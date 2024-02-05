@@ -28,8 +28,6 @@ on:
       - master
       - staging
       - lineageondemand
-      - makerlogic
-      - tagpropv1master
 
 jobs:
   build:
