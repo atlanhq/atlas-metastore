@@ -3,6 +3,9 @@ package org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.authorize.AtlasAuthorizationUtils;
+import org.apache.atlas.authorize.AtlasEntityAccessRequest;
+import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.*;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -102,6 +105,12 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
         entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
 
+        // Check if authorized to create entities
+        AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
+                "create entity: type=", entity.getTypeName());
+
+        entity.setCustomAttributes(customAttributes);
+
         productExists(productName, parentDomainQualifiedName, null);
 
         createDaapVisibilityPolicy(entity, vertex);
@@ -120,6 +129,9 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         }
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
+        entity.setAttribute(QUALIFIED_NAME, vertexQnName);
+        // Check if authorized to update entities
+        AtlasAuthorizationUtils.verifyUpdateEntityAccess(typeRegistry, new AtlasEntityHeader(entity),"update entity: type=" + entity.getTypeName());
 
         AtlasEntity storedProduct = entityRetriever.toAtlasEntity(vertex);
         AtlasRelatedObjectId currentParentDomainObjectId = (AtlasRelatedObjectId) storedProduct.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE);
@@ -167,7 +179,6 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
             if (!productCurrentName.equals(productNewName)) {
                 productExists(productNewName, currentParentDomainQualifiedName, storedProduct.getGuid());
             }
-            entity.setAttribute(QUALIFIED_NAME, vertexQnName);
         }
 
         if (isDaapVisibilityChanged) {

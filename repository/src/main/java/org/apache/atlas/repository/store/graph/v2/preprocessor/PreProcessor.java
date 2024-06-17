@@ -9,10 +9,7 @@ import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import java.util.HashSet;
 import java.util.Set;
 
-import static org.apache.atlas.repository.Constants.ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE;
-import static org.apache.atlas.repository.Constants.ATLAS_GLOSSARY_TERM_ENTITY_TYPE;
-import static org.apache.atlas.repository.Constants.STAKEHOLDER_ENTITY_TYPE;
-import static org.apache.atlas.repository.Constants.STAKEHOLDER_TITLE_ENTITY_TYPE;
+import static org.apache.atlas.repository.Constants.*;
 
 
 public interface PreProcessor {
@@ -22,6 +19,13 @@ public interface PreProcessor {
         add(ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE);
         add(STAKEHOLDER_ENTITY_TYPE);
         add(STAKEHOLDER_TITLE_ENTITY_TYPE);
+        add(DATA_DOMAIN_ENTITY_TYPE);
+        add(DATA_PRODUCT_ENTITY_TYPE);
+    }};
+
+    Set<String> skipUpdateAuthCheckTypes = new HashSet<String>() {{
+        add(DATA_DOMAIN_ENTITY_TYPE);
+        add(DATA_PRODUCT_ENTITY_TYPE);
     }};
 
     void processAttributes(AtlasStruct entity, EntityMutationContext context, EntityMutations.EntityOperation operation) throws AtlasBaseException;
