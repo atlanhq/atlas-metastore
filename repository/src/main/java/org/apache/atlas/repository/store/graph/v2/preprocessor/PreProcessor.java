@@ -23,6 +23,11 @@ public interface PreProcessor {
         add(DATA_PRODUCT_ENTITY_TYPE);
     }};
 
+    Set<String> skipUpdateAuthCheckTypes = new HashSet<String>() {{
+        add(DATA_DOMAIN_ENTITY_TYPE);
+        add(DATA_PRODUCT_ENTITY_TYPE);
+    }};
+
     void processAttributes(AtlasStruct entity, EntityMutationContext context, EntityMutations.EntityOperation operation) throws AtlasBaseException;
 
     default void processDelete(AtlasVertex vertex) throws AtlasBaseException {

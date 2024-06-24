@@ -142,6 +142,10 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
         validateStakeholderRelationship(entity);
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
+        entity.setAttribute(QUALIFIED_NAME, vertexQnName);
+        // Check if authorized to update entities
+        AtlasAuthorizationUtils.verifyUpdateEntityAccess(typeRegistry, new AtlasEntityHeader(entity),"update entity: type=" + entity.getTypeName());
+
 
         AtlasEntity storedDomain = entityRetriever.toAtlasEntity(vertex);
         AtlasRelatedObjectId currentParentDomainObjectId = (AtlasRelatedObjectId) storedDomain.getRelationshipAttribute(PARENT_DOMAIN_REL_TYPE);
@@ -188,9 +192,8 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             if (!domainCurrentName.equals(domainNewName)) {
                 domainExists(domainNewName, currentParentDomainQualifiedName, storedDomain.getGuid());
             }
-            entity.setAttribute(QUALIFIED_NAME, vertexQnName);
-        }
 
+        }
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -432,18 +435,18 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             Iterator<AtlasVertex> childrens = getActiveChildrenVertices(vertex,
                     DOMAIN_PARENT_EDGE_LABEL, DATA_PRODUCT_EDGE_LABEL);
             if (childrens.hasNext()){
-                throw new AtlasBaseException("Domain cannot be archived because some subdomains or products are active in this domain");
+                throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "Domain cannot be archived because some subdomains or products are active in this domain");
             }
 
             // active stakeholder exists?
             childrens = getActiveChildrenVertices(vertex, STAKEHOLDER_EDGE_LABEL);
             if (childrens.hasNext()){
-                throw new AtlasBaseException("Domain cannot be archived because some stakeholders are active in this domain");
+                throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "Domain cannot be archived because some stakeholders are active in this domain");
             }
 
             // active stakeholder titles exists?
             if(verifyStakeholderTitleExists(vertex.getProperty(QUALIFIED_NAME, String.class))){
-                throw new AtlasBaseException("Domain cannot be archived because some stakeholdersTitles are active in this domain");
+                throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "Domain cannot be archived because some stakeholdersTitles are active in this domain");
             }
 
         }

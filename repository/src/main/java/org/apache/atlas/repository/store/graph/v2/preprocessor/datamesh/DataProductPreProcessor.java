@@ -128,6 +128,9 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         }
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
+        entity.setAttribute(QUALIFIED_NAME, vertexQnName);
+        // Check if authorized to update entities
+        AtlasAuthorizationUtils.verifyUpdateEntityAccess(typeRegistry, new AtlasEntityHeader(entity),"update entity: type=" + entity.getTypeName());
 
         AtlasEntity storedProduct = entityRetriever.toAtlasEntity(vertex);
         AtlasRelatedObjectId currentParentDomainObjectId = (AtlasRelatedObjectId) storedProduct.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE);
@@ -175,7 +178,6 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
             if (!productCurrentName.equals(productNewName)) {
                 productExists(productNewName, currentParentDomainQualifiedName, storedProduct.getGuid());
             }
-            entity.setAttribute(QUALIFIED_NAME, vertexQnName);
         }
 
         if (isDaapVisibilityChanged) {
