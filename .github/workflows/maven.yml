@@ -26,6 +26,7 @@ on:
       - development
       - master
       - lineageondemand
+      - wf_service_account
 
 jobs:
   build:
