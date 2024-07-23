@@ -48,6 +48,7 @@ import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * REST interface for an entity's lineage information
@@ -109,8 +110,10 @@ public class LineageREST {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getOnDemandLineageGraph(" + guid + "," + lineageOnDemandRequest + ")");
             }
-
-            return atlasLineageService.getAtlasLineageInfo(guid, lineageOnDemandRequest, lineageType);
+            if(Objects.nonNull(lineageType)) {
+                RequestContext.get().setLineageType(lineageType);
+            }
+            return atlasLineageService.getAtlasLineageInfo(guid, lineageOnDemandRequest);
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -141,8 +144,10 @@ public class LineageREST {
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG))
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getLineageList(" + guid + "," + lineageListRequest + ")");
-
-            return atlasLineageService.getLineageListInfoOnDemand(guid, lineageListRequest, lineageType);
+            if(Objects.nonNull(lineageType)) {
+                RequestContext.get().setLineageType(lineageType);
+            }
+            return atlasLineageService.getLineageListInfoOnDemand(guid, lineageListRequest);
         } finally {
             AtlasPerfTracer.log(perf);
         }

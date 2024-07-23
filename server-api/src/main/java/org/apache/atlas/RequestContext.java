@@ -90,6 +90,9 @@ public class RequestContext {
     private boolean     includeClassifications = true;
 
     private boolean     includeClassificationNames = false;
+
+
+    private String     lineageType = "DatasetProcessLineage";
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
     private String traceId;
@@ -192,6 +195,13 @@ public class RequestContext {
         this.applicationMetrics.add(metric);
     }
 
+    public String getLineageType() {
+        return lineageType;
+    }
+
+    public void setLineageType(String lineageType) {
+        this.lineageType = lineageType;
+    }
     public void clearEntityCache() {
         this.entityCache.clear();
     }
