@@ -221,11 +221,10 @@ public class EntityLineageService implements AtlasLineageService {
         }
         HashMap<String, Boolean> dataTypeMap = new HashMap<>();
         boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
-        boolean isDataProduct = entityType.getTypeAndAllSuperTypes().contains(DATA_PRODUCT_ENTITY_TYPE);
+        boolean isDataProduct = entityType.getTypeName().equals(DATA_PRODUCT_ENTITY_TYPE);
         dataTypeMap.put(IS_DATA_PRODUCT, isDataProduct);
         dataTypeMap.put(IS_DATASET, !isProcess);
         if (!isProcess) {
-            //TODO : Check product is an asset super
             boolean isDataSet = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
             if (!isDataSet) {
                 throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
