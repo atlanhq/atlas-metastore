@@ -71,7 +71,7 @@ public interface AtlasLineageService {
      * @param lineageOnDemandRequest lineage on demand request object
      * @return AtlasLineageInfo
      */
-    AtlasLineageOnDemandInfo getAtlasLineageInfo(String entityGuid, LineageOnDemandRequest lineageOnDemandRequest) throws AtlasBaseException;
+    AtlasLineageOnDemandInfo getAtlasLineageInfo(String entityGuid, LineageOnDemandRequest lineageOnDemandRequest, String lineageType) throws AtlasBaseException;
 
     /**
      * @param entityGuid unique ID of the entity

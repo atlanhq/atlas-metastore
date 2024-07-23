@@ -93,7 +93,7 @@ public class LineageREST {
     @Consumes(Servlets.JSON_MEDIA_TYPE)
     @Produces(Servlets.JSON_MEDIA_TYPE)
     @Timed
-    public AtlasLineageOnDemandInfo getLineageGraph(@PathParam("guid") String guid,
+    public AtlasLineageOnDemandInfo getLineageGraph(@PathParam("guid") String guid,@QueryParam("lineageType") String lineageType,
                                                     LineageOnDemandRequest lineageOnDemandRequest) throws AtlasBaseException {
         if (!AtlasConfiguration.LINEAGE_ON_DEMAND_ENABLED.getBoolean()) {
             LOG.warn("LineageREST: "+ AtlasErrorCode.LINEAGE_ON_DEMAND_NOT_ENABLED.getFormattedErrorMessage(AtlasConfiguration.LINEAGE_ON_DEMAND_ENABLED.getPropertyName()));
@@ -110,7 +110,7 @@ public class LineageREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getOnDemandLineageGraph(" + guid + "," + lineageOnDemandRequest + ")");
             }
 
-            return atlasLineageService.getAtlasLineageInfo(guid, lineageOnDemandRequest);
+            return atlasLineageService.getAtlasLineageInfo(guid, lineageOnDemandRequest, lineageType);
         } finally {
             AtlasPerfTracer.log(perf);
         }
