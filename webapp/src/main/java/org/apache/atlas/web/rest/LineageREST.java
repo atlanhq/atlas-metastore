@@ -128,7 +128,7 @@ public class LineageREST {
     @Consumes(Servlets.JSON_MEDIA_TYPE)
     @Produces(Servlets.JSON_MEDIA_TYPE)
     @Timed
-    public AtlasLineageListInfo getLineageList(LineageListRequest lineageListRequest) throws AtlasBaseException {
+    public AtlasLineageListInfo getLineageList(@QueryParam("lineageType") String lineageType, LineageListRequest lineageListRequest) throws AtlasBaseException {
         lineageListRequestValidator.validate(lineageListRequest);
 
         String guid = lineageListRequest.getGuid();
@@ -142,7 +142,7 @@ public class LineageREST {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG))
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getLineageList(" + guid + "," + lineageListRequest + ")");
 
-            return atlasLineageService.getLineageListInfoOnDemand(guid, lineageListRequest);
+            return atlasLineageService.getLineageListInfoOnDemand(guid, lineageListRequest, lineageType);
         } finally {
             AtlasPerfTracer.log(perf);
         }
