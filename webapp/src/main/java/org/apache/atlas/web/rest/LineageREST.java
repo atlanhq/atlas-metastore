@@ -94,7 +94,7 @@ public class LineageREST {
     @Consumes(Servlets.JSON_MEDIA_TYPE)
     @Produces(Servlets.JSON_MEDIA_TYPE)
     @Timed
-    public AtlasLineageOnDemandInfo getLineageGraph(@PathParam("guid") String guid,@QueryParam("lineageType") String lineageType,
+    public AtlasLineageOnDemandInfo getLineageGraph(@PathParam("guid") String guid,
                                                     LineageOnDemandRequest lineageOnDemandRequest) throws AtlasBaseException {
         if (!AtlasConfiguration.LINEAGE_ON_DEMAND_ENABLED.getBoolean()) {
             LOG.warn("LineageREST: "+ AtlasErrorCode.LINEAGE_ON_DEMAND_NOT_ENABLED.getFormattedErrorMessage(AtlasConfiguration.LINEAGE_ON_DEMAND_ENABLED.getPropertyName()));
@@ -109,9 +109,6 @@ public class LineageREST {
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getOnDemandLineageGraph(" + guid + "," + lineageOnDemandRequest + ")");
-            }
-            if(Objects.nonNull(lineageType)) {
-                RequestContext.get().setLineageType(lineageType);
             }
             return atlasLineageService.getAtlasLineageInfo(guid, lineageOnDemandRequest);
         } finally {
@@ -131,7 +128,7 @@ public class LineageREST {
     @Consumes(Servlets.JSON_MEDIA_TYPE)
     @Produces(Servlets.JSON_MEDIA_TYPE)
     @Timed
-    public AtlasLineageListInfo getLineageList(@QueryParam("lineageType") String lineageType, LineageListRequest lineageListRequest) throws AtlasBaseException {
+    public AtlasLineageListInfo getLineageList(LineageListRequest lineageListRequest) throws AtlasBaseException {
         lineageListRequestValidator.validate(lineageListRequest);
 
         String guid = lineageListRequest.getGuid();
@@ -144,9 +141,7 @@ public class LineageREST {
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG))
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getLineageList(" + guid + "," + lineageListRequest + ")");
-            if(Objects.nonNull(lineageType)) {
-                RequestContext.get().setLineageType(lineageType);
-            }
+
             return atlasLineageService.getLineageListInfoOnDemand(guid, lineageListRequest);
         } finally {
             AtlasPerfTracer.log(perf);

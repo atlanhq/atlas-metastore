@@ -92,7 +92,9 @@ public class RequestContext {
     private boolean     includeClassificationNames = false;
 
 
-    private String     lineageType = "DatasetProcessLineage";
+
+    private String     lineageInputLabel = "";
+    private String     lineageOutputLabel = "";
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
     private String traceId;
@@ -195,13 +197,6 @@ public class RequestContext {
         this.applicationMetrics.add(metric);
     }
 
-    public String getLineageType() {
-        return lineageType;
-    }
-
-    public void setLineageType(String lineageType) {
-        this.lineageType = lineageType;
-    }
     public void clearEntityCache() {
         this.entityCache.clear();
     }
@@ -220,6 +215,21 @@ public class RequestContext {
         return removedElementsMap;
     }
 
+    public String getLineageInputLabel() {
+        return lineageInputLabel;
+    }
+
+    public void setLineageInputLabel(String lineageInputLabel) {
+        this.lineageInputLabel = lineageInputLabel;
+    }
+
+    public String getLineageOutputLabel() {
+        return lineageOutputLabel;
+    }
+
+    public void setLineageOutputLabel(String lineageOutputLabel) {
+        this.lineageOutputLabel = lineageOutputLabel;
+    }
     public Map<String, List<Object>> getNewElementsCreatedMap() {
         return newElementsCreatedMap;
     }

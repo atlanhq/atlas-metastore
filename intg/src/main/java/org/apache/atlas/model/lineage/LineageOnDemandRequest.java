@@ -22,6 +22,7 @@ public class LineageOnDemandRequest {
     private Set<String>                             attributes;
     private Set<String>                             relationAttributes;
     private LineageOnDemandBaseParams               defaultParams;
+    private String                                  lineageType = "DatasetProcessLineage";
 
     public LineageOnDemandRequest() {
         this.attributes = new HashSet<>();
@@ -64,6 +65,13 @@ public class LineageOnDemandRequest {
         this.relationshipTraversalFilters = relationshipTraversalFilters;
     }
 
+    public String getLineageType() {
+        return lineageType;
+    }
+
+    public void setLineageType(String lineageType) {
+        this.lineageType = lineageType;
+    }
     public Set<String> getAttributes() {
         return attributes;
     }

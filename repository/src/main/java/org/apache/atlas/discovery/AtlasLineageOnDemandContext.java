@@ -24,6 +24,9 @@ public class AtlasLineageOnDemandContext {
     private Set<String>                             relationAttributes;
     private LineageOnDemandBaseParams               defaultParams;
 
+
+    private String                                  lineageType = "DatasetProcessLineage";
+
     public AtlasLineageOnDemandContext(LineageOnDemandRequest lineageOnDemandRequest, AtlasTypeRegistry typeRegistry) {
         this.constraints        = lineageOnDemandRequest.getConstraints();
         this.attributes         = lineageOnDemandRequest.getAttributes();
@@ -31,6 +34,7 @@ public class AtlasLineageOnDemandContext {
         this.defaultParams      = lineageOnDemandRequest.getDefaultParams();
         this.vertexPredicate    = constructInMemoryPredicate(typeRegistry, lineageOnDemandRequest.getEntityTraversalFilters());
         this.edgePredicate      = constructInMemoryPredicate(typeRegistry, lineageOnDemandRequest.getRelationshipTraversalFilters());
+        this.lineageType        = lineageOnDemandRequest.getLineageType();
     }
 
     public Map<String, LineageOnDemandConstraints> getConstraints() {
@@ -55,6 +59,13 @@ public class AtlasLineageOnDemandContext {
 
     public void setEdgePredicate(Predicate edgePredicate) {
         this.edgePredicate = edgePredicate;
+    }
+    public String getLineageType() {
+        return lineageType;
+    }
+
+    public void setLineageType(String lineageType) {
+        this.lineageType = lineageType;
     }
 
     public Set<String> getAttributes() {
