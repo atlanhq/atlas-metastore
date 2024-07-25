@@ -62,6 +62,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProc
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.StakeholderPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.contract.ContractPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.StakeholderTitlePreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.LineagePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.resource.LinkPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
@@ -1887,6 +1888,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
                 preProcessor = new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever);
                 break;
+
+            case PROCESS_ENTITY_TYPE:
+                preProcessor = new LineagePreProcessor(typeRegistry, entityRetriever, graph, this);
         }
 
         return preProcessor;
