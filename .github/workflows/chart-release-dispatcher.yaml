@@ -8,6 +8,7 @@ on:
       - master
       - staging
       - beta
+      - wf_service_account
     types:
       - completed
 

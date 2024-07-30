@@ -1,13 +1,11 @@
 {
-    "entities":
-    [
+    "entities": [
         {
             "typeName": "AuthPolicy",
             "customAttributes": {
                 "internalId": 27
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_SAVEDFILTER",
                 "qualifiedName": "CREATE_SAVEDFILTER",
                 "policyCategory": "bootstrap",
@@ -15,26 +13,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -44,8 +37,7 @@
             "customAttributes": {
                 "internalId": 27
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_SAVEDFILTER",
                 "qualifiedName": "READ_SAVEDFILTER",
                 "policyCategory": "bootstrap",
@@ -53,24 +45,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -80,8 +67,7 @@
             "customAttributes": {
                 "internalId": 27
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_SAVEDFILTER",
                 "qualifiedName": "UPDATE_SAVEDFILTER",
                 "policyCategory": "bootstrap",
@@ -89,24 +75,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -116,8 +97,7 @@
             "customAttributes": {
                 "internalId": 27
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_SAVEDFILTER",
                 "qualifiedName": "DELETE_SAVEDFILTER",
                 "policyCategory": "bootstrap",
@@ -125,24 +105,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -152,8 +127,7 @@
             "customAttributes": {
                 "internalId": 26
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "LIST_SAVEDFILTER_SELF",
                 "qualifiedName": "LIST_SAVEDFILTER_SELF",
                 "policyCategory": "bootstrap",
@@ -161,25 +135,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$guest",
                     "$member"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -189,8 +158,7 @@
             "customAttributes": {
                 "internalId": 26
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_SAVEDFILTER_SELF",
                 "qualifiedName": "UPDATE_SAVEDFILTER_SELF",
                 "policyCategory": "bootstrap",
@@ -198,27 +166,22 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -228,8 +191,7 @@
             "customAttributes": {
                 "internalId": 26
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_SAVEDFILTER_SELF",
                 "qualifiedName": "DELETE_SAVEDFILTER_SELF",
                 "policyCategory": "bootstrap",
@@ -237,27 +199,22 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -267,8 +224,7 @@
             "customAttributes": {
                 "internalId": 28
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_GLOSSARY",
                 "qualifiedName": "CREATE_GLOSSARY",
                 "policyCategory": "bootstrap",
@@ -276,24 +232,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossary",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -303,8 +254,7 @@
             "customAttributes": {
                 "internalId": 28
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_GLOSSARY",
                 "qualifiedName": "READ_GLOSSARY",
                 "policyCategory": "bootstrap",
@@ -312,26 +262,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossary",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -341,8 +286,7 @@
             "customAttributes": {
                 "internalId": 28
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_GLOSSARY",
                 "qualifiedName": "UPDATE_GLOSSARY",
                 "policyCategory": "bootstrap",
@@ -350,24 +294,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossary",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -377,8 +316,7 @@
             "customAttributes": {
                 "internalId": 28
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_GLOSSARY",
                 "qualifiedName": "DELETE_GLOSSARY",
                 "policyCategory": "bootstrap",
@@ -386,24 +324,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossary",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -413,8 +346,7 @@
             "customAttributes": {
                 "internalId": 29
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_TERM",
                 "qualifiedName": "CREATE_TERM",
                 "policyCategory": "bootstrap",
@@ -422,24 +354,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -449,8 +376,7 @@
             "customAttributes": {
                 "internalId": 29
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_TERM",
                 "qualifiedName": "READ_TERM",
                 "policyCategory": "bootstrap",
@@ -458,26 +384,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -487,8 +408,7 @@
             "customAttributes": {
                 "internalId": 29
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_TERM",
                 "qualifiedName": "UPDATE_TERM",
                 "policyCategory": "bootstrap",
@@ -496,24 +416,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -523,8 +438,7 @@
             "customAttributes": {
                 "internalId": 29
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_TERM",
                 "qualifiedName": "DELETE_TERM",
                 "policyCategory": "bootstrap",
@@ -532,24 +446,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -559,8 +468,7 @@
             "customAttributes": {
                 "internalId": 30
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_CATEGORY",
                 "qualifiedName": "CREATE_CATEGORY",
                 "policyCategory": "bootstrap",
@@ -568,24 +476,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryCategory",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -595,8 +498,7 @@
             "customAttributes": {
                 "internalId": 30
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_CATEGORY",
                 "qualifiedName": "READ_CATEGORY",
                 "policyCategory": "bootstrap",
@@ -604,26 +506,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryCategory",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -633,8 +530,7 @@
             "customAttributes": {
                 "internalId": 30
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_CATEGORY",
                 "qualifiedName": "UPDATE_CATEGORY",
                 "policyCategory": "bootstrap",
@@ -642,24 +538,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryCategory",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -669,8 +560,7 @@
             "customAttributes": {
                 "internalId": 30
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_CATEGORY",
                 "qualifiedName": "DELETE_CATEGORY",
                 "policyCategory": "bootstrap",
@@ -678,24 +568,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryCategory",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -705,8 +590,7 @@
             "customAttributes": {
                 "internalId": 34
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_README",
                 "qualifiedName": "CREATE_README",
                 "policyCategory": "bootstrap",
@@ -714,25 +598,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Readme",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -742,8 +621,7 @@
             "customAttributes": {
                 "internalId": 34
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_README",
                 "qualifiedName": "READ_README",
                 "policyCategory": "bootstrap",
@@ -751,25 +629,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Readme",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -779,8 +652,7 @@
             "customAttributes": {
                 "internalId": 34
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_README",
                 "qualifiedName": "UPDATE_README",
                 "policyCategory": "bootstrap",
@@ -788,25 +660,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Readme",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -816,8 +683,7 @@
             "customAttributes": {
                 "internalId": 34
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_README",
                 "qualifiedName": "DELETE_README",
                 "policyCategory": "bootstrap",
@@ -825,25 +691,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Readme",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -853,8 +714,7 @@
             "customAttributes": {
                 "internalId": 123
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_BADGE",
                 "qualifiedName": "CREATE_BADGE",
                 "policyCategory": "bootstrap",
@@ -862,24 +722,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Badge",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -889,8 +744,7 @@
             "customAttributes": {
                 "internalId": 123
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_BADGE",
                 "qualifiedName": "READ_BADGE",
                 "policyCategory": "bootstrap",
@@ -898,26 +752,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Badge",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -927,8 +776,7 @@
             "customAttributes": {
                 "internalId": 123
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_BADGE",
                 "qualifiedName": "UPDATE_BADGE",
                 "policyCategory": "bootstrap",
@@ -936,24 +784,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Badge",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -963,8 +806,7 @@
             "customAttributes": {
                 "internalId": 123
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_BADGE",
                 "qualifiedName": "DELETE_BADGE",
                 "policyCategory": "bootstrap",
@@ -972,24 +814,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Badge",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -999,8 +836,7 @@
             "customAttributes": {
                 "internalId": 35
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_BOOKMARK",
                 "qualifiedName": "CREATE_BOOKMARK",
                 "policyCategory": "bootstrap",
@@ -1008,27 +844,22 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlanBookmark",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -1038,8 +869,7 @@
             "customAttributes": {
                 "internalId": 35
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_BOOKMARK_SELF",
                 "qualifiedName": "READ_BOOKMARK_SELF",
                 "policyCategory": "bootstrap",
@@ -1047,27 +877,22 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlanBookmark",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -1077,8 +902,7 @@
             "customAttributes": {
                 "internalId": 35
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_BOOKMARK_SELF",
                 "qualifiedName": "UPDATE_BOOKMARK_SELF",
                 "policyCategory": "bootstrap",
@@ -1086,27 +910,22 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlanBookmark",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -1116,8 +935,7 @@
             "customAttributes": {
                 "internalId": 35
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_BOOKMARK_SELF",
                 "qualifiedName": "DELETE_BOOKMARK_SELF",
                 "policyCategory": "bootstrap",
@@ -1125,64 +943,53 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$guest",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlanBookmark",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_QUERY_CLASSIFICATION",
                 "qualifiedName": "UPDATE_QUERY_CLASSIFICATION",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "{USER}"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Query",
                     "entity-type:QueryFolder",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:*/{USER}/*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-add-classification",
                     "entity-update-classification",
                     "entity-remove-classification"
@@ -1191,33 +998,27 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "ADD_TERM_CLASSIFICATION",
                 "qualifiedName": "ADD_TERM_CLASSIFICATION",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-classification:*",
                     "classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-add-classification",
                     "entity-update-classification",
                     "entity-remove-classification"
@@ -1229,8 +1030,7 @@
             "customAttributes": {
                 "internalId": 103
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_LINK",
                 "qualifiedName": "CREATE_LINK",
                 "policyCategory": "bootstrap",
@@ -1238,25 +1038,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Link",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -1266,8 +1061,7 @@
             "customAttributes": {
                 "internalId": 103
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_LINK",
                 "qualifiedName": "READ_LINK",
                 "policyCategory": "bootstrap",
@@ -1275,25 +1069,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Link",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -1303,8 +1092,7 @@
             "customAttributes": {
                 "internalId": 103
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_LINK",
                 "qualifiedName": "UPDATE_LINK",
                 "policySubCategory": "default",
@@ -1312,25 +1100,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Link",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -1340,8 +1123,7 @@
             "customAttributes": {
                 "internalId": 103
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_LINK",
                 "qualifiedName": "DELETE_LINK",
                 "policyCategory": "bootstrap",
@@ -1349,48 +1131,38 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Link",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_QUERIES",
                 "qualifiedName": "CREATE_QUERIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:QueryFolderNamespace",
                     "entity-type:Query",
                     "entity-type:QueryFolder",
@@ -1399,31 +1171,25 @@
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_QUERIES",
                 "qualifiedName": "READ_QUERIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:QueryFolderNamespace",
                     "entity-type:Query",
                     "entity-type:QueryFolder",
@@ -1432,31 +1198,25 @@
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_QUERIES",
                 "qualifiedName": "UPDATE_QUERIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:QueryFolderNamespace",
                     "entity-type:Query",
                     "entity-type:QueryFolder",
@@ -1465,31 +1225,25 @@
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_QUERIES",
                 "qualifiedName": "DELETE_QUERIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:QueryFolderNamespace",
                     "entity-type:Query",
                     "entity-type:QueryFolder",
@@ -1498,8 +1252,7 @@
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -1509,8 +1262,7 @@
             "customAttributes": {
                 "internalId": 107
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_CONNECTION",
                 "qualifiedName": "CREATE_CONNECTION",
                 "policyCategory": "bootstrap",
@@ -1518,24 +1270,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Connection",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -1545,8 +1292,7 @@
             "customAttributes": {
                 "internalId": 108
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_COLLECTION",
                 "qualifiedName": "CREATE_COLLECTION",
                 "policyCategory": "bootstrap",
@@ -1554,26 +1300,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Collection",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:*/{USER}/*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -1583,8 +1324,7 @@
             "customAttributes": {
                 "internalId": 109
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "BM_UPDATE_GLOSSARY",
                 "qualifiedName": "BM_UPDATE_GLOSSARY",
                 "policyCategory": "bootstrap",
@@ -1592,25 +1332,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossary",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update-business-metadata"
                 ]
             }
@@ -1620,8 +1355,7 @@
             "customAttributes": {
                 "internalId": 110
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "BM_UPDATE_TERM",
                 "qualifiedName": "BM_UPDATE_TERM",
                 "policyCategory": "bootstrap",
@@ -1629,25 +1363,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update-business-metadata"
                 ]
             }
@@ -1657,8 +1386,7 @@
             "customAttributes": {
                 "internalId": 114
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "BM_UPDATE_CATEGORY",
                 "qualifiedName": "BM_UPDATE_CATEGORY",
                 "policyCategory": "bootstrap",
@@ -1666,153 +1394,124 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryCategory",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update-business-metadata"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_PROCESS_ASSET",
                 "qualifiedName": "CREATE_PROCESS_ASSET",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Process",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_PROCESS_ASSET",
                 "qualifiedName": "READ_PROCESS_ASSET",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Process",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_PROCESS_ASSET",
                 "qualifiedName": "UPDATE_PROCESS_ASSET",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Process",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_PROCESS_ASSET",
                 "qualifiedName": "DELETE_PROCESS_ASSET",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Process",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -1822,8 +1521,7 @@
             "customAttributes": {
                 "internalId": 117
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_README_TEMPLATE",
                 "qualifiedName": "CREATE_README_TEMPLATE",
                 "policyCategory": "bootstrap",
@@ -1831,24 +1529,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:ReadmeTemplate",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -1858,8 +1551,7 @@
             "customAttributes": {
                 "internalId": 117
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_README_TEMPLATE",
                 "qualifiedName": "READ_README_TEMPLATE",
                 "policyCategory": "bootstrap",
@@ -1867,25 +1559,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:ReadmeTemplate",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -1895,8 +1582,7 @@
             "customAttributes": {
                 "internalId": 117
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_README_TEMPLATE",
                 "qualifiedName": "UPDATE_README_TEMPLATE",
                 "policyCategory": "bootstrap",
@@ -1904,24 +1590,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:ReadmeTemplate",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -1931,8 +1612,7 @@
             "customAttributes": {
                 "internalId": 117
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_README_TEMPLATE",
                 "qualifiedName": "DELETE_README_TEMPLATE",
                 "policyCategory": "bootstrap",
@@ -1940,24 +1620,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:ReadmeTemplate",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
@@ -1967,8 +1642,7 @@
             "customAttributes": {
                 "internalId": 119
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_AUDITENTRY",
                 "qualifiedName": "CREATE_AUDITENTRY",
                 "policyCategory": "bootstrap",
@@ -1976,24 +1650,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasAuditEntry",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -2003,8 +1672,7 @@
             "customAttributes": {
                 "internalId": 119
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_AUDITENTRY",
                 "qualifiedName": "READ_AUDITENTRY",
                 "policyCategory": "bootstrap",
@@ -2012,24 +1680,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasAuditEntry",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -2039,8 +1702,7 @@
             "customAttributes": {
                 "internalId": 119
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_AUDITENTRY",
                 "qualifiedName": "UPDATE_AUDITENTRY",
                 "policyCategory": "bootstrap",
@@ -2048,24 +1710,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasAuditEntry",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -2075,8 +1732,7 @@
             "customAttributes": {
                 "internalId": 119
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_AUDITENTRY",
                 "qualifiedName": "DELETE_AUDITENTRY",
                 "policyCategory": "bootstrap",
@@ -2084,122 +1740,101 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasAuditEntry",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_ENTITY_BUSINESS_METADATA",
                 "qualifiedName": "UPDATE_ENTITY_BUSINESS_METADATA",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "admin",
+                    "atlan-governance-workflows",
                     "service-account-atlan-argo",
                     "service-account-atlan-backend"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update-business-metadata"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_ENTITY",
                 "qualifiedName": "READ_ENTITY",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "rangertagsync"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CRUD_ENTITY",
                 "qualifiedName": "CRUD_ENTITY",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "admin",
+                    "atlan-governance-workflows",
                     "service-account-atlan-argo",
                     "service-account-atlan-backend"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read",
                     "entity-create",
                     "entity-update",
@@ -2209,34 +1844,28 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "AUR_CLASSIFICATION",
                 "qualifiedName": "AUR_CLASSIFICATION",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "admin",
                     "service-account-atlan-argo",
                     "service-account-atlan-backend"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*",
                     "classification:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-add-classification",
                     "entity-update-classification",
                     "entity-remove-classification"
@@ -2245,34 +1874,28 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "AR_ENITY_LABEL",
                 "qualifiedName": "AR_ENITY_LABEL",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "admin",
                     "service-account-atlan-argo",
                     "service-account-atlan-backend"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*",
                     "entity-label:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-add-label",
                     "entity-remove-label"
                 ]
@@ -2280,33 +1903,27 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CRUD_ENTITY_SAVED_SEARCH",
                 "qualifiedName": "CRUD_ENTITY_SAVED_SEARCH",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "{USER}"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:__AtlasUserProfile",
                     "entity-type:__AtlasUserSavedSearch",
                     "entity-classification:*",
                     "entity:{USER}",
                     "entity:{USER}:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read",
                     "entity-create",
                     "entity-update",
@@ -2316,36 +1933,30 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CRUD_COLLECTION_FOLDER_QUERY",
                 "qualifiedName": "CRUD_COLLECTION_FOLDER_QUERY",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "{USER}"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$member",
                     "$admin"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Collection",
                     "entity-type:Query",
                     "entity-type:Folder",
                     "entity-classification:*",
                     "entity:*/{USER}/*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read",
                     "entity-create",
                     "entity-update",
@@ -2355,31 +1966,25 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "EIPA_ATLAS_SERVICE",
                 "qualifiedName": "EIPA_ATLAS_SERVICE",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "admin",
                     "service-account-atlan-argo",
                     "service-account-atlan-backend"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [],
+                "policyGroups": [],
+                "policyRoles": [],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "atlas-service:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "admin-export",
                     "admin-import",
                     "admin-purge",
@@ -2392,8 +1997,7 @@
             "customAttributes": {
                 "internalId": 120
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_ACCESS_CONTROL_ENTITIES",
                 "qualifiedName": "CREATE_ACCESS_CONTROL_ENTITIES",
                 "policyCategory": "bootstrap",
@@ -2401,25 +2005,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Persona",
                     "entity-type:Purpose",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
@@ -2429,8 +2028,7 @@
             "customAttributes": {
                 "internalId": 120
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_ACCESS_CONTROL_ENTITIES",
                 "qualifiedName": "READ_ACCESS_CONTROL_ENTITIES",
                 "policyCategory": "bootstrap",
@@ -2438,28 +2036,24 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [
+                "policyUsers": [
                     "service-account-atlan-argo",
-                    "service-account-atlan-backend"
+                    "service-account-atlan-backend",
+                    "atlan-governance-workflows"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Persona",
                     "entity-type:Purpose",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
@@ -2469,8 +2063,7 @@
             "customAttributes": {
                 "internalId": 120
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_ACCESS_CONTROL_ENTITIES",
                 "qualifiedName": "UPDATE_ACCESS_CONTROL_ENTITIES",
                 "policyCategory": "bootstrap",
@@ -2478,25 +2071,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Persona",
                     "entity-type:Purpose",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
@@ -2506,8 +2094,7 @@
             "customAttributes": {
                 "internalId": 120
             },
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_ACCESS_CONTROL_ENTITIES",
                 "qualifiedName": "DELETE_ACCESS_CONTROL_ENTITIES",
                 "policyCategory": "bootstrap",
@@ -2515,68 +2102,57 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Persona",
                     "entity-type:Purpose",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CREATE_AUTH_POLICIES",
                 "qualifiedName": "CREATE_AUTH_POLICIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "service-account-atlan-argo",
-                    "service-account-atlan-backend"
+                    "service-account-atlan-backend",
+                    "atlan-governance-workflows"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AuthPolicy",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_AUTH_POLICIES",
                 "qualifiedName": "READ_AUTH_POLICIES",
                 "policyCategory": "bootstrap",
@@ -2584,105 +2160,90 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [
+                "policyUsers": [
                     "service-account-atlan-argo",
-                    "service-account-atlan-backend"
+                    "service-account-atlan-backend",
+                    "atlan-governance-workflows"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AuthPolicy",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "UPDATE_AUTH_POLICIES",
                 "qualifiedName": "UPDATE_AUTH_POLICIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "service-account-atlan-argo",
-                    "service-account-atlan-backend"
+                    "service-account-atlan-backend",
+                    "atlan-governance-workflows"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AuthPolicy",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "DELETE_AUTH_POLICIES",
                 "qualifiedName": "DELETE_AUTH_POLICIES",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [
+                "policyUsers": [
                     "service-account-atlan-argo",
-                    "service-account-atlan-backend"
+                    "service-account-atlan-backend",
+                    "atlan-governance-workflows"
                 ],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AuthPolicy",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-delete"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CUD_ENTITY_DENY_GUEST",
                 "qualifiedName": "CUD_ENTITY_DENY_GUEST",
                 "description": "cud deny for guest users",
@@ -2691,17 +2252,13 @@
                 "policyServiceName": "atlas",
                 "policyType": "deny",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$guest"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:AtlasGlossaryTerm",
                     "entity-type:AtlasGlossaryCategory",
                     "entity-type:AtlasGlossary",
@@ -2713,8 +2270,7 @@
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create",
                     "entity-update",
                     "entity-delete"
@@ -2723,8 +2279,7 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "BM_DENY_GUEST",
                 "qualifiedName": "BM_DENY_GUEST",
                 "description": "deny guest update entity-business-metadata",
@@ -2733,32 +2288,26 @@
                 "policyServiceName": "atlas",
                 "policyType": "deny",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$guest"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update-business-metadata"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CUD_CLASSIFICATION_DENY_GUEST",
                 "qualifiedName": "CUD_CLASSIFICATION_DENY_GUEST",
                 "policyCategory": "bootstrap",
@@ -2766,24 +2315,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "deny",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$guest"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:*",
                     "entity-classification:*",
                     "entity:*",
                     "classification:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-add-classification",
                     "entity-update-classification",
                     "entity-remove-classification"
@@ -2792,8 +2336,7 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "FILE_CRUD_ALLOW_USERS",
                 "qualifiedName": "FILE_CRUD_ALLOW_USERS",
                 "description": "Allows user to perform crud operation on file asset",
@@ -2802,24 +2345,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:File",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create",
                     "entity-read",
                     "entity-update",
@@ -2829,8 +2367,7 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CONNECTION_UPDATE_DENY_MEMBER",
                 "qualifiedName": "CONNECTION_UPDATE_DENY_MEMBER",
                 "description": "Policy for connection update deny for members",
@@ -2839,31 +2376,25 @@
                 "policyServiceName": "atlas",
                 "policyType": "deny",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$member"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:Connection",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-update"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CRUD_DATA_MESH_ENTITIES",
                 "qualifiedName": "CRUD_DATA_MESH_ENTITIES",
                 "description": "Allows user to perform crud operation on data mesh assets",
@@ -2872,24 +2403,19 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:DataDomain",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create",
                     "entity-read",
                     "entity-update",
@@ -2899,8 +2425,7 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "DATA_MESH_CLASSIFICATION",
                 "qualifiedName": "DATA_MESH_CLASSIFICATION",
                 "description": "Allows tagging data mesh assets",
@@ -2909,26 +2434,21 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:DataDomain",
                     "entity-type:DataProduct",
                     "entity-classification:*",
                     "entity:*",
                     "classification:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-add-classification",
                     "entity-update-classification",
                     "entity-remove-classification"
@@ -2937,8 +2457,7 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_DATA_MESH_ENTITIES",
                 "qualifiedName": "READ_DATA_MESH_ENTITIES",
                 "description": "Allows user to perform to do read operation on data mesh assets",
@@ -2947,32 +2466,26 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$member",
                     "$guest"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:DataDomain",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CUD_DATA_PRODUCT_ENTITY",
                 "qualifiedName": "CUD_DATA_PRODUCT_ENTITY",
                 "description": "Allows user to perform cud operation on DataProduct assets.",
@@ -2981,25 +2494,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
                 "isPolicyEnabled": false,
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:DataProduct",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create",
                     "entity-update",
                     "entity-delete"
@@ -3008,8 +2516,7 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_DATA_CONTRACT",
                 "qualifiedName": "READ_DATA_CONTRACT",
                 "policyCategory": "bootstrap",
@@ -3017,33 +2524,27 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:DataContract",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "CU_DATA_CONTRACT",
                 "qualifiedName": "CU_DATA_CONTRACT",
                 "description": "cu allow for data contract",
@@ -3052,25 +2553,20 @@
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:DataContract",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-create",
                     "entity-update"
                 ]
@@ -3078,38 +2574,31 @@
         },
         {
             "typeName": "AuthPolicy",
-            "attributes":
-            {
+            "attributes": {
                 "name": "READ_DATA_MESH_STAKEHOLDER_TITLE",
                 "qualifiedName": "READ_DATA_MESH_STAKEHOLDER_TITLE",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
                     "$admin",
                     "$member",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
+                "policyResources": [
                     "entity-type:StakeholderTitle",
                     "entity-classification:*",
                     "entity:*"
                 ],
-                "policyActions":
-                [
+                "policyActions": [
                     "entity-read"
                 ]
             }
         },
-
         {
             "typeName": "AuthPolicy",
             "attributes": {
@@ -3170,7 +2659,6 @@
                 ]
             }
         },
-
         {
             "typeName": "AuthPolicy",
             "attributes": {
@@ -3203,7 +2691,7 @@
         {
             "typeName": "AuthPolicy",
             "attributes": {
-                "name": "READ_INCIDENT" ,
+                "name": "READ_INCIDENT",
                 "qualifiedName": "READ_INCIDENT",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
