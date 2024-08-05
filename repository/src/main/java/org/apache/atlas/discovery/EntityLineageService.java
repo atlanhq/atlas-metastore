@@ -100,7 +100,7 @@ public class EntityLineageService implements AtlasLineageService {
     private static final int     LINEAGE_ON_DEMAND_DEFAULT_DEPTH      = 3;
     private static final String  SEPARATOR                            = "->";
     public static final String IS_DATA_PRODUCT = "isDataProduct";
-    public static final String IS_DATASET = "isProcess";
+    public static final String IS_DATASET = "isDataset";
     public static final String PRODUCT_ASSET_LINEAGE = "ProductAssetLineage";
     public static final String DATASET_PROCESS_LINEAGE = "DatasetProcessLineage";
 
