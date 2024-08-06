@@ -1929,7 +1929,7 @@ public final class GraphHelper {
      * @return Iterator of children vertices
      */
     public static Iterator<AtlasVertex> getActiveParentVertices(AtlasVertex vertex, String parentEdgeLabel) throws AtlasBaseException {
-        return getActiveVertices(vertex, parentEdgeLabel, AtlasEdgeDirection.IN);
+        return getActiveVertices(vertex, AtlasEdgeDirection.IN, parentEdgeLabel);
     }
 
     /**
@@ -1938,11 +1938,12 @@ public final class GraphHelper {
      * @param childrenEdgeLabel Edge label of children
      * @return Iterator of children vertices
      */
-    public static Iterator<AtlasVertex> getActiveChildrenVertices(AtlasVertex vertex, String childrenEdgeLabel) throws AtlasBaseException {
-        return getActiveVertices(vertex, childrenEdgeLabel, AtlasEdgeDirection.OUT);
+
+    public static Iterator<AtlasVertex> getActiveChildrenVertices(AtlasVertex vertex, String... childrenEdgeLabel) throws AtlasBaseException {
+        return getActiveVertices(vertex, AtlasEdgeDirection.OUT, childrenEdgeLabel);
     }
 
-    public static Iterator<AtlasVertex> getActiveVertices(AtlasVertex vertex, String childrenEdgeLabel, AtlasEdgeDirection direction) throws AtlasBaseException {
+    public static Iterator<AtlasVertex> getActiveVertices(AtlasVertex vertex, AtlasEdgeDirection direction, String... childrenEdgeLabel) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("CategoryPreProcessor.getEdges");
 
         try {

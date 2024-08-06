@@ -52,6 +52,9 @@ public class PreProcessorUtils {
 
     public static final String DATA_PRODUCT_EDGE_LABEL     = "__DataDomain.dataProducts";
     public static final String DOMAIN_PARENT_EDGE_LABEL    = "__DataDomain.subDomains";
+    public static final String STAKEHOLDER_EDGE_LABEL =  "__DataDomain.stakeholders";
+    public static final String STAKEHOLDER_TITLE_EDGE_LABEL = "__StakeholderTitle.stakeholders";
+
 
     public static final String PARENT_DOMAIN_QN_ATTR = "parentDomainQualifiedName";
     public static final String SUPER_DOMAIN_QN_ATTR = "superDomainQualifiedName";

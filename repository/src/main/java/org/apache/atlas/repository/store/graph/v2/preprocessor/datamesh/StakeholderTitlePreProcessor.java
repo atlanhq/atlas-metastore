@@ -25,8 +25,11 @@ import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import static java.lang.String.format;
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
@@ -35,8 +38,8 @@ import static org.apache.atlas.repository.Constants.DATA_DOMAIN_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.STAKEHOLDER_TITLE_ENTITY_TYPE;
-import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.getUUID;
-import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.verifyDuplicateAssetByName;
+import static org.apache.atlas.repository.graph.GraphHelper.getActiveChildrenVertices;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
 public class StakeholderTitlePreProcessor implements PreProcessor {
@@ -50,6 +53,7 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
     public static final String STAR = "*/super";
     public static final String NEW_STAR = "default/domain/*/super";
     public static final String ATTR_DOMAIN_QUALIFIED_NAMES = "stakeholderTitleDomainQualifiedNames";
+    public static final String ATTR_STAKEHOLDER_DOMAIN_QUALIFIED_NAME = "stakeholderDomainQualifiedName";
 
     public static final String REL_ATTR_STAKEHOLDERS = "stakeholders";
 
@@ -159,15 +163,22 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
             }
 
             List<String> domainQualifiedNames = null;
+            List<String> currentDomainQualifiedNames = vertex.getMultiValuedProperty(ATTR_DOMAIN_QUALIFIED_NAMES, String.class);;
             if (entity.hasAttribute(ATTR_DOMAIN_QUALIFIED_NAMES)) {
                 Object qNamesAsObject = entity.getAttribute(ATTR_DOMAIN_QUALIFIED_NAMES);
                 if (qNamesAsObject != null) {
                     domainQualifiedNames = (List<String>) qNamesAsObject;
+                    if(CollectionUtils.isEqualCollection(domainQualifiedNames, currentDomainQualifiedNames)) {
+                        domainQualifiedNames = currentDomainQualifiedNames;
+                    }
+                    else{
+                       handleDomainQualifiedNamesUpdate(entity, vertex, domainQualifiedNames, currentDomainQualifiedNames);
+                    }
                 }
             }
 
             if (CollectionUtils.isEmpty(domainQualifiedNames)) {
-                domainQualifiedNames = vertex.getMultiValuedProperty(ATTR_DOMAIN_QUALIFIED_NAMES, String.class);
+                domainQualifiedNames = currentDomainQualifiedNames;
             }
 
             authorizeDomainAccess(domainQualifiedNames);
@@ -205,6 +216,43 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
             }
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    private List<String> getRemovedItems(List<String> oldList, List<String> newList) {
+        return oldList.stream()
+                .filter(qName -> !newList.contains(qName))
+                .collect(Collectors.toList());
+    }
+
+    private boolean isStakeholderAssociatedWithRemovedItems(AtlasVertex vertex, List<String> removedItems) throws AtlasBaseException {
+        Iterator<AtlasVertex> childrens = getActiveChildrenVertices(vertex, STAKEHOLDER_TITLE_EDGE_LABEL);
+        while (childrens.hasNext()) {
+            if(removedItems.contains(STAR) || removedItems.contains(NEW_STAR)) {
+                return true;
+            }
+            AtlasVertex child = childrens.next();
+            String domainQualifiedName = child.getProperty(ATTR_STAKEHOLDER_DOMAIN_QUALIFIED_NAME, String.class);
+            for (String removedItem : removedItems) {
+                if (domainQualifiedName.equals(removedItem)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private void handleDomainQualifiedNamesUpdate(AtlasEntity entity, AtlasVertex vertex, List<String> domainQualifiedNames, List<String> currentDomainQualifiedNames) throws AtlasBaseException {
+        if(domainQualifiedNames.contains(STAR) || domainQualifiedNames.contains(NEW_STAR)) {
+            domainQualifiedNames.clear();
+            domainQualifiedNames.add(NEW_STAR);
+            entity.setAttribute(ATTR_DOMAIN_QUALIFIED_NAMES, domainQualifiedNames);
+        }
+        else{
+            List<String> removedItems = getRemovedItems(currentDomainQualifiedNames, domainQualifiedNames);
+            if (!removedItems.isEmpty() && isStakeholderAssociatedWithRemovedItems(vertex, removedItems)) {
+                throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot remove Domain as StakeholderTitle has reference to Stakeholder in that Domain");
+            }
         }
     }
 

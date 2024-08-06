@@ -18,24 +18,26 @@
 package org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh;
 
 
+import com.sun.org.apache.bcel.internal.generic.NEW;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.authorize.AtlasAuthorizationUtils;
+import org.apache.atlas.authorize.AtlasEntityAccessRequest;
+import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.model.instance.AtlasObjectId;
-import org.apache.atlas.model.instance.AtlasRelatedObjectId;
-import org.apache.atlas.model.instance.AtlasStruct;
-import org.apache.atlas.model.instance.EntityMutations;
+import org.apache.atlas.model.instance.*;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.AtlasEntityStore;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,8 +45,10 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.getActiveChildrenVertices;
+import static org.apache.atlas.repository.graph.GraphHelper.*;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.StakeholderTitlePreProcessor.*;
+import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
 public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(DataDomainPreProcessor.class);
@@ -53,13 +57,15 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     private Map<String, String> updatedPolicyResources;
     private EntityGraphRetriever retrieverNoRelation = null;
     private Map<String, String> updatedDomainQualifiedNames;
+    private AtlasEntityStore entityStore;
 
     public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
-                                  AtlasGraph graph) {
+                                  AtlasGraph graph, AtlasEntityStore entityStore) {
         super(typeRegistry, entityRetriever, graph);
         this.updatedPolicyResources = new HashMap<>();
         this.retrieverNoRelation = new EntityGraphRetriever(graph, typeRegistry, true);
         this.updatedDomainQualifiedNames = new HashMap<>();
+        this.entityStore = entityStore;
     }
 
     @Override
@@ -114,6 +120,9 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
 
         entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
 
+        // Check if authorized to create entities
+        AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
+                "create entity: type=", entity.getTypeName());
 
         entity.setCustomAttributes(customAttributes);
 
@@ -133,6 +142,10 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
         validateStakeholderRelationship(entity);
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
+        entity.setAttribute(QUALIFIED_NAME, vertexQnName);
+        // Check if authorized to update entities
+        AtlasAuthorizationUtils.verifyUpdateEntityAccess(typeRegistry, new AtlasEntityHeader(entity),"update entity: type=" + entity.getTypeName());
+
 
         AtlasEntity storedDomain = entityRetriever.toAtlasEntity(vertex);
         AtlasRelatedObjectId currentParentDomainObjectId = (AtlasRelatedObjectId) storedDomain.getRelationshipAttribute(PARENT_DOMAIN_REL_TYPE);
@@ -179,9 +192,8 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             if (!domainCurrentName.equals(domainNewName)) {
                 domainExists(domainNewName, currentParentDomainQualifiedName, storedDomain.getGuid());
             }
-            entity.setAttribute(QUALIFIED_NAME, vertexQnName);
-        }
 
+        }
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -392,6 +404,83 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     private void validateStakeholderRelationship(AtlasEntity entity) throws AtlasBaseException {
         if(entity.hasRelationshipAttribute(STAKEHOLDER_REL_TYPE)){
             throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "Managing Stakeholders while creating/updating a domain");
+        }
+    }
+
+    public List<AtlasEntityHeader> getStakeholderTitle(String domainQualifiedName) throws AtlasBaseException {
+        List<Map<String, Object>> mustClauseList = new ArrayList<>();
+        mustClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
+        mustClauseList.add(mapOf("term", mapOf("__typeName.keyword", STAKEHOLDER_TITLE_ENTITY_TYPE)));
+
+        List<String> termsList = Arrays.asList(
+                NEW_STAR,
+                STAR,
+                domainQualifiedName
+        );
+
+        Map<String, Object> termsMap = mapOf(ATTR_DOMAIN_QUALIFIED_NAMES, termsList);
+        Map<String, Object> termsFilter = mapOf("terms", termsMap);
+
+        mustClauseList.add(termsFilter);
+
+        Map<String, Object> boolQuery = mapOf("must", mustClauseList);
+        Map<String, Object> query = mapOf("bool", boolQuery);
+        Map<String, Object> dsl = mapOf("query", query);
+
+        List<AtlasEntityHeader> assets = indexSearchPaginated(dsl, null, super.discovery);
+
+        return assets;
+    }
+
+
+    @Override
+    public void processDelete(AtlasVertex vertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processDomainDelete");
+
+        try{
+            List<String> stakeHolderGuids = new ArrayList<>();
+
+            // active childrens exists?
+            Iterator<AtlasVertex> childrens = getActiveChildrenVertices(vertex,
+                    DOMAIN_PARENT_EDGE_LABEL, DATA_PRODUCT_EDGE_LABEL);
+            if (childrens.hasNext()){
+                throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "Domain cannot be archived because some subdomains or products are active in this domain");
+            }
+
+            // active stakeholder exists?
+            childrens = getActiveChildrenVertices(vertex, STAKEHOLDER_EDGE_LABEL);
+            while (childrens.hasNext()){
+                AtlasVertex child = childrens.next();
+                AtlasObjectId childId = entityRetriever.toAtlasObjectId(child);
+                stakeHolderGuids.add(childId.getGuid());
+            }
+
+            if (CollectionUtils.isNotEmpty(stakeHolderGuids)) {
+                entityStore.deleteByIds(stakeHolderGuids);
+                LOG.info("Deleted Stakeholders: {}", stakeHolderGuids);
+            }
+
+            // active stakeholder titles exists?
+            List<AtlasEntityHeader> stakeholderTitles = getStakeholderTitle(vertex.getProperty(QUALIFIED_NAME, String.class));
+            if (CollectionUtils.isNotEmpty(stakeholderTitles)) {
+                for (AtlasEntityHeader stakeholderTitle : stakeholderTitles) {
+                    AtlasVertex stakeholderTitleVertex = entityRetriever.getEntityVertex(stakeholderTitle.getGuid());
+                    AtlasGraphUtilsV2.removeItemFromListPropertyValue(stakeholderTitleVertex, ATTR_DOMAIN_QUALIFIED_NAMES, vertex.getProperty(QUALIFIED_NAME, String.class));
+                    List<String> domainQualifiedNames = stakeholderTitleVertex.getMultiValuedProperty(ATTR_DOMAIN_QUALIFIED_NAMES, String.class);
+
+                    if (CollectionUtils.isEmpty(domainQualifiedNames)) {
+                        Iterator<AtlasVertex> stakeholders = getActiveChildrenVertices(stakeholderTitleVertex, STAKEHOLDER_TITLE_EDGE_LABEL);
+                        if (!stakeholders.hasNext()) {
+                            entityStore.deleteById(stakeholderTitle.getGuid());
+                            LOG.info("Deleted Stakeholder Title: {}", stakeholderTitle.getGuid());
+                        }
+                    }
+                }
+            }
+
+        }
+        finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
 }
