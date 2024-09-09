@@ -22,9 +22,14 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.audit.AuditSearchParams;
+import org.apache.atlas.model.audit.EntityAuditEventV2;
+import org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2;
+import org.apache.atlas.model.audit.EntityAuditSearchResult;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.plugin.model.RangerPolicyDelta;
 import org.apache.atlas.plugin.util.ServicePolicies;
 import org.apache.atlas.plugin.model.RangerPolicy;
 import org.apache.atlas.plugin.model.RangerPolicy.RangerDataMaskPolicyItem;
@@ -36,6 +41,7 @@ import org.apache.atlas.plugin.model.RangerPolicy.RangerPolicyResource;
 import org.apache.atlas.plugin.model.RangerServiceDef;
 import org.apache.atlas.plugin.model.RangerValiditySchedule;
 import org.apache.atlas.plugin.util.ServicePolicies.TagPolicies;
+import org.apache.atlas.repository.audit.ESBasedAuditRepository;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
@@ -63,9 +69,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.repository.Constants.NAME;
-import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
-import static org.apache.atlas.repository.Constants.SERVICE_ENTITY_TYPE;
+import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_CATEGORY;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_CONNECTION_QN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_IS_ENABLED;
@@ -115,11 +119,15 @@ public class CachePolicyTransformerImpl {
     private PurposeCachePolicyTransformer purposeTransformer;
 
     private AtlasEntityHeader service;
+    private final ESBasedAuditRepository auditRepository;
+
+    private final Map<EntityAuditActionV2, Integer> auditEventToDeltaChangeType;
 
     @Inject
-    public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+    public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry, ESBasedAuditRepository auditRepository) throws AtlasBaseException {
         this.graph                = new AtlasJanusGraph();
         this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
+        this.auditRepository      = auditRepository;
 
         personaTransformer = new PersonaCachePolicyTransformer(entityRetriever);
         purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
@@ -130,13 +138,81 @@ public class CachePolicyTransformerImpl {
             LOG.error("Failed to initialize discoveryService");
             throw new AtlasBaseException(e.getCause());
         }
+
+        this.auditEventToDeltaChangeType = new HashMap<>();
+        this.auditEventToDeltaChangeType.put(EntityAuditActionV2.ENTITY_CREATE, RangerPolicyDelta.CHANGE_TYPE_POLICY_CREATE);
+        this.auditEventToDeltaChangeType.put(EntityAuditActionV2.ENTITY_UPDATE, RangerPolicyDelta.CHANGE_TYPE_POLICY_UPDATE);
+        this.auditEventToDeltaChangeType.put(EntityAuditActionV2.ENTITY_DELETE, RangerPolicyDelta.CHANGE_TYPE_POLICY_DELETE);
     }
 
     public AtlasEntityHeader getService() {
         return service;
     }
 
-    public ServicePolicies getPolicies(String serviceName, String pluginId, Long lastUpdatedTime) {
+    public ServicePolicies getPoliciesDelta(String serviceName, String pluginId, Long lastUpdatedTime) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("CachePolicyTransformerImpl.getPoliciesDelta." + serviceName);
+
+        ServicePolicies servicePolicies = new ServicePolicies();
+
+        try {
+            servicePolicies.setServiceName(serviceName);
+
+            service = getServiceEntity(serviceName);
+            servicePolicies.setPolicyVersion(-1L);
+            servicePolicies.setPolicyUpdateTime(new Date());
+
+            if (service != null) {
+                servicePolicies.setServiceName(serviceName);
+                servicePolicies.setServiceId(service.getGuid());
+
+                String serviceDefName = String.format(RESOURCE_SERVICE_DEF_PATTERN, serviceName);
+                servicePolicies.setServiceDef(getResourceAsObject(serviceDefName, RangerServiceDef.class));
+
+                List<RangerPolicyDelta> policiesDelta = getServicePoliciesDelta(service, 250, lastUpdatedTime);
+                servicePolicies.setPolicyDeltas(policiesDelta);
+
+
+                //Process tag based policies
+                String tagServiceName = (String) service.getAttribute(ATTR_SERVICE_TAG_SERVICE);
+                if (StringUtils.isNotEmpty(tagServiceName)) {
+                    AtlasEntityHeader tagService = getServiceEntity(tagServiceName);
+
+                    if (tagService != null) {
+                        List<RangerPolicy> tagRangerPolicies = getServicePolicies(tagService, 0);
+
+                        TagPolicies tagPolicies = new TagPolicies();
+
+                        tagPolicies.setServiceName(tagServiceName);
+                        tagPolicies.setPolicyUpdateTime(new Date());
+                        tagPolicies.setServiceId(tagService.getGuid());
+                        tagPolicies.setPolicyVersion(-1L);
+
+                        String tagServiceDefName =  String.format(RESOURCE_SERVICE_DEF_PATTERN, tagService.getAttribute(NAME));
+                        tagPolicies.setServiceDef(getResourceAsObject(tagServiceDefName, RangerServiceDef.class));
+
+                        servicePolicies.setTagPolicies(tagPolicies);
+                        servicePolicies.getTagPolicies().setPolicies(tagRangerPolicies);
+                        LOG.info("PolicyDelta: {}: Found tag policies - {}", serviceName, tagRangerPolicies.size());
+                    }
+                }
+
+
+
+                LOG.info("PolicyDelta: {}: Found {} policies", serviceName, policiesDelta.size());
+                LOG.info("PolicyDelta: Found and set {} policies as delta and {} tag policies", servicePolicies.getPolicyDeltas().size(), servicePolicies.getTagPolicies().getPolicies().size());
+            }
+
+        } catch (Exception e) {
+            LOG.error("PolicyDelta: {}: ERROR in getPoliciesDelta {}: {}", serviceName, e.getMessage(), e);
+            return null;
+        }
+
+        RequestContext.get().endMetricRecord(recorder);
+        return servicePolicies;
+    }
+
+
+    public ServicePolicies getPoliciesAll(String serviceName, String pluginId, Long lastUpdatedTime) {
         //TODO: return only if updated
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("CachePolicyTransformerImpl.getPolicies." + serviceName);
 
@@ -208,13 +284,91 @@ public class CachePolicyTransformerImpl {
 
         String serviceName = (String) service.getAttribute("name");
         String serviceType = (String) service.getAttribute("authServiceType");
-        List<AtlasEntityHeader> atlasPolicies = getAtlasPolicies(serviceName, batchSize);
+        List<AtlasEntityHeader> atlasPolicies = getAtlasPolicies(serviceName, batchSize, new ArrayList<>());
 
         if (CollectionUtils.isNotEmpty(atlasPolicies)) {
             //transform policies
             servicePolicies = transformAtlasPoliciesToRangerPolicies(atlasPolicies, serviceType, serviceName);
         }
         return servicePolicies;
+    }
+
+    private List<RangerPolicyDelta> getServicePoliciesDelta(AtlasEntityHeader service, int batchSize, Long lastUpdatedTime) throws AtlasBaseException, IOException {
+
+        String serviceName = (String) service.getAttribute("name");
+        String serviceType = (String) service.getAttribute("authServiceType");
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("CachePolicyTransformerImpl.getServicePoliciesWithDelta." + serviceName);
+
+        List<RangerPolicyDelta> policyDeltas = new ArrayList<>();
+
+        // TODO: when getServicePolicies (without delta) is removed, merge the pagination for audit logs and policy fetch into one
+        List<EntityAuditEventV2> auditEvents = queryPoliciesAuditLogs(serviceName, lastUpdatedTime, batchSize);
+        Map<String, EntityAuditActionV2> policiesWithChangeType = new HashMap<>();
+        for (EntityAuditEventV2 event : auditEvents) {
+            if (POLICY_ENTITY_TYPE.equals(event.getTypeName()) && !policiesWithChangeType.containsKey(event.getEntityId())) {
+                policiesWithChangeType.put(event.getEntityId(), event.getAction());
+            }
+        }
+        LOG.info("PolicyDelta: {}: Total audit logs found = {}, events for {} ({}) = {}", serviceName, auditEvents.size(), POLICY_ENTITY_TYPE, policiesWithChangeType.size(), policiesWithChangeType);
+        if (policiesWithChangeType.isEmpty()) {
+            return policyDeltas;
+        }
+
+        ArrayList<String> policyGuids = new ArrayList<>(policiesWithChangeType.keySet());
+        List<AtlasEntityHeader> atlasPolicies = getAtlasPolicies(serviceName, batchSize, policyGuids);
+
+        List<RangerPolicy> rangerPolicies = new ArrayList<>();
+        if (CollectionUtils.isNotEmpty(atlasPolicies)) {
+            rangerPolicies = transformAtlasPoliciesToRangerPolicies(atlasPolicies, serviceType, serviceName);
+        }
+
+        for (RangerPolicy rangerPolicy : rangerPolicies) {
+            int changeType = auditEventToDeltaChangeType.get(policiesWithChangeType.get(rangerPolicy.getAtlasGuid()));
+
+            RangerPolicyDelta delta = new RangerPolicyDelta(rangerPolicy.getId(), changeType, rangerPolicy.getVersion(), rangerPolicy);
+            policyDeltas.add(delta);
+        }
+        LOG.info("PolicyDelta: {}: atlas policies found = {}, delta created = {}", serviceName, atlasPolicies.size(), policyDeltas.size());
+        RequestContext.get().endMetricRecord(recorder);
+
+        return policyDeltas;
+    }
+
+    private List<EntityAuditEventV2> queryPoliciesAuditLogs(String serviceName, Long afterTime, int batchSize) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("CachePolicyTransformerImpl.queryPoliciesAuditLogs." + serviceName);
+
+        List<String> entityUpdateToWatch = new ArrayList<>();
+        entityUpdateToWatch.add(POLICY_ENTITY_TYPE);
+        entityUpdateToWatch.add(PURPOSE_ENTITY_TYPE);
+
+        AuditSearchParams parameters = new AuditSearchParams();
+        Map<String, Object> dsl = getMap("size", batchSize);
+
+        List<Map<String, Object>> mustClauseList = new ArrayList<>();
+        mustClauseList.add(getMap("terms", getMap("typeName", entityUpdateToWatch)));
+        afterTime = afterTime == -1 ? 0 : afterTime;
+        mustClauseList.add(getMap("range", getMap("created", getMap("gte", afterTime))));
+
+        List<Map<String, Object>> sortList = new ArrayList<>(0);
+        sortList.add(getMap("created", getMap("order", "desc")));
+        dsl.put("sort", sortList);
+
+        dsl.put("query", getMap("bool", getMap("must", mustClauseList)));
+
+        parameters.setDsl(dsl);
+
+        List<EntityAuditEventV2> events = new ArrayList<>();
+        try {
+            EntityAuditSearchResult result = auditRepository.searchEvents(parameters.getQueryString());
+            if (result != null && !CollectionUtils.isEmpty(result.getEntityAudits())) {
+                events = result.getEntityAudits();
+            }
+        } catch (AtlasBaseException e) {
+            LOG.error("ERROR in queryPoliciesAuditLogs while fetching entity audits {}: ", e.getMessage(), e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+        return events;
     }
 
     private List<RangerPolicy> transformAtlasPoliciesToRangerPolicies(List<AtlasEntityHeader> atlasPolicies,
@@ -451,7 +605,7 @@ public class CachePolicyTransformerImpl {
         return ret;
     }
 
-    private List<AtlasEntityHeader> getAtlasPolicies(String serviceName, int batchSize) throws AtlasBaseException {
+    private List<AtlasEntityHeader> getAtlasPolicies(String serviceName, int batchSize, List<String> policyGuids) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("CachePolicyTransformerImpl."+service+".getAtlasPolicies");
 
         List<AtlasEntityHeader> ret = new ArrayList<>();
@@ -481,6 +635,10 @@ public class CachePolicyTransformerImpl {
             List<Map<String, Object>> mustClauseList = new ArrayList<>();
             mustClauseList.add(getMap("term", getMap(ATTR_POLICY_SERVICE_NAME, serviceName)));
             mustClauseList.add(getMap("match", getMap("__state", Id.EntityState.ACTIVE)));
+
+            if (!policyGuids.isEmpty()) {
+                mustClauseList.add(getMap("terms", getMap("__guid", policyGuids)));
+            }
 
             dsl.put("query", getMap("bool", getMap("must", mustClauseList)));
 

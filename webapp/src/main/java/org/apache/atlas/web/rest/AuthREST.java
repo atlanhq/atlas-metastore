@@ -156,7 +156,7 @@ public class AuthREST {
                 return null;
             }
 
-            ServicePolicies ret = policyTransformer.getPolicies(serviceName, pluginId, lastUpdatedTime);
+            ServicePolicies ret = policyTransformer.getPoliciesAll(serviceName, pluginId, lastUpdatedTime);
 
             updateLastSync(serviceName);
 
@@ -212,7 +212,7 @@ public class AuthREST {
                 return false;
             }
         } catch (AtlasBaseException e) {
-            LOG.error("ERROR in getPoliciesIfUpdated while fetching entity audits {}: ", e.getMessage());
+            LOG.error("ERROR in getPoliciesIfUpdated while fetching entity audits {}: ", e.getMessage(), e);
             return true;
         } finally {
             RequestContext.get().endMetricRecord(recorder);

@@ -529,6 +529,13 @@ public class RangerPolicy extends RangerBaseModelObject implements java.io.Seria
 		this.isDenyAllElse = isDenyAllElse == null ? Boolean.FALSE : isDenyAllElse;
 	}
 
+	public String getAtlasGuid() {
+		if (getGuid().length() > 36) {
+			return getGuid().substring(0, 36);
+		}
+		return getGuid();
+	}
+
 	@Override
 	public String toString( ) {
 		StringBuilder sb = new StringBuilder();
@@ -675,6 +682,7 @@ public class RangerPolicy extends RangerBaseModelObject implements java.io.Seria
 		@Override
 		public int compare(RangerPolicy me, RangerPolicy other) {
 			return Long.compare(me.getId(), other.getId());
+//			return String.CASE_INSENSITIVE_ORDER.compare(me.getGuid(), other.getGuid());
 		}
 	}
 
