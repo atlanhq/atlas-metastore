@@ -24,7 +24,9 @@ import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasStruct;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscovery;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.EntityResolver;
@@ -40,9 +42,11 @@ import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.atlas.type.TemplateToken;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
+import org.apache.hadoop.util.Time;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
@@ -103,7 +107,35 @@ public class AtlasEntityGraphDiscoveryV2 implements EntityGraphDiscovery {
 
         validateLabels(entity.getLabels());
 
+
         type.validateValue(entity, entity.getTypeName(), messages);
+
+
+
+        // DMEntity and DMAttributeType are requested for update
+        // by dMQualifiedNamePrefix which is not a unique attribute
+        // This can return multiple entity/attribute that match this prefix vale
+      //   we have to return latest entity/attribute
+        if (entity.getTypeName().equals(Constants.ATLAS_DM_ENTITY_TYPE) ||
+                entity.getTypeName().equals(Constants.ATLAS_DM_ATTRIBUTE_TYPE)){
+
+            String qualifiedNamePrefix = (String) entity.getAttributes().get(Constants.ATLAS_DM_QUALIFIED_NAME_PREFIX);
+            if (qualifiedNamePrefix.isEmpty()){
+                throw new AtlasBaseException(AtlasErrorCode.QUALIFIED_NAME_PREFIX_NOT_EXIST);
+            }
+           // AtlasVertex vertex = AtlasGraphUtilsV2.findLatestEntityAttributeVerticesByType(entity.getTypeName(), qualifiedNamePrefix);
+            AtlasVertex vertex= discoveryContext.getResolvedEntityVertex(entity.getGuid());
+            if (vertex == null) {
+                // no entity exists with this qualifiedName, set qualifiedName and let entity be created
+               entity.setAttribute(Constants.QUALIFIED_NAME, qualifiedNamePrefix + "_" + RequestContext.get().getRequestTime());
+                return;
+            }
+
+         //   if guidFromVertex is found let entity be updated
+            entity.setGuid(AtlasGraphUtilsV2.getIdFromVertex(vertex));
+            type.getNormalizedValue(entity);
+            return;
+        }
 
         if (!messages.isEmpty()) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_CRUD_INVALID_PARAMS, messages);
@@ -160,6 +192,8 @@ public class AtlasEntityGraphDiscoveryV2 implements EntityGraphDiscovery {
                 if (entity == null) {
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "found null entity");
                 }
+
+                validateAttributesForDataModel(entity);
 
                 processDynamicAttributes(entity);
 
@@ -484,5 +518,16 @@ public class AtlasEntityGraphDiscoveryV2 implements EntityGraphDiscovery {
                 entity.setAttribute(attributeName,dynAttributeValue.toString());
             }
         }
+    }
+
+    private void validateAttributesForDataModel(AtlasEntity entity) throws AtlasBaseException {
+        if (entity.getTypeName().equals(Constants.ATLAS_DM_ENTITY_TYPE) ||
+                entity.getTypeName().equals(Constants.ATLAS_DM_ATTRIBUTE_TYPE)) {
+            if (entity.getAttributes().get(Constants.ATLAS_DM_QUALIFIED_NAME_PREFIX) == null ||
+                    entity.getAttributes().get(Constants.ATLAS_DM_QUALIFIED_NAME_PREFIX) == "") {
+              throw new AtlasBaseException(AtlasErrorCode.QUALIFIED_NAME_PREFIX_NOT_EXIST);
+            }
+        }
+
     }
 }
