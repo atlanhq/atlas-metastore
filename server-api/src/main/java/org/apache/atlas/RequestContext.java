@@ -90,6 +90,11 @@ public class RequestContext {
     private boolean     includeClassifications = true;
 
     private boolean     includeClassificationNames = false;
+
+
+
+    private String     lineageInputLabel = "";
+    private String     lineageOutputLabel = "";
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
     private String traceId;
@@ -210,6 +215,21 @@ public class RequestContext {
         return removedElementsMap;
     }
 
+    public String getLineageInputLabel() {
+        return lineageInputLabel;
+    }
+
+    public void setLineageInputLabel(String lineageInputLabel) {
+        this.lineageInputLabel = lineageInputLabel;
+    }
+
+    public String getLineageOutputLabel() {
+        return lineageOutputLabel;
+    }
+
+    public void setLineageOutputLabel(String lineageOutputLabel) {
+        this.lineageOutputLabel = lineageOutputLabel;
+    }
     public Map<String, List<Object>> getNewElementsCreatedMap() {
         return newElementsCreatedMap;
     }
