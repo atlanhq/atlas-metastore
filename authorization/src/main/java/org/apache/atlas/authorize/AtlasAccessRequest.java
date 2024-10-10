@@ -23,6 +23,7 @@ import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -33,6 +34,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
+import java.util.stream.Collectors;
 
 public class AtlasAccessRequest {
     private static Logger LOG = LoggerFactory.getLogger(AtlasAccessRequest.class);
@@ -176,20 +180,20 @@ public class AtlasAccessRequest {
         return ret == null ? "" : ret.toString();
     }
 
-    public Set<AtlasClassification> getClassificationNames(AtlasEntityHeader entity) {
-        final Set<AtlasClassification> ret;
-
-        if (entity == null || entity.getClassifications() == null) {
-            ret = Collections.emptySet();
-        } else {
-            ret = new HashSet<>();
-
-            for (AtlasClassification classification : entity.getClassifications()) {
-                ret.add(classification);
-            }
+    public Set<AtlasClassification> getClassifications(AtlasEntityHeader entity) {
+        if (CollectionUtils.isNotEmpty(entity.getClassifications())) {
+            return new HashSet<>(entity.getClassifications());
         }
 
-        return ret;
+        List<String> classificationNames = entity.getClassificationNames();
+        if (CollectionUtils.isEmpty(classificationNames)) {
+            return new HashSet<>();
+        }
+        // Create new classification objects with name using stream filter
+        return classificationNames.stream()
+                .distinct()
+                .map(AtlasClassification::new)
+                .collect(Collectors.toSet());
     }
 
     @Override
