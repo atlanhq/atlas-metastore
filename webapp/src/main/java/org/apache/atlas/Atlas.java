@@ -18,15 +18,20 @@
 
 package org.apache.atlas;
 
+import io.opentelemetry.api.OpenTelemetry;
+import io.opentelemetry.exporter.otlp.logs.OtlpGrpcLogRecordExporter;
+import io.opentelemetry.sdk.OpenTelemetrySdk;
+import io.opentelemetry.sdk.logs.SdkLoggerProvider;
+import io.opentelemetry.sdk.logs.export.BatchLogRecordProcessor;
+import io.opentelemetry.sdk.resources.Resource;
+import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.samplers.Sampler;
+import io.opentelemetry.semconv.ResourceAttributes;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.security.SecurityProperties;
 import org.apache.atlas.util.AccessAuditLogsIndexCreator;
 import org.apache.atlas.web.service.EmbeddedServer;
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.GnuParser;
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.*;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.commons.lang.StringUtils;
@@ -48,7 +53,8 @@ import java.net.NetworkInterface;
 import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.util.*;
+import java.util.Arrays;
+import java.util.Iterator;
 
 import static org.apache.atlas.repository.Constants.INDEX_PREFIX;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
@@ -240,6 +246,12 @@ public final class Atlas {
     }
 
     private static void installLogBridge() {
+        // Initialize OpenTelemetry as early as possible
+        OpenTelemetry openTelemetry = initializeOpenTelemetry();
+        // Install OpenTelemetry in log4j appender
+        io.opentelemetry.instrumentation.log4j.appender.v2_17.OpenTelemetryAppender.install(
+                openTelemetry);
+
         // Optionally remove existing handlers attached to j.u.l root logger
         SLF4JBridgeHandler.removeHandlersForRootLogger();  // (since SLF4J 1.6.5)
 
@@ -295,4 +307,30 @@ public final class Atlas {
             }
         }
     }
+
+    private static OpenTelemetry initializeOpenTelemetry() {
+        OpenTelemetrySdk sdk =
+                OpenTelemetrySdk.builder()
+                        .setTracerProvider(SdkTracerProvider.builder().setSampler(Sampler.alwaysOn()).build())
+                        .setLoggerProvider(
+                                SdkLoggerProvider.builder()
+                                        .setResource(
+                                                Resource.getDefault().toBuilder()
+                                                        .put(ResourceAttributes.SERVICE_NAME, "atlas")
+                                                        .build())
+                                        .addLogRecordProcessor(
+                                                BatchLogRecordProcessor.builder(
+                                                                OtlpGrpcLogRecordExporter.builder()
+                                                                        .setEndpoint("http://localhost:4317")
+                                                                        .build())
+                                                        .build())
+                                        .build())
+                        .build();
+
+        // Add hook to close SDK, which flushes logs
+        Runtime.getRuntime().addShutdownHook(new Thread(sdk::close));
+
+        return sdk;
+    }
+
 }

@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Configuration status="WARN" packages="io.opentelemetry.instrumentation.log4j.appender.v2_17">
+    <Appenders>
+        <Console name="ConsoleAppender" target="SYSTEM_OUT" follow="true">
+            <JSONLayout complete="false" compact="true" eventEol="true" objectMessageAsJsonObject="true" />
+        </Console>
+        <OpenTelemetry name="OpenTelemetryAppender" captureMapMessageAttributes="true" captureExperimentalAttributes="true" captureContextDataAttributes="*">
+        </OpenTelemetry>
+    </Appenders>
+    <Loggers>
+        <Root level="info">
+            <AppenderRef ref="OpenTelemetryAppender" />
+            <AppenderRef ref="ConsoleAppender" />
+        </Root>
+    </Loggers>
+</Configuration>
