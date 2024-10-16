@@ -207,6 +207,11 @@ public final class Constants {
 
     public static String[] PROCESS_EDGE_LABELS = {PROCESS_OUTPUTS, PROCESS_INPUTS};
 
+    public static final String PROCESS_ENTITY_TYPE = "Process";
+
+    public static final String CONNECTION_PROCESS_ENTITY_TYPE = "ConnectionProcess";
+    public static final String PARENT_CONNECTION_PROCESS_QUALIFIED_NAME = "parentConnectionProcessQualifiedName";
+
     /**
      * The homeId field is used when saving into Atlas a copy of an object that is being imported from another
      * repository. The homeId will be set to a String that identifies the other repository. The specific format
@@ -269,6 +274,7 @@ public final class Constants {
 
     public static final String NAME                                    = "name";
     public static final String QUALIFIED_NAME                          = "qualifiedName";
+    public static final String CONNECTION_QUALIFIED_NAME               = "connectionQualifiedName";
     public static final String TYPE_NAME_PROPERTY_KEY                  = INTERNAL_PROPERTY_KEY_PREFIX + "typeName";
     public static final String INDEX_SEARCH_MAX_RESULT_SET_SIZE        = "atlas.graph.index.search.max-result-set-size";
     public static final String INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH = "atlas.graph.index.search.types.max-query-str-length";
