@@ -128,6 +128,12 @@ public class ConnectionPreProcessor implements PreProcessor {
             }
             connection.setAttribute(ATTR_ADMIN_USERS, adminUsers);
 
+            // clean adminRoles
+            if (CollectionUtils.isNotEmpty(adminRoles)) {
+                adminRoles = adminRoles.stream().filter(Objects::nonNull).filter(x -> !x.equals("null")) .collect(Collectors.toList());
+                connection.setAttribute(ATTR_ADMIN_ROLES, adminRoles);
+            }
+
             RoleRepresentation role = keycloakStore.createRoleForConnection(roleName, true, adminUsers, adminGroups, adminRoles);
 
             //create connection bootstrap policies
