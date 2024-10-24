@@ -360,6 +360,7 @@ public final class GraphHelper {
     }
 
     public static AtlasVertex getClassificationVertex(AtlasVertex entityVertex, String classificationName) {
+        AtlasPerfMetrics.MetricRecorder metrics = RequestContext.get().startMetricRecord("getClassificationVertex");
         AtlasVertex ret   = null;
         Iterable    edges = entityVertex.query().direction(AtlasEdgeDirection.OUT).label(CLASSIFICATION_LABEL)
                                                 .has(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, false)
@@ -373,7 +374,7 @@ public final class GraphHelper {
                 ret = (edge != null) ? edge.getInVertex() : null;
             }
         }
-
+        RequestContext.get().endMetricRecord(metrics);
         return ret;
     }
     public static Iterator<AtlasVertex> getClassificationVertices(AtlasGraph graph, String classificationName, int size) {
@@ -418,6 +419,7 @@ public final class GraphHelper {
         return count;
     }
     public static AtlasEdge getClassificationEdge(AtlasVertex entityVertex, AtlasVertex classificationVertex) {
+        AtlasPerfMetrics.MetricRecorder metrics = RequestContext.get().startMetricRecord("getClassficationEdge");
         AtlasEdge ret   = null;
         Iterable  edges = entityVertex.query().direction(AtlasEdgeDirection.OUT).label(CLASSIFICATION_LABEL)
                                               .has(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, false)
@@ -431,7 +433,7 @@ public final class GraphHelper {
                 ret = (edge != null && edge.getInVertex().equals(classificationVertex)) ? edge : null;
             }
         }
-
+        RequestContext.get().endMetricRecord(metrics);
         return ret;
     }
 
@@ -844,6 +846,7 @@ public final class GraphHelper {
     }
 
     public static List<String> getTraitNames(AtlasVertex entityVertex, Boolean propagated) {
+        AtlasPerfMetrics.MetricRecorder getTraitNamesMetrics = RequestContext.get().startMetricRecord("getTraitNames");
         List<String>     ret   = new ArrayList<>();
         AtlasVertexQuery query = entityVertex.query().direction(AtlasEdgeDirection.OUT).label(CLASSIFICATION_LABEL);
 
@@ -862,7 +865,7 @@ public final class GraphHelper {
                 ret.add(AtlasGraphUtilsV2.getEncodedProperty(edge, CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class));
             }
         }
-
+        RequestContext.get().endMetricRecord(getTraitNamesMetrics);
         return ret;
     }
 

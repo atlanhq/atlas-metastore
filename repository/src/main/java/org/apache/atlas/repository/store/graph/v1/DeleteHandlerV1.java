@@ -350,6 +350,7 @@ public abstract class DeleteHandlerV1 {
 
     public boolean deleteEdgeReference(AtlasEdge edge, TypeCategory typeCategory, boolean isOwned, boolean forceDeleteStructTrait,
                                        AtlasRelationshipEdgeDirection relationshipDirection, AtlasVertex entityVertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metrics = RequestContext.get().startMetricRecord("deleteEdgeReference");
         if (LOG.isDebugEnabled()) {
             LOG.debug("Deleting {}, force = {}", string(edge), forceDeleteStructTrait);
         }
@@ -406,7 +407,7 @@ public abstract class DeleteHandlerV1 {
                 deleteEdge(edge, true, isInternalType || isCustomRelationship(edge));
             }
         }
-
+        RequestContext.get().endMetricRecord(metrics);
         return !softDelete || forceDelete || isCustomRelationship(edge);
     }
 
@@ -730,32 +731,39 @@ public abstract class DeleteHandlerV1 {
 
     protected void deleteEdge(AtlasEdge edge, boolean updateInverseAttribute, boolean force) throws AtlasBaseException {
         //update inverse attribute
-        if (updateInverseAttribute) {
-            String labelWithoutPrefix = edge.getLabel().substring(GraphHelper.EDGE_LABEL_PREFIX.length());
-            AtlasType      parentType = typeRegistry.getType(AtlasGraphUtilsV2.getTypeName(edge.getOutVertex()));
+        AtlasPerfMetrics.MetricRecorder metrics = RequestContext.get().startMetricRecord("deleteEdge");
+        try{
+            if (updateInverseAttribute) {
+                String labelWithoutPrefix = edge.getLabel().substring(GraphHelper.EDGE_LABEL_PREFIX.length());
+                AtlasType      parentType = typeRegistry.getType(AtlasGraphUtilsV2.getTypeName(edge.getOutVertex()));
 
-            if (parentType instanceof AtlasEntityType) {
-                AtlasEntityType                parentEntityType = (AtlasEntityType) parentType;
-                AtlasStructType.AtlasAttribute attribute        = parentEntityType.getAttribute(labelWithoutPrefix);
+                if (parentType instanceof AtlasEntityType) {
+                    AtlasEntityType                parentEntityType = (AtlasEntityType) parentType;
+                    AtlasStructType.AtlasAttribute attribute        = parentEntityType.getAttribute(labelWithoutPrefix);
 
-                if (attribute == null) {
-                    attribute = parentEntityType.getRelationshipAttribute(labelWithoutPrefix, AtlasGraphUtilsV2.getTypeName(edge));
-                }
+                    if (attribute == null) {
+                        attribute = parentEntityType.getRelationshipAttribute(labelWithoutPrefix, AtlasGraphUtilsV2.getTypeName(edge));
+                    }
 
-                if (attribute != null && attribute.getInverseRefAttribute() != null) {
-                    deleteEdgeBetweenVertices(edge.getInVertex(), edge.getOutVertex(), attribute.getInverseRefAttribute());
+                    if (attribute != null && attribute.getInverseRefAttribute() != null) {
+                        deleteEdgeBetweenVertices(edge.getInVertex(), edge.getOutVertex(), attribute.getInverseRefAttribute());
+                    }
                 }
             }
+
+            if (isClassificationEdge(edge)) {
+                AtlasVertex classificationVertex = edge.getInVertex();
+
+                AtlasGraphUtilsV2.setEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_STATUS,
+                        RequestContext.get().getDeleteType() == DeleteType.HARD ? PURGED.name() : DELETED.name());
+            }
+
+            deleteEdge(edge, force);
+            RequestContext.get().endMetricRecord(metrics);
+        } catch (AtlasBaseException e){
+            RequestContext.get().endMetricRecord(metrics);
+            throw e;
         }
-
-        if (isClassificationEdge(edge)) {
-            AtlasVertex classificationVertex = edge.getInVertex();
-
-            AtlasGraphUtilsV2.setEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_STATUS,
-                    RequestContext.get().getDeleteType() == DeleteType.HARD ? PURGED.name() : DELETED.name());
-        }
-
-        deleteEdge(edge, force);
     }
 
     protected void deleteTypeVertex(AtlasVertex instanceVertex, TypeCategory typeCategory, boolean force) throws AtlasBaseException {

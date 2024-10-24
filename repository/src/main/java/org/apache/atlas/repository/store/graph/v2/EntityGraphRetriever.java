@@ -368,6 +368,7 @@ public class EntityGraphRetriever {
     }
 
     public AtlasClassification toAtlasClassification(AtlasVertex classificationVertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metrics = RequestContext.get().startMetricRecord("toAtlasClassification");
         AtlasClassification ret                = null;
         String              classificationName = getTypeName(classificationVertex);
 
@@ -391,7 +392,7 @@ public class EntityGraphRetriever {
 
             mapAttributes(classificationVertex, ret, null);
         }
-
+        RequestContext.get().endMetricRecord(metrics);
         return ret;
     }
 
