@@ -32,6 +32,7 @@ import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections4.ListUtils;
 import org.slf4j.Logger;
@@ -104,6 +105,7 @@ public class TaskRegistry {
     }
 
     public List<AtlasTask> getInProgressTasks() {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getInProgressTasks");
         List<AtlasTask> ret = new ArrayList<>();
 
         try {
@@ -124,7 +126,7 @@ public class TaskRegistry {
         } catch (Exception exception) {
             LOG.error("Error fetching in progress tasks!", exception);
         }
-
+        RequestContext.get().endMetricRecord(metric);
         return ret;
     }
 
@@ -166,6 +168,7 @@ public class TaskRegistry {
     }
 
     public List<AtlasTask> getByIdsES(List<String> guids) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getByIdsES");
         List<AtlasTask> ret = new ArrayList<>();
 
         List<List<String>> chunkedGuids = ListUtils.partition(guids, 50);
@@ -188,7 +191,7 @@ public class TaskRegistry {
             // adding filtering layer to filter exact tasks
             ret.addAll(filterTasksByGuids(result.getTasks(), chunkedGuidList));
         }
-
+        RequestContext.get().endMetricRecord(metric);
         return ret;
     }
 

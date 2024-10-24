@@ -3555,8 +3555,8 @@ public class EntityGraphMapper {
         if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
             perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityGraphMapper.deleteClassification");
         }
-
-        List<String> traitNames = getTraitNames(entityVertex);
+        AtlasPerfMetrics.MetricRecorder deleteClassification1 = RequestContext.get().startMetricRecord("deleteClassification-1");
+        List<String> traitNames = getTraitNames(entityVertex); // TODO: clean
 
         if (CollectionUtils.isEmpty(traitNames)) {
             throw new AtlasBaseException(AtlasErrorCode.NO_CLASSIFICATIONS_FOUND_FOR_ENTITY, entityGuid);
@@ -3564,16 +3564,19 @@ public class EntityGraphMapper {
 
         validateClassificationExists(traitNames, classificationName);
 
-        AtlasVertex         classificationVertex = getClassificationVertex(entityVertex, classificationName);
+        AtlasVertex         classificationVertex = getClassificationVertex(entityVertex, classificationName); // TODO: clean
 
         // Get in progress task to see if there already is a propagation for this particular vertex
+        AtlasPerfMetrics.MetricRecorder taskManagementMetric = RequestContext.get().startMetricRecord("deleteClassification-taskManagement");
         List<AtlasTask> inProgressTasks = taskManagement.getInProgressTasks();
+        RequestContext.get().endMetricRecord(taskManagementMetric);
+        AtlasPerfMetrics.MetricRecorder taskManagementMetric2 = RequestContext.get().startMetricRecord("deleteClassification-taskManagement2");
         for (AtlasTask task : inProgressTasks) {
             if (isTaskMatchingWithVertexIdAndEntityGuid(task, classificationVertex.getIdForDisplay(), entityGuid)) {
                 throw new AtlasBaseException(AtlasErrorCode.CLASSIFICATION_CURRENTLY_BEING_PROPAGATED, classificationName);
             }
         }
-
+        RequestContext.get().endMetricRecord(taskManagementMetric2);
         AtlasClassification classification       = entityRetriever.toAtlasClassification(classificationVertex);
 
         if (classification == null) {
@@ -3582,8 +3585,10 @@ public class EntityGraphMapper {
 
         // remove classification from propagated entities if propagation is turned on
         final List<AtlasVertex> entityVertices;
-
-        if (isPropagationEnabled(classificationVertex)) {
+        //TODO : add for this flow metric
+        RequestContext.get().endMetricRecord(deleteClassification1);
+        AtlasPerfMetrics.MetricRecorder deleteClassification2 = RequestContext.get().startMetricRecord("deleteClassification-2");
+        if (isPropagationEnabled(classificationVertex)) { // TODO
             if (taskManagement != null && DEFERRED_ACTION_ENABLED) {
                 boolean propagateDelete = true;
                 String classificationVertexId = classificationVertex.getIdForDisplay();
@@ -3591,12 +3596,13 @@ public class EntityGraphMapper {
                 List<String> entityTaskGuids = (List<String>) entityVertex.getPropertyValues(PENDING_TASKS_PROPERTY_KEY, String.class);
 
                 if (CollectionUtils.isNotEmpty(entityTaskGuids)) {
-                    List<AtlasTask> entityPendingTasks = taskManagement.getByGuidsES(entityTaskGuids);
-
-                    boolean pendingTaskExists  = entityPendingTasks.stream()
+                    List<AtlasTask> entityPendingTasks = taskManagement.getByGuidsES(entityTaskGuids); // TODO
+                    AtlasPerfMetrics.MetricRecorder deleteClassification25 = RequestContext.get().startMetricRecord("deleteClassification-25");
+                    boolean pendingTaskExists  = entityPendingTasks.stream() // TODO
                             .anyMatch(x -> isTaskMatchingWithVertexIdAndEntityGuid(x, classificationVertexId, entityGuid));
-
+                    RequestContext.get().endMetricRecord(deleteClassification25);
                     if (pendingTaskExists) {
+                        AtlasPerfMetrics.MetricRecorder deleteClassification26 = RequestContext.get().startMetricRecord("deleteClassification-26");
                         List<AtlasTask> entityClassificationPendingTasks = entityPendingTasks.stream()
                                 .filter(t -> t.getParameters().containsKey("entityGuid")
                                         && t.getParameters().containsKey("classificationVertexId"))
@@ -3604,17 +3610,20 @@ public class EntityGraphMapper {
                                         && t.getParameters().get("classificationVertexId").equals(classificationVertexId)
                                         && t.getType().equals(CLASSIFICATION_PROPAGATION_ADD))
                                 .collect(Collectors.toList());
+                        RequestContext.get().endMetricRecord(deleteClassification26);
+                        AtlasPerfMetrics.MetricRecorder deleteClassification27 = RequestContext.get().startMetricRecord("deleteClassification-27");
                         for (AtlasTask entityClassificationPendingTask: entityClassificationPendingTasks) {
                             String taskGuid = entityClassificationPendingTask.getGuid();
-                            taskManagement.deleteByGuid(taskGuid, TaskManagement.DeleteType.SOFT);
+                            taskManagement.deleteByGuid(taskGuid, TaskManagement.DeleteType.SOFT); //TODO
                             AtlasGraphUtilsV2.deleteProperty(entityVertex, PENDING_TASKS_PROPERTY_KEY, taskGuid);
 //                            propagateDelete = false;  TODO: Uncomment when all unnecessary ADD tasks are resolved
                         }
+                        RequestContext.get().endMetricRecord(deleteClassification27);
                     }
                 }
 
                 if (propagateDelete) {
-                    createAndQueueTask(CLASSIFICATION_PROPAGATION_DELETE, entityVertex, classificationVertex.getIdForDisplay(), classificationName);
+                    createAndQueueTask(CLASSIFICATION_PROPAGATION_DELETE, entityVertex, classificationVertex.getIdForDisplay(), classificationName); // TODO:
                 }
 
                 entityVertices = new ArrayList<>();
@@ -3633,14 +3642,15 @@ public class EntityGraphMapper {
         if (!entityVertices.contains(entityVertex)) {
             entityVertices.add(entityVertex);
         }
-
+        RequestContext.get().endMetricRecord(deleteClassification2);
+        AtlasPerfMetrics.MetricRecorder deleteClassification3 = RequestContext.get().startMetricRecord("deleteClassification-3");
         // remove classifications from associated entity
         if (LOG.isDebugEnabled()) {
             LOG.debug("Removing classification: [{}] from: [{}][{}] with edge label: [{}]", classificationName,
                     getTypeName(entityVertex), entityGuid, CLASSIFICATION_LABEL);
         }
 
-        AtlasEdge edge = getClassificationEdge(entityVertex, classificationVertex);
+        AtlasEdge edge = getClassificationEdge(entityVertex, classificationVertex); //TODO : clean
 
         deleteDelegate.getHandler().deleteEdgeReference(edge, CLASSIFICATION, false, true, entityVertex);
 
@@ -3657,17 +3667,21 @@ public class EntityGraphMapper {
         updateModificationMetadata(entityVertex);
 
         if (RequestContext.get().isDelayTagNotifications()) {
+            AtlasPerfMetrics.MetricRecorder deleteClassification31 = RequestContext.get().startMetricRecord("deleteClassification-31");
             RequestContext.get().addDeletedClassificationAndVertices(classification, new ArrayList<>(entityVertices));
+            RequestContext.get().endMetricRecord(deleteClassification31);
         } else if (CollectionUtils.isNotEmpty(entityVertices)) {
             List<AtlasEntity> propagatedEntities = updateClassificationText(classification, entityVertices);
 
             //Sending audit request for all entities at once
-            entityChangeNotifier.onClassificationsDeletedFromEntities(propagatedEntities, Collections.singletonList(classification));
+            entityChangeNotifier.onClassificationsDeletedFromEntities(propagatedEntities, Collections.singletonList(classification)); //TODO
         }
+        RequestContext.get().endMetricRecord(deleteClassification3);
         AtlasPerfTracer.log(perf);
     }
 
     private boolean isTaskMatchingWithVertexIdAndEntityGuid(AtlasTask task, String classificationVertexId, String entityGuid) {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("isTaskMatchingWithVertexIdAndEntityGuid");
         try {
             if (CLASSIFICATION_PROPAGATION_ADD.equals(task.getType())) {
                 return task.getParameters().get(ClassificationTask.PARAM_CLASSIFICATION_VERTEX_ID).equals(classificationVertexId)
@@ -3676,6 +3690,7 @@ public class EntityGraphMapper {
         } catch (NullPointerException npe) {
             LOG.warn("Task classificationVertexId or entityGuid is null");
         }
+        RequestContext.get().endMetricRecord(metric);
         return false;
     }
 
@@ -4384,9 +4399,11 @@ public class EntityGraphMapper {
     }
 
     private void validateClassificationExists(List<String> existingClassifications, String suppliedClassificationName) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("validateClassificationExists");
         if (!existingClassifications.contains(suppliedClassificationName)) {
             throw new AtlasBaseException(AtlasErrorCode.CLASSIFICATION_NOT_ASSOCIATED_WITH_ENTITY, suppliedClassificationName);
         }
+        RequestContext.get().endMetricRecord(metric);
     }
 
     private AtlasEdge getOrCreateRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex, String relationshipName,
