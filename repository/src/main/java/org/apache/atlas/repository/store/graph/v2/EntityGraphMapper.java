@@ -3465,7 +3465,7 @@ public class EntityGraphMapper {
             currentTask.setAssetsCountToPropagate((long) impactedVertices.size());
 
             //update the 'assetsCountToPropagate' in the current task vertex.
-            AtlasVertex currentTaskVertex = graphHelper.getVertexForGUID(currentTask.getGuid());
+            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
             currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, impactedVertices.size());
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
