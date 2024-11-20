@@ -3459,6 +3459,14 @@ public class EntityGraphMapper {
             List<String> edgeLabelsToCheck = CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode);
             Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
             List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
+
+            // update the 'assetsCountToPropagate' on in memory java object.
+            AtlasTask currentTask = RequestContext.get().getCurrentTask();
+            currentTask.setAssetsCountToPropagate((long) impactedVertices.size());
+
+            //update the 'assetsCountToPropagate' in the current task vertex.
+            AtlasVertex currentTaskVertex = graphHelper.getVertexForGUID(currentTask.getGuid());
+            currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, impactedVertices.size());
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
 
@@ -3918,10 +3926,6 @@ public class EntityGraphMapper {
                         }
                         Boolean toExclude = propagationMode == CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE ? true : false;
                         entitiesToPropagateTo = entityRetriever.getImpactedVerticesV2(entityVertex, null, classificationVertex.getIdForDisplay(), CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode),toExclude);
-
-                        //update the 'assetsCountToPropagate' in the current task vertex.
-                        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-                        currentTask.setAssetsCountToPropagate((long) entitiesToPropagateTo.size());
                     }
 
                     if (CollectionUtils.isNotEmpty(entitiesToPropagateTo)) {
