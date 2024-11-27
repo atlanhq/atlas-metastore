@@ -49,6 +49,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasEntityType;
@@ -67,6 +69,7 @@ import org.apache.atlas.v1.model.instance.Id;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.janusgraph.core.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -88,11 +91,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Queue;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import static org.apache.atlas.glossary.GlossaryUtils.TERM_ASSIGNMENT_ATTR_CONFIDENCE;
 import static org.apache.atlas.glossary.GlossaryUtils.TERM_ASSIGNMENT_ATTR_CREATED_BY;
@@ -131,6 +133,7 @@ import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 @Component
 public class EntityGraphRetriever {
     private static final Logger LOG = LoggerFactory.getLogger(EntityGraphRetriever.class);
+    private static final int BATCH_SIZE = 300;
 
     private static final String GLOSSARY_TERM_DISPLAY_NAME_ATTR = "name";
     public  static final String TERM_RELATION_NAME              = "AtlasGlossarySemanticAssignment";
@@ -1093,6 +1096,230 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    public List<AtlasEntityHeader> mapVerticesToAtlasEntityHeader(List<AtlasVertex> entityVertices, Set<String> attributes) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVerticesToAtlasEntityHeader");
+
+        List<AtlasEntityHeader> results = new ArrayList<>();
+        try {
+            // Convert AtlasVertex to JanusGraphVertex
+
+            // Use multiQuery for optimized property fetching
+            AtlasJanusGraph janusGraph = ((AtlasJanusGraph)graph);
+            Map<JanusGraphVertex, Map<String, Object>> multiQueryResults = getBatchPropertiesWithMultiQuery(entityVertices, attributes, janusGraph);
+            Map<JanusGraphVertex, AtlasVertex>  map = getJanusGraphVerticesMap(entityVertices);
+            multiQueryResults.forEach((janusGraphVertex, vertexProperties) -> {
+                AtlasEntityHeader ret = new AtlasEntityHeader();
+
+                // Populate AtlasEntityHeader with fetched properties
+                try {
+                    populateEntityHeader(ret, map.get(janusGraphVertex), vertexProperties, attributes);
+                } catch (AtlasBaseException e) {
+                    throw new RuntimeException(e);
+                }
+                results.add(ret);
+            });
+
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+
+        return results;
+    }
+
+    private Map<JanusGraphVertex, AtlasVertex> getJanusGraphVerticesMap(List<AtlasVertex> vertices) {
+        Map<JanusGraphVertex, AtlasVertex> resultMap = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            if (vertex instanceof AtlasJanusVertex) {
+                Object wrappedElement = ((AtlasJanusVertex) vertex).getWrappedElement();
+
+                if (wrappedElement instanceof JanusGraphVertex) {
+                    resultMap.put((JanusGraphVertex) wrappedElement, vertex);
+                } else {
+                    throw new IllegalArgumentException("Wrapped element is not an instance of JanusGraphVertex");
+                }
+            } else {
+                throw new IllegalArgumentException("Provided vertex is not an instance of AtlasJanusVertex");
+            }
+        }
+
+        return resultMap;
+    }
+
+    // Helper to convert AtlasVertex to JanusGraphVertex
+    private List<JanusGraphVertex> getJanusGraphVertices(List<AtlasVertex> vertices) {
+        List<JanusGraphVertex> results = new ArrayList<>();
+        for(AtlasVertex vertex : vertices) {
+            if (((AtlasJanusVertex) vertex).getWrappedElement() instanceof JanusGraphVertex) {
+                results.add(vertex.getWrappedElement());
+            } else {
+                throw new IllegalArgumentException("Provided vertex is not an instance of JanusGraphVertex");
+            }
+        }
+        return results;
+    }
+
+    public Map<JanusGraphVertex, Map<String, Object>> getBatchPropertiesWithMultiQuery(
+            List<AtlasVertex> entityVertices, Set<String> attributes, AtlasJanusGraph graph) {
+
+        Map<JanusGraphVertex, Map<String, Object>> result = new ConcurrentHashMap<>();
+        List<JanusGraphVertex> vertices = getJanusGraphVertices(entityVertices);
+
+        // Split vertices into batches and process them in parallel
+        AtomicInteger counter = new AtomicInteger(0);
+        StreamSupport.stream(vertices.spliterator(), false)
+                .collect(Collectors.groupingBy(v -> counter.getAndIncrement() / BATCH_SIZE))
+                .values()
+                .parallelStream()
+                .forEach(batch -> {
+                    Map<JanusGraphVertex, Map<String, Object>> batchResult = processBatch(batch, attributes, graph);
+                    result.putAll(batchResult);
+                });
+
+        return result;
+    }
+
+    private Map<JanusGraphVertex, Map<String, Object>> processBatch(
+            List<JanusGraphVertex> batch, Set<String> attributes, AtlasJanusGraph graph) {
+
+        JanusGraphTransaction transaction = graph.getTransaction();
+        try {
+            JanusGraphMultiVertexQuery multiQuery = transaction.multiQuery(batch);
+
+            // Add all required keys to fetch
+            Set<String> keys = new HashSet<>(Arrays.asList(
+                    Constants.TYPE_NAME_PROPERTY_KEY, Constants.GUID_PROPERTY_KEY,
+                    Constants.CREATED_BY_KEY, Constants.MODIFIED_BY_KEY,
+                    Constants.TIMESTAMP_PROPERTY_KEY, Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY
+            ));
+            keys.addAll(attributes);
+
+            // Set the keys in the multiQuery
+            multiQuery.keys(keys.toArray(new String[0]));
+
+            // Fetch properties in bulk
+            Map<JanusGraphVertex, Iterable<JanusGraphProperty>> results = multiQuery.properties();
+
+            // Convert results to the desired map format
+            Map<JanusGraphVertex, Map<String, Object>> vertexPropertiesMap = new HashMap<>();
+            for (Map.Entry<JanusGraphVertex, Iterable<JanusGraphProperty>> entry : results.entrySet()) {
+                JanusGraphVertex vertex = entry.getKey();
+                Iterable<JanusGraphProperty> properties = entry.getValue();
+
+                Map<String, Object> propertiesMap = new HashMap<>();
+                for (JanusGraphProperty property : properties) {
+                    propertiesMap.put(property.key(), property.value());
+                }
+                vertexPropertiesMap.put(vertex, propertiesMap);
+            }
+
+            return vertexPropertiesMap;
+        } finally {
+            if (transaction != null) {
+                transaction.commit();
+                transaction.close();
+            }
+        }
+    }
+
+    // Populate AtlasEntityHeader
+    private void populateEntityHeader(AtlasEntityHeader ret, AtlasVertex entityVertex, Map<String, Object> vertexProperties, Set<String> attributes) throws AtlasBaseException {
+        String typeName = (String) vertexProperties.get(Constants.TYPE_NAME_PROPERTY_KEY);
+        String guid = (String) vertexProperties.get(Constants.GUID_PROPERTY_KEY);
+        String createdBy = (String) vertexProperties.get(Constants.CREATED_BY_KEY);
+        String updatedBy = (String) vertexProperties.get(Constants.MODIFIED_BY_KEY);
+        Long createTime = (Long) vertexProperties.get(Constants.TIMESTAMP_PROPERTY_KEY);
+        Long updateTime = (Long) vertexProperties.get(Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY);
+        Boolean isIncomplete = isEntityIncomplete(entityVertex);
+
+        ret.setTypeName(typeName);
+        ret.setGuid(guid);
+        ret.setStatus(GraphHelper.getStatus(entityVertex));
+        ret.setIsIncomplete(isIncomplete);
+        ret.setCreatedBy(createdBy);
+        ret.setUpdatedBy(updatedBy);
+        ret.setCreateTime(createTime != null ? new Date(createTime) : null);
+        ret.setUpdateTime(updateTime != null ? new Date(updateTime) : null);
+        ret.setLabels(getLabels(entityVertex));
+
+        // Classifications
+        RequestContext context = RequestContext.get();
+        if (context.includeClassifications() || context.isIncludeClassificationNames()) {
+            ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
+        }
+
+        // Meanings
+        if (context.includeMeanings()) {
+            List<AtlasTermAssignmentHeader> termAssignmentHeaders = mapAssignedTerms(entityVertex);
+            ret.setMeanings(termAssignmentHeaders);
+            ret.setMeaningNames(termAssignmentHeaders.stream()
+                    .map(AtlasTermAssignmentHeader::getDisplayText)
+                    .collect(Collectors.toList()));
+        }
+
+        // Process entity type and attributes
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        if (entityType != null) {
+            // Header attributes
+            for (AtlasAttribute headerAttribute : entityType.getHeaderAttributes().values()) {
+                Object attrValue = getVertexAttributeFromBatch(vertexProperties, headerAttribute);
+                if (attrValue != null) {
+                    ret.setAttribute(headerAttribute.getName(), attrValue);
+                }
+            }
+
+            // Display text
+            Object displayText = getDisplayText(entityVertex, entityType);
+            if (displayText != null) {
+                ret.setDisplayText(displayText.toString());
+            }
+
+            // Additional attributes
+            if (CollectionUtils.isNotEmpty(attributes)) {
+                for (String attrName : attributes) {
+                    AtlasAttribute attribute = getEntityOrRelationshipAttribute(entityType, attrName);
+                    if (attribute != null) {
+                        Object attrValue = getVertexAttributeFromBatch(vertexProperties, attribute);
+                        if (attrValue != null) {
+                            ret.setAttribute(attrName, attrValue);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Additional properties like classifications, meanings, and attributes...
+    }
+
+    /**
+     * Retrieves a vertex attribute from the pre-fetched batch of properties.
+     */
+    private Object getVertexAttributeFromBatch(Map<String, Object> properties, AtlasAttribute attribute) {
+        if (properties == null || attribute == null) {
+            return null;
+        }
+
+        String propertyKey = attribute.getVertexPropertyName();
+        return properties.get(propertyKey);
+    }
+
+    /**
+     * Retrieves an entity or relationship attribute from the entity type.
+     */
+    private AtlasAttribute getEntityOrRelationshipAttribute(AtlasEntityType entityType, String attrName) {
+        AtlasAttribute attribute = entityType.getAttribute(attrName);
+
+        if (attribute == null) {
+            attrName = toNonQualifiedName(attrName);
+
+            attribute = entityType.getAttribute(attrName);
+            if (attribute == null) {
+                attribute = entityType.getRelationshipAttribute(attrName, null);
+            }
+        }
+
+        return attribute;
+    }
     private String toNonQualifiedName(String attrName) {
         String ret;
         if (attrName.contains(".")) {

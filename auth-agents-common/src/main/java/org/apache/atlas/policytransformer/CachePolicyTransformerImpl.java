@@ -334,10 +334,27 @@ public class CachePolicyTransformerImpl {
 
         List<String> users = (List<String>) atlasPolicy.getAttribute("policyUsers");
         List<String> groups = (List<String>) atlasPolicy.getAttribute("policyGroups");
-        List<String> roles = (List<String>) atlasPolicy.getAttribute("policyRoles");
+
+        List<String> roles = null;
+        if (atlasPolicy.getAttribute("policyRoles") instanceof String) {
+            String policyRoles = (String) atlasPolicy.getAttribute("policyRoles");
+            LOG.info("policyRoles", policyRoles);
+            roles = new ArrayList<>(Arrays.asList(policyRoles));
+        } else {
+            roles = (List<String>) atlasPolicy.getAttribute("policyRoles");
+        }
+
 
         List<RangerPolicyItemAccess> accesses = new ArrayList<>();
-        List<String> actions = (List<String>) atlasPolicy.getAttribute("policyActions");
+        List<String> actions = null;
+
+        if (atlasPolicy.getAttribute("policyActions") instanceof String) {
+            String policyActions = (String) atlasPolicy.getAttribute("policyActions");
+            LOG.info("policyActions", policyActions);
+            actions = new ArrayList<>(Arrays.asList(policyActions));
+        } else {
+            actions = (List<String>) atlasPolicy.getAttribute("policyActions");
+        }
 
         actions.forEach(action -> accesses.add(new RangerPolicyItemAccess(action)));
 

@@ -69,12 +69,7 @@ import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestHighLevelClient;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.janusgraph.core.Cardinality;
-import org.janusgraph.core.JanusGraph;
-import org.janusgraph.core.JanusGraphFactory;
-import org.janusgraph.core.JanusGraphIndexQuery;
-import org.janusgraph.core.PropertyKey;
-import org.janusgraph.core.SchemaViolationException;
+import org.janusgraph.core.*;
 import org.janusgraph.core.schema.JanusGraphIndex;
 import org.janusgraph.core.schema.JanusGraphManagement;
 import org.janusgraph.core.schema.Parameter;
@@ -695,5 +690,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     public Boolean isCacheEnabled() {
         return this.janusGraph.isCacheEnabled();
+    }
+
+    public JanusGraphTransaction getTransaction() {
+        return this.janusGraph.newThreadBoundTransaction();
     }
 }
