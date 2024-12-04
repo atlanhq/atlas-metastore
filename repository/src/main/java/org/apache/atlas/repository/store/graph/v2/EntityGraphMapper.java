@@ -26,6 +26,7 @@ import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.TimeBoundary;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.*;
@@ -36,6 +37,7 @@ import org.apache.atlas.model.typedef.AtlasEntityDef.AtlasRelationshipAttributeD
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef.Cardinality;
+import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
@@ -71,6 +73,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,6 +84,10 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import org.apache.atlas.kafka.KafkaNotification;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
@@ -133,6 +140,8 @@ import static org.apache.atlas.type.Constants.MEANINGS_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.MEANINGS_TEXT_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.MEANING_NAMES_PROPERTY_KEY;
 
+import com.google.common.hash.Hashing;
+import java.nio.charset.StandardCharsets;
 
 @Component
 public class EntityGraphMapper {
@@ -196,6 +205,10 @@ public class EntityGraphMapper {
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
+    Configuration configuration;
+    KafkaNotification kfknotif;
+    int numPartitions = Integer.parseInt(TAG_PROP_EVENTS_PARTITION_COUNT); // Total number of partitions in the Kafka topic
+
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
@@ -213,7 +226,16 @@ public class EntityGraphMapper {
         this.retrieverNoRelation  = new EntityGraphRetriever(graph, typeRegistry, true);
         this.fullTextMapperV2     = fullTextMapperV2;
         this.taskManagement       = taskManagement;
-        this.transactionInterceptHelper = transactionInterceptHelper;}
+        this.transactionInterceptHelper = transactionInterceptHelper;
+        try {
+            this.configuration = ApplicationProperties.get();
+            this.kfknotif = new KafkaNotification(configuration);
+
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
 
     @VisibleForTesting
     public void setTasksUseFlag(boolean value) {
@@ -3227,123 +3249,6 @@ public class EntityGraphMapper {
         LOG.info("Completed cleaning up classification {}", classificationName);
     }
 
-
-
-// Huge change to get affected edge count, to be reviewed hence keeping in comments for future review.
-//    public void cleanUpClassificationPropagation(String classificationName, int batchLimit) {
-//        int CLEANUP_MAX = batchLimit <= 0 ? CLEANUP_BATCH_SIZE : batchLimit * CLEANUP_BATCH_SIZE;
-//        int cleanedUpCount = 0;
-//        long classificationEdgeCount = 0; // To hold the total count
-//        long classificationEdgeInMemoryCount = 0;
-//
-//        // Cache vertices and their classification edges during the initial iteration
-//        List<AtlasVertex> allTagVertices = new ArrayList<>();
-//        Map<AtlasVertex, Long> vertexEdgeCounts = new HashMap<>();
-//
-//        Iterator<AtlasVertex> tagVerticesIterator = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
-//
-//        while (tagVerticesIterator != null && tagVerticesIterator.hasNext()) {
-//            AtlasVertex tagVertex = tagVerticesIterator.next();
-//            long edgeCount = GraphHelper.getClassificationEdges(tagVertex, null, classificationName).size();
-//            classificationEdgeCount += edgeCount;
-//
-//            // Cache the vertex and its edge count
-//            allTagVertices.add(tagVertex);
-//            vertexEdgeCounts.put(tagVertex, edgeCount);
-//        }
-//
-//        LOG.info("Total classification edges to be cleaned for {}: {}", classificationName, classificationEdgeCount);
-//
-//        // Now use the cached vertices for cleanup
-//        List<AtlasVertex> tagVerticesProcessed = new ArrayList<>();
-//        List<AtlasVertex> currentAssetVerticesBatch = new ArrayList<>();
-//
-//        Iterator<AtlasVertex> cachedVerticesIterator = allTagVertices.iterator();
-//        while (cachedVerticesIterator.hasNext()) {
-//            if (cleanedUpCount >= CLEANUP_MAX) {
-//                return;
-//            }
-//
-//            while (cachedVerticesIterator.hasNext() && currentAssetVerticesBatch.size() < CLEANUP_BATCH_SIZE) {
-//                AtlasVertex tagVertex = cachedVerticesIterator.next();
-//
-//                int availableSlots = CLEANUP_BATCH_SIZE - currentAssetVerticesBatch.size();
-//                long assetCountForCurrentTagVertex = GraphHelper.getAssetsCountOfClassificationVertex(tagVertex);
-//                currentAssetVerticesBatch.addAll(GraphHelper.getAllAssetsWithClassificationVertex(tagVertex, availableSlots));
-//                LOG.info("Available slots : {}, assetCountForCurrentTagVertex : {}, queueSize : {}", availableSlots, assetCountForCurrentTagVertex, currentAssetVerticesBatch.size());
-//                if (assetCountForCurrentTagVertex <= availableSlots) {
-//                    tagVerticesProcessed.add(tagVertex);
-//                }
-//            }
-//
-//            int currentAssetsBatchSize = currentAssetVerticesBatch.size();
-//            if (currentAssetsBatchSize > 0) {
-//                LOG.info("To clean up tag {} from {} entities", classificationName, currentAssetsBatchSize);
-//                int offset = 0;
-//                do {
-//                    try {
-//                        int toIndex = Math.min((offset + CHUNK_SIZE), currentAssetsBatchSize);
-//                        List<AtlasVertex> entityVertices = currentAssetVerticesBatch.subList(offset, toIndex);
-//                        for (AtlasVertex vertex : entityVertices) {
-//                            List<AtlasClassification> deletedClassifications = new ArrayList<>();
-//                            GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex));
-//                            List<AtlasEdge> classificationEdges = GraphHelper.getClassificationEdges(vertex, null, classificationName);
-//                            int batchSize = CHUNK_SIZE;
-//                            for (int i = 0; i < classificationEdges.size(); i += batchSize) {
-//                                int end = Math.min(i + batchSize, classificationEdges.size());
-//                                List<AtlasEdge> batch = classificationEdges.subList(i, end);
-//                                for (AtlasEdge edge : batch) {
-//                                    try {
-//                                        AtlasClassification classification = entityRetriever.toAtlasClassification(edge.getInVertex());
-//                                        deletedClassifications.add(classification);
-//                                        deleteDelegate.getHandler().deleteEdgeReference(edge, TypeCategory.CLASSIFICATION, false, true, null, vertex);
-//                                        classificationEdgeInMemoryCount++;
-//                                    } catch (IllegalStateException | AtlasBaseException e) {
-//                                        e.printStackTrace();
-//                                    }
-//                                }
-//                                if (classificationEdgeInMemoryCount >= CHUNK_SIZE) {
-//                                    transactionInterceptHelper.intercept();
-//                                    classificationEdgeInMemoryCount = 0;
-//                                }
-//                            }
-//                            try {
-//                                AtlasEntity entity = repairClassificationMappings(vertex);
-//                                entityChangeNotifier.onClassificationDeletedFromEntity(entity, deletedClassifications);
-//                            } catch (IllegalStateException | AtlasBaseException e) {
-//                                e.printStackTrace();
-//                            }
-//                        }
-//
-//                        transactionInterceptHelper.intercept();
-//
-//                        offset += CHUNK_SIZE;
-//                    } finally {
-//                        LOG.info("For offset {} , cleaned up classification edges.", offset);
-//                        LOG.info("Cleaned up {} entities for classification {}", offset, classificationName);
-//                    }
-//
-//                } while (offset < currentAssetsBatchSize);
-//
-//                for (AtlasVertex classificationVertex : tagVerticesProcessed) {
-//                    try {
-//                        deleteDelegate.getHandler().deleteClassificationVertex(classificationVertex, true);
-//                    } catch (IllegalStateException e) {
-//                        e.printStackTrace();
-//                    }
-//                }
-//                transactionInterceptHelper.intercept();
-//
-//                cleanedUpCount += currentAssetsBatchSize;
-//                currentAssetVerticesBatch.clear();
-//                tagVerticesProcessed.clear();
-//            }
-//        }
-
-//        LOG.info("Completed cleaning up classification {}", classificationName);
-//    }
-
-
     public AtlasEntity repairClassificationMappings(AtlasVertex entityVertex) throws AtlasBaseException {
         String guid = GraphHelper.getGuid(entityVertex);
         AtlasEntity entity = instanceConverter.getEntity(guid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
@@ -3585,6 +3490,30 @@ public class EntityGraphMapper {
             AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
             currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, impactedVertices.size());
 
+            //iterate over each impacted vertex to create a message and send it to kafka
+            for (AtlasVertex vertex : impactedVertices) {
+                // Create a Map to store vertex properties
+                Map<String, Object> vertexMap = new HashMap<>();
+
+                vertexMap.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
+                vertexMap.put("action", "ADD_PROPAGATION");
+                vertexMap.put("assetVertexId", vertex.getIdForDisplay());
+                vertexMap.put("tagVertexId", classificationVertexId);
+                vertexMap.put("parentTaskGuid", currentTask.getGuid());
+                vertexMap.put("tagTypeName", currentTask.getClassificationTypeName());
+
+                String vertexJson = AtlasType.toJson(vertexMap);
+
+
+                // Using Guava to calculate the partition
+                int partition = Hashing.consistentHash(
+                        Hashing.sha256().hashString((String)vertexMap.get("parentTaskGuid"), StandardCharsets.UTF_8),
+                        numPartitions
+                );
+
+                //send vertexJson to kafka topic 'TAG_PROP_EVENTS'
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(vertexJson), partition);
+            }
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
 

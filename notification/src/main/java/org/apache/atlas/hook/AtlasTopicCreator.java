@@ -31,7 +31,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import org.apache.atlas.AtlasConfiguration;
+import static org.apache.atlas.repository.Constants.TAG_PROP_EVENTS_PARTITION_COUNT;
 
 /**
  * A class to create Kafka topics used by Atlas components.
@@ -61,18 +65,29 @@ public class AtlasTopicCreator {
             if (!handleSecurity(atlasProperties)) {
                 return;
             }
-            try(KafkaUtils kafkaUtils = getKafkaUtils(atlasProperties)) {
-                int numPartitions = atlasProperties.getInt("atlas.notification.partitions", 1);
+            try (KafkaUtils kafkaUtils = getKafkaUtils(atlasProperties)) {
                 int numReplicas = atlasProperties.getInt("atlas.notification.replicas", 1);
-                kafkaUtils.createTopics(Arrays.asList(topicNames), numPartitions, numReplicas);
+                List<String[]> topicDetails = new ArrayList<>();
+
+                for (String topicName : topicNames) {
+                    if (AtlasConfiguration.NOTIFICATION_PROPAGATION_TOPIC_NAME.getString().equals(topicName)) {
+                        topicDetails.add(new String[]{topicName, TAG_PROP_EVENTS_PARTITION_COUNT}); // 5 partitions for 'TAG_PROP_EVENTS'
+                    } else {
+                        topicDetails.add(new String[]{topicName, String.valueOf(atlasProperties.getInt("atlas.notification.partitions", 1))}); // 1 partition for all others
+                    }
+                }
+
+                kafkaUtils.createTopics(topicDetails, numReplicas);
+
             } catch (Exception e) {
-                LOG.error("Error while creating topics e :" + e.getMessage(), e);
+                LOG.error("Error while creating topics: " + e.getMessage(), e);
             }
         } else {
             LOG.info("Not creating topics {} as {} is false", StringUtils.join(topicNames, ","),
                     ATLAS_NOTIFICATION_CREATE_TOPICS_KEY);
         }
     }
+
 
     @VisibleForTesting
     protected boolean handleSecurity(Configuration atlasProperties) {

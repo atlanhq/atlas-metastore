@@ -1718,6 +1718,13 @@
             <version>2.2.2</version>
         </dependency>
 
+        <!-- Google guava library for hashing -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.3.1-jre</version>
+        </dependency>
+
     </dependencies>
 
     <build>
