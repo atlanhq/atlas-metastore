@@ -164,7 +164,7 @@ public class EntityREST {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.evaluatePolicies()");
             }
-
+            LOG.info("Number of evaluations : " + entities.size());
             for (int i = 0; i < entities.size(); i++) {
 
                 String action = entities.get(i).getAction();
@@ -175,8 +175,8 @@ public class EntityREST {
 
                 if (ENTITY_READ.name().equals(action) || ENTITY_CREATE.name().equals(action) || ENTITY_UPDATE.name().equals(action)
                         || ENTITY_DELETE.name().equals(action) || ENTITY_UPDATE_BUSINESS_METADATA.name().equals(action)) {
-
                     try {
+                        AtlasPerfMetrics.MetricRecorder evaluatePoliciesMetric11 = RequestContext.get().startMetricRecord("evaluatePolicies11");
                         AtlasEntityHeader entityHeader = getAtlasEntityHeader(entities.get(i).getEntityGuid(), entities.get(i).getEntityId(),entities.get(i).getTypeName());
 
                         AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder requestBuilder = new AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder(typeRegistry, AtlasPrivilege.valueOf(entities.get(i).getAction()), entityHeader);
@@ -188,51 +188,65 @@ public class EntityREST {
 
                         AtlasAuthorizationUtils.verifyAccess(entityAccessRequest, entities.get(i).getAction() + "guid=" + entities.get(i).getEntityGuid());
                         response.add(new AtlasEvaluatePolicyResponse(entities.get(i).getTypeName(), entities.get(i).getEntityGuid(), entities.get(i).getAction(), entities.get(i).getEntityId(), true, null , entities.get(i).getBusinessMetadata()));
+                        RequestContext.get().endMetricRecord(evaluatePoliciesMetric11);
                     } catch (AtlasBaseException e) {
+                        AtlasPerfMetrics.MetricRecorder evaluatePoliciesMetric12 = RequestContext.get().startMetricRecord("evaluatePolicies12");
                         AtlasErrorCode code = e.getAtlasErrorCode();
                         String errorCode = code.getErrorCode();
                         response.add(new AtlasEvaluatePolicyResponse(entities.get(i).getTypeName(), entities.get(i).getEntityGuid(), entities.get(i).getAction(), entities.get(i).getEntityId(), false, errorCode, entities.get(i).getBusinessMetadata()));
+                        RequestContext.get().endMetricRecord(evaluatePoliciesMetric12);
                     }
 
-                } else if (ENTITY_REMOVE_CLASSIFICATION.name().equals(action) || ENTITY_ADD_CLASSIFICATION.name().equals(action) || ENTITY_UPDATE_CLASSIFICATION.name().equals(action)) {
-
+                }
+                else if (ENTITY_REMOVE_CLASSIFICATION.name().equals(action) || ENTITY_ADD_CLASSIFICATION.name().equals(action) || ENTITY_UPDATE_CLASSIFICATION.name().equals(action)) {
                     if (entities.get(i).getClassification() == null) {
                         throw new AtlasBaseException(BAD_REQUEST, "classification needed for " + action + " authorization");
                     }
                     try {
+                        AtlasPerfMetrics.MetricRecorder evaluatePoliciesMetric21 = RequestContext.get().startMetricRecord("evaluatePolicies21");
                         AtlasEntityHeader entityHeader = getAtlasEntityHeader(entities.get(i).getEntityGuid(), entities.get(i).getEntityId(),entities.get(i).getTypeName());
 
                         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.valueOf(entities.get(i).getAction()), entityHeader, new AtlasClassification(entities.get(i).getClassification())));
                         response.add(new AtlasEvaluatePolicyResponse(entities.get(i).getTypeName(), entities.get(i).getEntityGuid(), entities.get(i).getAction(), entities.get(i).getEntityId(), entities.get(i).getClassification(), true, null));
-
+                        RequestContext.get().endMetricRecord(evaluatePoliciesMetric21);
                     } catch (AtlasBaseException e) {
+                        AtlasPerfMetrics.MetricRecorder evaluatePoliciesMetric22 = RequestContext.get().startMetricRecord("evaluatePolicies22");
                         AtlasErrorCode code = e.getAtlasErrorCode();
                         String errorCode = code.getErrorCode();
                         response.add(new AtlasEvaluatePolicyResponse(entities.get(i).getTypeName(), entities.get(i).getEntityGuid(), entities.get(i).getAction(), entities.get(i).getEntityId(), entities.get(i).getClassification(), false, errorCode));
+                        RequestContext.get().endMetricRecord(evaluatePoliciesMetric22);
                     }
 
-                }    else if (RELATIONSHIP_ADD.name().equals(action) || RELATIONSHIP_REMOVE.name().equals(action) || RELATIONSHIP_UPDATE.name().equals(action)) {
+                }
+                else if (RELATIONSHIP_ADD.name().equals(action) || RELATIONSHIP_REMOVE.name().equals(action) || RELATIONSHIP_UPDATE.name().equals(action)) {
 
                     if (entities.get(i).getRelationShipTypeName() == null) {
                         throw new AtlasBaseException(BAD_REQUEST, "RelationShip TypeName needed for " + action + " authorization");
                     }
 
                     try {
+                        AtlasPerfMetrics.MetricRecorder evaluatePoliciesMetric31 = RequestContext.get().startMetricRecord("evaluatePolicies31");
                         AtlasEntityHeader end1Entity = getAtlasEntityHeader(entities.get(i).getEntityGuidEnd1(), entities.get(i).getEntityIdEnd1(), entities.get(i).getEntityTypeEnd1());
 
                         AtlasEntityHeader end2Entity = getAtlasEntityHeader(entities.get(i).getEntityGuidEnd2(), entities.get(i).getEntityIdEnd2(), entities.get(i).getEntityTypeEnd2());
 
                         AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.valueOf(action), entities.get(i).getRelationShipTypeName(), end1Entity, end2Entity));
                         response.add(new AtlasEvaluatePolicyResponse(action, entities.get(i).getRelationShipTypeName(), entities.get(i).getEntityTypeEnd1(), entities.get(i).getEntityGuidEnd1(), entities.get(i).getEntityIdEnd1(), entities.get(i).getEntityTypeEnd2(), entities.get(i).getEntityGuidEnd2(), entities.get(i).getEntityIdEnd2(), true, null));
+                        RequestContext.get().endMetricRecord(evaluatePoliciesMetric31);
                     } catch (AtlasBaseException e) {
+                        AtlasPerfMetrics.MetricRecorder evaluatePoliciesMetric32 = RequestContext.get().startMetricRecord("evaluatePolicies32");
                         AtlasErrorCode code = e.getAtlasErrorCode();
                         String errorCode = code.getErrorCode();
                         response.add(new AtlasEvaluatePolicyResponse(action, entities.get(i).getRelationShipTypeName(), entities.get(i).getEntityTypeEnd1(), entities.get(i).getEntityGuidEnd1(), entities.get(i).getEntityIdEnd1(), entities.get(i).getEntityTypeEnd2(), entities.get(i).getEntityGuidEnd2(), entities.get(i).getEntityIdEnd2(), false, errorCode));
+                        RequestContext.get().endMetricRecord(evaluatePoliciesMetric32);
                     }
                 }
 
             }
         } finally {
+            if(perf.getElapsedTime() > 1000){
+                LOG.info("Slow perf response payload : " + entities.toString());
+            }
             AtlasPerfTracer.log(perf);
         }
 
@@ -264,6 +278,7 @@ public class EntityREST {
     }
 
     private AtlasEntityHeader getAtlasEntityHeader(String entityGuid, String entityId, String entityType) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAtlasEntityHeader");
         AtlasEntityHeader entityHeader = null;
 
         if (StringUtils.isNotEmpty(entityGuid)) {
@@ -282,6 +297,7 @@ public class EntityREST {
         } else {
             throw new AtlasBaseException(BAD_REQUEST, "requires entityGuid or typeName and qualifiedName for entity authorization");
         }
+        RequestContext.get().endMetricRecord(metricRecorder);
         return entityHeader;
     }
 
