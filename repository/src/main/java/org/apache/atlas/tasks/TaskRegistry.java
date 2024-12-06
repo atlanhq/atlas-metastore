@@ -456,8 +456,8 @@ public class TaskRegistry {
         this.graph.commit();
     }
 
-    public AtlasTask createVertex(String taskType, String createdBy, Map<String, Object> parameters, String classificationId, String entityGuid) {
-        AtlasTask ret = new AtlasTask(taskType, createdBy, parameters, classificationId, entityGuid, 0L, 0L);
+    public AtlasTask createVertex(String taskType, String createdBy, Map<String, Object> parameters, String classificationId, String entityGuid, Long assetCountToPropagate, Long assetCountPropagated) {
+        AtlasTask ret = new AtlasTask(taskType, createdBy, parameters, classificationId, entityGuid, assetCountToPropagate, assetCountPropagated);
 
         createVertex(ret);
 
@@ -465,7 +465,7 @@ public class TaskRegistry {
     }
 
     public AtlasTask createVertex(String taskType, String createdBy, Map<String, Object> parameters, String classificationId,String classificationTypeName, String entityGuid) {
-        AtlasTask ret = new AtlasTask(taskType, createdBy, parameters, classificationId, entityGuid, 0L, 0L);
+        AtlasTask ret = new AtlasTask(taskType, createdBy, parameters, classificationId, entityGuid);
         ret.setClassificationTypeName(classificationTypeName);
         createVertex(ret);
 
