@@ -558,7 +558,15 @@ public class TaskRegistry {
             ret.setErrorMessage(errorMessage);
         }
 
+        Long assetsCountToPropagate = v.getProperty(Constants.TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
+        if (assetsCountToPropagate != null){
+            ret.setAssetsCountToPropagate(assetsCountToPropagate);
+        }
 
+        Long assetsCountPropagated = v.getProperty(Constants.TASK_ASSET_COUNT_PROPAGATED, Long.class);
+        if (assetsCountPropagated != null){
+            ret.setAssetsCountPropagated(assetsCountPropagated);
+        }
         return ret;
     }
 

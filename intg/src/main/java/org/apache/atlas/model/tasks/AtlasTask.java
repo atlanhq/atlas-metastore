@@ -260,8 +260,13 @@ public class AtlasTask {
     public void setAssetsCountToPropagate(Long assetsCount) {
         this.assetsCountToPropagate = assetsCount ;
     }
+
     public Long getAssetsCountToPropagate() {
         return assetsCountToPropagate ;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     @JsonIgnore
