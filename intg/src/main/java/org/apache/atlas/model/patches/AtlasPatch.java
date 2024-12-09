@@ -189,6 +189,8 @@ public class AtlasPatch implements Serializable {
         sb.append(", createdTime=").append(createdTime);
         sb.append(", updatedTime=").append(updatedTime);
         sb.append(", status=").append(status);
+        sb.append(", assetsCountToPropagate=").append(assetsCountToPropagate);
+        sb.append(", assetsCountPropagated=").append(assetsCountPropagated);
         sb.append('}');
 
         return sb.toString();
