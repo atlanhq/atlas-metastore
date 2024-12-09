@@ -256,6 +256,10 @@ public class AtlasTask {
         this.assetsCountPropagated = assetsCountPropagated;
     }
 
+    public Long getAssetsCountPropagated(){
+        return  assetsCountPropagated;
+    }
+
     @JsonIgnore
     public void start() {
         this.setStatus(Status.IN_PROGRESS);

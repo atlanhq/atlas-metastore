@@ -270,6 +270,8 @@ public class AtlasTaskService implements TaskService {
 
         setEncodedProperty(ret, Constants.TASK_PARAMETERS, AtlasJson.toJson(task.getParameters()));
         setEncodedProperty(ret, Constants.TASK_ATTEMPT_COUNT, task.getAttemptCount());
+        setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_PROPAGATED, task.getAssetsCountToPropagate());
+        setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_PROPAGATED, task.getAssetsCountPropagated());
         setEncodedProperty(ret, Constants.TASK_ERROR_MESSAGE, task.getErrorMessage());
 
         LOG.info("Creating task vertex: {}: {}, {}: {}, {}: {} ",
