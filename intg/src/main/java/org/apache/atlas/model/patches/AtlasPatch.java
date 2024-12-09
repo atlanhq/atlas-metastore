@@ -49,6 +49,8 @@ public class AtlasPatch implements Serializable {
     private long        createdTime;
     private long        updatedTime;
     private PatchStatus status;
+    private long                assetsCountToPropagate;
+    private long                assetsCountPropagated;
 
     public enum PatchStatus { UNKNOWN, APPLIED, SKIPPED, FAILED }
 
@@ -65,6 +67,8 @@ public class AtlasPatch implements Serializable {
         this.createdBy   = createdBy;
         this.createdTime = createdTime;
         this.updatedTime = updatedTime;
+        this.assetsCountToPropagate = 0L;
+        this.assetsCountPropagated = 0L;
     }
 
     public String getId() {
@@ -137,6 +141,18 @@ public class AtlasPatch implements Serializable {
 
     public void setUpdatedTime(long updatedTime) {
         this.updatedTime = updatedTime;
+    }
+
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public Long getAssetsCountPropagated(){
+        return  assetsCountPropagated;
     }
 
     @Override

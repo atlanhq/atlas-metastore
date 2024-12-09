@@ -3492,19 +3492,11 @@ public class EntityGraphMapper {
 
         // update the 'assetsCountToPropagate' on in memory java object.
         AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        currentTask.setAssetsCountToPropagate((long) verticesToPropagate.size());
 
         //update the 'assetsCountToPropagate' in the current task vertex.
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-
-        currentTask.setAssetsCountToPropagate((long) verticesToPropagate.size());
-
         currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
-
-        try {
-            TimeUnit.SECONDS.sleep(20);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
 
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
