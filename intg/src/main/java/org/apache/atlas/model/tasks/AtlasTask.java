@@ -117,20 +117,6 @@ public class AtlasTask {
         this.assetsCountPropagated = 0L;
     }
 
-//    public AtlasTask(String type, String createdBy, Map<String, Object> parameters, String classificationId,
-//                     String entityGuid, Long assetsCountToPropagate, Long assetsCountPropagated) {
-//        this.guid               = UUID.randomUUID().toString();
-//        this.type               = type;
-//        this.createdBy          = createdBy;
-//        this.createdTime        = new Date();
-//        this.updatedTime        = this.createdTime;
-//        this.parameters         = parameters;
-//        this.status             = Status.PENDING;
-//        this.attemptCount       = 0;
-//        this.classificationId   = classificationId;
-//        this.entityGuid         = entityGuid;
-//    }
-
     public String getGuid() {
         return guid;
     }
