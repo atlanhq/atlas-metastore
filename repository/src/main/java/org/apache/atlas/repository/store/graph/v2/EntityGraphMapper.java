@@ -3497,11 +3497,14 @@ public class EntityGraphMapper {
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
 
         currentTask.setAssetsCountToPropagate((long) verticesToPropagate.size());
-        currentTask.setAssetsCountPropagated(0L);
 
         currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
-        currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, 0L);
 
+        try {
+            TimeUnit.SECONDS.sleep(20);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
 
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
@@ -3536,7 +3539,7 @@ public class EntityGraphMapper {
                 offset += CHUNK_SIZE;
 
                 transactionInterceptHelper.intercept();
-                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + chunkedPropagatedEntitiesGuids.size());
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + chunkedPropagatedEntitiesGuids.size() + 1);
                 currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
 
             } while (offset < impactedVerticesSize);
