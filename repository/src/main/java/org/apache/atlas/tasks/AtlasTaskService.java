@@ -162,6 +162,8 @@ public class AtlasTaskService implements TaskService {
                 task.setCreatedTime(new Date());
                 task.setStatusPending();
                 task.setAttemptCount(0);
+                task.setAssetsCountToPropagate(0L);
+                task.setAssetsCountPropagated(0L);
                 task.setGuid(UUID.randomUUID().toString());
                 task.setCreatedBy(RequestContext.getCurrentUser());
 
