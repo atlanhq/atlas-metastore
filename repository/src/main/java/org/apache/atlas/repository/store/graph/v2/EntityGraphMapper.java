@@ -3536,6 +3536,8 @@ public class EntityGraphMapper {
                 offset += CHUNK_SIZE;
 
                 transactionInterceptHelper.intercept();
+                currentTask.incrementAssetCountPropagated();
+                currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
 
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
