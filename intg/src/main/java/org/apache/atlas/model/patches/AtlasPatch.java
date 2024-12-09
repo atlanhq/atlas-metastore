@@ -57,7 +57,7 @@ public class AtlasPatch implements Serializable {
     public AtlasPatch() { }
 
     public AtlasPatch(String id, String patchName, String type, String action, PatchStatus status,
-                      String updatedBy, String createdBy, long createdTime, long updatedTime) {
+                      String updatedBy, String createdBy, long createdTime, long updatedTime, long assetsCountToPropagate, long assetsCountPropagated) {
         this.id          = id;
         this.description = patchName;
         this.type        = type;
@@ -67,8 +67,8 @@ public class AtlasPatch implements Serializable {
         this.createdBy   = createdBy;
         this.createdTime = createdTime;
         this.updatedTime = updatedTime;
-        this.assetsCountToPropagate = 0L;
-        this.assetsCountPropagated = 0L;
+        this.assetsCountToPropagate = assetsCountToPropagate;
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public String getId() {
