@@ -105,11 +105,7 @@ public abstract class ClassificationTask extends AbstractTask {
         try {
             setStatus(IN_PROGRESS);
             setAssetsCountToPropagate(1234L);
-            try {
-                TimeUnit.SECONDS.sleep(20);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
+            graph.commit();
             run(params);
 
             setStatus(COMPLETE);
