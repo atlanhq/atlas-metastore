@@ -67,7 +67,7 @@ public abstract class AbstractTask {
         return this.task;
     }
 
-    public void setAssetsCountToPropagate(Long assetsCount) {
+    protected void setAssetsCountToPropagate(Long assetsCount) {
         task.setAssetsCountToPropagate(assetsCount);;
     }
 

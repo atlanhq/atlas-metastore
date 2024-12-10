@@ -105,7 +105,6 @@ public abstract class ClassificationTask extends AbstractTask {
         try {
             setStatus(IN_PROGRESS);
             setAssetsCountToPropagate(1234L);
-            graph.commit();
             run(params);
 
             setStatus(COMPLETE);
@@ -185,5 +184,14 @@ public abstract class ClassificationTask extends AbstractTask {
         graph.commit();
     }
 
+    protected void setAssetsCountToPropagate(Long assetsCount) {
+        super.setAssetsCountToPropagate(assetsCount);
+        graph.commit();
+        try {
+            TimeUnit.SECONDS.sleep(10);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+    }
     protected abstract void run(Map<String, Object> parameters) throws AtlasBaseException;
 }
