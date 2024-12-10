@@ -52,8 +52,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.repository.Constants.TASK_GUID;
-import static org.apache.atlas.repository.Constants.TASK_STATUS;
+import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
 
 @Component
@@ -241,9 +240,12 @@ public class TaskRegistry {
 
     public void inProgress(AtlasVertex taskVertex, AtlasTask task) {
         RequestContext.get().setCurrentTask(task);
-
+        
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, task.getGuid()).vertices().iterator().next();
+        Long assets_count_to_propagate = currentTaskVertex.getProperty(TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
+        
         task.setStartTime(new Date());
-        task.setAssetsCountToPropagate(task.getAssetsCountToPropagate());
+        task.setAssetsCountToPropagate(assets_count_to_propagate);
         setEncodedProperty(taskVertex, Constants.TASK_START_TIME, task.getStartTime());
         setEncodedProperty(taskVertex, Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS);
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
