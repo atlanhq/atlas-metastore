@@ -243,7 +243,7 @@ public class TaskRegistry {
         RequestContext.get().setCurrentTask(task);
 
         task.setStartTime(new Date());
-        task.setAssetsCountToPropagate(1234L);
+        task.setAssetsCountToPropagate(task.getAssetsCountToPropagate());
         setEncodedProperty(taskVertex, Constants.TASK_START_TIME, task.getStartTime());
         setEncodedProperty(taskVertex, Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS);
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
