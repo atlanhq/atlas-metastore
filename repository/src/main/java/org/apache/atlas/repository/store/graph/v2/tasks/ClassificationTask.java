@@ -103,9 +103,7 @@ public abstract class ClassificationTask extends AbstractTask {
 
         try {
             setStatus(IN_PROGRESS);
-            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, getTaskDef().getGuid()).vertices().iterator().next();
-            Long asset_count_to_prop = (Long) currentTaskVertex.getProperty(TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
-            getTaskDef().setAssetsCountToPropagate(asset_count_to_prop);
+            setAssetsCountToPropagate(getAssetsCountToPropagate());
             run(params);
 
             setStatus(COMPLETE);
