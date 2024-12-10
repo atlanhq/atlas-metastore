@@ -242,7 +242,7 @@ public class TaskRegistry {
         RequestContext.get().setCurrentTask(task);
         
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, task.getGuid()).vertices().iterator().next();
-        Long assets_count_to_propagate = currentTaskVertex.getProperty(TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
+        long assets_count_to_propagate = currentTaskVertex.getProperty(TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
         
         task.setStartTime(new Date());
         task.setAssetsCountToPropagate(assets_count_to_propagate);
