@@ -23,6 +23,7 @@ import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
@@ -38,6 +39,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.atlas.model.tasks.AtlasTask.Status.*;
+import static org.apache.atlas.repository.Constants.TASK_ASSET_COUNT_TO_PROPAGATE;
+import static org.apache.atlas.repository.Constants.TASK_GUID;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE;
 
 public abstract class ClassificationTask extends AbstractTask {
@@ -100,7 +103,9 @@ public abstract class ClassificationTask extends AbstractTask {
 
         try {
             setStatus(IN_PROGRESS);
-
+            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, getTaskDef().getGuid()).vertices().iterator().next();
+            Long asset_count_to_prop = (Long) currentTaskVertex.getProperty(TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
+            getTaskDef().setAssetsCountToPropagate(asset_count_to_prop);
             run(params);
 
             setStatus(COMPLETE);
