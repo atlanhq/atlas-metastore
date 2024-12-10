@@ -251,6 +251,11 @@ public class TaskRegistry {
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
         setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
         graph.commit();
+        try {
+            TimeUnit.SECONDS.sleep(10);
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @GraphTransaction
