@@ -116,11 +116,7 @@ public abstract class MeaningsTask extends AbstractTask {
 
     protected void setAssetsCountToPropagate(Long assetsCount) {
         super.setAssetsCountToPropagate(assetsCount);
-        try {
-            TimeUnit.SECONDS.sleep(10);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        }
+
     }
 
     protected abstract void run(Map<String, Object> parameters) throws AtlasBaseException;
