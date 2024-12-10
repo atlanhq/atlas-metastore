@@ -37,6 +37,7 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import static org.apache.atlas.model.tasks.AtlasTask.Status.*;
 import static org.apache.atlas.repository.Constants.TASK_ASSET_COUNT_TO_PROPAGATE;
@@ -104,6 +105,11 @@ public abstract class ClassificationTask extends AbstractTask {
         try {
             setStatus(IN_PROGRESS);
             setAssetsCountToPropagate(getAssetsCountToPropagate());
+            try {
+                TimeUnit.SECONDS.sleep(20);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
             run(params);
 
             setStatus(COMPLETE);
