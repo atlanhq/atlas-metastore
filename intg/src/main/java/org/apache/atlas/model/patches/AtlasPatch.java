@@ -173,7 +173,7 @@ public class AtlasPatch implements Serializable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, description, type, action, updatedBy, createdBy, createdTime, updatedTime, status);
+        return Objects.hash(id, description, type, action, updatedBy, createdBy, createdTime, updatedTime, status, assetsCountToPropagate, assetsCountPropagated);
     }
 
     @Override
