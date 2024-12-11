@@ -3497,6 +3497,7 @@ public class EntityGraphMapper {
         //update the 'assetsCountToPropagate' in the current task vertex.
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
         currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+        graph.commit();
 
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
@@ -3531,7 +3532,7 @@ public class EntityGraphMapper {
                 offset += CHUNK_SIZE;
 
                 transactionInterceptHelper.intercept();
-                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + chunkedPropagatedEntitiesGuids.size() + 1);
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + toIndex);
                 currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
 
             } while (offset < impactedVerticesSize);
