@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.Iterators;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
@@ -3139,6 +3140,18 @@ public class EntityGraphMapper {
         long classificationEdgeCount = 0;
         long classificationEdgeInMemoryCount = 0;
         Iterator<AtlasVertex> tagVertices = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
+
+        int impactedVerticesCount = Iterators.size(tagVertices);
+
+        // update the 'assetsCountToPropagate' on in memory java object.
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        currentTask.setAssetsCountToPropagate((long) impactedVerticesCount);
+
+        //update the 'assetsCountToPropagate' in the current task vertex.
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+        graph.commit();
+
         List<AtlasVertex> tagVerticesProcessed = new ArrayList<>(0);
         List<AtlasVertex> currentAssetVerticesBatch = new ArrayList<>(0);
 
@@ -3169,7 +3182,7 @@ public class EntityGraphMapper {
                         List<AtlasVertex> entityVertices = currentAssetVerticesBatch.subList(offset, toIndex);
                         for (AtlasVertex vertex : entityVertices) {
                             List<AtlasClassification> deletedClassifications = new ArrayList<>();
-                            GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex));
+                            GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex   ));
                             List<AtlasEdge> classificationEdges = GraphHelper.getClassificationEdges(vertex, null, classificationName);
                             classificationEdgeCount += classificationEdges.size();
                             int batchSize = CHUNK_SIZE;
@@ -3200,8 +3213,12 @@ public class EntityGraphMapper {
                         }
 
                         transactionInterceptHelper.intercept();
+                        int finishedTaskCount = toIndex - offset;
 
                         offset += CHUNK_SIZE;
+                        currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + finishedTaskCount);
+                        currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+
                     } finally {
                         LOG.info("For offset {} , classificationEdge were : {}", offset, classificationEdgeCount);
                         classificationEdgeCount = 0;
@@ -4067,6 +4084,16 @@ public class EntityGraphMapper {
         AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
         LOG.info("Fetched classification : {} ", classification.toString());
         List<AtlasVertex> impactedVertices = graphHelper.getAllPropagatedEntityVertices(classificationVertex);
+
+        // update the 'assetsCountToPropagate' on in memory java object.
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        currentTask.setAssetsCountToPropagate((long) impactedVertices.size());
+
+        //update the 'assetsCountToPropagate' in the current task vertex.
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+        graph.commit();
+
         LOG.info("impactedVertices : {}", impactedVertices.size());
         int batchSize = 100;
         for (int i = 0; i < impactedVertices.size(); i += batchSize) {
@@ -4081,6 +4108,10 @@ public class EntityGraphMapper {
                     entityChangeNotifier.onClassificationUpdatedToEntity(entity, Collections.singletonList(classification));
                 }
             }
+
+            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + batch.size());
+            currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+
             transactionInterceptHelper.intercept();
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
         }
@@ -4271,6 +4302,15 @@ public class EntityGraphMapper {
                 .filter(vertex -> vertex != null)
                 .collect(Collectors.toList());
 
+        // update the 'assetsCountToPropagate' on in memory java object.
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        currentTask.setAssetsCountToPropagate((long) verticesToRemove.size() + verticesToAddClassification.size());
+
+        //update the 'assetsCountToPropagate' in the current task vertex.
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+        graph.commit();
+
         //Remove classifications from unreachable vertices
         processPropagatedClassificationDeletionFromVertices(verticesToRemove, currentClassificationVertex, classification);
 
@@ -4332,6 +4372,9 @@ public class EntityGraphMapper {
         int toIndex;
         int offset = 0;
 
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+
         LOG.info("To delete classification of vertex id {} from {} entity vertices", classificationVertex.getIdForDisplay(), propagatedVerticesSize);
 
         try {
@@ -4348,8 +4391,10 @@ public class EntityGraphMapper {
                 List<AtlasEntity> updatedEntities = updateClassificationText(classification, updatedVertices);
                 entityChangeNotifier.onClassificationsDeletedFromEntities(updatedEntities, Collections.singletonList(classification));
 
+                int finishedTaskCount = toIndex - offset;
                 offset += CHUNK_SIZE;
-
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + finishedTaskCount);
+                currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
                 transactionInterceptHelper.intercept();
 
             } while (offset < propagatedVerticesSize);
@@ -4367,6 +4412,15 @@ public class EntityGraphMapper {
         int toIndex;
         int offset = 0;
 
+        // update the 'assetsCountToPropagate' on in memory java object.
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        currentTask.setAssetsCountToPropagate((long) propagatedEdgesSize);
+
+        //update the 'assetsCountToPropagate' in the current task vertex.
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+        graph.commit();
+
         do {
             toIndex = ((offset + CHUNK_SIZE > propagatedEdgesSize) ? propagatedEdgesSize : (offset + CHUNK_SIZE));
 
@@ -4382,8 +4436,12 @@ public class EntityGraphMapper {
                 deletedPropagationsGuid.addAll(propagatedEntities.stream().map(x -> x.getGuid()).collect(Collectors.toList()));
             }
 
+            int finishedTaskCount = toIndex - offset;
+
             offset += CHUNK_SIZE;
 
+            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + finishedTaskCount);
+            currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
             transactionInterceptHelper.intercept();
 
         } while (offset < propagatedEdgesSize);
