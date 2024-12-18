@@ -375,7 +375,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     @Override
     @GraphTransaction
     public AtlasEntityHeader getAtlasEntityHeaderWithoutAuthorization(String guid, String qualifiedName, String typeName) throws AtlasBaseException {
-        return extractEntityHeader( guid,  qualifiedName,  typeName);
+        return extractEntityHeader( guid,  qualifiedName,  typeName, false);
     }
 
     @Override
@@ -2253,8 +2253,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     case RELATIONSHIP_ADD:
                     case RELATIONSHIP_UPDATE:
                     case RELATIONSHIP_REMOVE:
-                        AtlasEntityHeader end1EntityHeader = extractEntityHeader(accessorRequest.getEntityGuidEnd1(), accessorRequest.getEntityQualifiedNameEnd1(), accessorRequest.getEntityTypeEnd1());
-                        AtlasEntityHeader end2EntityHeader = extractEntityHeader(accessorRequest.getEntityGuidEnd2(), accessorRequest.getEntityQualifiedNameEnd2(), accessorRequest.getEntityTypeEnd2());
+                        AtlasEntityHeader end1EntityHeader = extractEntityHeader(accessorRequest.getEntityGuidEnd1(), accessorRequest.getEntityQualifiedNameEnd1(), accessorRequest.getEntityTypeEnd1(), true);
+                        AtlasEntityHeader end2EntityHeader = extractEntityHeader(accessorRequest.getEntityGuidEnd2(), accessorRequest.getEntityQualifiedNameEnd2(), accessorRequest.getEntityTypeEnd2(), true);
 
                         AtlasRelationshipAccessRequest relAccessRequest = new AtlasRelationshipAccessRequest(typeRegistry,
                                 action, accessorRequest.getRelationshipTypeName(), end1EntityHeader, end2EntityHeader);
@@ -2294,16 +2294,18 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     private AtlasEntityAccessRequestBuilder getEntityAccessRequest(AtlasAccessorRequest element, AtlasPrivilege action) throws AtlasBaseException {
-        AtlasEntityHeader entityHeader = extractEntityHeader(element.getGuid(), element.getQualifiedName(), element.getTypeName());
+        AtlasEntityHeader entityHeader = extractEntityHeader(element.getGuid(), element.getQualifiedName(), element.getTypeName(), false);
 
         return new AtlasEntityAccessRequestBuilder(typeRegistry, action, entityHeader);
     }
 
-    private AtlasEntityHeader extractEntityHeader(String guid, String qualifiedName, String typeName) throws AtlasBaseException {
+    private AtlasEntityHeader extractEntityHeader(String guid, String qualifiedName, String typeName, boolean useClassificationsNames) throws AtlasBaseException {
         AtlasEntityHeader entityHeader = null;
 
         if (StringUtils.isNotEmpty(guid)) {
-            entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(guid);
+            entityHeader = useClassificationsNames ?
+                    entityRetriever.toAtlasEntityHeader(guid) :
+                    entityRetriever.toAtlasEntityHeaderWithClassifications(guid);
 
         } else {
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
@@ -2313,7 +2315,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     uniqueAttrs.put(QUALIFIED_NAME, qualifiedName);
 
                     AtlasVertex vertex = AtlasGraphUtilsV2.getVertexByUniqueAttributes(this.graph, entityType, uniqueAttrs);
-                    entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
+                    entityHeader = useClassificationsNames ?
+                            entityRetriever.toAtlasEntityHeader(vertex) :
+                            entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
 
                 } catch (AtlasBaseException abe) {
                     if (abe.getAtlasErrorCode() != AtlasErrorCode.INSTANCE_BY_UNIQUE_ATTRIBUTE_NOT_FOUND) {
