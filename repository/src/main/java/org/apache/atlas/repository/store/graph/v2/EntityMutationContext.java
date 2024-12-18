@@ -30,8 +30,8 @@ public class EntityMutationContext {
     private final EntityGraphDiscoveryContext context;
     private final List<AtlasEntity> entitiesCreated = new ArrayList<>();
     private final List<AtlasEntity> entitiesUpdated = new ArrayList<>();
-    private final List<AtlasEntity> entitiesUpdatedWithAppendRelationshipAttribute = new ArrayList<>();
-    private final List<AtlasEntity> entitiesUpdatedWithRemoveRelationshipAttribute = new ArrayList<>();
+    private List<AtlasEntity> entitiesUpdatedWithAppendRelationshipAttribute = new ArrayList<>();
+    private List<AtlasEntity> entitiesUpdatedWithRemoveRelationshipAttribute = new ArrayList<>();
     private final Map<String, AtlasEntityType> entityVsType = new HashMap<>();
     private final Map<String, AtlasVertex> entityVsVertex = new HashMap<>();
     private final Map<String, String> guidAssignments = new HashMap<>();
@@ -59,11 +59,11 @@ public class EntityMutationContext {
         }
     }
 
-    public void setUpdatedWithRelationshipAttributes(AtlasEntity entity){
+    public void setUpdatedWithRelationshipAttributes(AtlasEntity entity) {
         entitiesUpdatedWithAppendRelationshipAttribute.add(entity);
     }
 
-    public void setUpdatedWithRemoveRelationshipAttributes(AtlasEntity entity){
+    public void setUpdatedWithRemoveRelationshipAttributes(AtlasEntity entity) {
         entitiesUpdatedWithRemoveRelationshipAttribute.add(entity);
     }
 
@@ -80,6 +80,39 @@ public class EntityMutationContext {
             if (!StringUtils.equals(internalGuid, entity.getGuid())) {
                 guidAssignments.put(internalGuid, entity.getGuid());
                 entityVsVertex.put(internalGuid, atlasVertex);
+            }
+        }
+    }
+
+    public void removeUpdated(String internalGuid, AtlasEntity entity, AtlasEntityType type, AtlasVertex atlasVertex) {
+        if (entityVsVertex.containsKey(internalGuid)) { // if the entity was already created/updated
+            entitiesUpdated.remove(entity);
+            entityVsType.remove(entity.getGuid(), type);
+            entityVsVertex.remove(entity.getGuid(), atlasVertex);
+
+//            if (!StringUtils.equals(internalGuid, entity.getGuid())) {
+//                guidAssignments.put(internalGuid, entity.getGuid());
+//                entityVsVertex.put(internalGuid, atlasVertex);
+//            }
+        }
+    }
+
+    public void removeUpdatedWithRelationshipAttributes(AtlasEntity entity) {
+        Iterator<AtlasEntity> entities = entitiesUpdatedWithAppendRelationshipAttribute.iterator();
+        while (entities.hasNext()) {
+            String guid = entities.next().getGuid();
+            if (guid.equals(entity.getGuid())) {
+                entities.remove();
+            }
+        }
+    }
+
+    public void removeUpdatedWithDeleteRelationshipAttributes(AtlasEntity entity) {
+        Iterator<AtlasEntity> entities = entitiesUpdatedWithRemoveRelationshipAttribute.iterator();
+        while (entities.hasNext()) {
+            String guid = entities.next().getGuid();
+            if (guid.equals(entity.getGuid())) {
+                entities.remove();
             }
         }
     }
