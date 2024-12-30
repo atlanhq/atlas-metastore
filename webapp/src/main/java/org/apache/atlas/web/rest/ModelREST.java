@@ -1,9 +1,5 @@
 package org.apache.atlas.web.rest;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
@@ -12,10 +8,23 @@ import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.discovery.IndexSearchParams;
+import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.model.instance.EntityMutationResponse;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.model.AbstractModelPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.model.DMEntityPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.model.ModelResponse;
 import org.apache.atlas.searchlog.SearchLoggingManagement;
+import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.web.util.ModelUtil;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -29,10 +38,9 @@ import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
-import java.util.Arrays;
-import java.util.Base64;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.*;
+
+import static org.apache.atlas.repository.Constants.*;
 
 @Path("model")
 @Singleton
@@ -41,43 +49,41 @@ import java.util.Set;
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class ModelREST {
 
-    private static final String BUSINESS_DATE = "dMDataModelBusinessDate";
-    private static final String EXPIRED_BUSINESS_DATE = "dMDataModelExpiredAtBusinessDate";
-    private static final String LESSER_THAN_EQUAL_TO = "lte";
-    private static final String SYSTEM_DATE = "dMDataModelSystemDate";
-    private static final String EXPIRED_SYSTEM_DATE = "dMDataModelExpiredAtSystemDate";
-    private static final String NAMESPACE = "dMDataModelNamespace";
-    private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.DiscoveryREST");
+
+    private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.ModelREST");
     private static final Logger LOG = LoggerFactory.getLogger(DiscoveryREST.class);
 
     @Context
     private HttpServletRequest httpServletRequest;
     private final boolean enableSearchLogging;
-
     private final AtlasTypeRegistry typeRegistry;
+    private final AbstractModelPreProcessor entityPreProcessor;
     private final AtlasDiscoveryService discoveryService;
     private final SearchLoggingManagement loggerManagement;
+    private final EntityGraphMapper entityGraphMapper;
+    private final EntityGraphRetriever graphRetriever;
+
+    //private final Entity
 
     private static final String INDEXSEARCH_TAG_NAME = "indexsearch";
     private static final Set<String> TRACKING_UTM_TAGS = new HashSet<>(Arrays.asList("ui_main_list", "ui_popup_searchbar"));
     private static final String UTM_TAG_FROM_PRODUCT = "project_webapp";
 
     @Inject
-    public ModelREST(AtlasTypeRegistry typeRegistry, AtlasDiscoveryService discoveryService,
-                     SearchLoggingManagement loggerManagement) {
+    public ModelREST(AtlasTypeRegistry typeRegistry, AtlasDiscoveryService discoveryService, SearchLoggingManagement loggerManagement, EntityGraphMapper entityGraphMapper, EntityGraphRetriever graphRetriever, DMEntityPreProcessor entityPreProcessor) {
         this.typeRegistry = typeRegistry;
         this.discoveryService = discoveryService;
         this.loggerManagement = loggerManagement;
+        this.entityGraphMapper = entityGraphMapper;
+        this.graphRetriever = graphRetriever;
+        this.entityPreProcessor = entityPreProcessor;
         this.enableSearchLogging = AtlasConfiguration.ENABLE_SEARCH_LOGGER.getBoolean();
     }
 
     @Path("/search")
     @POST
     @Timed
-    public AtlasSearchResult dataSearch(@QueryParam("namespace") String namespace,
-                                        @QueryParam("businessDate") String businessDate,
-                                        @QueryParam("systemDate") String systemDate,
-                                        @Context HttpServletRequest servletRequest, IndexSearchParams parameters) throws AtlasBaseException {
+    public AtlasSearchResult dataSearch(@QueryParam("namespace") String namespace, @QueryParam("businessDate") String businessDate, @QueryParam("systemDate") String systemDate, @Context HttpServletRequest servletRequest, IndexSearchParams parameters) throws AtlasBaseException {
 
         Servlets.validateQueryParamLength("namespace", namespace);
         Servlets.validateQueryParamLength("businessDate", businessDate);
@@ -91,10 +97,7 @@ public class ModelREST {
 
             parameters = parameters == null ? new IndexSearchParams() : parameters;
 
-            String queryStringUsingFiltersAndUserDSL = createQueryStringUsingFiltersAndUserDSL(namespace,
-                    businessDate,
-                    systemDate,
-                    parameters.getQuery());
+            String queryStringUsingFiltersAndUserDSL = ModelUtil.createQueryStringUsingFiltersAndUserDSL(namespace, businessDate, systemDate, parameters.getQuery());
 
             if (StringUtils.isEmpty(queryStringUsingFiltersAndUserDSL)) {
                 AtlasBaseException abe = new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid model search query");
@@ -111,19 +114,15 @@ public class ModelREST {
             if (result == null) {
                 return null;
             }
-
-
             return result;
         } catch (AtlasBaseException abe) {
-            if (enableSearchLogging && parameters.isSaveSearchLog()
-            ) {
+            if (enableSearchLogging && parameters.isSaveSearchLog()) {
                 // logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }
             throw abe;
         } catch (Exception e) {
             AtlasBaseException abe = new AtlasBaseException(e.getMessage(), e.getCause());
-            if (enableSearchLogging && parameters.isSaveSearchLog()
-            ) {
+            if (enableSearchLogging && parameters.isSaveSearchLog()) {
                 //logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }
             throw abe;
@@ -149,148 +148,184 @@ public class ModelREST {
         }
     }
 
-    /***
-     * combines user query/dsl along with business parameters
-     *
-     * creates query as following :
-     * {"query":{"bool":{"must":[{"bool":{"filter":[{"match":{"namespace":"{namespace}"}},{"bool":{"must":[{"range":{"businessDate":{"lte":"businessDate"}}},{"bool":{"should":[{"range":{"expiredAtBusinessDate":{"gt":"{businessDate}"}}},{"bool":{"must_not":[{"exists":{"field":"expiredAtBusiness"}}]}}],"minimum_should_match":1}}]}}]}},{"wrapper":{"query":"user query"}}]}}}
-     * @param namespace
-     * @param businessDate
-     * @param dslString
-     * @return
-     */
-    private String createQueryStringUsingFiltersAndUserDSL(final String namespace,
-                                                           final String businessDate,
-                                                           final String systemDate,
-                                                           final String dslString) {
+    @DELETE
+    @Path("/entity")
+    @Timed
+    public EntityMutationResponse deleteByQualifiedNamePrefix(@QueryParam("qualifiedNamePrefix") String qualifiedNamePrefix,
+                                                              @QueryParam("entityType") String entityType,
+                                                              @Context HttpServletRequest servletRequest) throws AtlasBaseException {
+
+        Servlets.validateQueryParamLength("qualifiedNamePrefix", qualifiedNamePrefix);
+        Servlets.validateQueryParamLength("entityType", entityType);
+        AtlasPerfTracer perf = null;
+
+        EntityGraphDiscoveryContext graphDiscoveryContext = new EntityGraphDiscoveryContext(typeRegistry, null);
+        EntityMutationContext entityMutationContext = new EntityMutationContext(graphDiscoveryContext);
+
         try {
-            AtlasPerfMetrics.MetricRecorder addBusinessFiltersToSearchQueryMetric = RequestContext.get().startMetricRecord("createQueryStringUsingFiltersAndUserDSL");
-            // Create an ObjectMapper instance
-            ObjectMapper objectMapper = new ObjectMapper();
-
-            // Create the root 'query' node
-            ObjectNode rootNode = objectMapper.createObjectNode();
-            ObjectNode queryNode = objectMapper.createObjectNode();
-            ObjectNode boolNode = objectMapper.createObjectNode();
-            ArrayNode mustArray = objectMapper.createArrayNode();
-
-            // Create the first 'bool' object inside 'must'
-            ObjectNode firstBoolNode = objectMapper.createObjectNode();
-            ObjectNode filterBoolNode = objectMapper.createObjectNode();
-            ArrayNode filterArray = objectMapper.createArrayNode();
-
-            // Create 'match' object
-            ObjectNode matchNode = objectMapper.createObjectNode();
-            matchNode.put(NAMESPACE.concat(".keyword"), namespace);
-
-            // Add 'match' object to filter
-            ObjectNode matchWrapper = objectMapper.createObjectNode();
-            matchWrapper.set("term", matchNode);
-            filterArray.add(matchWrapper);
-
-            // add 'businessDateValidation'
-            ObjectNode businessDateWrapper = dateValidation(businessDate, true, objectMapper);
-            filterArray.add(businessDateWrapper);
-
-            // add 'systemDateValidation'
-            if (!StringUtils.isEmpty(systemDate)) {
-                ObjectNode systemDateWrapper = dateValidation(systemDate, false, objectMapper);
-                filterArray.add(systemDateWrapper);
+            if (StringUtils.isEmpty(qualifiedNamePrefix) || StringUtils.isEmpty(entityType)) {
+                throw new AtlasBaseException(AtlasErrorCode.QUALIFIED_NAME_PREFIX_NOT_EXIST);
             }
 
-            // Add filter to firstBool
-            filterBoolNode.set("filter", filterArray);
-            firstBoolNode.set("bool", filterBoolNode);
+            // check with chris how the label look like
+            // accordingly capitalize letters
+            AtlasEntityType atlasEntityType = typeRegistry.getEntityTypeByName(entityType);
 
-            // Add firstBool to must array
-            mustArray.add(firstBoolNode);
-
-            // process user query
-            if (!StringUtils.isEmpty(dslString)) {
-                JsonNode node = new ObjectMapper().readTree(dslString);
-                JsonNode userQueryNode = node.get("query");
-                ObjectNode wrapperNode = objectMapper.createObjectNode();
-                String userQueryString = userQueryNode.toString();
-                String userQueryBase64 = Base64.getEncoder().encodeToString(userQueryString.getBytes());
-                wrapperNode.put("query", userQueryBase64);
-                // Add wrapper to must array
-                ObjectNode wrapperWrapper = objectMapper.createObjectNode();
-                wrapperWrapper.set("wrapper", wrapperNode);
-                mustArray.add(wrapperWrapper);
+            if (atlasEntityType == null) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_ENTITY_TYPE);
             }
 
+            AtlasVertex latestEntityVertex = AtlasGraphUtilsV2.findLatestEntityAttributeVerticesByType(entityType, qualifiedNamePrefix);
 
-            // Add must array to bool node
-            boolNode.set("must", mustArray);
+            if (latestEntityVertex == null) {
+                throw new AtlasBaseException(AtlasErrorCode.NO_TYPE_EXISTS_FOR_QUALIFIED_NAME_PREFIX, qualifiedNamePrefix);
+            }
 
-            // Add bool to query
-            queryNode.set("bool", boolNode);
+            String modelQualifiedName;
 
-            rootNode.set("query", queryNode);
+            if (entityType.equals(ATLAS_DM_ENTITY_TYPE)) {
+                int lastIndex = qualifiedNamePrefix.lastIndexOf("/");
+                modelQualifiedName = qualifiedNamePrefix.substring(0, lastIndex);
+                String entityGuid = AtlasGraphUtilsV2.getIdFromVertex(latestEntityVertex);
+                replicateModelVersionAndExcludeEntity(modelQualifiedName, entityGuid, entityMutationContext);
 
-            // Print the JSON representation of the query
-            return objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(rootNode);
-        } catch (Exception e) {
-            LOG.error("Error -> createQueryStringUsingFiltersAndUserDSL!", e);
+            } else if (entityType.equals(ATLAS_DM_ATTRIBUTE_TYPE)) {
+                int lastIndex = qualifiedNamePrefix.lastIndexOf("/");
+                String entityQualifiedNamePrefix = qualifiedNamePrefix.substring(0, lastIndex);
+                String attributeGuid = AtlasGraphUtilsV2.getIdFromVertex(latestEntityVertex);
+                replicateModelVersionAndEntityAndExcludeAttribute(entityQualifiedNamePrefix,
+                        attributeGuid, "", entityMutationContext);
+            } else {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_ENTITY_TYPE);
+            }
+            return entityGraphMapper.mapAttributesAndClassifications(entityMutationContext,
+                    false, false, false, false);
+        } finally {
+            AtlasPerfTracer.log(perf);
         }
-        return "";
     }
 
-    private ObjectNode dateValidation(final String date, final boolean isBusinessDate, ObjectMapper objectMapper) {
+    private void replicateModelVersionAndEntityAndExcludeAttribute(final String entityQualifiedNamePrefix, String deleteAttributeGuid, String deleteEntityGuid, EntityMutationContext entityMutationContext) throws AtlasBaseException {
+        int lastIndex = entityQualifiedNamePrefix.lastIndexOf("/");
+        String modelQualifiedName = entityQualifiedNamePrefix.substring(0, lastIndex);
 
-        String condition = LESSER_THAN_EQUAL_TO, dateType = BUSINESS_DATE, expiredDateType = EXPIRED_BUSINESS_DATE;
+        // get entity
+        // replicate entity
+        AtlasVertex latestEntityVertex = AtlasGraphUtilsV2.findLatestEntityAttributeVerticesByType(ATLAS_DM_ENTITY_TYPE, entityQualifiedNamePrefix);
+        AtlasEntity latestEntity = graphRetriever.toAtlasEntity(latestEntityVertex);
 
-        if (!isBusinessDate) {
-            dateType = SYSTEM_DATE;
-            expiredDateType = EXPIRED_SYSTEM_DATE;
+        if (latestEntityVertex == null) {
+            throw new AtlasBaseException(AtlasErrorCode.DATA_ENTITY_NOT_EXIST);
         }
-        // Create the nested 'bool' object inside filter
-        ObjectNode nestedBoolNode = objectMapper.createObjectNode();
-        ArrayNode nestedMustArray = objectMapper.createArrayNode();
-        ObjectNode rangeBusinessDateNode = objectMapper.createObjectNode();
-        rangeBusinessDateNode.put(condition, date);
 
-        // Add 'range' object to nestedMust
-        ObjectNode rangeBusinessDateWrapper = objectMapper.createObjectNode();
-        rangeBusinessDateWrapper.set("range", objectMapper.createObjectNode().set(dateType, rangeBusinessDateNode));
-        nestedMustArray.add(rangeBusinessDateWrapper);
+        long now = RequestContext.get().getRequestTime();
+
+        ModelResponse modelResponse = entityPreProcessor.replicateModelEntity(latestEntity,
+                latestEntityVertex, entityQualifiedNamePrefix, now);
+
+        AtlasEntity replicaEntity = modelResponse.getReplicaEntity();
+        AtlasVertex replicaVertex = modelResponse.getReplicaVertex();
+
+        // exclude attribute from entity
+        Map<String, Object> relationshipAttributes = excludeEntityFromRelationshipAttribute(deleteAttributeGuid,
+                replicaEntity.getRelationshipAttributes());
+        replicaEntity.setRelationshipAttributes(relationshipAttributes);
 
 
-        // Create 'bool' object for 'should'
-        ObjectNode shouldBoolNodeWrapper = objectMapper.createObjectNode();
-        ObjectNode shouldBoolNode = objectMapper.createObjectNode();
-        ArrayNode shouldArray = objectMapper.createArrayNode();
+        //replicate modelVersion
+        ModelResponse modelVersionResponse = replicateModelVersionAndExcludeEntity(
+                modelQualifiedName, "", entityMutationContext);
 
-        // Create 'range' object for 'expiredAtBusinessDate'
-        ObjectNode rangeExpiredAtNode = objectMapper.createObjectNode();
-        rangeExpiredAtNode.put("gt", date);
+        // create entity-modelVersion relationship
+        entityPreProcessor.createModelVersionModelEntityRelationship(
+                modelVersionResponse.getReplicaVertex(),
+                replicaVertex);
 
-        // Add 'range' object to should array
-        ObjectNode rangeExpiredAtWrapper = objectMapper.createObjectNode();
-        rangeExpiredAtWrapper.set("range", objectMapper.createObjectNode().set(expiredDateType, rangeExpiredAtNode));
-        shouldArray.add(rangeExpiredAtWrapper);
+        entityMutationContext.addCreated(replicaEntity.getGuid(),
+                replicaEntity,
+                typeRegistry.getEntityTypeByName(ATLAS_DM_ENTITY_TYPE),
+                replicaVertex);
 
-        // add 'term' object to should array
-        ObjectNode termNode = objectMapper.createObjectNode();
-        termNode.put(expiredDateType, 0);
-        ObjectNode termNodeWrapper = objectMapper.createObjectNode();
-        termNodeWrapper.set("term", termNode);
-        shouldArray.add(termNodeWrapper);
+    }
 
-        // Add 'should' to should array
-        shouldBoolNode.set("should", shouldArray);
-        shouldBoolNode.put("minimum_should_match", 1);
-        shouldBoolNodeWrapper.set("bool", shouldBoolNode);
+    private ModelResponse replicateModelVersionAndExcludeEntity(final String modelQualifiedName, String deleteEntityGuid, EntityMutationContext entityMutationContext) throws AtlasBaseException {
+        Map<String, Object> attrValues = new HashMap<>();
+        attrValues.put(QUALIFIED_NAME, modelQualifiedName);
 
-        // Add shouldBoolNodeWrapper to nestedMust
-        nestedMustArray.add(shouldBoolNodeWrapper);
+        AtlasVertex modelVertex = AtlasGraphUtilsV2.findByUniqueAttributes(
+                typeRegistry.getEntityTypeByName(ATLAS_DM_DATA_MODEL), attrValues);
 
-        // Add nestedMust to nestedBool
-        nestedBoolNode.set("must", nestedMustArray);
+        if (modelVertex == null) {
+            throw new AtlasBaseException(AtlasErrorCode.DATA_MODEL_NOT_EXIST);
+        }
 
-        // Add nestedBool to filter
-        ObjectNode nestedBoolWrapper = objectMapper.createObjectNode();
-        nestedBoolWrapper.set("bool", nestedBoolNode);
-        return nestedBoolWrapper;
+        String modelGuid = AtlasGraphUtilsV2.getIdFromVertex(modelVertex);
+
+        long now = RequestContext.get().getRequestTime();
+
+        ModelResponse modelResponse = entityPreProcessor.replicateModelVersion(modelGuid, modelQualifiedName, now);
+        AtlasEntity replicaModelVersionEntity = modelResponse.getReplicaEntity();
+        AtlasVertex replicaModelVersionVertex = modelResponse.getReplicaVertex();
+        String modelVersionGuid = replicaModelVersionEntity.getGuid();
+
+        Map<String, Object> relationshipAttributes = excludeEntityFromRelationshipAttribute(deleteEntityGuid,
+                replicaModelVersionEntity.getRelationshipAttributes());
+        replicaModelVersionEntity.setRelationshipAttributes(relationshipAttributes);
+        entityPreProcessor.createModelModelVersionRelation(modelGuid, modelVersionGuid);
+
+        entityMutationContext.addCreated(modelVersionGuid, replicaModelVersionEntity,
+                typeRegistry.getEntityTypeByName(ATLAS_DM_VERSION_TYPE), replicaModelVersionVertex);
+
+        entityMutationContext.getDiscoveryContext().addResolvedGuid(modelGuid, modelVertex);
+        return modelResponse;
+    }
+
+    private Map<String, Object> excludeEntityFromRelationshipAttribute(String entityGuid, Map<String, Object> relationshipAttributes) throws AtlasBaseException {
+        if (StringUtils.isEmpty(entityGuid)) {
+            return relationshipAttributes;
+        }
+        Map<String, Object> appendAttributesDestination = new HashMap<>();
+        if (relationshipAttributes != null) {
+            Map<String, Object> appendAttributesSource = (Map<String, Object>) relationshipAttributes;
+
+            String guid = "";
+
+            for (String attribute : appendAttributesSource.keySet()) {
+
+                if (appendAttributesSource.get(attribute) instanceof List) {
+
+                    List<Map<String, Object>> destList = new ArrayList<>();
+                    Map<String, Object> destMap = null;
+
+                    List<Map<String, Object>> attributeList = (List<Map<String, Object>>) appendAttributesSource.get(attribute);
+
+                    for (Map<String, Object> relationAttribute : attributeList) {
+                        guid = (String) relationAttribute.get("guid");
+
+                        if (guid.equals(entityGuid)) {
+                            continue;
+                        }
+
+                        destMap = new HashMap<>(relationAttribute);
+                        destList.add(destMap);
+                    }
+                    appendAttributesDestination.put(attribute, destList);
+                } else {
+                    if (appendAttributesSource.get(attribute) instanceof Map) {
+                        LinkedHashMap<String, Object> attributeList = (LinkedHashMap<String, Object>) appendAttributesSource.get(attribute);
+                        guid = (String) attributeList.get("guid");
+
+                        // update end2
+                        if (guid.equals(entityGuid)) {
+                            continue;
+                        }
+
+                        Map<String, Object> destMap = new HashMap<>(attributeList);
+                        appendAttributesDestination.put(attribute, destMap);
+                    }
+                }
+            }
+        }
+        return appendAttributesDestination;
     }
 }
