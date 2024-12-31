@@ -82,7 +82,7 @@ public class AtlasEntityAccessRequest extends AtlasAccessRequest {
         this.businessMetadata      = businessMetadata;
         this.attributeName         = attributeName;
         this.typeRegistry          = typeRegistry;
-        this.entityClassifications = super.getClassificationNames(entity);
+        this.entityClassifications = super.getClassifications(entity);
         this.auditEnabled = auditEnabled;
     }
 
