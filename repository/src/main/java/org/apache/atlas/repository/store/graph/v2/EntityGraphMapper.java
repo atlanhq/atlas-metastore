@@ -3578,7 +3578,8 @@ public class EntityGraphMapper {
         List<AtlasTask> inProgressTasks = taskManagement.getInProgressTasks();
         for (AtlasTask task : inProgressTasks) {
             if (IN_PROGRESS.equals(task.getStatus()) && isTaskMatchingWithVertexIdAndEntityGuid(task, classificationVertex.getIdForDisplay(), entityGuid)) {
-                throw new AtlasBaseException(AtlasErrorCode.CLASSIFICATION_CURRENTLY_BEING_PROPAGATED, classificationName);
+                    RequestContext.get().setHasInProgressTasks(true);
+                    break;
             }
         }
 

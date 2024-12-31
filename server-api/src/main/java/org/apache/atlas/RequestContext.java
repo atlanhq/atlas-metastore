@@ -83,6 +83,7 @@ public class RequestContext {
     private String clientOrigin;
     private DeleteType deleteType = DeleteType.DEFAULT;
     private boolean isPurgeRequested = false;
+    private boolean hasInProgressTasks = false;
     private int maxAttempts = 1;
     private int attemptCount = 1;
     private boolean isImportInProgress = false;
@@ -751,6 +752,14 @@ public class RequestContext {
 
     public void setClientOrigin(String clientOrigin) {
         this.clientOrigin = StringUtils.isEmpty(this.clientOrigin) ? "other" :clientOrigin;
+    }
+
+    public boolean isHasInProgressTasks() {
+        return hasInProgressTasks;
+    }
+
+    public void setHasInProgressTasks(boolean hasInProgressTasks) {
+        this.hasInProgressTasks = hasInProgressTasks;
     }
 
     public class EntityGuidPair {

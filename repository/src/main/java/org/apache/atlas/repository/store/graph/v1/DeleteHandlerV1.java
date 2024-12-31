@@ -1063,9 +1063,9 @@ public abstract class DeleteHandlerV1 {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Deleting classification vertex", string(classificationVertex));
         }
-
+        boolean hasInprogressTasks = RequestContext.get().isHasInProgressTasks();
         // delete classification vertex only if it has no more entity references (direct or propagated)
-        if (!hasEntityReferences(classificationVertex)) {
+        if (!hasEntityReferences(classificationVertex) && !hasInprogressTasks) {
             _deleteVertex(classificationVertex, force);
         }
     }

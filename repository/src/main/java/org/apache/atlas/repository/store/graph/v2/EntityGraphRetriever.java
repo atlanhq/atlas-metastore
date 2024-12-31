@@ -635,7 +635,13 @@ public class EntityGraphRetriever {
 
     public List<String> getImpactedVerticesIdsClassificationAttached(AtlasVertex entityVertex, String classificationId, List<String> edgeLabelsToCheck,Boolean toExclude, List<String> verticesWithoutClassification) {
         List<String> ret = new ArrayList<>();
-
+        AtlasVertex classificationVertex_ = graph.getVertex(classificationId);
+        if(GraphHelper.getClassificationEntityGuid(classificationVertex_).equals(GraphHelper.getGuid(entityVertex)))
+        {
+            traverseImpactedVerticesByLevel(entityVertex, null, classificationId, ret, edgeLabelsToCheck, toExclude, verticesWithoutClassification);
+            return ret;
+        }
+        // why does this check exist?
         GraphHelper.getClassificationEdges(entityVertex).forEach(classificationEdge -> {
             AtlasVertex classificationVertex = classificationEdge.getInVertex();
             if (classificationVertex != null && classificationId.equals(classificationVertex.getIdForDisplay())) {
@@ -789,7 +795,10 @@ public class EntityGraphRetriever {
                             // If we want to store vertices without classification attached
                             // Check if vertices has classification attached or not using function isClassificationAttached
 
-                            if(storeVerticesWithoutClassification && !GraphHelper.isClassificationAttached(entityVertex, classificationVertex)) {
+                            if(storeVerticesWithoutClassification &&
+                                    (!GraphHelper.isClassificationAttached(entityVertex, classificationVertex)
+                            /* So that incase source has been detached from classification, it should not be sent for calculations */
+                                            && !GraphHelper.getClassificationEntityGuid(classificationVertex).equals(GraphHelper.getGuid(entityVertex)))) {
                                 verticesWithOutClassification.add(entityVertex.getIdForDisplay());
                             }
 
