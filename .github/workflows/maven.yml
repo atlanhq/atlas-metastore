@@ -26,9 +26,7 @@ on:
       - beta
       - development
       - master
-      - dg1908
-      - revert3773dg1924
-      - ns/fix/delta-refresh
+      - taskdg1924
 
 jobs:
   build:
@@ -67,8 +65,9 @@ jobs:
 
       - name: Build with Maven
         run: |
-          branch_name=${{ env.BRANCH_NAME }}
-          if [[ $branch_name == 'main' || $branch_name == 'master' || $branch_name == 'lineageondemand' ]]
+
+          branch_name=${{ steps.get_branch.outputs.branch }} 
+          if [[ $branch_name == 'main' || $branch_name == 'master' || $branch_name == 'taskdg1924' ]]
           then
               echo "build without dashboard"
               chmod +x ./build.sh && ./build.sh build_without_dashboard

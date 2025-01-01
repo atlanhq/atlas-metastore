@@ -16,6 +16,7 @@
  * limitations under the License.
  */
 package org.apache.atlas.tasks;
+import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.tasks.AtlasTask;
 
 import java.util.List;
@@ -26,7 +27,7 @@ public interface TaskFactory {
      * @param atlasTask
      * @return
      */
-    AbstractTask create(AtlasTask atlasTask);
+    AbstractTask create(AtlasTask atlasTask) throws AtlasException;
 
     List<String> getSupportedTypes();
 }

@@ -85,6 +85,8 @@ public class RequestContext {
     private boolean isPurgeRequested = false;
     private int maxAttempts = 1;
     private int attemptCount = 1;
+    private Long assetsCountToPropagate = 0L;
+    private Long assetsCountPropagated = 0L;
     private boolean isImportInProgress = false;
     private boolean     isInNotificationProcessing = false;
     private boolean     isInTypePatching           = false;
@@ -298,6 +300,23 @@ public class RequestContext {
 
     public void setAttemptCount(int attemptCount) {
         this.attemptCount = attemptCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public Long getAssetsCountPropagated() {
+        return assetsCountPropagated;
+    }
+
+
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount ;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public boolean isImportInProgress() {

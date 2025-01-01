@@ -95,6 +95,8 @@ public class AtlasTask {
     private String              classificationId;
     private String              entityGuid;
     private String              classificationTypeName;
+    private Long                assetsCountToPropagate;
+    private Long                assetsCountPropagated;
 
     public AtlasTask() {
     }
@@ -111,7 +113,10 @@ public class AtlasTask {
         this.attemptCount       = 0;
         this.classificationId   = classificationId;
         this.entityGuid         = entityGuid;
+        this.assetsCountToPropagate = 0L;
+        this.assetsCountPropagated = 0L;
     }
+
 
     public String getGuid() {
         return guid;
@@ -239,6 +244,22 @@ public class AtlasTask {
         return entityGuid;
     }
 
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
+    }
+
+    public Long getAssetsCountPropagated(){
+        return  assetsCountPropagated;
+    }
+
     @JsonIgnore
     public void start() {
         this.setStatus(Status.IN_PROGRESS);
@@ -270,6 +291,8 @@ public class AtlasTask {
                 ", attemptCount=" + attemptCount +
                 ", errorMessage='" + errorMessage + '\'' +
                 ", status=" + status +
+                ", assetsCountToPropagate=" + assetsCountToPropagate +
+                ", assetsCountPropagated=" + assetsCountPropagated +
                 '}';
     }
 }

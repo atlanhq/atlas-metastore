@@ -49,13 +49,15 @@ public class AtlasPatch implements Serializable {
     private long        createdTime;
     private long        updatedTime;
     private PatchStatus status;
+    private long                assetsCountToPropagate;
+    private long                assetsCountPropagated;
 
     public enum PatchStatus { UNKNOWN, APPLIED, SKIPPED, FAILED }
 
     public AtlasPatch() { }
 
     public AtlasPatch(String id, String patchName, String type, String action, PatchStatus status,
-                      String updatedBy, String createdBy, long createdTime, long updatedTime) {
+                      String updatedBy, String createdBy, long createdTime, long updatedTime, long assetsCountToPropagate, long assetsCountPropagated) {
         this.id          = id;
         this.description = patchName;
         this.type        = type;
@@ -65,6 +67,8 @@ public class AtlasPatch implements Serializable {
         this.createdBy   = createdBy;
         this.createdTime = createdTime;
         this.updatedTime = updatedTime;
+        this.assetsCountToPropagate = assetsCountToPropagate;
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public String getId() {
@@ -139,6 +143,18 @@ public class AtlasPatch implements Serializable {
         this.updatedTime = updatedTime;
     }
 
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public Long getAssetsCountPropagated(){
+        return  assetsCountPropagated;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -157,7 +173,7 @@ public class AtlasPatch implements Serializable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, description, type, action, updatedBy, createdBy, createdTime, updatedTime, status);
+        return Objects.hash(id, description, type, action, updatedBy, createdBy, createdTime, updatedTime, status, assetsCountToPropagate, assetsCountPropagated);
     }
 
     @Override
@@ -173,6 +189,8 @@ public class AtlasPatch implements Serializable {
         sb.append(", createdTime=").append(createdTime);
         sb.append(", updatedTime=").append(updatedTime);
         sb.append(", status=").append(status);
+        sb.append(", assetsCountToPropagate=").append(assetsCountToPropagate);
+        sb.append(", assetsCountPropagated=").append(assetsCountPropagated);
         sb.append('}');
 
         return sb.toString();
