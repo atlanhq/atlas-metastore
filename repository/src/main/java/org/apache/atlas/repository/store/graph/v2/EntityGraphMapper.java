@@ -84,7 +84,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
-import static org.apache.atlas.AtlasErrorCode.CLASSIFICATION_NOT_FOUND;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
 import static org.apache.atlas.model.TypeCategory.CLASSIFICATION;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
@@ -4771,20 +4770,83 @@ public class EntityGraphMapper {
     }
 
 
-    public List<AtlasVertex> linkBusinessPolicy(String policyId, Set<String> linkGuids) {
-        return linkGuids.stream().map(guid -> findByGuid(graph, guid)).filter(Objects::nonNull).filter(ev -> {
-            Set<String> existingValues = ev.getMultiValuedSetProperty(ASSET_POLICY_GUIDS, String.class);
-            return !existingValues.contains(policyId);
-        }).peek(ev -> {
-            Set<String> existingValues = ev.getMultiValuedSetProperty(ASSET_POLICY_GUIDS, String.class);
-            existingValues.add(policyId);
-            ev.setProperty(ASSET_POLICY_GUIDS, policyId);
-            ev.setProperty(ASSET_POLICIES_COUNT, existingValues.size());
+    public AtlasVertex linkBusinessPolicy(final BusinessPolicyRequest.AssetComplianceInfo data) {
+        String assetGuid = data.getAssetId();
+        AtlasVertex vertex = findByGuid(graph, assetGuid);
 
-            updateModificationMetadata(ev);
+        // Retrieve existing policies
+        Set<String> existingCompliant = getVertexPolicies(vertex, ASSET_POLICY_GUIDS);
+        Set<String> existingNonCompliant = getVertexPolicies(vertex, NON_COMPLIANT_ASSET_POLICY_GUIDS);
 
-            cacheDifferentialEntity(ev, existingValues, ev.getMultiValuedSetProperty(NON_COMPLIANT_ASSET_POLICY_GUIDS, String.class));
-        }).collect(Collectors.toList());
+        // Retrieve new policies
+        Set<String> newCompliantRulesGUIDs = data.getComplaintRules();
+        Set<String> newNonCompliantRulesGUIDs = data.getNonComplaintRules();
+        Set<String> newCompliantPolicyGUIDs = data.getComplaintPolicies();
+
+        // Calculate effective compliant and non-compliant policies
+        Set<String> effectiveCompliantGUIDs = calculateEffectivePolicies(existingCompliant, newCompliantRulesGUIDs, newCompliantPolicyGUIDs);
+        Set<String> effectiveNonCompliantGUIDs = calculateEffectivePolicies(existingNonCompliant, newNonCompliantRulesGUIDs);
+
+        // Update vertex properties
+        updateVertexPolicies(vertex, ASSET_POLICY_GUIDS, effectiveCompliantGUIDs);
+        updateVertexPolicies(vertex, NON_COMPLIANT_ASSET_POLICY_GUIDS, effectiveNonCompliantGUIDs);
+
+        // Count and set policies
+        int compliantPolicyCount = countPoliciesExcluding(effectiveCompliantGUIDs, "rule");
+        int nonCompliantPolicyCount = countPoliciesExcluding(effectiveNonCompliantGUIDs, "rule");
+        int totalPolicyCount = compliantPolicyCount + nonCompliantPolicyCount;
+
+        vertex.setProperty(ASSET_POLICIES_COUNT, totalPolicyCount);
+        updateModificationMetadata(vertex);
+
+        // Create and cache differential entity
+        AtlasEntity diffEntity = createDifferentialEntity(
+                vertex, effectiveCompliantGUIDs, effectiveNonCompliantGUIDs, existingCompliant, existingNonCompliant, totalPolicyCount);
+
+        RequestContext.get().cacheDifferentialEntity(diffEntity);
+        return vertex;
+    }
+
+    @SafeVarargs
+    private final Set<String> calculateEffectivePolicies(Set<String> existing, Set<String>... additions) {
+        Set<String> effective = new HashSet<>(existing);
+        for (Set<String> addition : additions) {
+            effective.addAll(addition);
+        }
+        return effective;
+    }
+
+    private void updateVertexPolicies(AtlasVertex vertex, String propertyKey, Set<String> policies) {
+        if(ASSET_POLICY_GUIDS.equals(propertyKey)){
+            policies.forEach(policyGuid -> vertex.setProperty(ASSET_POLICY_GUIDS, policyGuid));
+        }else {
+            policies.forEach(policyGuid -> vertex.setProperty(NON_COMPLIANT_ASSET_POLICY_GUIDS, policyGuid));
+        }
+    }
+
+    private int countPoliciesExcluding(Set<String> policies, String substring) {
+        return (int) policies.stream().filter(policy -> !policy.contains(substring)).count();
+    }
+
+    private AtlasEntity createDifferentialEntity(AtlasVertex vertex, Set<String> effectiveCompliant, Set<String> effectiveNonCompliant,
+                                                 Set<String> existingCompliant, Set<String> existingNonCompliant, int totalPolicyCount) {
+        AtlasEntity diffEntity = new AtlasEntity(vertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class));
+        setEntityCommonAttributes(vertex, diffEntity);
+        diffEntity.setAttribute(ASSET_POLICIES_COUNT, totalPolicyCount);
+
+        if (!existingCompliant.equals(effectiveCompliant)) {
+            diffEntity.setAttribute(ASSET_POLICY_GUIDS, effectiveCompliant);
+        }
+        if (!existingNonCompliant.equals(effectiveNonCompliant)) {
+            diffEntity.setAttribute(NON_COMPLIANT_ASSET_POLICY_GUIDS, effectiveNonCompliant);
+        }
+
+        return diffEntity;
+    }
+
+    private Set<String> getVertexPolicies(AtlasVertex vertex, String propertyKey) {
+        return Optional.ofNullable(vertex.getMultiValuedSetProperty(propertyKey, String.class))
+                .orElse(Collections.emptySet());
     }
 
 
@@ -4811,21 +4873,29 @@ public class EntityGraphMapper {
         Set<String> compliantPolicies = getMultiValuedSetProperty(vertex, ASSET_POLICY_GUIDS);
         Set<String> nonCompliantPolicies = getMultiValuedSetProperty(vertex, NON_COMPLIANT_ASSET_POLICY_GUIDS);
 
-        boolean removed = compliantPolicies.remove(policyId);
-        removed |= nonCompliantPolicies.remove(policyId);
+        boolean removed = removePolicyAndRule(compliantPolicies, policyId);
+        removed |= removePolicyAndRule(nonCompliantPolicies,policyId);
 
         if (removed) {
             vertex.removePropertyValue(ASSET_POLICY_GUIDS, policyId);
             vertex.removePropertyValue(NON_COMPLIANT_ASSET_POLICY_GUIDS, policyId);
 
-            int totalPolicies = compliantPolicies.size() + nonCompliantPolicies.size();
-            vertex.setProperty(ASSET_POLICIES_COUNT, totalPolicies);
+            int compliantPolicyCount = countPoliciesExcluding(compliantPolicies, "rule");
+            int nonCompliantPolicyCount = countPoliciesExcluding(nonCompliantPolicies, "rule");
+            int totalPolicyCount = compliantPolicyCount + nonCompliantPolicyCount;
+            vertex.setProperty(ASSET_POLICIES_COUNT, totalPolicyCount);
 
             updateModificationMetadata(vertex);
             cacheDifferentialEntity(vertex, compliantPolicies, nonCompliantPolicies);
         }
 
         return vertex;
+    }
+
+    private boolean removePolicyAndRule(Set<String> policies, String policyId) {
+        Set<String> toRemove = policies.stream().filter(i-> i.contains(policyId)).collect(Collectors.toSet());
+        return policies.removeAll(toRemove);
+
     }
 
     private Set<String> getMultiValuedSetProperty(AtlasVertex vertex, String propertyName) {
@@ -4927,7 +4997,7 @@ public class EntityGraphMapper {
 
         // Check if the asset already has the given policy IDs
         if (policyIds.isEmpty()) {
-            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Asset already has the given policy id");
+            return assetVertex;
         }
 
         // Move policies to the appropriate set
