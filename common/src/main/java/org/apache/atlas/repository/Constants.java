@@ -208,6 +208,28 @@ public final class Constants {
 
     public static String[] PROCESS_EDGE_LABELS = {PROCESS_OUTPUTS, PROCESS_INPUTS};
 
+    /***
+     * DataModel
+     */
+
+    public static final String ATLAS_DM_ENTITY_TYPE  = "DMEntity";
+
+    public static final String ATLAS_DM_ATTRIBUTE_TYPE  = "DMAttribute";
+    public static final String ATLAS_DM_DATA_MODEL = "DMDataModel";
+
+    public static final String ATLAS_DM_VERSION_TYPE  = "DMVersion";
+
+    public static final String ATLAS_DM_ENTITY_ASSOCIATION_TYPE= "DMEntityAssociation";
+    public static final String ATLAS_DM_ATTRIBUTE_ASSOCIATION_TYPE= "DMAttributeAssociation";
+
+    public static final String ATLAS_DM_QUALIFIED_NAME_PREFIX = "dMQualifiedNamePrefix";
+    public static final String ATLAS_DM_NAMESPACE = "dMDataModelNamespace";
+    public static  final String ATLAS_DM_EXPIRED_AT_SYSTEM_DATE = "dMDataModelExpiredAtSystemDate";
+    public static  final String ATLAS_DM_EXPIRED_AT_BUSINESS_DATE = "dMDataModelExpiredAtBusinessDate";
+    public static  final String ATLAS_DM_SYSTEM_DATE = "dMDataModelSystemDate";
+    public  static  final String ATLAS_DM_BUSINESS_DATE = "dMDataModelBusinessDate";
+
+
     /**
      * The homeId field is used when saving into Atlas a copy of an object that is being imported from another
      * repository. The homeId will be set to a String that identifies the other repository. The specific format
@@ -400,6 +422,8 @@ public final class Constants {
 
     public static final String NON_COMPLIANT_ASSET_POLICY_GUIDS  = "nonCompliantAssetPolicyGUIDs";
     public static final String ASSET_POLICIES_COUNT  = "assetPoliciesCount";
+
+
 
     /*
      * All supported file-format extensions for Bulk Imports through file upload
