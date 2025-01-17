@@ -64,6 +64,8 @@ import java.util.List;
 import static org.apache.atlas.repository.Constants.INDEX_PREFIX;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
 
+import org.apache.atlas.hook.AtlasTopicCreator;
+
 /**
  * Driver for running Metadata as a standalone server with embedded jetty server.
  */
@@ -76,8 +78,6 @@ public final class Atlas {
     private static final String ATLAS_LOG_DIR = "atlas.log.dir";
     public static final String ATLAS_SERVER_HTTPS_PORT = "atlas.server.https.port";
     public static final String ATLAS_SERVER_HTTP_PORT = "atlas.server.http.port";
-
-
     private static EmbeddedServer server;
 
     static {
@@ -168,7 +168,6 @@ public final class Atlas {
 
         server = EmbeddedServer.newServer(appHost, appPort, appPath, enableTLS);
         installLogBridge();
-
         server.start();
     }
 
