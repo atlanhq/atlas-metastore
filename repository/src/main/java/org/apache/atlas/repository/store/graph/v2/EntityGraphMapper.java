@@ -195,6 +195,7 @@ public class EntityGraphMapper {
     private final EntityGraphRetriever       retrieverNoRelation;
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
+    private static final Set<String> edgeLabelsForHardDeletion = new HashSet<>(Arrays.asList(OUTPUT_PORT_PRODUCT_EDGE_LABEL, INPUT_PORT_PRODUCT_EDGE_LABEL));
 
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
@@ -3001,12 +3002,17 @@ public class EntityGraphMapper {
                     List<AtlasEdge> additionalElements = new ArrayList<>();
 
                     for (AtlasEdge edge : edgesToRemove) {
-                        if (getStatus(edge) == DELETED ) {
+                        if (getStatus(edge) == DELETED) {
                             continue;
                         }
 
-                        boolean deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
-                                true, attribute.getRelationshipEdgeDirection(), entityVertex);
+                        boolean deleted = false;
+                        if (edgeLabelsForHardDeletion.contains(edge.getLabel())) {
+                            graph.removeEdge(edge);
+                        } else {
+                            deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
+                                    true, attribute.getRelationshipEdgeDirection(), entityVertex);
+                        }
 
                         if (!deleted) {
                             additionalElements.add(edge);
