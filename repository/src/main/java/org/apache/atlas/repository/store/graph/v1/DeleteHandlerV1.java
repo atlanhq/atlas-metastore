@@ -96,7 +96,7 @@ public abstract class DeleteHandlerV1 {
     private   final TaskManagement       taskManagement;
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
-
+    private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
@@ -1237,7 +1237,7 @@ public abstract class DeleteHandlerV1 {
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
                 propagatedCount++;
-                if (propagatedCount == 100){
+                if (propagatedCount == CHUNK_SIZE){
                     currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount - 1);
                     currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
                     propagatedCount = 0;
@@ -1249,7 +1249,7 @@ public abstract class DeleteHandlerV1 {
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
                 propagatedCount++;
-                if (propagatedCount == 100){
+                if (propagatedCount == CHUNK_SIZE){
                     currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount);
                     currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
                     propagatedCount = 0;
@@ -1264,7 +1264,6 @@ public abstract class DeleteHandlerV1 {
             handleBlockedClassifications(edge, relationship.getBlockedPropagatedClassifications());
         }
     }
-
 
     public void handleBlockedClassifications(AtlasEdge edge, Set<AtlasClassification> blockedClassifications) throws AtlasBaseException {
         if (blockedClassifications != null) {
