@@ -3638,7 +3638,6 @@ public class EntityGraphMapper {
             LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
             throw exception;
         } finally {
-            MetricRecorder classificationPropagationMetricRecorder = null;
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
         }
 
