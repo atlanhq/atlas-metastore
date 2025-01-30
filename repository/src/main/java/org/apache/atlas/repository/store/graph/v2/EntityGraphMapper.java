@@ -79,6 +79,7 @@ import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -223,6 +224,39 @@ public class EntityGraphMapper {
     @VisibleForTesting
     public void setTasksUseFlag(boolean value) {
         DEFERRED_ACTION_ENABLED = value;
+    }
+
+    public void updateTaskVertexProperty(String propertyKey, long value, boolean isIncremental, BiConsumer<AtlasTask, Long> taskSetter) {
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices().iterator().next();
+
+        Long existingValue = currentTaskVertex.getProperty(propertyKey, Long.class);
+        long newValue = isIncremental ? (existingValue != null ? existingValue : 0L) + value : value;
+        if (taskSetter != null) {
+            taskSetter.accept(currentTask, newValue);
+        }
+
+        currentTaskVertex.setProperty(propertyKey, newValue);
+    }
+
+    public void updateTaskVertexForPropagation(long propagationCount) {
+        updateTaskVertexProperty(
+                TASK_ASSET_COUNT_TO_PROPAGATE,
+                propagationCount,
+                false,
+                AtlasTask::setAssetsCountToPropagate
+        );
+    }
+
+    public void updateTaskVertexForPropagated(long propagatedCount) {
+        updateTaskVertexProperty(
+                TASK_ASSET_COUNT_PROPAGATED,
+                propagatedCount,
+                true,
+                AtlasTask::setAssetsCountPropagated
+        );
     }
 
     public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
@@ -3544,14 +3578,8 @@ public class EntityGraphMapper {
             Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
             List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
 
-            // update the 'assetsCountToPropagate' on in memory java object.
-            AtlasTask currentTask = RequestContext.get().getCurrentTask();
-            currentTask.setAssetsCountToPropagate((long) impactedVertices.size() - 1);
+            updateTaskVertexForPropagation(impactedVertices.size() - 1);
 
-            //update the 'assetsCountToPropagate' in the current task vertex.
-            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-            currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
-            graph.commit();
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
                 return null;
@@ -3566,8 +3594,6 @@ public class EntityGraphMapper {
     }
 
     public List<String> processClassificationPropagationAddition(List<AtlasVertex> verticesToPropagate, AtlasVertex classificationVertex) throws AtlasBaseException{
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
         int impactedVerticesSize = verticesToPropagate.size();
@@ -3605,14 +3631,14 @@ public class EntityGraphMapper {
                         : toIndex - offset;
 
                 offset += CHUNK_SIZE;
-                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + finishedTaskCount);
-                currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+                updateTaskVertexForPropagated(finishedTaskCount);
 
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
             LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
             throw exception;
         } finally {
+            MetricRecorder classificationPropagationMetricRecorder = null;
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
         }
 
