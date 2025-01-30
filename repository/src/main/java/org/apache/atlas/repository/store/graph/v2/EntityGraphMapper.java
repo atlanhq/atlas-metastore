@@ -228,13 +228,13 @@ public class EntityGraphMapper {
                 .has(TASK_GUID, currentTask.getGuid())
                 .vertices().iterator().next();
 
-        Long existingValue = currentTaskVertex.getProperty(propertyKey, Long.class);
-        long newValue = isIncremental ? (existingValue != null ? existingValue : 0L) + value : value;
+        Long valueFromTaskVertex = currentTaskVertex.getProperty(propertyKey, Long.class);
+        long valueToPushToTaskVertex = isIncremental ? (valueFromTaskVertex != null ? valueFromTaskVertex : 0L) + value : value;
         if (taskSetter != null) {
-            taskSetter.accept(currentTask, newValue);
+            taskSetter.accept(currentTask, valueToPushToTaskVertex);
         }
 
-        currentTaskVertex.setProperty(propertyKey, newValue);
+        currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
     }
 
     public void updateTaskVertexForPropagation(long propagationCount) {
@@ -3264,18 +3264,8 @@ public class EntityGraphMapper {
             tagVertices = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
         }
 
-        // update the 'assetsCountToPropagate' on in memory java object.
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        currentTask.setAssetsCountToPropagate((long) totalCount);
-
-        //update the 'assetsCountToPropagate' in the current task vertex.
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
-        graph.commit();
-
-        currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + totalCount);
-        currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
-
+        updateTaskVertexForPropagation(totalCount);
+        updateTaskVertexForPropagated(totalCount);
         transactionInterceptHelper.intercept();
         LOG.info("Completed cleaning up classification {}", classificationName);
     }
@@ -4112,14 +4102,7 @@ public class EntityGraphMapper {
         LOG.info("Fetched classification : {} ", classification.toString());
         List<AtlasVertex> impactedVertices = graphHelper.getAllPropagatedEntityVertices(classificationVertex);
 
-        // update the 'assetsCountToPropagate' on in memory java object.
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        currentTask.setAssetsCountToPropagate((long) impactedVertices.size());
-
-        //update the 'assetsCountToPropagate' in the current task vertex.
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
-        graph.commit();
+        updateTaskVertexForPropagation(impactedVertices.size());
 
         LOG.info("impactedVertices : {}", impactedVertices.size());
         int batchSize = 100;
@@ -4136,8 +4119,7 @@ public class EntityGraphMapper {
                 }
             }
 
-            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + end);
-            currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+            updateTaskVertexForPropagated(end);
 
             transactionInterceptHelper.intercept();
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
@@ -4329,15 +4311,7 @@ public class EntityGraphMapper {
                 .filter(vertex -> vertex != null)
                 .collect(Collectors.toList());
 
-        // update the 'assetsCountToPropagate' on in memory java object.
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        //removing one for direct attachment and removal
-        currentTask.setAssetsCountToPropagate((long) verticesToRemove.size() + (verticesToAddClassification.size()));
-
-        //update the 'assetsCountToPropagate' in the current task vertex.
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-        currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
-        graph.commit();
+        updateTaskVertexForPropagation(verticesToRemove.size() + (verticesToAddClassification.size()));
 
         //Remove classifications from unreachable vertices
         processPropagatedClassificationDeletionFromVertices(verticesToRemove, currentClassificationVertex, classification);
@@ -4400,9 +4374,6 @@ public class EntityGraphMapper {
         int toIndex;
         int offset = 0;
 
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-
         LOG.info("To delete classification of vertex id {} from {} entity vertices", classificationVertex.getIdForDisplay(), propagatedVerticesSize);
 
         try {
@@ -4421,8 +4392,7 @@ public class EntityGraphMapper {
 
                 int finishedTaskCount = toIndex - offset;
                 offset += CHUNK_SIZE;
-                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + finishedTaskCount);
-                currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+                updateTaskVertexForPropagated(finishedTaskCount);
                 transactionInterceptHelper.intercept();
 
             } while (offset < propagatedVerticesSize);
