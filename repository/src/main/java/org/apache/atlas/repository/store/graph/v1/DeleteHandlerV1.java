@@ -94,7 +94,7 @@ public abstract class DeleteHandlerV1 {
     private   final TaskManagement       taskManagement;
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
-
+    private static final Set<String> edgeLabelsForHardDeletion = new HashSet<>(Arrays.asList(OUTPUT_PORT_PRODUCT_EDGE_LABEL, INPUT_PORT_PRODUCT_EDGE_LABEL, TERM_ASSIGNMENT_LABEL));
 
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
@@ -384,7 +384,8 @@ public abstract class DeleteHandlerV1 {
             // for relationship edges, inverse vertex's relationship attribute doesn't need to be updated.
             // only delete the reference relationship edge
             if (GraphHelper.isRelationshipEdge(edge)) {
-                deleteEdge(edge, isInternalType || isCustomRelationship(edge));
+                deleteEdge(edge, isInternalType || isCustomRelationship(edge) || isHardDeletionRelationship(edge));
+
                 AtlasVertex referencedVertex = entityRetriever.getReferencedEntityVertex(edge, relationshipDirection, entityVertex);
 
                 if (referencedVertex != null) {
@@ -401,7 +402,7 @@ public abstract class DeleteHandlerV1 {
                 //legacy case - not a relationship edge
                 //If deleting just the edge, reverse attribute should be updated for any references
                 //For example, for the department type system, if the person's manager edge is deleted, subordinates of manager should be updated
-                deleteEdge(edge, true, isInternalType || isCustomRelationship(edge));
+                deleteEdge(edge, true, isInternalType || isCustomRelationship(edge) || isHardDeletionRelationship(edge));
             }
         }
 
@@ -1080,6 +1081,10 @@ public abstract class DeleteHandlerV1 {
 
     private boolean isCustomRelationship(final AtlasEdge edge) {
         return edge.getLabel().equals(UD_RELATIONSHIP_EDGE_LABEL);
+    }
+
+    private boolean isHardDeletionRelationship(final AtlasEdge edge) {
+        return edgeLabelsForHardDeletion.contains(edge.getLabel());
     }
 
     private void addToPropagatedClassificationNames(AtlasVertex entityVertex, String classificationName) {
