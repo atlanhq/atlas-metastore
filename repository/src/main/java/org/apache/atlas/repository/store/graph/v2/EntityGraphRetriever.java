@@ -1893,10 +1893,27 @@ public class EntityGraphRetriever {
                 String relationshipTypeName = GraphHelper.getTypeName(edge);
                 boolean isRelationshipAttribute = typeRegistry.getRelationshipDefByName(relationshipTypeName) != null;
                 if (isRelationshipAttribute) {
-                    AtlasRelationship relationship = mapEdgeToAtlasRelationship(edge);
-                    Map<String, Object> relationshipAttributes = mapOf("typeName", relationshipTypeName);
-                    relationshipAttributes.put("attributes", relationship.getAttributes());
-                    ret.getAttributes().put("relationshipAttributes", relationshipAttributes);
+                    LOG.info("CustomRelationship: ret is null: {} ", ret == null);
+                    LOG.info("CustomRelationship: relTypeName: {}, assetGuid: {}, edgeId {}",
+                            relationshipTypeName, GraphHelper.getGuid(entityVertex), edge.getIdForDisplay());
+                    try {
+                        LOG.info("CustomRelationship: Fetching relationshipAttributes for {}", relationshipTypeName);
+                        AtlasRelationship relationship = mapEdgeToAtlasRelationship(edge);
+
+                        LOG.info("CustomRelationship: relationship: {}", AtlasType.toJson(relationship));
+                        LOG.info("CustomRelationship: relationship.getAttributes() is null: {}", relationship.getAttributes() == null);
+
+                        Map<String, Object> relationshipAttributes = mapOf("typeName", relationshipTypeName);
+                        relationshipAttributes.put("attributes", relationship.getAttributes());
+
+                        LOG.info("CustomRelationship: ret.getAttributes() is null: {}", ret.getAttributes() == null);
+                        ret.getAttributes().put("relationshipAttributes", relationshipAttributes);
+                    } catch (Exception e) {
+                        if (ret != null) {
+                            LOG.error("CustomRelationship: relTypeName: {}, assetGuid: {}, assetTypeName: {}", relationshipTypeName, ret.getGuid(), ret.getTypeName());
+                        }
+                        throw e;
+                    }
                 }
             }
         }
