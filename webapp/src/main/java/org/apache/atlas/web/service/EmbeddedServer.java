@@ -68,7 +68,7 @@ public class EmbeddedServer {
         int                           maxThreads    = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
         int                           reservedThreads    = AtlasConfiguration.WEBSERVER_RESERVED_THREADS.getInt();
         long                          keepAliveTime = AtlasConfiguration.WEBSERVER_KEEPALIVE_SECONDS.getLong();
-        ThreadPoolExecutor            executor      = new ThreadPoolExecutor(minThreads, maxThreads, keepAliveTime, TimeUnit.SECONDS, queue);
+        ThreadPoolExecutor            executor      = new ThreadPoolExecutor(maxThreads, maxThreads, keepAliveTime, TimeUnit.SECONDS, queue);
         ExecutorThreadPool            pool          = new ExecutorThreadPool(executor, reservedThreads);
 
         server = new Server(pool);
