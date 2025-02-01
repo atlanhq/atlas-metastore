@@ -1889,7 +1889,7 @@ public class EntityGraphRetriever {
                 }
             }
 
-            if (RequestContext.get().isIncludeRelationshipAttributes()) {
+            if (RequestContext.get().isIncludeRelationshipAttributes() && ret != null) {
                 String relationshipTypeName = GraphHelper.getTypeName(edge);
                 boolean isRelationshipAttribute = typeRegistry.getRelationshipDefByName(relationshipTypeName) != null;
                 if (isRelationshipAttribute) {
@@ -1909,9 +1909,6 @@ public class EntityGraphRetriever {
                         LOG.info("CustomRelationship: ret.getAttributes() is null: {}", ret.getAttributes() == null);
                         ret.getAttributes().put("relationshipAttributes", relationshipAttributes);
                     } catch (Exception e) {
-                        if (ret != null) {
-                            LOG.error("CustomRelationship: relTypeName: {}, assetGuid: {}, assetTypeName: {}", relationshipTypeName, ret.getGuid(), ret.getTypeName());
-                        }
                         throw e;
                     }
                 }
