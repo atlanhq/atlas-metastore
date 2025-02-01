@@ -1887,6 +1887,10 @@ public class EntityGraphRetriever {
                 } else {
                     ret = toAtlasObjectId(referenceVertex);
                 }
+
+                if (ret == null) {
+                    LOG.warn("Found corrupted vertex with ID: {}",referenceVertex);
+                }
             }
 
             if (RequestContext.get().isIncludeRelationshipAttributes() && ret != null) {
