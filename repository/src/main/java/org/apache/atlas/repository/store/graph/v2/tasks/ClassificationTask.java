@@ -98,22 +98,18 @@ public abstract class ClassificationTask extends AbstractTask {
         }
 
         RequestContext.get().setUser(userName, null);
-
         try {
             setStatus(IN_PROGRESS);
             run(params);
             setStatus(COMPLETE);
         } catch (AtlasBaseException e) {
             LOG.error("Task: {}: Error performing task!", getTaskGuid(), e);
-
             setStatus(FAILED);
-
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
             graph.commit();
         }
-
         return getStatus();
     }
 
