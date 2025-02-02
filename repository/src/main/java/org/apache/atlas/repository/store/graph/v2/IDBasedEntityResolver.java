@@ -22,6 +22,7 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
@@ -69,7 +70,33 @@ public class IDBasedEntityResolver implements EntityResolver {
                         throw new AtlasBaseException(element.getValue(), AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), entity.getTypeName());
                     }
 
-                    vertex = AtlasGraphUtilsV2.findByUniqueAttributes(this.graph, entityType, entity.getAttributes());
+    //                -------
+
+                    if (
+                            ((entity.getAttributes().get(Constants.QUALIFIED_NAME) == null) && (entity.getAttributes().get(Constants.ATLAS_DM_QUALIFIED_NAME_PREFIX)!=null))
+                                    &&
+                                    ((entity.getTypeName().equals(Constants.ATLAS_DM_ENTITY_TYPE)) || (entity.getTypeName().equals(Constants.ATLAS_DM_ATTRIBUTE_TYPE)))) {
+
+                        String qualifiedNamePrefix = (String) entity.getAttributes().get(Constants.ATLAS_DM_QUALIFIED_NAME_PREFIX);
+                        if (qualifiedNamePrefix.isEmpty()){
+                            throw new AtlasBaseException(AtlasErrorCode.QUALIFIED_NAME_PREFIX_NOT_EXIST);
+                        }
+                         vertex = AtlasGraphUtilsV2.findLatestEntityAttributeVerticesByType(entity.getTypeName(), qualifiedNamePrefix);
+
+                        if (vertex == null) {
+                            // no entity exists with this qualifiedName, set qualifiedName and let entity be created
+                            entity.setAttribute(Constants.QUALIFIED_NAME, qualifiedNamePrefix + "_" + RequestContext.get().getRequestTime());
+                            return context;
+                        }
+
+                        //   if guidFromVertex is found let entity be updated
+                      //      entity.setGuid(AtlasGraphUtilsV2.getIdFromVertex(vertex));
+                        // else find qualifiedName and set qualifiedName : as it is mandatory
+                        context.addResolvedGuid(guid, vertex);
+                    }else {
+                        vertex = AtlasGraphUtilsV2.findByUniqueAttributes(this.graph, entityType, entity.getAttributes());
+                    }
+
                 } else if (!isAssignedGuid) { // for local-guids, entity must be in the stream
                     throw new AtlasBaseException(element.getValue(), AtlasErrorCode.REFERENCED_ENTITY_NOT_FOUND, guid);
                 }

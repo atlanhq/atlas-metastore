@@ -295,8 +295,15 @@ public enum AtlasErrorCode {
     TASK_TYPE_NOT_SUPPORTED(400, "ATLAS-400-00-112", "Task type {0} is not supported"),
 
     PERSONA_POLICY_ASSETS_LIMIT_EXCEEDED(400, "ATLAS-400-00-113", "Exceeded limit of maximum allowed assets across policies for a Persona: Limit: {0}, assets: {1}"),
-    ADMIN_LIST_SHOULD_NOT_BE_EMPTY(400, "ATLAS-400-00-114", "Admin list should not be empty for type {0}");
-
+    ADMIN_LIST_SHOULD_NOT_BE_EMPTY(400, "ATLAS-400-00-114", "Admin list should not be empty for type {0}"),
+    DATA_MODEL_VERSION_NOT_EXIST(400, "ATLAS-400-00-115", "Model version {0} does not exist"),
+    DATA_ENTITY_NOT_EXIST(400, "ATLAS-400-00-116", "DataEntity {0} does not exist"),
+    DATA_MODEL_NOT_EXIST(400, "ATLAS-400-00-117", "DataModel {0} does not exist"),
+    QUALIFIED_NAME_PREFIX_NOT_EXIST(400, "ATLAS-400-00-118", "dMQualifiedNamePrefix is mandatory for DMEntity/DMAttribute"),
+    NO_TYPE_EXISTS_FOR_QUALIFIED_NAME_PREFIX (400,"ATLAS-400-00-119", "No DMEntity/DMAttribute exists for dMQualifiedNamePrefix : {0}"),
+    NAME_NAMESPACE_NOT_EXIST (400, "ATLAS-400-00-120", "name/namespace are mandatory for DMEntity/DMAttribute"),
+    QUALIFIED_NAME_PREFIX_OR_TYPE_NOT_FOUND(400, "ATLAS-400-00-121", "qualifiedName/entityType are mandatory"),
+    INVALID_ENTITY_TYPE(400, "ATLAS-400-00-122", "Invalid entity type");
     private String errorCode;
     private String errorMessage;
     private Response.Status httpCode;
