@@ -3535,13 +3535,13 @@ public class EntityGraphMapper {
 
                 transactionInterceptHelper.intercept();
 
-                int finishedTaskCount = (offset + CHUNK_SIZE >= impactedVerticesSize && impactedVerticesSize == verticesToPropagate.size())
+                int propagatedAssetsCount = (offset + CHUNK_SIZE >= impactedVerticesSize && impactedVerticesSize == verticesToPropagate.size())
                         ? toIndex - offset - 1 // Subtract 1 for the last chunk
                         : toIndex - offset;
 
                 offset += CHUNK_SIZE;
 
-                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, finishedTaskCount, true, AtlasTask::setAssetsCountPropagated);
+                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, propagatedAssetsCount, true, AtlasTask::setAssetsCountPropagated);
 
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
@@ -4374,9 +4374,9 @@ public class EntityGraphMapper {
                 List<AtlasEntity> updatedEntities = updateClassificationText(classification, updatedVertices);
                 entityChangeNotifier.onClassificationsDeletedFromEntities(updatedEntities, Collections.singletonList(classification));
 
-                int finishedTaskCount = toIndex - offset;
+                int propagatedAssetsCount = toIndex - offset;
                 offset += CHUNK_SIZE;
-                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, finishedTaskCount, true, AtlasTask::setAssetsCountPropagated);
+                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, propagatedAssetsCount, true, AtlasTask::setAssetsCountPropagated);
                 transactionInterceptHelper.intercept();
 
             } while (offset < propagatedVerticesSize);
@@ -4418,11 +4418,11 @@ public class EntityGraphMapper {
                 deletedPropagationsGuid.addAll(propagatedEntities.stream().map(x -> x.getGuid()).collect(Collectors.toList()));
             }
 
-            int finishedTaskCount = toIndex - offset;
+            int propagatedAssetsCount = toIndex - offset;
 
             offset += CHUNK_SIZE;
 
-            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + finishedTaskCount);
+            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedAssetsCount);
             currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
             transactionInterceptHelper.intercept();
 
