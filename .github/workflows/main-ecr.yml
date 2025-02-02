@@ -73,7 +73,7 @@ jobs:
         aws-region: ${{ steps.get_ecr-details.outputs.region }}
 
     - name: Check and create ECR Repo if it does not exist
-      uses: nick-fields/retry@v2
+      uses: nick-fields/retry@v3
       id: check_and_create_repo
       with:
         timeout_minutes: 10
