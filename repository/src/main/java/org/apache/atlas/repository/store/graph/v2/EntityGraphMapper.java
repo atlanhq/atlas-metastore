@@ -1624,7 +1624,18 @@ public class EntityGraphMapper {
                 return null;
             }
 
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_OBJECT_ID, (ctx.getValue() == null ? null : ctx.getValue().toString()));
+            AtlasEntity dataModelEntity = entityRetriever.toAtlasEntity(guid);
+            String entityType = dataModelEntity.getTypeName();
+            if (entityType.equals(MODEL_ENTITY) || entityType.equals(MODEL_ATTRIBUTE)) {
+                attributeVertex = entityRetriever.getEntityVertex(guid);
+
+                if (attributeVertex == null) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_OBJECT_ID, (ctx.getValue() == null ? null : ctx.getValue().toString()));
+                }
+
+            } else {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_OBJECT_ID, (ctx.getValue() == null ? null : ctx.getValue().toString()));
+            }
         }
 
         AtlasType type = typeRegistry.getType(AtlasGraphUtilsV2.getTypeName(entityVertex));

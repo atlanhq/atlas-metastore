@@ -208,6 +208,49 @@ public final class Constants {
 
     public static String[] PROCESS_EDGE_LABELS = {PROCESS_OUTPUTS, PROCESS_INPUTS};
 
+    /***
+     * DataModel
+     */
+    public static final String MODEL_ENTITY = "ModelEntity";
+    public static final String MODEL_ATTRIBUTE = "ModelAttribute";
+    public static final String MODEL_DATA_MODEL = "ModelDataModel";
+    public static final String MODEL_VERSION = "ModelVersion";
+    public static final String MODEL_ENTITY_ASSOCIATION = "ModelEntityAssociation";
+    public static final String MODEL_ATTRIBUTE_ASSOCIATION = "ModelAttributeAssociation";
+    public static final String MODEL_QUALIFIED_NAME_PATTERN = "modelVersionAgnosticQualifiedName";
+    public static final String MODEL_NAMESPACE = "modelNamespace";
+    public static final String MODEL_EXPIRED_AT_SYSTEM_DATE = "modelExpiredAtSystemDate";
+    public static final String MODEL_EXPIRED_AT_BUSINESS_DATE = "modelExpiredAtBusinessDate";
+    public static final String MODEL_SYSTEM_DATE = "modelSystemDate";
+    public static final String MODEL_BUSINESS_DATE = "modelBusinessDate";
+    public static final String MODEL_MODEL_VERSION_RELATION = "model_data_model_model_versions";
+    public static final String RELATED_DATA_MODEL = "modelDataModel";
+    public static final String RELATED_MODEL_VERSIONS = "modelVersions";
+    public static final String MODEL_VERSIONS_MODEL_VERSION_ENTITY_RELATION = "model_versions_model_version_entities";
+    public static final String MODEL_VERSION_ENTITIES = "modelVersionEntities";
+    public static final String MODEL_ENTITY_MAPPED_FROM_ENTITIES = "modelEntityMappedFromEntities";
+    public static final String MODEL_ENTITY_MAPPED_TO_ENTITIES = "modelEntityMappedToEntities";
+    public static final String MODEL_ENTITY_MODEL_ATTRIBUTES_RELATION = "model_attribute_entities_model_entity_attributes";
+    public static final String MODEL_ENTITY_ATTRIBUTES = "modelEntityAttributes";
+    public static final String MODEL_ATTRIBUTE_ENTITIES = "modelAttributeEntities";
+    public static final String MODEL_ATTRIBUTE_MAPPED_TO_ATTRIBUTES = "modelAttributeMappedToAttributes";
+    public static final String MODEL_ATTRIBUTE_MAPPED_FROM_ATTRIBUTES = "modelAttributeMappedFromAttributes";
+    public static final String MODEL_ENTITY_RELATED_FROM_ENTITIES = "modelEntityRelatedFromEntities";
+    public static final String MODEL_ENTITY_RELATED_TO_ENTITIES = "modelEntityRelatedToEntities";
+    public static final String MODEL_ATTRIBUTE_RELATED_FROM_ATTRIBUTES = "modelAttributeRelatedFromAttributes";
+    public static final String MODEL_ATTRIBUTE_RELATED_TO_ATTRIBUTES = "modelAttributeRelatedToAttributes";
+    public static String MODEL_ENTITY_ASSOCIATION_TO = "modelEntityAssociationTo";
+    public static String MODEL_ENTITY_ASSOCIATION_FROM = "modelEntityAssociationFrom";
+    public static  String MODEL_ATTRIBUTE_ASSOCIATION_FROM = "modelAttributeAssociationFrom";
+    public static String MODEL_ATTRIBUTE_ASSOCIATION_TO = "modelAttributeAssociationTo";
+
+
+
+
+
+
+
+
     /**
      * The homeId field is used when saving into Atlas a copy of an object that is being imported from another
      * repository. The homeId will be set to a String that identifies the other repository. The specific format
@@ -400,6 +443,8 @@ public final class Constants {
 
     public static final String NON_COMPLIANT_ASSET_POLICY_GUIDS  = "nonCompliantAssetPolicyGUIDs";
     public static final String ASSET_POLICIES_COUNT  = "assetPoliciesCount";
+
+
 
     /*
      * All supported file-format extensions for Bulk Imports through file upload
