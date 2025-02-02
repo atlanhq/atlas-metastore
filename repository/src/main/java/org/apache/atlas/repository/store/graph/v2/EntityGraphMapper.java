@@ -241,24 +241,6 @@ public class EntityGraphMapper {
         currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
     }
 
-    public void updateTaskVertexForPropagation(long propagationCount) {
-        updateTaskVertexProperty(
-                TASK_ASSET_COUNT_TO_PROPAGATE,
-                propagationCount,
-                false,
-                AtlasTask::setAssetsCountToPropagate
-        );
-    }
-
-    public void updateTaskVertexForPropagated(long propagatedCount) {
-        updateTaskVertexProperty(
-                TASK_ASSET_COUNT_PROPAGATED,
-                propagatedCount,
-                true,
-                AtlasTask::setAssetsCountPropagated
-        );
-    }
-
     public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
         final String guid = UUID.randomUUID().toString();
         return createVertexWithGuid(entity, guid);
@@ -3328,8 +3310,9 @@ public class EntityGraphMapper {
             tagVertices = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
         }
 
-        updateTaskVertexForPropagation(totalCount);
-        updateTaskVertexForPropagated(totalCount);
+        updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, totalCount, false, AtlasTask::setAssetsCountToPropagate);
+        updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, totalCount, true, AtlasTask::setAssetsCountPropagated);
+
         transactionInterceptHelper.intercept();
         LOG.info("Completed cleaning up classification {}", classificationName);
     }
@@ -3568,7 +3551,7 @@ public class EntityGraphMapper {
             Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
             List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
 
-            updateTaskVertexForPropagation(impactedVertices.size() - 1);
+            updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, impactedVertices.size() - 1, false, AtlasTask::setAssetsCountToPropagate);
 
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
@@ -3621,7 +3604,8 @@ public class EntityGraphMapper {
                         : toIndex - offset;
 
                 offset += CHUNK_SIZE;
-                updateTaskVertexForPropagated(finishedTaskCount);
+
+                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, finishedTaskCount, true, AtlasTask::setAssetsCountPropagated);
 
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
@@ -4166,7 +4150,7 @@ public class EntityGraphMapper {
         LOG.info("Fetched classification : {} ", classification.toString());
         List<AtlasVertex> impactedVertices = graphHelper.getAllPropagatedEntityVertices(classificationVertex);
 
-        updateTaskVertexForPropagation(impactedVertices.size());
+        updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, impactedVertices.size(), false, AtlasTask::setAssetsCountToPropagate);
 
         LOG.info("impactedVertices : {}", impactedVertices.size());
         int batchSize = 100;
@@ -4183,7 +4167,7 @@ public class EntityGraphMapper {
                 }
             }
 
-            updateTaskVertexForPropagated(end);
+            updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, end, true, AtlasTask::setAssetsCountPropagated);
 
             transactionInterceptHelper.intercept();
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
@@ -4375,7 +4359,7 @@ public class EntityGraphMapper {
                 .filter(vertex -> vertex != null)
                 .collect(Collectors.toList());
 
-        updateTaskVertexForPropagation(verticesToRemove.size() + (verticesToAddClassification.size()));
+        updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, verticesToRemove.size() + verticesToAddClassification.size(), false, AtlasTask::setAssetsCountToPropagate);
 
         //Remove classifications from unreachable vertices
         processPropagatedClassificationDeletionFromVertices(verticesToRemove, currentClassificationVertex, classification);
@@ -4456,7 +4440,7 @@ public class EntityGraphMapper {
 
                 int finishedTaskCount = toIndex - offset;
                 offset += CHUNK_SIZE;
-                updateTaskVertexForPropagated(finishedTaskCount);
+                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, finishedTaskCount, true, AtlasTask::setAssetsCountPropagated);
                 transactionInterceptHelper.intercept();
 
             } while (offset < propagatedVerticesSize);
