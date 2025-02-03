@@ -166,6 +166,8 @@ public final class Constants {
     public static final String UD_RELATIONSHIP_END_NAME_FROM = "userDefRelationshipFrom";
     public static final String UD_RELATIONSHIP_END_NAME_TO = "userDefRelationshipTo";
 
+    public static final String MODIFICATION_TIMESTAMP = "__modificationTimestamp";
+
     /**
      * SQL property keys.
      */
