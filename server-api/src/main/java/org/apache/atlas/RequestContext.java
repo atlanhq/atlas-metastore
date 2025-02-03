@@ -88,8 +88,8 @@ public class RequestContext {
     private int attemptCount = 1;
     private boolean isImportInProgress = false;
     private boolean     isInNotificationProcessing = false;
-
-
+    private Long        assetsCountToPropagate = 0L;
+    private Long        assetsCountPropagated = 0L;
     private boolean     authorisedRemoveRelation = false;
     private boolean     isInTypePatching           = false;
     private boolean     createShellEntityForNonExistingReference = false;
@@ -310,6 +310,23 @@ public class RequestContext {
 
     public void setAttemptCount(int attemptCount) {
         this.attemptCount = attemptCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public Long getAssetsCountPropagated() {
+        return assetsCountPropagated;
+    }
+
+
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount ;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public boolean isImportInProgress() {

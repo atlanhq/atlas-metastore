@@ -245,14 +245,15 @@ public class TaskRegistry {
         deleteVertex(taskVertex);
     }
 
-    public void inProgress(AtlasVertex taskVertex, AtlasTask task) {
+    public void inProgress(AtlasVertex taskVertex, AtlasTask task, AbstractTask runnableTask) {
         RequestContext.get().setCurrentTask(task);
 
         task.setStartTime(new Date());
-
+        task.setAssetsCountToPropagate(runnableTask.getAssetsCountToPropagate());
         setEncodedProperty(taskVertex, Constants.TASK_START_TIME, task.getStartTime());
         setEncodedProperty(taskVertex, Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS);
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
+        setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
         graph.commit();
     }
 
@@ -279,7 +280,7 @@ public class TaskRegistry {
     public AtlasTask getById(String guid) {
         AtlasGraphQuery query = graph.query()
                                      .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
-                                     .has(TASK_GUID, guid);
+                                     .has(Constants.TASK_GUID, guid);
 
         Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -288,7 +289,7 @@ public class TaskRegistry {
 
     @GraphTransaction
     public AtlasVertex getVertex(String taskGuid) {
-        AtlasGraphQuery query = graph.query().has(Constants.TASK_GUID, taskGuid);
+        AtlasGraphQuery query = graph.query().has(TASK_GUID, taskGuid);
 
         Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -613,7 +614,15 @@ public class TaskRegistry {
             ret.setErrorMessage(errorMessage);
         }
 
+        Long assetsCountToPropagate = v.getProperty(Constants.TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
+        if (assetsCountToPropagate != null){
+            ret.setAssetsCountToPropagate(assetsCountToPropagate);
+        }
 
+        Long assetsCountPropagated = v.getProperty(Constants.TASK_ASSET_COUNT_PROPAGATED, Long.class);
+        if (assetsCountPropagated != null){
+            ret.setAssetsCountPropagated(assetsCountPropagated);
+        }
         return ret;
     }
 
