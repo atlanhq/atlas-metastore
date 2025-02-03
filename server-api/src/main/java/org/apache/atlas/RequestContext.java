@@ -692,12 +692,11 @@ public class RequestContext {
         }
     }
 
-    public void endMetricRecordWithInvocations(MetricRecorder recorder, long invocationCount) {
+    public void endMetricRecord(MetricRecorder recorder,long invocations){
         if (metrics != null && recorder != null) {
-            metrics.recordMetricWithInvocations(recorder, invocationCount);
+            metrics.recordMetric(recorder, invocations);
         }
     }
-
 
     public void recordEntityGuidUpdate(AtlasEntity entity, String guidInRequest) {
         recordEntityGuidUpdate(new EntityGuidPair(entity, guidInRequest));
