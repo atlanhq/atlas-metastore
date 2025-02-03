@@ -53,6 +53,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.LinkedHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -400,6 +401,7 @@ public class TaskRegistry {
         Map<String, Object> dsl = mapOf("query", mapOf("bool", mapOf("should", statusClauseList)));
         dsl.put("sort", Collections.singletonList(mapOf(Constants.TASK_CREATED_TIME, mapOf("order", "asc"))));
         dsl.put("size", size);
+        long mismatches = 0;
         int totalFetched = 0;
         while (true) {
             int fetched = 0;
@@ -443,10 +445,14 @@ public class TaskRegistry {
                             } else {
                                 LOG.warn("Status mismatch for task with guid: {}. Expected PENDING/IN_PROGRESS but found: {}",
                                         atlasTask.getGuid(), atlasTask.getStatus());
-                                // Repair mismatched task
-                                String docId = LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay()));
-                                LOG.info("Repairing mismatched task with docId: {}", docId);
-                                repairMismatchedTask(atlasTask, docId);
+                                mismatches++;
+                                try {
+                                    String docId = LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay()));
+                                    repairMismatchedTask(atlasTask, docId);
+                                }
+                                catch (Exception e){
+                                    e.printStackTrace();
+                                }
                             }
                         } else {
                             LOG.warn("Null vertex encountered while re-queuing tasks at index {}", fetched);
@@ -472,6 +478,7 @@ public class TaskRegistry {
                 break;
             }
         }
+        RequestContext.get().endMetricRecord(RequestContext.get().startMetricRecord("elasticSearchTaskMismatch"), mismatches);
 
         LOG.info("Fetch process completed. Total tasks fetched: {}.", totalFetched);
         return ret;
@@ -483,10 +490,14 @@ public class TaskRegistry {
         try {
             // Create a map for the fields to be updated
             Map<String, Object> fieldsToUpdate = new HashMap<>();
-            fieldsToUpdate.put("__task_endTime", atlasTask.getEndTime().getTime());
-            fieldsToUpdate.put("__task_timeTakenInSeconds", atlasTask.getTimeTakenInSeconds());
+            if(Objects.nonNull(atlasTask.getEndTime())) {
+                fieldsToUpdate.put("__task_endTime", atlasTask.getEndTime().getTime());
+            }
+            if(Objects.nonNull(atlasTask.getTimeTakenInSeconds())) {
+                fieldsToUpdate.put("__task_timeTakenInSeconds", atlasTask.getTimeTakenInSeconds());
+            }
             fieldsToUpdate.put("__task_status", atlasTask.getStatus().toString());
-            fieldsToUpdate.put("__task_modificationTimestamp", atlasTask.getUpdatedTime().getTime()); // Set current timestamp
+            fieldsToUpdate.put("__task_modificationTimestamp", atlasTask.getUpdatedTime().getTime());
 
             // Convert fieldsToUpdate map to JSON using Jackson
             ObjectMapper objectMapper = new ObjectMapper();
