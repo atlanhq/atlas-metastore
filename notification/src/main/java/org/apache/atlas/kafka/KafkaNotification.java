@@ -21,9 +21,13 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.RequestContext;
+import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.notification.AbstractNotification;
 import org.apache.atlas.notification.NotificationConsumer;
 import org.apache.atlas.notification.NotificationException;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.Service;
 import org.apache.atlas.utils.KafkaUtils;
 import org.apache.commons.configuration.Configuration;
@@ -45,6 +49,7 @@ import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.Future;
 
+import static org.apache.atlas.repository.Constants.TASK_GUID;
 import static org.apache.atlas.security.SecurityProperties.TRUSTSTORE_PASSWORD_KEY;
 import static org.apache.atlas.security.SecurityProperties.TLS_ENABLED;
 import static org.apache.atlas.security.SecurityUtil.getPassword;
@@ -312,10 +317,13 @@ public class KafkaNotification extends AbstractNotification implements Service {
 
     // ----- AbstractNotification with partition detail --------------------------------------------
     @Override
-    public void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) throws NotificationException {
+    public void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) {
         KafkaProducer producer = getOrCreateProducer(notificationType);
-
-        sendInternalToProducer(producer, notificationType, messages, partition);
+        try {
+            sendInternalToProducer(producer, notificationType, messages, partition);
+        } catch (NotificationException e) {
+            throw new RuntimeException("Failed to send internal notification", e);
+        }
     }
 
 
@@ -470,4 +478,18 @@ public class KafkaNotification extends AbstractNotification implements Service {
         return ret;
     }
 
+    public Map<String, Object> createKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertedId) {
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+        Map<String, Object> vertexMap = new HashMap<>();
+
+        vertexMap.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
+        vertexMap.put("action", classificationType);
+        vertexMap.put("assetVertexId", vertex.getIdForDisplay());
+        vertexMap.put("tagVertexId", tagVertedId);
+        vertexMap.put("parentTaskGuid", currentTask.getGuid());
+        vertexMap.put("tagTypeName", currentTask.getClassificationTypeName());
+
+        return vertexMap;
+    }
 }
