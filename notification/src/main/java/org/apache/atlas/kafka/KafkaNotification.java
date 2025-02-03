@@ -61,6 +61,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
     public    static final String ATLAS_HOOK_TOPIC           = AtlasConfiguration.NOTIFICATION_HOOK_TOPIC_NAME.getString();
     public    static final String ATLAS_ENTITIES_TOPIC       = AtlasConfiguration.NOTIFICATION_ENTITIES_TOPIC_NAME.getString();
     public    static final String ATLAS_RELATIONSHIPS_TOPIC       = AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_TOPIC_NAME.getString();
+    public    static final String ATLAS_TAG_PROP_EVENTS = AtlasConfiguration.NOTIFICATION_PROPAGATION_TOPIC_NAME.getString();
     protected static final String CONSUMER_GROUP_ID_PROPERTY = "group.id";
 
     private   static final String[] ATLAS_HOOK_CONSUMER_TOPICS     = AtlasConfiguration.NOTIFICATION_HOOK_CONSUMER_TOPIC_NAMES.getStringArray(ATLAS_HOOK_TOPIC);
@@ -74,6 +75,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
             put(NotificationType.HOOK, ATLAS_HOOK_TOPIC);
             put(NotificationType.ENTITIES, ATLAS_ENTITIES_TOPIC);
             put(NotificationType.RELATIONSHIPS, ATLAS_RELATIONSHIPS_TOPIC);
+            put(NotificationType.EMIT_PLANNED_RELATIONSHIPS, ATLAS_TAG_PROP_EVENTS);
         }
     };
 
@@ -268,6 +270,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
         sendInternalToProducer(producer, notificationType, messages);
     }
 
+
     @VisibleForTesting
     void sendInternalToProducer(Producer p, NotificationType notificationType, List<String> messages) throws NotificationException {
         String               topic           = PRODUCER_TOPIC_MAP.get(notificationType);
@@ -306,6 +309,55 @@ public class KafkaNotification extends AbstractNotification implements Service {
             throw new NotificationException(lastFailureException, failedMessages);
         }
     }
+
+    // ----- AbstractNotification with partition detail --------------------------------------------
+    @Override
+    public void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) throws NotificationException {
+        KafkaProducer producer = getOrCreateProducer(notificationType);
+
+        sendInternalToProducer(producer, notificationType, messages, partition);
+    }
+
+
+    @VisibleForTesting
+    void sendInternalToProducer(Producer p, NotificationType notificationType, List<String> messages, Integer partition) throws NotificationException {
+        String               topic           = PRODUCER_TOPIC_MAP.get(notificationType);
+        List<MessageContext> messageContexts = new ArrayList<>();
+
+        for (String message : messages) {
+            ProducerRecord record = new ProducerRecord(topic, partition, null, message);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Sending message for topic-partition {}-{}: {}", topic, partition, message);
+            }
+
+            Future future = p.send(record);
+
+            messageContexts.add(new MessageContext(future, message));
+        }
+
+        List<String> failedMessages       = new ArrayList<>();
+        Exception    lastFailureException = null;
+
+        for (MessageContext context : messageContexts) {
+            try {
+                RecordMetadata response = context.getFuture().get();
+
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Sent message for topic - {}, partition - {}, offset - {}", response.topic(), response.partition(), response.offset());
+                }
+            } catch (Exception e) {
+                lastFailureException = e;
+
+                failedMessages.add(context.getMessage());
+            }
+        }
+
+        if (lastFailureException != null) {
+            throw new NotificationException(lastFailureException, failedMessages);
+        }
+    }
+
 
     // Get properties for consumer request
     @VisibleForTesting

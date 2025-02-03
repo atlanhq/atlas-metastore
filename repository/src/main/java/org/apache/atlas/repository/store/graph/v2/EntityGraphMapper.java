@@ -27,6 +27,7 @@ import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.TimeBoundary;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.*;
@@ -37,6 +38,7 @@ import org.apache.atlas.model.typedef.AtlasEntityDef.AtlasRelationshipAttributeD
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef.Cardinality;
+import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
@@ -72,6 +74,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -82,6 +85,10 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
+import org.apache.atlas.kafka.KafkaNotification;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
@@ -134,6 +141,8 @@ import static org.apache.atlas.type.Constants.MEANINGS_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.MEANINGS_TEXT_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.MEANING_NAMES_PROPERTY_KEY;
 
+import com.google.common.hash.Hashing;
+import java.nio.charset.StandardCharsets;
 
 @Component
 public class EntityGraphMapper {
@@ -198,6 +207,10 @@ public class EntityGraphMapper {
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
     private static final Set<String> edgeLabelsForHardDeletion = new HashSet<>(Arrays.asList(OUTPUT_PORT_PRODUCT_EDGE_LABEL, INPUT_PORT_PRODUCT_EDGE_LABEL, TERM_ASSIGNMENT_LABEL));
 
+    Configuration configuration;
+    KafkaNotification kfknotif;
+    int numPartitions = Integer.parseInt(TAG_PROP_EVENTS_PARTITION_COUNT); // Total number of partitions in the Kafka topic
+
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
@@ -215,7 +228,16 @@ public class EntityGraphMapper {
         this.retrieverNoRelation  = new EntityGraphRetriever(graph, typeRegistry, true);
         this.fullTextMapperV2     = fullTextMapperV2;
         this.taskManagement       = taskManagement;
-        this.transactionInterceptHelper = transactionInterceptHelper;}
+        this.transactionInterceptHelper = transactionInterceptHelper;
+        try {
+            this.configuration = ApplicationProperties.get();
+            this.kfknotif = new KafkaNotification(configuration);
+
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
 
     @VisibleForTesting
     public void setTasksUseFlag(boolean value) {
@@ -3502,7 +3524,38 @@ public class EntityGraphMapper {
             List<String> edgeLabelsToCheck = CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode);
             Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
             List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
-            
+
+            // update the 'assetsCountToPropagate' on in memory java object.
+            AtlasTask currentTask = RequestContext.get().getCurrentTask();
+            currentTask.setAssetsCountToPropagate((long) impactedVertices.size());
+
+            //update the 'assetsCountToPropagate' in the current task vertex.
+            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+            currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, impactedVertices.size());
+
+            //iterate over each impacted vertex to create a message and send it to kafka
+            for (AtlasVertex vertex : impactedVertices) {
+                // Create a Map to store vertex properties
+                Map<String, Object> vertexMap = new HashMap<>();
+
+                vertexMap.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
+                vertexMap.put("action", CLASSIFICATION_PROPAGATION_ADD);
+                vertexMap.put("assetVertexId", vertex.getIdForDisplay());
+                vertexMap.put("tagVertexId", classificationVertexId);
+                vertexMap.put("parentTaskGuid", currentTask.getGuid());
+                vertexMap.put("tagTypeName", currentTask.getClassificationTypeName());
+
+                String vertexJson = AtlasType.toJson(vertexMap);
+
+
+                // Using Guava to calculate the partition
+                int partition = Math.abs((Integer) vertexMap.get("parentTaskGuid")) % numPartitions;
+                LOG.debug("sending message with  guid={} to partition={}",currentTaskVertex.getIdForDisplay(), partition);
+
+                //send vertexJson to kafka topic 'TAG_PROP_EVENTS'
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(vertexJson), partition);
+                LOG.debug("Message with guid={} sent to partition={} sent successfully.",currentTaskVertex.getIdForDisplay(), partition );
+            }
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
 

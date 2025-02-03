@@ -502,6 +502,9 @@ public final class Constants {
     public static final String REQUEST_HEADER_USER_AGENT = "User-Agent";
     public static final String REQUEST_HEADER_HOST       = "Host";
 
+    //kafka partition value for TAG_PROP_EVENTS
+    public static final String TAG_PROP_EVENTS_PARTITION_COUNT = "5";
+
     public static final Set<String> SKIP_UPDATE_AUTH_CHECK_TYPES = new HashSet<String>() {{
         add(README_ENTITY_TYPE);
         add(LINK_ENTITY_TYPE);

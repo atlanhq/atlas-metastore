@@ -108,6 +108,38 @@ public class KafkaUtils implements AutoCloseable {
         }
     }
 
+    public void createTopics(List<String[]> topicDetails, int replicationFactor)
+            throws TopicExistsException, ExecutionException, InterruptedException {
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> createTopics()");
+        }
+
+        List<NewTopic> newTopicList = topicDetails.stream()
+                .map(details -> new NewTopic(details[0], Integer.parseInt(details[1]), (short) replicationFactor))
+                .collect(Collectors.toList());
+
+        CreateTopicsResult             createTopicsResult = adminClient.createTopics(newTopicList);
+        Map<String, KafkaFuture<Void>> futureMap          = createTopicsResult.values();
+
+        for (Map.Entry<String, KafkaFuture<Void>> futureEntry : futureMap.entrySet()) {
+            KafkaFuture<Void> future = futureEntry.getValue();
+
+            try {
+                future.get();
+            } catch (ExecutionException | InterruptedException e) {
+                LOG.error("Error while creating topic " + futureEntry.getKey(), e);
+                // Re-throw to handle these exceptions in the calling code.
+                throw e;
+            }
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("<== createTopics()");
+        }
+    }
+
+
     public List<String> listAllTopics() throws ExecutionException, InterruptedException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> KafkaUtils.listAllTopics() ");
