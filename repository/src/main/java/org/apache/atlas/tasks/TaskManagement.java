@@ -21,10 +21,13 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ICuratorFactory;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.ha.HAConfiguration;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.Service;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
@@ -41,6 +44,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+
+import static org.apache.atlas.repository.Constants.TASK_GUID;
 
 @Component
 @Order(7)
@@ -56,6 +62,21 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
     private Thread watcherThread = null;
+
+    public void updateTaskVertexProperty(String propertyKey, AtlasGraph graph, long value, boolean isIncremental, BiConsumer<AtlasTask, Long> taskSetter) {
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices().iterator().next();
+
+        Long valueFromTaskVertex = currentTaskVertex.getProperty(propertyKey, Long.class);
+        long valueToPushToTaskVertex = isIncremental ? (valueFromTaskVertex != null ? valueFromTaskVertex : 0L) + value : value;
+        if (taskSetter != null) {
+            taskSetter.accept(currentTask, valueToPushToTaskVertex);
+        }
+
+        currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
+    }
 
     public enum DeleteType {
         SOFT,
