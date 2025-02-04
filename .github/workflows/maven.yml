@@ -29,6 +29,7 @@ on:
       - lineageondemand
       - makerlogic
       - tagpropv1master
+      - tagpropv1.5master
 
 jobs:
   build:
@@ -68,7 +69,7 @@ jobs:
       - name: Build with Maven
         run: |
           branch_name=${{ env.BRANCH_NAME }}
-          if [[ $branch_name == 'main' || $branch_name == 'master' || $branch_name == 'tagpropv1master' ]]
+          if [[ $branch_name == 'main' || $branch_name == 'master' || $branch_name == 'lineageondemand' ]]
           then
               echo "build without dashboard"
               chmod +x ./build.sh && ./build.sh build_without_dashboard

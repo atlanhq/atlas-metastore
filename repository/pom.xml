@@ -332,6 +332,14 @@
             <artifactId>jackson-dataformat-yaml</artifactId>
             <version>2.12.7</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-notification</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-notification</artifactId>
+        </dependency>
 
     </dependencies>
 

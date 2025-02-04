@@ -21,6 +21,7 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.authorize.AtlasRelationshipAccessRequest;
@@ -36,6 +37,7 @@ import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
+import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
@@ -104,14 +106,10 @@ public abstract class DeleteHandlerV1 {
                 .has(TASK_GUID, currentTask.getGuid())
                 .vertices().iterator().next();
 
-        Long valueFromTaskVertex = currentTaskVertex.getProperty(propertyKey, Long.class);
-        long valueToPushToTaskVertex = isIncremental ? (valueFromTaskVertex != null ? valueFromTaskVertex : 0L) + value : value;
-        if (taskSetter != null) {
-            taskSetter.accept(currentTask, valueToPushToTaskVertex);
-        }
+    KafkaNotification kfknotif;
+    int numPartitions = Integer.parseInt(TAG_PROP_EVENTS_PARTITION_COUNT); // Total number of partitions in the Kafka topic
 
-        currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
-    }
+
 
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
@@ -1239,6 +1237,12 @@ public abstract class DeleteHandlerV1 {
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
+                Map<String, Object> kafkaMessage = kfknotif.createKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
+                LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
@@ -1250,6 +1254,12 @@ public abstract class DeleteHandlerV1 {
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
+                Map<String, Object> kafkaMessage = kfknotif.createKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
+                LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
