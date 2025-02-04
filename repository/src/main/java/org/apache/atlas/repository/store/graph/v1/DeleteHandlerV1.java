@@ -60,8 +60,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 
-
 import java.util.*;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;
@@ -96,6 +96,22 @@ public abstract class DeleteHandlerV1 {
     private   final TaskManagement       taskManagement;
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
+    private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
+
+    public void updateTaskVertexProperty(String propertyKey, long value, boolean isIncremental, BiConsumer<AtlasTask, Long> taskSetter) {
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices().iterator().next();
+
+        Long valueFromTaskVertex = currentTaskVertex.getProperty(propertyKey, Long.class);
+        long valueToPushToTaskVertex = isIncremental ? (valueFromTaskVertex != null ? valueFromTaskVertex : 0L) + value : value;
+        if (taskSetter != null) {
+            taskSetter.accept(currentTask, valueToPushToTaskVertex);
+        }
+
+        currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
+    }
 
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
@@ -1219,16 +1235,32 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, addPropagationsMap.size() + removePropagationsMap.size(), false, AtlasTask::setAssetsCountToPropagate);
+
+            int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
+                propagatedCount++;
+                if (propagatedCount == CHUNK_SIZE){
+                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount - 1, true, AtlasTask::setAssetsCountPropagated);
+                    propagatedCount = 0;
+                }
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
+                propagatedCount++;
+                if (propagatedCount == CHUNK_SIZE){
+                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount, true, AtlasTask::setAssetsCountPropagated);
+                    propagatedCount = 0;
+                }
+            }
+            if (propagatedCount != 0){
+                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount, true, AtlasTask::setAssetsCountPropagated);
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)
