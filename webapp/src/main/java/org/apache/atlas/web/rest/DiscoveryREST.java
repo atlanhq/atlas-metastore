@@ -401,6 +401,8 @@ public class DiscoveryREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.indexSearch(" + parameters + ")");
             }
 
+            RequestContext.get().endMetricRecordWithInvocations(RequestContext.get().startMetricRecord("dslSize"), parameters.getQuerySize());
+            RequestContext.get().endMetricRecordWithInvocations(RequestContext.get().startMetricRecord("attributeSize"), CollectionUtils.isNotEmpty(parameters.getAttributes()) ? parameters.getAttributes().size() : 0);
             if (AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_API_LIMIT.getBoolean() && parameters.getQuerySize() > AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()) {
                 if(CollectionUtils.isEmpty(parameters.getUtmTags())) {
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
@@ -440,7 +442,7 @@ public class DiscoveryREST {
             }
             throw abe;
         } catch (Exception e) {
-            AtlasBaseException abe = new AtlasBaseException(e.getMessage(), e.getCause());
+            AtlasBaseException abe = new AtlasBaseException(e.getMessage(), e);
             if (enableSearchLogging && parameters.isSaveSearchLog()) {
                 logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }

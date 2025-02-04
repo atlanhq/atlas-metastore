@@ -526,6 +526,24 @@
             </exclusions>
         </dependency>
 
+        <!-- sentry.io dependency in webapp/pom.xml -->
+        <dependency>
+            <groupId>io.sentry</groupId>
+            <artifactId>sentry-log4j</artifactId>
+            <version>1.7.30</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-testtools</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>ch.qos.logback</groupId>
             <artifactId>logback-classic</artifactId>

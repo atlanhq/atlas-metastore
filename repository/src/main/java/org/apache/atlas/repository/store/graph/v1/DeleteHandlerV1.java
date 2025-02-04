@@ -97,7 +97,6 @@ public abstract class DeleteHandlerV1 {
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
 
-
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
