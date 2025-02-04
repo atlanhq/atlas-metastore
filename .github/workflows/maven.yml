@@ -206,6 +206,7 @@ jobs:
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
+      - build
       - list-integration-tests
     runs-on: ubuntu-latest
     strategy:
