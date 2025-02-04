@@ -149,20 +149,14 @@ jobs:
         with:
           version: 'latest'
 
-      - name: Install Loft CLI
-        run: |
-          curl -L -o loft "https://github.com/loft-sh/loft/releases/latest/download/loft-linux-amd64"
-          chmod +x loft
-          mv loft "$HOME/.local/bin/"
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
+      - name: Install and Authenticate Loft CLI (Using setup-loft)
+        uses: loft-sh/setup-loft@main
+        with:
+          url: "https://onboarding-tenant.atlan.com"
+          access-key: ${{ secrets.LOFT_ACCESS_KEY }}
 
-      - name: Verify Loft Installation
-        run: loft --version
-
-      - name: Authenticate with Loft
-        run: |
-          loft login onboarding-tenant.atlan.com --access-key ${{ secrets.LOFT_ACCESS_KEY }}
-          loft use vcluster enpla9up36 --project default
+      - name: Use Loft Virtual Cluster
+        run: loft use vcluster enpla9up36 --project default
 
       - name: Deploy Metastore with New Image
         run: |
