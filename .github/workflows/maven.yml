@@ -134,3 +134,140 @@ jobs:
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
           echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_OUTPUT
         id: image-tag
+
+  # ----- Integration Tests Jobs (appended to the Maven workflow) -----
+
+  deploy-test-environment:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v2
+
+      - name: Set Up Kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install Loft CLI
+        run: |
+          curl -fsSL https://downloads.loft.sh/install.sh | bash
+          echo "$HOME/.loft/bin" >> $GITHUB_PATH
+
+      - name: Authenticate with Loft
+        run: |
+          loft login onboarding-tenant.atlan.com --access-key ${{ secrets.LOFT_ACCESS_KEY }}
+          loft use vcluster enpla9up36 --project default
+
+      - name: Deploy Metastore with New Image
+        run: |
+          echo "Updating Kubernetes deployment with new image..."
+          kubectl set image StatefulSets/atlas atlas-main=${{ steps.image-tag.outputs.IMAGE_TAG }} -n atlas
+
+
+      - name: Verify Deployment
+        run: |
+          echo "Waiting for deployment to be ready..."
+          kubectl wait --for=condition=available --timeout=600s StatefulSets/atlas -n atlas
+  
+
+  run-integration-tests:
+    runs-on: ubuntu-latest
+    needs: deploy-test-environment
+    steps:
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/java-sdk
+          ref: main
+
+      - name: Set up JDK for SDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Compile
+        uses: burrunan/gradle-cache-action@v1
+        with:
+          arguments: assemble shadowJar test
+
+  list-integration-tests:
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.test-files.outputs.tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: List integration tests
+        id: test-files
+        run: |
+          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
+          json_tests=$(echo "$tests[@]}" | jq -R -c 'split(" ")[:-1]')
+          echo "tests=$json_tests" >> $GITHUB_OUTPUT
+  integration-test:
+    needs:
+      - list-integration-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tests: ${{fromJson(needs.list-integration-tests.outputs.tests)}}
+    concurrency:
+      group: ${{ matrix.tests }}
+    name: "Integration"
+    steps:
+      - uses: actions/checkout@v4
+      # - name: Download artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: build-artifacts
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+      - name: Integration tests
+        uses: burrunan/gradle-cache-action@v1
+        env:
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+          ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
+        with:
+          arguments: -PintegrationTests integration-tests:test --tests "com.atlan.java.sdk.${{ matrix.tests }}"
+      - if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tests }}
+          path: integration-tests/${{ matrix.tests }}.log
+
+  post-test-results:
+    runs-on: ubuntu-latest
+    needs: integration-test
+    steps:
+      - name: Retrieve Test Results
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-test-results
+          path: target/surefire-reports/
+
+      - name: Post Test Results as PR Comment
+        uses: actions/github-script@v5
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            const results = fs.readFileSync('target/surefire-reports/test-summary.txt', 'utf8');
+            const success = results.includes("Tests run:") && !results.includes("Failures:");
+            const comment = success 
+              ? "✅ Integration Tests Passed! Ready to merge." 
+              : "❌ Integration Tests Failed. Please check the logs.";
+            
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail if Tests Failed
+        run: exit 1
+        if: failure()
+
