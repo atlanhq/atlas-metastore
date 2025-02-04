@@ -142,7 +142,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v3
 
       - name: Set Up Kubectl
         uses: azure/setup-kubectl@v3
@@ -151,8 +151,13 @@ jobs:
 
       - name: Install Loft CLI
         run: |
-          curl -fsSL https://downloads.loft.sh/install.sh | bash
-          echo "$HOME/.loft/bin" >> $GITHUB_PATH
+          curl -L -o loft "https://github.com/loft-sh/loft/releases/latest/download/loft-linux-amd64"
+          chmod +x loft
+          mv loft "$HOME/.local/bin/"
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+
+      - name: Verify Loft Installation
+        run: loft --version
 
       - name: Authenticate with Loft
         run: |
