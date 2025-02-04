@@ -73,7 +73,6 @@ import org.testng.annotations.Guice;
 import org.testng.annotations.Test;
 
 import javax.inject.Inject;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -162,7 +161,7 @@ public class TestEntitiesREST {
         dbWithCustomAttr.setCustomAttributes(customAttr);
 
         AtlasEntitiesWithExtInfo atlasEntitiesWithExtInfo = new AtlasEntitiesWithExtInfo(dbWithCustomAttr);
-        EntityMutationResponse   response                 = entityREST.createOrUpdate(atlasEntitiesWithExtInfo, false, false, false);
+        EntityMutationResponse   response                 = entityREST.createOrUpdate(atlasEntitiesWithExtInfo, false, false, false, false);
 
         Assert.assertNotNull(response.getUpdatedEntitiesByTypeName(DATABASE_TYPE));
 
@@ -646,7 +645,7 @@ public class TestEntitiesREST {
             newEntities.addReferredEntity(serDeserEntity(column));
         }
 
-        EntityMutationResponse response2 = entityREST.createOrUpdate(newEntities, false, false, false);
+        EntityMutationResponse response2 = entityREST.createOrUpdate(newEntities, false, false, false, false);
 
         List<AtlasEntityHeader> newGuids = response2.getEntitiesByOperation(EntityMutations.EntityOperation.CREATE);
         Assert.assertNotNull(newGuids);
@@ -775,7 +774,7 @@ public class TestEntitiesREST {
             entities.addReferredEntity(column);
         }
 
-        EntityMutationResponse response = entityREST.createOrUpdate(entities, false, false, false);
+        EntityMutationResponse response = entityREST.createOrUpdate(entities, false, false, false, false);
         List<AtlasEntityHeader> guids = response.getEntitiesByOperation(EntityMutations.EntityOperation.CREATE);
 
         Assert.assertNotNull(guids);
