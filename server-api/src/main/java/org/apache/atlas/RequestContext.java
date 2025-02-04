@@ -110,11 +110,12 @@ public class RequestContext {
     private boolean skipAuthorizationCheck = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
-    private boolean cacheEnabled;
 
     private boolean delayTagNotifications = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
+    private final List<String> addedOutputPorts = new ArrayList<>();
+    private final List<String> removedOutputPorts = new ArrayList<>();
 
 
     private RequestContext() {
@@ -180,6 +181,8 @@ public class RequestContext {
         this.delayTagNotifications = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
+        this.addedOutputPorts.clear();
+        this.removedOutputPorts.clear();
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -669,6 +672,13 @@ public class RequestContext {
         }
     }
 
+    public void endMetricRecordWithInvocations(MetricRecorder recorder, long invocationCount) {
+        if (metrics != null && recorder != null) {
+            metrics.recordMetricWithInvocations(recorder, invocationCount);
+        }
+    }
+
+
     public void recordEntityGuidUpdate(AtlasEntity entity, String guidInRequest) {
         recordEntityGuidUpdate(new EntityGuidPair(entity, guidInRequest));
     }
@@ -739,14 +749,6 @@ public class RequestContext {
 
     public String getRequestUri() {
         return this.requestUri;
-    }
-
-    public void setEnableCache(boolean cacheEnabled) {
-        this.cacheEnabled = cacheEnabled;
-    }
-
-    public boolean isCacheEnabled() {
-        return this.cacheEnabled;
     }
 
     public boolean isIncludeClassificationNames() {
@@ -855,6 +857,22 @@ public class RequestContext {
 
     public boolean isEdgeLabelAlreadyProcessed(String processEdgeLabel) {
         return edgeLabels.contains(processEdgeLabel);
+    }
+
+    public void setAddedOutputPorts(List<String> addedOutputPorts) {
+        this.addedOutputPorts.addAll(addedOutputPorts);
+    }
+
+    public List<String> getAddedOutputPorts() {
+        return addedOutputPorts;
+    }
+
+    public void setRemovedOutputPorts(List<String> removedOutputPorts) {
+        this.removedOutputPorts.addAll(removedOutputPorts);
+    }
+
+    public List<String> getRemovedOutputPorts() {
+        return removedOutputPorts;
     }
 
 }
