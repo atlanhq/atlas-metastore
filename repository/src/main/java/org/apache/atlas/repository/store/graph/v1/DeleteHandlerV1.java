@@ -1235,7 +1235,7 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
-            updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, addPropagationsMap.size() + removePropagationsMap.size(), false, AtlasTask::setAssetsCountToPropagate);
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, addPropagationsMap.size() + removePropagationsMap.size(), false, AtlasTask::setAssetsCountToPropagate);
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
@@ -1244,7 +1244,7 @@ public abstract class DeleteHandlerV1 {
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
                 propagatedCount++;
                 if (propagatedCount == CHUNK_SIZE){
-                    updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, propagatedCount - 1, true, AtlasTask::setAssetsCountPropagated);
+                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount - 1, true, AtlasTask::setAssetsCountPropagated);
                     propagatedCount = 0;
                 }
             }
@@ -1255,12 +1255,12 @@ public abstract class DeleteHandlerV1 {
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
                 propagatedCount++;
                 if (propagatedCount == CHUNK_SIZE){
-                    updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, propagatedCount, true, AtlasTask::setAssetsCountPropagated);
+                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount, true, AtlasTask::setAssetsCountPropagated);
                     propagatedCount = 0;
                 }
             }
             if (propagatedCount != 0){
-                updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, propagatedCount, true, AtlasTask::setAssetsCountPropagated);
+                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount, true, AtlasTask::setAssetsCountPropagated);
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)
