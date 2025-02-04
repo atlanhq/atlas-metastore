@@ -39,4 +39,6 @@ public final class AtlasConstants {
     public static final String DEFAULT_TYPE_VERSION          = "1.0";
     public static final int    ATLAS_SHUTDOWN_HOOK_PRIORITY  = 30;
     public static final int TASK_WAIT_TIME_MS = 180_000;
+    public static final String ATLAS_KAFKA_TAG_TOPIC = "TAG_PROP_EVENTS";
+
 }
