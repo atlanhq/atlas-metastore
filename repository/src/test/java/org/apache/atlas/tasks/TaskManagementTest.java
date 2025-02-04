@@ -19,11 +19,9 @@ package org.apache.atlas.tasks;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.TestModules;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.tasks.AtlasTask;
-import org.apache.commons.configuration.Configuration;
 import org.testng.Assert;
 import org.testng.annotations.Guice;
 import org.testng.annotations.Test;
@@ -76,7 +74,7 @@ public class TaskManagementTest extends BaseTaskFixture {
     public void severalTaskAdds() throws AtlasException, InterruptedException {
         int MAX_THREADS = 5;
 
-        TaskManagement taskManagement = new TaskManagement((Configuration) null, taskRegistry, (ICuratorFactory) null,null, null);
+        TaskManagement taskManagement = new TaskManagement(null, taskRegistry,null,null);
         taskManagement.start();
 
         Thread[] threads = new Thread[MAX_THREADS];
