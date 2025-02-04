@@ -27,9 +27,9 @@ unzip -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
 echo "Maven Building"
 
 if [ "$1" == "build_without_dashboard" ]; then
-  mvn  -pl '!dashboardv2' -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+  mvn  -pl '!test-tools,!dashboardv2,!dashboardv3' -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
 else
-  mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipEnunciate=true package -Pdist
+  mvn  -pl '!test-tools' -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipEnunciate=true package -Pdist
 fi
 
 echo "[DEBUG listing distro/target"
