@@ -415,6 +415,11 @@
             <type>war</type>
         </dependency>
         <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-dashboardv3</artifactId>
+            <type>war</type>
+        </dependency>
+        <dependency>
             <groupId>org.easymock</groupId>
             <artifactId>easymock</artifactId>
             <version>3.4</version>
@@ -593,6 +598,11 @@
                         <overlay>
                             <groupId>org.apache.atlas</groupId>
                             <artifactId>atlas-dashboardv2</artifactId>
+                            <skip>${skipOverlay}</skip>
+                        </overlay>
+                        <overlay>
+                            <groupId>org.apache.atlas</groupId>
+                            <artifactId>atlas-dashboardv3</artifactId>
                             <skip>${skipOverlay}</skip>
                         </overlay>
                         <overlay>
