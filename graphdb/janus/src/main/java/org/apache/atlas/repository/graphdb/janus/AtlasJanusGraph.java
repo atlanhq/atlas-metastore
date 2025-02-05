@@ -128,7 +128,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return new GremlinGroovyScriptEngine(builder.create());
     });
 
-
     public AtlasJanusGraph() {
         this(getGraphInstance(), getClient(), getLowLevelClient());
     }
@@ -688,5 +687,13 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         }
 
         return null;
+    }
+
+    public void setEnableCache(boolean enableCache) {
+        this.janusGraph.setEnableCache(enableCache);
+    }
+
+    public Boolean isCacheEnabled() {
+        return this.janusGraph.isCacheEnabled();
     }
 }

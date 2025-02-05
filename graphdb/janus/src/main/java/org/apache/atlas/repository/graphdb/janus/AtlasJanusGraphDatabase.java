@@ -90,7 +90,7 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
     public AtlasJanusGraphDatabase() {
         //update registry
-        GraphSONMapper.build().addRegistry(JanusGraphIoRegistry.instance()).create();
+        GraphSONMapper.build().addRegistry(JanusGraphIoRegistry.getInstance()).create();
     }
 
     public static Configuration getConfiguration() throws AtlasException {
