@@ -63,7 +63,6 @@ import org.slf4j.LoggerFactory;
 import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 
 import java.util.*;
-import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;
@@ -1224,7 +1223,7 @@ public abstract class DeleteHandlerV1 {
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
-                Map<String, Object> kafkaMessage = kfknotif.createKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
                 int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                 LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
                 kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
@@ -1241,7 +1240,7 @@ public abstract class DeleteHandlerV1 {
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
-                Map<String, Object> kafkaMessage = kfknotif.createKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
                 int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                 LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
                 kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);

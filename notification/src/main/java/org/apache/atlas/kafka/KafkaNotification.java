@@ -478,7 +478,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
         return ret;
     }
 
-    public Map<String, Object> createKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertedId) {
+    public Map<String, Object> createTagPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertedId) {
         AtlasTask currentTask = RequestContext.get().getCurrentTask();
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
         Map<String, Object> vertexMap = new HashMap<>();

@@ -72,8 +72,8 @@ public class Spooler extends AbstractNotification {
     }
 
     @Override
-    public void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) throws NotificationException {
-
+    public void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) {
+        throw new UnsupportedOperationException("sendInternal is not implemented yet.");
     }
 
     @Override
