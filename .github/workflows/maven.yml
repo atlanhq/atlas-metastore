@@ -129,6 +129,10 @@ jobs:
         with:
           sarif_file: 'trivy-image-results.sarif'
 
+
+      - name: Wait for Deployment
+        run: sleep 60
+
   run-integration-tests:
     runs-on: ubuntu-latest
     needs: build
@@ -149,6 +153,7 @@ jobs:
         uses: burrunan/gradle-cache-action@v1
         with:
           arguments: assemble shadowJar test
+
 
   list-integration-tests:
     runs-on: ubuntu-latest
