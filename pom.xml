@@ -800,7 +800,6 @@
         <module>repository</module>
         <module>authorization</module>
         <module>dashboardv2</module>
-        <module>dashboardv3</module>
 
         <module>auth-agents-cred</module>
         <module>auth-agents-common</module>
@@ -808,7 +807,6 @@
         <module>auth-plugin-atlas</module>
 
         <module>webapp</module>
-        <module>docs</module>
 
         <module>addons/hdfs-model</module>
         <module>plugin-classloader</module>
@@ -932,11 +930,7 @@
                 <version>${slf4j.version}</version>
             </dependency>
 
-            <dependency>
-                <groupId>org.slf4j</groupId>
-                <artifactId>slf4j-log4j12</artifactId>
-                <version>${slf4j.version}</version>
-            </dependency>
+
 
             <dependency>
                 <groupId>org.slf4j</groupId>
@@ -961,13 +955,6 @@
                 <artifactId>logback-core</artifactId>
                 <version>${logback.version}</version>
             </dependency>
-
-            <dependency>
-                <groupId>org.slf4j</groupId>
-                <artifactId>log4j-over-slf4j</artifactId>
-                <version>${slf4j.version}</version>
-            </dependency>
-
 
             <!-- hadoop -->
             <dependency>
@@ -1715,10 +1702,6 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
 
-        <dependency>
-            <groupId>org.slf4j</groupId>
-            <artifactId>slf4j-log4j12</artifactId>
-        </dependency>
 
         <dependency>
             <groupId>org.slf4j</groupId>
