@@ -382,6 +382,7 @@
             </roles>
             <organization>Privacera Inc</organization>
             <!--<organizationUrl>https://www.privacera.com</organizationUrl>-->
+        </developer>
         <developer>
             <id>mandy</id>
             <name>Mandy Chessell</name>
