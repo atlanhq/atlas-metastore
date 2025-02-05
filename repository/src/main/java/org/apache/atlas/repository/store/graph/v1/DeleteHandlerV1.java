@@ -98,21 +98,6 @@ public abstract class DeleteHandlerV1 {
     private   final TaskUtil             taskUtil;
     private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
-    public void updateTaskVertexProperty(String propertyKey, long value, boolean isIncremental, BiConsumer<AtlasTask, Long> taskSetter) {
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
-                .has(TASK_GUID, currentTask.getGuid())
-                .vertices().iterator().next();
-
-        Long valueFromTaskVertex = currentTaskVertex.getProperty(propertyKey, Long.class);
-        long valueToPushToTaskVertex = isIncremental ? (valueFromTaskVertex != null ? valueFromTaskVertex : 0L) + value : value;
-        if (taskSetter != null) {
-            taskSetter.accept(currentTask, valueToPushToTaskVertex);
-        }
-
-        currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
-    }
-
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
