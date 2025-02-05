@@ -26,6 +26,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.ha.HAConfiguration;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.Service;
@@ -39,10 +40,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 
@@ -62,34 +60,6 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
     private Thread watcherThread = null;
-
-    /**
-     * Updates a property on the current task’s vertex in the graph.
-     * If incremental is true, the provided value is added to the existing property value.
-     * If false, the property value is set to the new value.
-     *
-     * @param propertyKey   The key identifying the property to update.
-     * @param graph         The graph that holds the vertex representing the current task.
-     * @param value         The new value to apply to the property.
-     * @param isIncremental True if you want to add the value to the existing property; false to replace it.
-     * @param taskSetter    A BiConsumer to process the current task and the updated value. For example,
-     *                      you could use it to update the task's internal state or trigger other actions.
-     *                      Pass null if no additional processing is needed.
-     */
-    public void updateTaskVertexProperty(String propertyKey, AtlasGraph graph, long value, boolean isIncremental, BiConsumer<AtlasTask, Long> taskSetter) {
-        AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
-                .has(TASK_GUID, currentTask.getGuid())
-                .vertices().iterator().next();
-
-        Long valueFromTaskVertex = currentTaskVertex.getProperty(propertyKey, Long.class);
-        long valueToPushToTaskVertex = isIncremental ? (valueFromTaskVertex != null ? valueFromTaskVertex : 0L) + value : value;
-        if (taskSetter != null) {
-            taskSetter.accept(currentTask, valueToPushToTaskVertex);
-        }
-
-        currentTaskVertex.setProperty(propertyKey, valueToPushToTaskVertex);
-    }
 
     public enum DeleteType {
         SOFT,
@@ -118,6 +88,53 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         this.curatorFactory = curatorFactory;
 
         createTaskTypeFactoryMap(taskTypeFactoryMap, taskFactory);
+    }
+
+    /**
+     * Updates a property of the current task's vertex in the Atlas graph.
+     *
+     * This method retrieves the current task from the request context, fetches its corresponding
+     * vertex from the Atlas graph, and updates the specified property.
+     *
+     * Edge cases handled:
+     * - Ensures `currentTask` is not null before accessing its properties.
+     * - Checks if the vertex exists before attempting updates.
+     * - Handles `null` or unexpected `propertyKey` values safely.
+     *
+     * @param propertyKey The key of the property to update.
+     * @param graph The AtlasGraph instance used for querying and updating.
+     * @param value The value to set for the specified property.
+     * @throws IllegalStateException if no matching vertex is found.
+     * @throws IllegalArgumentException if an invalid propertyKey is provided.
+     */
+    public void updateTaskVertexProperty(String propertyKey, AtlasGraph graph, long value) {
+        // Ensure current task exists
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        if (currentTask == null) {
+            throw new IllegalStateException("No current task found in request context.");
+        }
+
+        // Get the corresponding vertex
+        Iterator vertexIterator = graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices().iterator();
+
+        if (!vertexIterator.hasNext()) {
+            throw new IllegalStateException("No vertex found for task GUID: " + currentTask.getGuid());
+        }
+
+        AtlasVertex currentTaskVertex = (AtlasVertex) vertexIterator.next();
+
+        // Ensure propertyKey is valid and update the corresponding task property
+        if (propertyKey != null && Constants.TASK_ASSET_COUNT_TO_PROPAGATE.equals(propertyKey)) {
+            currentTask.setAssetsCountToPropagate(value);
+            currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountToPropagate());
+        } else if (propertyKey != null && Constants.TASK_ASSET_COUNT_PROPAGATED.equals(propertyKey)) {
+            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + value);
+            currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountPropagated());
+        } else {
+            throw new IllegalArgumentException("Unexpected or null propertyKey: " + propertyKey);
+        }
     }
 
     @Override
