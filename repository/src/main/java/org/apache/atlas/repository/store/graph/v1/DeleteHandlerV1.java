@@ -100,9 +100,6 @@ public abstract class DeleteHandlerV1 {
     private   final TaskUtil             taskUtil;
     private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
-    KafkaNotification kfknotif;
-    int numPartitions = Integer.parseInt(TAG_PROP_EVENTS_PARTITION_COUNT); // Total number of partitions in the Kafka topic
-    
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
