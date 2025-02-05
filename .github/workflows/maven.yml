@@ -165,8 +165,7 @@ jobs:
       - name: Deploy Metastore with New Image
         run: |
           echo "Updating Kubernetes deployment with new image..."
-          kubectl set image StatefulSets/atlas atlas-main=${{ steps.image-tag.outputs.IMAGE_TAG }} -n atlas
-
+          kubectl set image statefulset/atlas atlas-main=ghcr.io/atlanhq/atlas-metastore-mlh41-integration-tests:93f012dabcd -n atlas
 
       - name: Verify Deployment
         run: |
@@ -250,28 +249,65 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: integration-test-results
-          path: target/surefire-reports/
+          path: build/test-results/test/
 
-      - name: Post Test Results as PR Comment
+      - name: Parse and Post Test Results
         uses: actions/github-script@v5
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const results = fs.readFileSync('target/surefire-reports/test-summary.txt', 'utf8');
-            const success = results.includes("Tests run:") && !results.includes("Failures:");
-            const comment = success 
-              ? "✅ Integration Tests Passed! Ready to merge." 
-              : "❌ Integration Tests Failed. Please check the logs.";
-            
+            const path = require('path');
+
+            const testResultsDir = 'build/test-results/test/';  
+
+            let testSummary = '';
+            let failedTests = 0;
+            let passedTests = 0;
+            let skippedTests = 0;
+
+            function parseXML(xml) {
+              const matches = {
+                tests: xml.match(/tests="(\d+)"/),
+                failures: xml.match(/failures="(\d+)"/),
+                errors: xml.match(/errors="(\d+)"/),
+                skipped: xml.match(/skipped="(\d+)"/),
+              };
+              return {
+                tests: matches.tests ? parseInt(matches.tests[1], 10) : 0,
+                failures: matches.failures ? parseInt(matches.failures[1], 10) : 0,
+                errors: matches.errors ? parseInt(matches.errors[1], 10) : 0,
+                skipped: matches.skipped ? parseInt(matches.skipped[1], 10) : 0,
+              };
+            }
+
+            if (fs.existsSync(testResultsDir)) {
+              const files = fs.readdirSync(testResultsDir).filter(file => file.endsWith('.xml'));
+              for (const file of files) {
+                const xmlContent = fs.readFileSync(path.join(testResultsDir, file), 'utf8');
+                const result = parseXML(xmlContent);
+                passedTests += result.tests - (result.failures + result.errors);
+                failedTests += result.failures + result.errors;
+                skippedTests += result.skipped;
+              }
+            } else {
+              testSummary = "⚠️ No test results found. Please check if the tests ran correctly.";
+            }
+
+            if (passedTests + failedTests > 0) {
+              testSummary = failedTests > 0
+                ? `❌ Integration Tests Failed.\n- **Passed:** ${passedTests}\n- **Failed:** ${failedTests}\n- **Skipped:** ${skippedTests}`
+                : `✅ All Integration Tests Passed!\n- **Passed:** ${passedTests}\n- **Failed:** ${failedTests}\n- **Skipped:** ${skippedTests}`;
+            }
+
             github.rest.issues.createComment({
               issue_number: context.payload.pull_request.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: comment
+              body: testSummary
             });
 
-      - name: Fail if Tests Failed
-        run: exit 1
-        if: failure()
+            if (failedTests > 0) {
+              core.setFailed("Some tests failed. Check PR comments for details.");
+            }
 
