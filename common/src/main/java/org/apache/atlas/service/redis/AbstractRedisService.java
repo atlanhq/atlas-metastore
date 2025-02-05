@@ -129,8 +129,14 @@ public abstract class AbstractRedisService implements RedisService {
     Config getProdConfig() throws AtlasException {
         Config config = initAtlasConfig();
         config.useSentinelServers()
+                .setClientName(ATLAS_METASTORE_SERVICE)
                 .setReadMode(ReadMode.MASTER_SLAVE)
                 .setCheckSentinelsList(false)
+                .setKeepAlive(true)
+                .setMasterConnectionMinimumIdleSize(10)
+                .setMasterConnectionPoolSize(20)
+                .setSlaveConnectionMinimumIdleSize(10)
+                .setSlaveConnectionPoolSize(20)
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))

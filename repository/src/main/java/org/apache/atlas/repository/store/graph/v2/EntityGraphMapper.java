@@ -197,7 +197,6 @@ public class EntityGraphMapper {
     private final EntityGraphRetriever       retrieverNoRelation;
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
-    private static final Set<String> edgeLabelsForHardDeletion = new HashSet<>(Arrays.asList(OUTPUT_PORT_PRODUCT_EDGE_LABEL, INPUT_PORT_PRODUCT_EDGE_LABEL, TERM_ASSIGNMENT_LABEL));
 
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
@@ -2006,7 +2005,7 @@ public class EntityGraphMapper {
 
             case INPUT_PORT_PRODUCT_EDGE_LABEL:
             case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
-                addInternalProductAttr(ctx, newElementsCreated, removedElements, currentElements);
+                addInternalProductAttr(ctx, newElementsCreated, removedElements);
                 break;
 
             case UD_RELATIONSHIP_EDGE_LABEL:
@@ -2100,7 +2099,7 @@ public class EntityGraphMapper {
 
             case INPUT_PORT_PRODUCT_EDGE_LABEL:
             case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
-                addInternalProductAttr(ctx, newElementsCreated, null, null);
+                addInternalProductAttr(ctx, newElementsCreated, null);
                 break;
 
             case UD_RELATIONSHIP_EDGE_LABEL:
@@ -2176,7 +2175,7 @@ public class EntityGraphMapper {
 
             case INPUT_PORT_PRODUCT_EDGE_LABEL:
             case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
-                addInternalProductAttr(ctx, null , removedElements, null);
+                addInternalProductAttr(ctx, null , removedElements);
                 break;
         }
 
@@ -2309,7 +2308,7 @@ public class EntityGraphMapper {
         }
     }
 
-    private void addInternalProductAttr(AttributeMutationContext ctx, List<Object> createdElements, List<AtlasEdge> deletedElements, List<Object> currentElements) throws AtlasBaseException {
+    private void addInternalProductAttr(AttributeMutationContext ctx, List<Object> createdElements, List<AtlasEdge> deletedElements) throws AtlasBaseException {
         MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("addInternalProductAttrForAppend");
         AtlasVertex toVertex = ctx.getReferringVertex();
         String toVertexType = getTypeName(toVertex);
@@ -2324,40 +2323,22 @@ public class EntityGraphMapper {
                     ? OUTPUT_PORT_GUIDS_ATTR
                     : INPUT_PORT_GUIDS_ATTR;
 
-            addOrRemoveDaapInternalAttr(toVertex, attrName, createdElements, deletedElements, currentElements);
+            addOrRemoveDaapInternalAttr(toVertex, attrName, createdElements, deletedElements);
         }else{
            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Can not update product relations while updating any asset");
         }
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    private void addOrRemoveDaapInternalAttr(AtlasVertex toVertex, String internalAttr, List<Object> createdElements, List<AtlasEdge> deletedElements, List<Object> currentElements) {
-        List<String> addedGuids = new ArrayList<>();
-        List<String> removedGuids = new ArrayList<>();
+    private void addOrRemoveDaapInternalAttr(AtlasVertex toVertex, String internalAttr, List<Object> createdElements, List<AtlasEdge> deletedElements) {
         if (CollectionUtils.isNotEmpty(createdElements)) {
-            addedGuids = createdElements.stream().map(x -> ((AtlasEdge) x).getOutVertex().getProperty("__guid", String.class)).collect(Collectors.toList());
+            List<String> addedGuids = createdElements.stream().map(x -> ((AtlasEdge) x).getOutVertex().getProperty("__guid", String.class)).collect(Collectors.toList());
             addedGuids.forEach(guid -> AtlasGraphUtilsV2.addEncodedProperty(toVertex, internalAttr, guid));
         }
 
         if (CollectionUtils.isNotEmpty(deletedElements)) {
-            removedGuids = deletedElements.stream().map(x -> x.getOutVertex().getProperty("__guid", String.class)).collect(Collectors.toList());
+            List<String> removedGuids = deletedElements.stream().map(x -> x.getOutVertex().getProperty("__guid", String.class)).collect(Collectors.toList());
             removedGuids.forEach(guid -> AtlasGraphUtilsV2.removeItemFromListPropertyValue(toVertex, internalAttr, guid));
-        }
-
-        // Add more info to outputPort update event.
-        if (internalAttr.equals(OUTPUT_PORT_GUIDS_ATTR)) {
-            if (CollectionUtils.isNotEmpty(currentElements)) {
-                List<String> currentElementGuids = currentElements.stream()
-                        .filter(x -> ((AtlasEdge) x).getProperty(STATE_PROPERTY_KEY, String.class).equals("ACTIVE"))
-                        .map(x -> ((AtlasEdge) x).getOutVertex().getProperty("__guid", String.class))
-                        .collect(Collectors.toList());
-
-                addedGuids = addedGuids.stream()
-                        .filter(guid -> !currentElementGuids.contains(guid))
-                        .collect(Collectors.toList());
-            }
-            RequestContext.get().setAddedOutputPorts(addedGuids);
-            RequestContext.get().setRemovedOutputPorts(removedGuids);
         }
     }
 
@@ -3022,18 +3003,12 @@ public class EntityGraphMapper {
                     List<AtlasEdge> additionalElements = new ArrayList<>();
 
                     for (AtlasEdge edge : edgesToRemove) {
-                        if (getStatus(edge) == DELETED) {
+                        if (getStatus(edge) == DELETED ) {
                             continue;
                         }
 
-                        boolean deleted = false;
-                        if (edgeLabelsForHardDeletion.contains(edge.getLabel())) {
-                            graph.removeEdge(edge);
-                        } else {
-                            deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
-                                    true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                        }
-
+                        boolean deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
+                                true, attribute.getRelationshipEdgeDirection(), entityVertex);
 
                         if (!deleted) {
                             additionalElements.add(edge);
@@ -3067,18 +3042,11 @@ public class EntityGraphMapper {
                         recordEntityUpdateForNonRelationsipAttribute(edge.getInVertex());
                         recordEntityUpdateForNonRelationsipAttribute(edge.getOutVertex());
 
-                        boolean deleted = false;
+                        deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
+                                true, attribute.getRelationshipEdgeDirection(), entityVertex);
 
-                        if (edgeLabelsForHardDeletion.contains(edge.getLabel())) {
-                            graph.removeEdge(edge);
-                        } else {
-                            deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
-                                    true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                        }
+                        additionalElements.add(edge);
 
-                        if (!deleted) {
-                            additionalElements.add(edge);
-                        }
                     }
 
                     return additionalElements;

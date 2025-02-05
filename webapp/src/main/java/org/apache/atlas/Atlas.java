@@ -186,6 +186,7 @@ public final class Atlas {
     }
 
     private static OpenTelemetry initializeOpenTelemetry() {
+
         String otelResourceAttributes = System.getenv("OTEL_RESOURCE_ATTRIBUTES");
 
         List<String> customResourceAttr = null;
