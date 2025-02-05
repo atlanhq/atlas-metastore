@@ -580,6 +580,13 @@
     </developers>
 
     <profiles>
+        <profile>
+            <id>embedded-cassandra-solr</id>
+            <properties>
+                <guava.version>19.0</guava.version>
+            </properties>
+        </profile>
+
         <!-- Turning on this profile affects only tests and does not affect packaging -->
         <profile>
             <id>distributed</id>
@@ -700,10 +707,10 @@
         <graph.index.backend>solr</graph.index.backend>
         <graph.storage.backend>berkeleyje</graph.storage.backend>
         <gson.version>2.5</gson.version>
-        <guava.version>32.0.0-jre</guava.version>
+        <guava.version>29.0-jre</guava.version>
         <guice.version>4.1.0</guice.version>
         <hadoop.hdfs-client.version>${hadoop.version}</hadoop.hdfs-client.version>
-        <hadoop.version>3.4.0</hadoop.version>
+        <hadoop.version>3.3.6</hadoop.version>
         <hbase.version>2.3.3</hbase.version>
         <hive.version>3.1.0</hive.version>
         <hppc.version>0.8.1</hppc.version>
@@ -723,7 +730,7 @@
         <jersey.version>1.19</jersey.version>
         <jettison.version>1.3.7</jettison.version>
         <jetty-maven-plugin.stopWait>10</jetty-maven-plugin.stopWait>
-        <jetty.version>9.4.57.v20241219</jetty.version>
+        <jetty.version>9.4.31.v20200723</jetty.version>
         <joda-time.version>2.10.6</joda-time.version>
         <json.version>3.2.11</json.version>
         <jsr.version>1.1</jsr.version>
@@ -780,6 +787,7 @@
 
     <modules>
         <module>build-tools</module>
+        <module>test-tools</module>
 
         <module>intg</module>
         <module>common</module>
@@ -792,6 +800,7 @@
         <module>repository</module>
         <module>authorization</module>
         <module>dashboardv2</module>
+        <module>dashboardv3</module>
 
         <module>auth-agents-cred</module>
         <module>auth-agents-common</module>
@@ -799,10 +808,25 @@
         <module>auth-plugin-atlas</module>
 
         <module>webapp</module>
+        <module>docs</module>
 
+        <module>addons/hdfs-model</module>
         <module>plugin-classloader</module>
+        <module>addons/hive-bridge-shim</module>
+        <module>addons/hive-bridge</module>
+        <module>addons/falcon-bridge-shim</module>
+        <module>addons/falcon-bridge</module>
+        <module>addons/sqoop-bridge-shim</module>
+        <module>addons/sqoop-bridge</module>
+        <module>addons/hbase-bridge-shim</module>
+        <module>addons/hbase-bridge</module>
+        <module>addons/hbase-testing-util</module>
+        <module>addons/kafka-bridge</module>
         <module>tools/classification-updater</module>
         <module>tools/atlas-index-repair</module>
+        <module>addons/impala-hook-api</module>
+        <module>addons/impala-bridge-shim</module>
+        <module>addons/impala-bridge</module>
 
         <module>distro</module>
         <module>atlas-examples</module>
@@ -908,7 +932,11 @@
                 <version>${slf4j.version}</version>
             </dependency>
 
-
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>slf4j-log4j12</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
 
             <dependency>
                 <groupId>org.slf4j</groupId>
@@ -933,6 +961,13 @@
                 <artifactId>logback-core</artifactId>
                 <version>${logback.version}</version>
             </dependency>
+
+            <dependency>
+                <groupId>org.slf4j</groupId>
+                <artifactId>log4j-over-slf4j</artifactId>
+                <version>${slf4j.version}</version>
+            </dependency>
+
 
             <!-- hadoop -->
             <dependency>
@@ -1468,6 +1503,13 @@
 
             <dependency>
                 <groupId>org.apache.atlas</groupId>
+                <artifactId>atlas-dashboardv3</artifactId>
+                <version>${project.version}</version>
+                <type>war</type>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
                 <artifactId>atlas-webapp</artifactId>
                 <version>${project.version}</version>
                 <type>war</type>
@@ -1484,6 +1526,90 @@
                 <artifactId>atlas-graphdb-impls</artifactId>
                 <version>${project.version}</version>
                 <type>pom</type>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>hive-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>storm-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>falcon-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>sqoop-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>hive-bridge-shim</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>storm-bridge-shim</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>falcon-bridge-shim</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>sqoop-bridge-shim</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>hbase-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>hbase-bridge-shim</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>kafka-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>impala-hook-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>impala-bridge</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+
+            <dependency>
+                <groupId>org.apache.atlas</groupId>
+                <artifactId>impala-bridge-shim</artifactId>
+                <version>${project.version}</version>
             </dependency>
 
             <!-- API documentation  -->
@@ -1576,7 +1702,7 @@
             <dependency>
                 <groupId>org.yaml</groupId>
                 <artifactId>snakeyaml</artifactId>
-                <version>2.0</version>
+                <version>1.33</version>
             </dependency>
 
         </dependencies>
@@ -1589,6 +1715,10 @@
             <artifactId>slf4j-api</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-log4j12</artifactId>
+        </dependency>
 
         <dependency>
             <groupId>org.slf4j</groupId>
@@ -2025,7 +2155,7 @@
                         <exclude>**/docz-lib/**</exclude>
                         <exclude>**/.docz/**</exclude>
                         <exclude>**/*.svg</exclude>
-                        
+
                     </excludes>
                 </configuration>
                 <executions>
