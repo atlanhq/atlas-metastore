@@ -61,6 +61,19 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final RedisService redisService;
     private Thread watcherThread = null;
 
+    /**
+     * Updates a property on the current task’s vertex in the graph.
+     * If incremental is true, the provided value is added to the existing property value.
+     * If false, the property value is set to the new value.
+     *
+     * @param propertyKey   The key identifying the property to update.
+     * @param graph         The graph that holds the vertex representing the current task.
+     * @param value         The new value to apply to the property.
+     * @param isIncremental True if you want to add the value to the existing property; false to replace it.
+     * @param taskSetter    A BiConsumer to process the current task and the updated value. For example,
+     *                      you could use it to update the task's internal state or trigger other actions.
+     *                      Pass null if no additional processing is needed.
+     */
     public void updateTaskVertexProperty(String propertyKey, AtlasGraph graph, long value, boolean isIncremental, BiConsumer<AtlasTask, Long> taskSetter) {
         AtlasTask currentTask = RequestContext.get().getCurrentTask();
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
