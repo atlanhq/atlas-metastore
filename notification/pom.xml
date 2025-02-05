@@ -82,6 +82,10 @@
             <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-graphdb-api</artifactId>
+        </dependency>
 
     </dependencies>
 
