@@ -161,10 +161,10 @@
             <artifactId>atlas-janusgraph-hbase2</artifactId>
             <version>${project.version}</version>
             <exclusions>
-              <exclusion>
-                <groupId>org.noggit</groupId>
-                <artifactId>noggit</artifactId>
-              </exclusion>
+                <exclusion>
+                    <groupId>org.noggit</groupId>
+                    <artifactId>noggit</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
@@ -359,42 +359,42 @@
         </dependency>
 
         <dependency>
-                <groupId>org.springframework</groupId>
-                <artifactId>spring-core</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-core</artifactId>
         </dependency>
 
         <dependency>
-                <groupId>org.springframework</groupId>
-                <artifactId>spring-web</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-web</artifactId>
         </dependency>
 
         <dependency>
-                <groupId>org.springframework</groupId>
-                <artifactId>spring-webmvc</artifactId>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-webmvc</artifactId>
         </dependency>
 
         <dependency>
-                <groupId>org.springframework.security</groupId>
-                <artifactId>spring-security-core</artifactId>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-core</artifactId>
         </dependency>
 
         <dependency>
-                <groupId>org.springframework.security</groupId>
-                <artifactId>spring-security-web</artifactId>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-web</artifactId>
         </dependency>
 
         <dependency>
-                <groupId>org.springframework.security</groupId>
-                <artifactId>spring-security-config</artifactId>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-config</artifactId>
         </dependency>
 
         <dependency>
-                <groupId>org.springframework.security</groupId>
-                <artifactId>spring-security-ldap</artifactId>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-ldap</artifactId>
         </dependency>
         <dependency>
-                <groupId>javax.servlet</groupId>
-                <artifactId>javax.servlet-api</artifactId>
+            <groupId>javax.servlet</groupId>
+            <artifactId>javax.servlet-api</artifactId>
         </dependency>
 
         <!-- Jersey + Spring -->
@@ -424,6 +424,11 @@
         <dependency>
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-dashboardv2</artifactId>
+            <type>war</type>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-dashboardv3</artifactId>
             <type>war</type>
         </dependency>
         <dependency>
@@ -469,7 +474,7 @@
         <dependency>
             <groupId>com.nimbusds</groupId>
             <artifactId>nimbus-jose-jwt</artifactId>
-            <version>9.48</version>
+            <version>9.8.1</version>
             <scope>compile</scope>
             <exclusions>
                 <exclusion>
@@ -524,6 +529,25 @@
                     <artifactId>jackson-core</artifactId>
                 </exclusion>
             </exclusions>
+        </dependency>
+
+        <!-- sentry.io dependency in webapp/pom.xml -->
+        <dependency>
+            <groupId>io.sentry</groupId>
+            <artifactId>sentry-log4j</artifactId>
+            <version>1.7.30</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>log4j</groupId>
+                    <artifactId>log4j</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-testtools</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>
@@ -593,6 +617,11 @@
                         <overlay>
                             <groupId>org.apache.atlas</groupId>
                             <artifactId>atlas-dashboardv2</artifactId>
+                            <skip>${skipOverlay}</skip>
+                        </overlay>
+                        <overlay>
+                            <groupId>org.apache.atlas</groupId>
+                            <artifactId>atlas-dashboardv3</artifactId>
                             <skip>${skipOverlay}</skip>
                         </overlay>
                         <overlay>
@@ -825,7 +854,7 @@
                     </execution>
                 </executions>
             </plugin>
-           <plugin>
+            <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
                 <executions>
