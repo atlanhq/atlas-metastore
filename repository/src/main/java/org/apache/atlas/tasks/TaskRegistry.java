@@ -252,11 +252,11 @@ public class TaskRegistry {
         RequestContext.get().setCurrentTask(task);
 
         task.setStartTime(new Date());
-        task.setAssetsCountToPropagate(runnableTask.getAssetsCountToPropagate());
+//        task.setAssetsCountToPropagate(runnableTask.getAssetsCountToPropagate());
         setEncodedProperty(taskVertex, Constants.TASK_START_TIME, task.getStartTime());
         setEncodedProperty(taskVertex, Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS);
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
-        setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
+//        setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
         graph.commit();
     }
 

@@ -67,8 +67,8 @@ public class AtlasPatch implements Serializable {
         this.createdBy   = createdBy;
         this.createdTime = createdTime;
         this.updatedTime = updatedTime;
-        this.assetsCountToPropagate = assetsCountToPropagate;
-        this.assetsCountPropagated = assetsCountPropagated;
+//        this.assetsCountToPropagate = assetsCountToPropagate;
+//        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public String getId() {
