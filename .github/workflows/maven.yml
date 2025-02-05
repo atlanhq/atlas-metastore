@@ -30,9 +30,6 @@ on:
       - makerlogic
       - tagpropv1.5master
 
-      - tagpropv1master
-      - tagpropv1.5master
-
 jobs:
   build:
 
