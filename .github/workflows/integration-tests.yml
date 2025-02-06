@@ -12,6 +12,41 @@ on:
       - mlh41-integration-tests
 
 jobs:
+  wait-for-revision:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Get commit ID
+        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)" >> $GITHUB_ENV
+
+      - name: Wait for Matching Revision
+        run: |
+          MAX_RETRIES=30  # Set maximum number of retries
+          SLEEP_TIME=30  # Time in seconds between retries
+
+          for i in $(seq 1 $MAX_RETRIES); do
+              echo "Attempt $i: Checking API for matching commit ID..."
+
+              REVISION=$(curl --silent --location 'https://gcpotel.atlan.com/api/meta/admin/version' \
+                --header "Authorization: Bearer $(curl --silent --location 'https://gcpotel.atlan.com/auth/realms/default/protocol/openid-connect/token' \
+                  --header 'Content-Type: application/x-www-form-urlencoded' \
+                  --data-urlencode 'client_id=atlan-argo' \
+                  --data-urlencode 'grant_type=client_credentials' \
+                  --data-urlencode "client_secret=${{ secrets.ATLAN_ARGO_CLIENT_SECRET }}" | jq -r '.access_token')" | jq -r '.Revision' | cut -c1-7)
+
+              echo "Fetched Revision: $REVISION"
+              echo "Expected Commit ID: $COMMIT_ID"
+
+              if [[ "$REVISION" == "$COMMIT_ID" ]]; then
+                  echo "✅ Revision matches commit ID! Proceeding to the next step..."
+                  exit 0
+              fi
+
+              echo "🔄 No match yet. Retrying in $SLEEP_TIME seconds..."
+              sleep $SLEEP_TIME
+          done
+
+          echo "❌ ERROR: Max retries reached. Commit ID did not match the revision."
+          exit 1
 
   run-integration-tests:
     runs-on: ubuntu-latest
@@ -90,3 +125,48 @@ jobs:
           path: integration-tests/${{ matrix.tests }}.log
 
 
+  report-test-results:
+    needs: integration-test
+    if: always()  # Run this even if tests fail
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Test Results
+        uses: actions/download-artifact@v4
+        with:
+          path: test-results
+
+      - name: Collect Failed Tests
+        id: collect-failures
+        run: |
+          echo "### Integration Test Results" >> test-summary.md
+          echo "" >> test-summary.md
+          
+          failed_tests=""
+          
+          for dir in test-results/*; do
+            if [ -d "$dir" ]; then  # Check if it's a directory
+              log_file=$(find "$dir" -name "*.log" | head -n 1)  # Get the first log file in the directory
+              if [ -f "$log_file" ] && grep -q "FAILED" "$log_file"; then
+                failed_tests+="$(basename $dir)\n"  # Add test name to the list
+              fi
+            fi
+          done
+          
+          if [[ -n "$failed_tests" ]]; then
+            echo "❌ **Some tests failed.** Please check the following tests:" >> test-summary.md
+            echo "\n\`\`\`" >> test-summary.md
+            echo -e "$failed_tests" >> test-summary.md
+            echo "\n\`\`\`" >> test-summary.md
+            echo "ALL_TESTS_PASSED=false" >> $GITHUB_ENV
+          else
+            echo "✅ **All integration tests passed!** Ready to merge. 🚀" >> test-summary.md
+            echo "ALL_TESTS_PASSED=true" >> $GITHUB_ENV
+          fi
+
+
+      - name: Post Comment on PR
+        uses: mshick/add-pr-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          message-path: test-summary.md
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
