@@ -170,8 +170,8 @@ jobs:
       - name: List integration tests
         id: test-files
         run: |
-          tests=$(ls atlan-java/integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
-          json_tests=$(echo "$tests" | jq -R -c 'split(" ")[:-1]')
+          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
+          json_tests=$(echo "$tests[@]}" | jq -R -c 'split(" ")[:-1]')
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
