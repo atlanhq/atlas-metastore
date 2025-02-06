@@ -1,65 +1,26 @@
 name: Integration Tests for Metastore
 
 on:
-  workflow_run:
-    workflows: ["Java CI with Maven"]
-    types:
-      - completed
-
+  push:
+    branches:
+      - alpha
+      - beta
+      - development
+      - master
+      - lineageondemand
+      - makerlogic
+      - mlh41-integration-tests
 
 jobs:
-  deploy-test-environment:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v2
-
-      - name: Set Up Kubectl
-        uses: azure/setup-kubectl@v3
-        with:
-          version: 'latest'
-
-      - name: Install Loft CLI
-        run: |
-          curl -fsSL https://downloads.loft.sh/install.sh | bash
-          echo "$HOME/.loft/bin" >> $GITHUB_PATH
-
-      - name: Authenticate with Loft
-        run: |
-          loft login onboarding-tenant.atlan.com --access-key ${{ secrets.LOFT_ACCESS_KEY }}
-          loft use vcluster enpla9up36 --project default
-
-      - name: Download Image Tag from Previous Workflow
-        uses: actions/download-artifact@v4
-        with:
-          name: image-tag
-          path: .
-
-      - name: Read Image Tag
-        run: |
-          IMAGE_TAG=$(cat image-tag.txt)
-          echo "Using built image: $IMAGE_TAG"
-          echo "IMAGE_TAG=$IMAGE_TAG" >> $GITHUB_ENV
-
-      - name: Deploy Metastore with New Image
-        run: |
-          echo "Updating Kubernetes deployment with new image..."
-          kubectl set image StatefulSets/atlas atlas-main=$IMAGE_TAG -n atlas
-
-      - name: Verify Deployment
-        run: |
-          echo "Waiting for deployment to be ready..."
-          kubectl wait --for=condition=available --timeout=600s StatefulSets/atlas -n atlas
-  
 
   run-integration-tests:
     runs-on: ubuntu-latest
-    needs: deploy-test-environment
+    #    needs: build
     steps:
       - name: Checkout Java SDK Repo
         uses: actions/checkout@v4
         with:
-          repository: atlanhq/java-sdk
+          repository: atlanhq/atlan-java
           ref: main
 
       - name: Set up JDK for SDK
@@ -73,12 +34,19 @@ jobs:
         with:
           arguments: assemble shadowJar test
 
+
   list-integration-tests:
+    #    needs: run-integration-tests
     runs-on: ubuntu-latest
     outputs:
       tests: ${{ steps.test-files.outputs.tests }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-java
+          ref: main
+
       - name: List integration tests
         id: test-files
         run: |
@@ -87,6 +55,7 @@ jobs:
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
+      - run-integration-tests
       - list-integration-tests
     runs-on: ubuntu-latest
     strategy:
@@ -127,28 +96,65 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: integration-test-results
-          path: target/surefire-reports/
+          path: build/test-results/test/
 
-      - name: Post Test Results as PR Comment
+      - name: Parse and Post Test Results
         uses: actions/github-script@v5
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const results = fs.readFileSync('target/surefire-reports/test-summary.txt', 'utf8');
-            const success = results.includes("Tests run:") && !results.includes("Failures:");
-            const comment = success 
-              ? "✅ Integration Tests Passed! Ready to merge." 
-              : "❌ Integration Tests Failed. Please check the logs.";
+            const path = require('path');
+            
+            const testResultsDir = 'build/test-results/test/';  
+            
+            let testSummary = '';
+            let failedTests = 0;
+            let passedTests = 0;
+            let skippedTests = 0;
+            
+            function parseXML(xml) {
+              const matches = {
+                tests: xml.match(/tests="(\d+)"/),
+                failures: xml.match(/failures="(\d+)"/),
+                errors: xml.match(/errors="(\d+)"/),
+                skipped: xml.match(/skipped="(\d+)"/),
+              };
+              return {
+                tests: matches.tests ? parseInt(matches.tests[1], 10) : 0,
+                failures: matches.failures ? parseInt(matches.failures[1], 10) : 0,
+                errors: matches.errors ? parseInt(matches.errors[1], 10) : 0,
+                skipped: matches.skipped ? parseInt(matches.skipped[1], 10) : 0,
+              };
+            }
+            
+            if (fs.existsSync(testResultsDir)) {
+              const files = fs.readdirSync(testResultsDir).filter(file => file.endsWith('.xml'));
+              for (const file of files) {
+                const xmlContent = fs.readFileSync(path.join(testResultsDir, file), 'utf8');
+                const result = parseXML(xmlContent);
+                passedTests += result.tests - (result.failures + result.errors);
+                failedTests += result.failures + result.errors;
+                skippedTests += result.skipped;
+              }
+            } else {
+              testSummary = "⚠️ No test results found. Please check if the tests ran correctly.";
+            }
+            
+            if (passedTests + failedTests > 0) {
+              testSummary = failedTests > 0
+                ? `❌ Integration Tests Failed.\n- **Passed:** ${passedTests}\n- **Failed:** ${failedTests}\n- **Skipped:** ${skippedTests}`
+                : `✅ All Integration Tests Passed!\n- **Passed:** ${passedTests}\n- **Failed:** ${failedTests}\n- **Skipped:** ${skippedTests}`;
+            }
             
             github.rest.issues.createComment({
               issue_number: context.payload.pull_request.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: comment
+              body: testSummary
             });
-
-      - name: Fail if Tests Failed
-        run: exit 1
-        if: failure()
+            
+            if (failedTests > 0) {
+              core.setFailed("Some tests failed. Check PR comments for details.");
+            }
 
