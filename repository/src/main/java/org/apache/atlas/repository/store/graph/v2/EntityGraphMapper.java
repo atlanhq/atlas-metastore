@@ -332,7 +332,9 @@ public class EntityGraphMapper {
                                                                   final boolean isPartialUpdate,
                                                                   final boolean replaceClassifications,
                                                                   boolean replaceBusinessAttributes,
-                                                                  boolean isOverwriteBusinessAttribute) throws AtlasBaseException {
+                                                                  boolean isOverwriteBusinessAttribute,
+                                                                  AtlasEntityStoreV2 entitiesStore,
+                                                                  EntityStream entityStream) throws AtlasBaseException {
 
         MetricRecorder metric = RequestContext.get().startMetricRecord("mapAttributesAndClassifications");
 
@@ -418,8 +420,13 @@ public class EntityGraphMapper {
                     setCustomAttributes(vertex, updatedEntity);
 
                     if (replaceClassifications) {
-                        deleteClassifications(guid);
-                        addClassifications(context, guid, updatedEntity.getClassifications());
+                        ClassificationAssociator.Updater associator = new ClassificationAssociator.Updater(typeRegistry, entitiesStore, this, entityChangeNotifier, instanceConverter);
+                        Map<String, AtlasEntityHeader> map = new HashMap<>();
+                        while(entityStream.hasNext()){
+                            AtlasEntity entity = entityStream.next();
+                            map.put(entity.getGuid(), new AtlasEntityHeader(entity.getTypeName(), entity.getAttributes()));
+                        }
+                        associator.setClassifications(map, true);
                     }
 
                     if (replaceBusinessAttributes) {

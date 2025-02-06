@@ -1655,7 +1655,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
 
             EntityMutationResponse ret = entityGraphMapper.mapAttributesAndClassifications(context, isPartialUpdate,
-                    replaceClassifications, replaceBusinessAttributes, isOverwriteBusinessAttribute);
+                    replaceClassifications, replaceBusinessAttributes, isOverwriteBusinessAttribute, this, entityStream);
 
             ret.setGuidAssignments(context.getGuidAssignments());
 
