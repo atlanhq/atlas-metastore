@@ -21,7 +21,6 @@ jobs:
         with:
           repository: atlanhq/atlan-java
           ref: main
-          path: atlan-java  # <-- CHANGED: Specify path so it does not checkout into the default directory
 
       - name: Set up JDK for SDK
         uses: actions/setup-java@v4
@@ -33,7 +32,6 @@ jobs:
         uses: burrunan/gradle-cache-action@v1
         with:
           arguments: assemble shadowJar test
-          working-directory: atlan-java  # <-- CHANGED: Set the working directory
 
   list-integration-tests:
     runs-on: ubuntu-latest
@@ -45,13 +43,11 @@ jobs:
         with:
           repository: atlanhq/atlan-java
           ref: main
-          path: atlan-java  # <-- CHANGED: Specify path to ensure correct directory structure
 
       - name: List integration tests
         id: test-files
         run: |
-          cd atlan-java  # <-- CHANGED: Ensure commands run inside the correct directory
-          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/Test.java | sed -E 's|./src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
+          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
           json_tests=$(echo "$tests[@]}" | jq -R -c 'split(" ")[:-1]')
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
@@ -72,7 +68,6 @@ jobs:
         with:
           repository: atlanhq/atlan-java
           ref: main
-          path: atlan-java  # <-- CHANGED: Ensure checkout into correct directory
 
       - name: Set up JDK
         uses: actions/setup-java@v4
@@ -83,14 +78,15 @@ jobs:
       - name: Integration tests
         uses: burrunan/gradle-cache-action@v1
         env:
-          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
-          ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
+            ATLAN_BASE_URL: "https://gcpotel.atlan.com/"
+            ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
         with:
           arguments: -PintegrationTests integration-tests:test --tests "com.atlan.java.sdk.${{ matrix.tests }}"
-          working-directory: atlan-java  # <-- CHANGED: Ensure Gradle runs in the correct repo
 
       - if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tests }}
-          path: atlan-java/integration-tests/${{ matrix.tests }}.log  # <-- CHANGED: Corrected log path
+          path: integration-tests/${{ matrix.tests }}.log
+
+
