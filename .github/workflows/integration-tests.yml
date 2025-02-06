@@ -15,13 +15,13 @@ jobs:
 
   run-integration-tests:
     runs-on: ubuntu-latest
-    #    needs: build
     steps:
       - name: Checkout Java SDK Repo
         uses: actions/checkout@v4
         with:
           repository: atlanhq/atlan-java
           ref: main
+          path: atlan-java  # <-- CHANGED: Specify path so it does not checkout into the default directory
 
       - name: Set up JDK for SDK
         uses: actions/setup-java@v4
@@ -33,10 +33,9 @@ jobs:
         uses: burrunan/gradle-cache-action@v1
         with:
           arguments: assemble shadowJar test
-
+          working-directory: atlan-java  # <-- CHANGED: Set the working directory
 
   list-integration-tests:
-    #    needs: run-integration-tests
     runs-on: ubuntu-latest
     outputs:
       tests: ${{ steps.test-files.outputs.tests }}
@@ -46,11 +45,13 @@ jobs:
         with:
           repository: atlanhq/atlan-java
           ref: main
+          path: atlan-java  # <-- CHANGED: Specify path to ensure correct directory structure
 
       - name: List integration tests
         id: test-files
         run: |
-          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
+          cd atlan-java  # <-- CHANGED: Ensure commands run inside the correct directory
+          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/Test.java | sed -E 's|./src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
           json_tests=$(echo "$tests[@]}" | jq -R -c 'split(" ")[:-1]')
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
@@ -61,20 +62,24 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tests: ${{fromJson(needs.list-integration-tests.outputs.tests)}}
+        tests: ${{ fromJson(needs.list-integration-tests.outputs.tests) }}
     concurrency:
       group: ${{ matrix.tests }}
     name: "Integration"
     steps:
-      - uses: actions/checkout@v4
-      # - name: Download artifacts
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: build-artifacts
-      - uses: actions/setup-java@v4
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-java
+          ref: main
+          path: atlan-java  # <-- CHANGED: Ensure checkout into correct directory
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
+
       - name: Integration tests
         uses: burrunan/gradle-cache-action@v1
         env:
@@ -82,79 +87,10 @@ jobs:
           ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
         with:
           arguments: -PintegrationTests integration-tests:test --tests "com.atlan.java.sdk.${{ matrix.tests }}"
+          working-directory: atlan-java  # <-- CHANGED: Ensure Gradle runs in the correct repo
+
       - if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tests }}
-          path: integration-tests/${{ matrix.tests }}.log
-
-  post-test-results:
-    runs-on: ubuntu-latest
-    needs: integration-test
-    steps:
-      - name: Retrieve Test Results
-        uses: actions/download-artifact@v4
-        with:
-          name: integration-test-results
-          path: build/test-results/test/
-
-      - name: Parse and Post Test Results
-        uses: actions/github-script@v5
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const path = require('path');
-            
-            const testResultsDir = 'build/test-results/test/';  
-            
-            let testSummary = '';
-            let failedTests = 0;
-            let passedTests = 0;
-            let skippedTests = 0;
-            
-            function parseXML(xml) {
-              const matches = {
-                tests: xml.match(/tests="(\d+)"/),
-                failures: xml.match(/failures="(\d+)"/),
-                errors: xml.match(/errors="(\d+)"/),
-                skipped: xml.match(/skipped="(\d+)"/),
-              };
-              return {
-                tests: matches.tests ? parseInt(matches.tests[1], 10) : 0,
-                failures: matches.failures ? parseInt(matches.failures[1], 10) : 0,
-                errors: matches.errors ? parseInt(matches.errors[1], 10) : 0,
-                skipped: matches.skipped ? parseInt(matches.skipped[1], 10) : 0,
-              };
-            }
-            
-            if (fs.existsSync(testResultsDir)) {
-              const files = fs.readdirSync(testResultsDir).filter(file => file.endsWith('.xml'));
-              for (const file of files) {
-                const xmlContent = fs.readFileSync(path.join(testResultsDir, file), 'utf8');
-                const result = parseXML(xmlContent);
-                passedTests += result.tests - (result.failures + result.errors);
-                failedTests += result.failures + result.errors;
-                skippedTests += result.skipped;
-              }
-            } else {
-              testSummary = "⚠️ No test results found. Please check if the tests ran correctly.";
-            }
-            
-            if (passedTests + failedTests > 0) {
-              testSummary = failedTests > 0
-                ? `❌ Integration Tests Failed.\n- **Passed:** ${passedTests}\n- **Failed:** ${failedTests}\n- **Skipped:** ${skippedTests}`
-                : `✅ All Integration Tests Passed!\n- **Passed:** ${passedTests}\n- **Failed:** ${failedTests}\n- **Skipped:** ${skippedTests}`;
-            }
-            
-            github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: testSummary
-            });
-            
-            if (failedTests > 0) {
-              core.setFailed("Some tests failed. Check PR comments for details.");
-            }
-
+          path: atlan-java/integration-tests/${{ matrix.tests }}.log  # <-- CHANGED: Corrected log path
