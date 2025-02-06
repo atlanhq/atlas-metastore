@@ -117,7 +117,8 @@ jobs:
             ATLAN_BASE_URL: "https://gcpotel.atlan.com/"
             ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
         with:
-          arguments: -PintegrationTests integration-tests:test --tests "com.atlan.java.sdk.${{ matrix.tests }}"
+          arguments: -PintegrationTests integration-tests:test --tests "com.atlan.java.sdk.${{ matrix.tests }}"  --rerun-tasks
+
 
       - if: success() || failure()
         uses: actions/upload-artifact@v4
@@ -143,27 +144,52 @@ jobs:
           echo "" >> test-summary.md
           
           failed_tests=""
-          
           for dir in test-results/*; do
-            if [ -d "$dir" ]; then  # Check if it's a directory
-              log_file=$(find "$dir" -name "*.log" | head -n 1)  # Get the first log file in the directory
-              if [ -f "$log_file" ] && grep -q "FAILED" "$log_file"; then
-                failed_tests+="$(basename $dir)\n"  # Add test name to the list
+            # Only proceed if this is a directory
+            if [ -d "$dir" ]; then
+            
+             # Find the first .log file within that directory
+              log_file=$(find "$dir" -maxdepth 1 -name "*.log" | head -n 1)
+              if [ -f "$log_file" ]; then
+                echo "--------------------------------------------------"
+                echo "Inspecting log for test: $(basename "$dir")"
+                echo "Log file path: $log_file"
+                echo "--------------------------------------------------"
+            
+                # Show some portion of the log (maybe first 40 lines) so you can debug
+                # You could do full `cat "$log_file"` if you want everything
+                head -n 40 "$log_file"
+            
+                echo "--------------------------------------------------"
+                echo "End of log snippet for $(basename "$dir")"
+                echo "--------------------------------------------------"
+            
+                # Count lines that contain 'FAILED'
+                # (Adjust pattern if your logs show "FAIL" or "BUILD FAILED" etc.)
+                failed_count=$(grep -c " FAILED" "$log_file")
+            
+                if (( failed_count > 0 )); then
+                  echo "❌ Detected $failed_count failure(s) in $(basename "$dir")"
+                  failed_tests+="$(basename "$dir")\n"
+                else
+                  echo "✅ No failures detected in $(basename "$dir")"
+                fi
+                echo ""
+              else
+                echo "No .log file found in $dir"
               fi
             fi
           done
           
+          # Summarize:
           if [[ -n "$failed_tests" ]]; then
-            echo "❌ **Some tests failed.** Please check the following tests:" >> test-summary.md
-            echo "\n\`\`\`" >> test-summary.md
-            echo -e "$failed_tests" >> test-summary.md
-            echo "\n\`\`\`" >> test-summary.md
-            echo "ALL_TESTS_PASSED=false" >> $GITHUB_ENV
+            echo "❌ **Some tests failed.** Please check these directories:"
+            echo -e "$failed_tests"
+            echo "ALL_TESTS_PASSED=false" >> "$GITHUB_ENV"
           else
-            echo "✅ **All integration tests passed!** Ready to merge. 🚀" >> test-summary.md
-            echo "ALL_TESTS_PASSED=true" >> $GITHUB_ENV
+            echo "✅ **All tests passed!**"
+            echo "ALL_TESTS_PASSED=true" >> "$GITHUB_ENV"
           fi
-
       - name: Output Test Summary to Logs
         run: |
           echo "--------------------------------------------------"
