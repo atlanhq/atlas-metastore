@@ -156,17 +156,22 @@ jobs:
 
 
   list-integration-tests:
-    needs: run-integration-tests
+#    needs: run-integration-tests
     runs-on: ubuntu-latest
     outputs:
       tests: ${{ steps.test-files.outputs.tests }}
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-java
+          ref: main
+
       - name: List integration tests
         id: test-files
         run: |
-          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
-          json_tests=$(echo "$tests[@]}" | jq -R -c 'split(" ")[:-1]')
+          tests=$(ls atlan-java/integration-tests/src/test/java/com/atlan/java/sdk/*Test.java | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' | tr '\n' ' ')
+          json_tests=$(echo "$tests" | jq -R -c 'split(" ")[:-1]')
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
