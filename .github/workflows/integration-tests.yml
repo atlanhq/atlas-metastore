@@ -12,7 +12,7 @@ on:
       - mlh41-integration-tests
 
 jobs:
-  wait-for-revision:
+  wait-for-deployment:
     runs-on: ubuntu-latest
     steps:
       - name: Get commit ID
@@ -48,7 +48,7 @@ jobs:
           echo "❌ ERROR: Max retries reached. Commit ID did not match the revision."
           exit 1
 
-  run-integration-tests:
+  setup-java-sdk:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Java SDK Repo
@@ -87,7 +87,8 @@ jobs:
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
-      - run-integration-tests
+      - wait-for-deployment
+      - setup-java-sdk
       - list-integration-tests
     runs-on: ubuntu-latest
     strategy:
@@ -163,6 +164,12 @@ jobs:
             echo "ALL_TESTS_PASSED=true" >> $GITHUB_ENV
           fi
 
+      - name: Output Test Summary to Logs
+        run: |
+          echo "--------------------------------------------------"
+          echo "✅ Printing the test summary before posting to PR"
+          echo "--------------------------------------------------"
+          cat test-summary.md  # This prints the content of test-summary.md into the GitHub Actions logs
 
       - name: Post Comment on PR
         uses: mshick/add-pr-comment@v2
