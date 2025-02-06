@@ -87,7 +87,7 @@ jobs:
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
-      - wait-for-deployment
+#      - wait-for-deployment
       - setup-java-sdk
       - list-integration-tests
     runs-on: ubuntu-latest
