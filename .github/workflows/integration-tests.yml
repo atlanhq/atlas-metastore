@@ -123,12 +123,13 @@ jobs:
           ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
 
       - name: Move JUnit XML results
-        # Move them into a test-specific folder so that multiple matrix jobs don't overwrite each other's results.
+        if: success() || failure()
         run: |
           mkdir -p integration-tests/build/test-results/${{ matrix.tests }}
           mv integration-tests/build/test-results/test/* integration-tests/build/test-results/${{ matrix.tests }} || true
 
       - name: Upload JUnit test results
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.tests }}-junit-results
