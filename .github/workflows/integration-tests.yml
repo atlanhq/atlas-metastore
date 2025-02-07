@@ -21,7 +21,7 @@ jobs:
       - name: Wait for Matching Revision
         run: |
           MAX_RETRIES=30  # Set maximum number of retries
-          SLEEP_TIME=30  # Time in seconds between retries
+          SLEEP_TIME=60  # Time in seconds between retries
 
           for i in $(seq 1 $MAX_RETRIES); do
               echo "Attempt $i: Checking API for matching commit ID..."
@@ -83,7 +83,7 @@ jobs:
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
-      #      - wait-for-deployment
+      - wait-for-deployment
       - setup-java-sdk
       - list-integration-tests
     runs-on: ubuntu-latest
