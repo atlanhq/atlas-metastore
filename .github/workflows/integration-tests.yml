@@ -35,19 +35,15 @@ jobs:
 
               echo "Fetched Revision: $REVISION"
               echo "Expected Commit ID: $COMMIT_ID"
-
               if [[ "$REVISION" == "$COMMIT_ID" ]]; then
                   echo "✅ Revision matches commit ID! Proceeding to the next step..."
                   exit 0
               fi
-
               echo "🔄 No match yet. Retrying in $SLEEP_TIME seconds..."
               sleep $SLEEP_TIME
           done
-
           echo "❌ ERROR: Max retries reached. Commit ID did not match the revision."
           exit 1
-
   setup-java-sdk:
     runs-on: ubuntu-latest
     steps:
@@ -87,7 +83,7 @@ jobs:
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
   integration-test:
     needs:
-      - wait-for-deployment
+      #      - wait-for-deployment
       - setup-java-sdk
       - list-integration-tests
     runs-on: ubuntu-latest
@@ -111,20 +107,27 @@ jobs:
           java-version: 17
           distribution: temurin
 
-      - name: Integration tests
-        uses: burrunan/gradle-cache-action@v1
+      - name: Run integration test for ${{ matrix.tests }}
+        run: |
+          # Run ONLY the test class for this matrix entry
+          ./gradlew -PintegrationTests integration-tests:test \
+            --tests "com.atlan.java.sdk.${{ matrix.tests }}" \
+            --rerun-tasks
         env:
-            ATLAN_BASE_URL: "https://gcpotel.atlan.com/"
-            ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
-        with:
-          arguments: -PintegrationTests integration-tests:test --tests "com.atlan.java.sdk.${{ matrix.tests }}"  --rerun-tasks
+          ATLAN_BASE_URL: "https://gcpotel.atlan.com/"
+          ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
 
-
-      - if: success() || failure()
+      - name: Move JUnit XML results
+        if: success() || failure()
+        run: |
+          mkdir -p integration-tests/build/test-results/${{ matrix.tests }}
+          mv integration-tests/build/test-results/test/* integration-tests/build/test-results/${{ matrix.tests }} || true
+      - name: Upload JUnit test results
+        if: success() || failure()
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.tests }}
-          path: integration-tests/${{ matrix.tests }}.log
+          name: ${{ matrix.tests }}-junit-results
+          path: integration-tests/build/test-results/${{ matrix.tests }}
 
 
   report-test-results:
@@ -135,68 +138,51 @@ jobs:
       - name: Download Test Results
         uses: actions/download-artifact@v4
         with:
+          # This will download all artifacts, including each test's folder
           path: test-results
 
-      - name: Collect Failed Tests
-        id: collect-failures
+      - name: Summarize JUnit XML
+        id: summary
         run: |
-          echo "### Integration Test Results" >> test-summary.md
+          echo "### Integration Test Results" > test-summary.md
           echo "" >> test-summary.md
-          
-          failed_tests=""
-          for dir in test-results/*; do
-            # Only proceed if this is a directory
-            if [ -d "$dir" ]; then
-            
-             # Find the first .log file within that directory
-              log_file=$(find "$dir" -maxdepth 1 -name "*.log" | head -n 1)
-              if [ -f "$log_file" ]; then
-                echo "--------------------------------------------------"
-                echo "Inspecting log for test: $(basename "$dir")"
-                echo "Log file path: $log_file"
-                echo "--------------------------------------------------"
-            
-                # Show some portion of the log (maybe first 40 lines) so you can debug
-                # You could do full `cat "$log_file"` if you want everything
-                head -n 40 "$log_file"
-            
-                echo "--------------------------------------------------"
-                echo "End of log snippet for $(basename "$dir")"
-                echo "--------------------------------------------------"
-            
-                # Count lines that contain 'FAILED'
-                # (Adjust pattern if your logs show "FAIL" or "BUILD FAILED" etc.)
-                failed_count=$(grep -c " FAILED" "$log_file")
-            
-                if (( failed_count > 0 )); then
-                  echo "❌ Detected $failed_count failure(s) in $(basename "$dir")"
-                  failed_tests+="$(basename "$dir")\n"
-                else
-                  echo "✅ No failures detected in $(basename "$dir")"
-                fi
-                echo ""
-              else
-                echo "No .log file found in $dir"
-              fi
+          all_passed=true
+          total_failures=0
+          # Each matrix test has its own subfolder named "...-junit-results",
+          # but the download-artifact step will default to putting each artifact in a directory.
+          # For example: test-results/PersonaTest-junit-results/ (with *.xml inside).
+          # Find all JUnit XML files under test-results/
+          while IFS= read -r -d '' xmlfile; do
+            # We'll parse "failures" and "tests" attributes from each <testsuite> in the XML.
+            # If you have multiple <testsuite> elements, we sum them up.
+            # This quick grep-based approach is enough, but for more robust parsing, consider using xmllint or a test-report action.
+            # Extract numeric sums for failures in this file
+            file_failures=$(grep -Po 'failures="\K\d+' "$xmlfile" | paste -sd+ - | bc)
+            [[ -z "$file_failures" ]] && file_failures=0
+            # If any failures > 0, we note them
+            if [ "$file_failures" -gt 0 ]; then
+              echo "❌ Failures found in: $xmlfile ($file_failures failures)" >> test-summary.md
+              all_passed=false
+              total_failures=$((total_failures + file_failures))
+            else
+              echo "✅ No failures in: $xmlfile" >> test-summary.md
             fi
-          done
-          
-          # Summarize:
-          if [[ -n "$failed_tests" ]]; then
-            echo "❌ **Some tests failed.** Please check these directories:"
-            echo -e "$failed_tests"
-            echo "ALL_TESTS_PASSED=false" >> "$GITHUB_ENV"
+          done < <(find test-results -name '*.xml' -print0)
+          if [ "$all_passed" = true ]; then
+            echo "" >> test-summary.md
+            echo "✅ **All integration tests passed!** Ready to merge. 🚀" >> test-summary.md
+            echo "ALL_TESTS_PASSED=true" >> $GITHUB_ENV
           else
-            echo "✅ **All tests passed!**"
-            echo "ALL_TESTS_PASSED=true" >> "$GITHUB_ENV"
+            echo "" >> test-summary.md
+            echo "❌ **Some tests failed.** Total failures: $total_failures" >> test-summary.md
+            echo "ALL_TESTS_PASSED=false" >> $GITHUB_ENV
           fi
       - name: Output Test Summary to Logs
         run: |
           echo "--------------------------------------------------"
           echo "✅ Printing the test summary before posting to PR"
           echo "--------------------------------------------------"
-          cat test-summary.md  # This prints the content of test-summary.md into the GitHub Actions logs
-
+          cat test-summary.md
       - name: Post Comment on PR
         uses: mshick/add-pr-comment@v2
         if: github.event_name == 'pull_request'
