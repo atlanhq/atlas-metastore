@@ -10,7 +10,7 @@ on:
       - lineageondemand
       - makerlogic
       - mlh41-integration-tests
-
+  
 jobs:
   wait-for-deployment:
     runs-on: ubuntu-latest
