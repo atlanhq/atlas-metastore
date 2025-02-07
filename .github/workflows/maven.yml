@@ -29,7 +29,7 @@ on:
       - lineageondemand
       - makerlogic
       - mlh41-integration-tests
-
+      - mlh41tests
 jobs:
   build:
 
