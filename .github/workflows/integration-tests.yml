@@ -10,7 +10,7 @@ on:
       - lineageondemand
       - makerlogic
       - mlh41-integration-tests
-
+      - mlh41tests
 jobs:
   wait-for-deployment:
     runs-on: ubuntu-latest
@@ -177,12 +177,14 @@ jobs:
             echo "❌ **Some tests failed.** Total failures: $total_failures" >> test-summary.md
             echo "ALL_TESTS_PASSED=false" >> $GITHUB_ENV
           fi
+
       - name: Output Test Summary to Logs
         run: |
           echo "--------------------------------------------------"
           echo "✅ Printing the test summary before posting to PR"
           echo "--------------------------------------------------"
           cat test-summary.md
+
       - name: Post Comment on PR
         uses: mshick/add-pr-comment@v2
         if: github.event_name == 'pull_request'
