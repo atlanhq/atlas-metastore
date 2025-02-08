@@ -590,11 +590,11 @@
                     <archiveClasses>true</archiveClasses>
                     <attachClasses>true</attachClasses>
                     <overlays>
-                        <overlay>
-                            <groupId>org.apache.atlas</groupId>
-                            <artifactId>atlas-dashboardv2</artifactId>
-                            <skip>${skipOverlay}</skip>
-                        </overlay>
+<!--                        <overlay>-->
+<!--                            <groupId>org.apache.atlas</groupId>-->
+<!--                            <artifactId>atlas-dashboardv2</artifactId>-->
+<!--                            <skip>${skipOverlay}</skip>-->
+<!--                        </overlay>-->
                         <overlay>
                             <!-- empty groupId/artifactId represents the current build -->
                         </overlay>
