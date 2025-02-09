@@ -28,7 +28,7 @@ on:
       - master
       - lineageondemand
       - makerlogic
-
+      - mlh41tests
 jobs:
   build:
 
