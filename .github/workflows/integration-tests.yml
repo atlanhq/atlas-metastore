@@ -1,7 +1,7 @@
 name: Integration Tests for Metastore
 
 on:
-  push:
+  pull_request:
     branches:
       - alpha
       - beta
@@ -9,7 +9,6 @@ on:
       - master
       - lineageondemand
       - makerlogic
-      - mlh41-integration-tests
       - mlh41tests
 jobs:
   wait-for-deployment:
