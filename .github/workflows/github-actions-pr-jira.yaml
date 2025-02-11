@@ -11,4 +11,4 @@ jobs:
     if: ${{ !contains(fromJson('["main", "staging", "master", "beta", "develop", "prod", "development"]'), github.event.pull_request.head.ref) }}
     steps:
       - name: Enforce Pull Request Title includes Jira Issue Key
-        uses: ryanvade/enforce-pr-title-style-action@v2.1.1
+        uses: ryanvade/enforce-pr-title-style-action@v2.1.2
