@@ -122,7 +122,7 @@ public enum AtlasConfiguration {
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
 
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
-    ATLAS_BULK_DELETE_SKIP_HASLINEAGE_CALCULATION("atlas.bulk.delete.skip.haslineage", false),
+    ATLAS_BULK_DELETE_SKIP_HASLINEAGE_CALCULATION("atlas.bulk.delete.skip.haslineage", true),
 
     /***
      * OTEL Configuration
