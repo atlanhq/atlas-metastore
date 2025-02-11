@@ -1,7 +1,7 @@
 name: Integration Tests for Metastore
 
 on:
-  pull_request:
+  push:
     branches:
       - alpha
       - beta
@@ -44,7 +44,7 @@ jobs:
           echo "❌ ERROR: Max retries reached. Commit ID did not match the revision."
           exit 1
   setup-java-sdk:
-    runs-on: ubuntu-latest
+    runs-on: metastore-runner
     steps:
       - name: Checkout Java SDK Repo
         uses: actions/checkout@v4
