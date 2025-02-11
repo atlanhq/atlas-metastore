@@ -1515,6 +1515,9 @@ public abstract class DeleteHandlerV1 {
 
     public void resetHasLineageOnInputOutputDelete(Collection<AtlasEdge> removedEdges, AtlasVertex deletedVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("resetHasLineageOnInputOutputDelete");
+        if (AtlasConfiguration.ATLAS_BULK_DELETE_SKIP_HASLINEAGE_CALCULATION.getBoolean()){
+            return;
+        }
 
         for (AtlasEdge atlasEdge : removedEdges) {
 
