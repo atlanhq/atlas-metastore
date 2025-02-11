@@ -1148,7 +1148,7 @@ public class EntityGraphRetriever {
     }
 
     private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithoutPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeader");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithoutPrefetch");
         AtlasEntityHeader ret = new AtlasEntityHeader();
         try {
             String  typeName     = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
@@ -2013,63 +2013,75 @@ public class EntityGraphRetriever {
     }
 
     private void mapRelationshipAttributes(AtlasVertex entityVertex, AtlasEntity entity, AtlasEntityExtInfo entityExtInfo, boolean isMinExtInfo) throws AtlasBaseException {
-        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphRetriever.mapRelationshipAttributes");
 
-        if (entityType == null) {
-            throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, entity.getTypeName());
-        }
+        try {
+            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
 
-        for (String attributeName : entityType.getRelationshipAttributes().keySet()) {
-            mapVertexToRelationshipAttribute(entityVertex, entityType, attributeName, entity, entityExtInfo, isMinExtInfo);
+            if (entityType == null) {
+                throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, entity.getTypeName());
+            }
+
+            for (String attributeName : entityType.getRelationshipAttributes().keySet()) {
+                mapVertexToRelationshipAttribute(entityVertex, entityType, attributeName, entity, entityExtInfo, isMinExtInfo);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
 
     private Object mapVertexToRelationshipAttribute(AtlasVertex entityVertex, AtlasEntityType entityType, String attributeName, AtlasEntity entity, AtlasEntityExtInfo entityExtInfo, boolean isMinExtInfo) throws AtlasBaseException {
-        Object                ret                  = null;
-        String                relationshipTypeName = graphHelper.getRelationshipTypeName(entityVertex, entityType, attributeName);
-        AtlasRelationshipType relationshipType     = relationshipTypeName != null ? typeRegistry.getRelationshipTypeByName(relationshipTypeName) : null;
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToRelationshipAttribute");
 
-        if (relationshipType == null) {
-            throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID, "relationshipDef is null");
+        try {
+            Object                ret                  = null;
+            String                relationshipTypeName = graphHelper.getRelationshipTypeName(entityVertex, entityType, attributeName);
+            AtlasRelationshipType relationshipType     = relationshipTypeName != null ? typeRegistry.getRelationshipTypeByName(relationshipTypeName) : null;
+
+            if (relationshipType == null) {
+                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID, "relationshipDef is null");
+            }
+
+            AtlasAttribute          attribute       = entityType.getRelationshipAttribute(attributeName, relationshipTypeName);
+            AtlasRelationshipDef    relationshipDef = relationshipType.getRelationshipDef();
+            AtlasRelationshipEndDef endDef1         = relationshipDef.getEndDef1();
+            AtlasRelationshipEndDef endDef2         = relationshipDef.getEndDef2();
+            AtlasEntityType         endDef1Type     = typeRegistry.getEntityTypeByName(endDef1.getType());
+            AtlasEntityType         endDef2Type     = typeRegistry.getEntityTypeByName(endDef2.getType());
+            AtlasRelationshipEndDef attributeEndDef = null;
+
+            if (endDef1Type.isTypeOrSuperTypeOf(entityType.getTypeName()) && StringUtils.equals(endDef1.getName(), attributeName)) {
+                attributeEndDef = endDef1;
+            } else if (endDef2Type.isTypeOrSuperTypeOf(entityType.getTypeName()) && StringUtils.equals(endDef2.getName(), attributeName)) {
+                attributeEndDef = endDef2;
+            }
+
+            if (attributeEndDef == null) {
+                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID, relationshipDef.toString());
+            }
+
+            switch (attributeEndDef.getCardinality()) {
+                case SINGLE:
+                    ret = mapRelatedVertexToObjectId(entityVertex, attribute, entityExtInfo, isMinExtInfo);
+                    break;
+
+                case LIST:
+                case SET:
+                    ret = mapRelationshipArrayAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo);
+                    break;
+            }
+
+            // Set Relationship attributes, even if the value is null
+            entity.setRelationshipAttribute(attributeName, ret);
+
+            if (attributeEndDef.getIsLegacyAttribute() && !entity.hasAttribute(attributeName)) {
+                entity.setAttribute(attributeName, toLegacyAttribute(ret));
+            }
+
+            return ret;
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
         }
-
-        AtlasAttribute          attribute       = entityType.getRelationshipAttribute(attributeName, relationshipTypeName);
-        AtlasRelationshipDef    relationshipDef = relationshipType.getRelationshipDef();
-        AtlasRelationshipEndDef endDef1         = relationshipDef.getEndDef1();
-        AtlasRelationshipEndDef endDef2         = relationshipDef.getEndDef2();
-        AtlasEntityType         endDef1Type     = typeRegistry.getEntityTypeByName(endDef1.getType());
-        AtlasEntityType         endDef2Type     = typeRegistry.getEntityTypeByName(endDef2.getType());
-        AtlasRelationshipEndDef attributeEndDef = null;
-
-        if (endDef1Type.isTypeOrSuperTypeOf(entityType.getTypeName()) && StringUtils.equals(endDef1.getName(), attributeName)) {
-            attributeEndDef = endDef1;
-        } else if (endDef2Type.isTypeOrSuperTypeOf(entityType.getTypeName()) && StringUtils.equals(endDef2.getName(), attributeName)) {
-            attributeEndDef = endDef2;
-        }
-
-        if (attributeEndDef == null) {
-            throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID, relationshipDef.toString());
-        }
-
-        switch (attributeEndDef.getCardinality()) {
-            case SINGLE:
-                ret = mapRelatedVertexToObjectId(entityVertex, attribute, entityExtInfo, isMinExtInfo);
-                break;
-
-            case LIST:
-            case SET:
-                ret = mapRelationshipArrayAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo);
-                break;
-        }
-
-        // Set Relationship attributes, even if the value is null
-        entity.setRelationshipAttribute(attributeName, ret);
-
-        if (attributeEndDef.getIsLegacyAttribute() && !entity.hasAttribute(attributeName)) {
-            entity.setAttribute(attributeName, toLegacyAttribute(ret));
-        }
-
-        return ret;
     }
 
     private Object toLegacyAttribute(Object obj) {
