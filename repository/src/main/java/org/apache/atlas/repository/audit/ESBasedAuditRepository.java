@@ -120,30 +120,34 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     public void putEventsV2(List<EntityAuditEventV2> events) throws AtlasBaseException {
         try {
             if (events != null && events.size() > 0) {
-
                 Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
                 String entityPayloadTemplate = getQueryTemplate(requestContextHeaders);
 
                 StringBuilder bulkRequestBody = new StringBuilder();
                 for (EntityAuditEventV2 event : events) {
-                    String created = String.format("%s", event.getTimestamp());
-                    String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
-                    String details = event.getDetails().substring(auditDetailPrefix.length());
+                    try {
+                        String created = String.format("%s", event.getTimestamp());
+                        String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
+                        String details = event.getDetails().substring(auditDetailPrefix.length());
 
-                    String bulkItem = MessageFormat.format(entityPayloadTemplate,
-                            event.getEntityId(),
-                            event.getAction(),
-                            details,
-                            event.getUser(),
-                            event.getEntityId() + ":" + event.getEntity().getUpdateTime().getTime(),
-                            event.getEntityQualifiedName(),
-                            event.getEntity().getTypeName(),
-                            created,
-                            "" + event.getEntity().getUpdateTime().getTime());
+                        String bulkItem = MessageFormat.format(entityPayloadTemplate,
+                                event.getEntityId(),
+                                event.getAction(),
+                                details,
+                                event.getUser(),
+                                event.getEntityId() + ":" + event.getEntity().getUpdateTime().getTime(),
+                                event.getEntityQualifiedName(),
+                                event.getEntity().getTypeName(),
+                                created,
+                                "" + event.getEntity().getUpdateTime().getTime());
 
-                    bulkRequestBody.append(bulkMetadata);
-                    bulkRequestBody.append(bulkItem);
-                    bulkRequestBody.append("\n");
+                        bulkRequestBody.append(bulkMetadata);
+                        bulkRequestBody.append(bulkItem);
+                        bulkRequestBody.append("\n");
+                    } catch (Exception e) {
+                        LOG.error("getUpdateTime null exception for processing event of entityId: {}", event.getEntityId(), e);
+                        throw e;
+                    }
                 }
                 String endpoint = INDEX_NAME + "/_bulk";
                 HttpEntity entity = new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON);
