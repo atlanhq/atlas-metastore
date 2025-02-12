@@ -396,6 +396,7 @@ public class DiscoveryREST {
     @Timed
     public AtlasSearchResult indexSearch(@Context HttpServletRequest servletRequest, IndexSearchParams parameters) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
+        RequestContext.get().setIsInvokedByIndexSearch(true);
         long startTime = System.currentTimeMillis();
 
         RequestContext.get().setIncludeMeanings(!parameters.isExcludeMeanings());
