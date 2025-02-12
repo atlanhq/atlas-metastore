@@ -450,6 +450,61 @@ public abstract class DeleteHandlerV1 {
         }
     }
 
+    // TODO : connect this method to the source trigger
+    public AtlasVertex addTagPropagation(AtlasVertex classificationVertex, AtlasVertex entityVertex) throws AtlasBaseException {
+
+        AtlasVertex             associatedEntityVertex = getAssociatedEntityVertex(classificationVertex);
+        String                  classificationName     = getTypeName(classificationVertex);
+        AtlasClassificationType classificationType     = typeRegistry.getClassificationTypeByName(classificationName);
+        if (getClassificationEdge(entityVertex, classificationVertex) != null) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(" --> Classification edge already exists from [{}] --> [{}][{}] using edge label: [{}]",
+                        getTypeName(entityVertex), getTypeName(classificationVertex), getTypeName(associatedEntityVertex), classificationName);
+            }
+
+            return null;
+        }
+        if (getPropagatedClassificationEdge(entityVertex, classificationVertex) != null) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(" --> Propagated classification edge already exists from [{}] --> [{}][{}] using edge label: [{}]",
+                        getTypeName(entityVertex), getTypeName(classificationVertex), getTypeName(associatedEntityVertex), CLASSIFICATION_LABEL);
+            }
+
+            return null;
+        }
+        AtlasPerfMetrics.MetricRecorder countMetricRecorder = RequestContext.get().startMetricRecord("countPropagations");
+
+        String          entityTypeName = getTypeName(entityVertex);
+        AtlasEntityType entityType     = typeRegistry.getEntityTypeByName(entityTypeName);
+        String          entityGuid     = getGuid(entityVertex);
+
+        if (!classificationType.canApplyToEntityType(entityType)) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug(" --> Not creating propagated classification edge from [{}] --> [{}][{}], classification is not applicable for entity type",
+                        getTypeName(entityVertex), getTypeName(classificationVertex), getTypeName(associatedEntityVertex));
+            }
+
+            return null;
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug(" --> Adding propagated classification: [{}] to {} ({}) using edge label: [{}]", classificationName, getTypeName(entityVertex),
+                    getGuid(entityVertex), CLASSIFICATION_LABEL);
+        }
+
+        graphHelper.addClassificationEdge(entityVertex, classificationVertex, true);
+
+        addToPropagatedClassificationNames(entityVertex, classificationName);
+
+        // record add propagation details to send notifications at the end
+        RequestContext      context        = RequestContext.get();
+        AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
+
+        context.recordAddedPropagation(entityGuid, classification);
+        RequestContext.get().endMetricRecord(countMetricRecorder);
+        return entityVertex;
+    }
+
     public List<AtlasVertex> addTagPropagation(AtlasVertex classificationVertex, List<AtlasVertex> propagatedEntityVertices) throws AtlasBaseException {
         List<AtlasVertex> ret = new ArrayList<>();
 
@@ -598,6 +653,21 @@ public abstract class DeleteHandlerV1 {
         }
 
         return ret;
+    }
+
+    public AtlasVertex removeTagPropagation(AtlasClassification classification, AtlasEdge propagatedEdge) throws AtlasBaseException {
+
+            AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("removeTagPropagationEdge");
+            org.apache.atlas.repository.graphdb.AtlasVertex entityVertex = propagatedEdge.getOutVertex();
+
+            // record remove propagation details to send notifications inline
+            RequestContext.get().recordRemovedPropagation(getGuid(entityVertex), classification);
+
+            deletePropagatedEdge(propagatedEdge);
+
+            RequestContext.get().endMetricRecord(metric);
+
+        return entityVertex;
     }
 
     public List<AtlasVertex> removeTagPropagation(AtlasClassification classification, List<AtlasEdge> propagatedEdges) throws AtlasBaseException {

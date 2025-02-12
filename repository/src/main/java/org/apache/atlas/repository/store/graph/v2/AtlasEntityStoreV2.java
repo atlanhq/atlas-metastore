@@ -46,10 +46,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
-import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
-import org.apache.atlas.repository.store.graph.EntityGraphDiscovery;
-import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
+import org.apache.atlas.repository.store.graph.*;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEntityDiffResult;
@@ -92,7 +89,6 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.InputStream;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static java.lang.Boolean.FALSE;
@@ -140,6 +136,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final ESAliasStore esAliasStore;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
 
+    private ObjectPropagationExecutorV2 objectPropagationExecutorV2;
+
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
@@ -160,6 +158,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.featureFlagStore = featureFlagStore;
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
+        this.objectPropagationExecutorV2 = null;
+
         try {
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
         } catch (AtlasException e) {
@@ -789,6 +789,35 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         RequestContext.get().setEntityHeaderCache(cacheKey, entityHeader);
         RequestContext.get().endMetricRecord(metric);
         return entityHeader;
+    }
+
+    @Override
+    public void processTasks(TaskV2Request taskV2Request) {
+        try {
+            switch (taskV2Request.getAction()) {
+                case CLASSIFICATION_PROPAGATION_ADD:
+                    objectPropagationExecutorV2 = new TagPropagate(entityGraphMapper);
+                    objectPropagationExecutorV2.attach(taskV2Request.getAssetVertexId(), taskV2Request.getTagVertexId());
+                    return;
+
+                case CLASSIFICATION_PROPAGATION_DELETE:
+                    objectPropagationExecutorV2 = new TagPropagate(entityGraphMapper);
+                    objectPropagationExecutorV2.detach(taskV2Request.getAssetVertexId(), taskV2Request.getTagVertexId());
+                    return;
+
+                case CLASSIFICATION_PROPAGATION_TEXT_UPDATE:
+                    objectPropagationExecutorV2 = new TagPropagate(entityGraphMapper);
+                    objectPropagationExecutorV2.updateText(taskV2Request.getAssetVertexId(), taskV2Request.getTagVertexId());
+                    return;
+
+                default:
+                    LOG.info("Unknown task");
+            }
+        }
+        catch (Exception e){
+            LOG.info("Some error occured while executing a subtask");
+            e.printStackTrace();
+        }
     }
 
     @Override
