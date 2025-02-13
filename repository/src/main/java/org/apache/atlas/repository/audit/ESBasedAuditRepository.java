@@ -145,8 +145,17 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                         bulkRequestBody.append(bulkItem);
                         bulkRequestBody.append("\n");
                     } catch (Exception e) {
-                        LOG.error("getUpdateTime null exception for processing event of entityId: {}", event.getEntityId(), e);
-                        throw e;
+
+                        if (event.getEntity() == null) {
+                            LOG.error("event.getEntity() is null for entityId: {} and event: {}", event.getEntityId(), event, e);
+                        }
+                        else if (event.getEntity().getUpdateTime() == null) {
+                            LOG.error("event.getEntity() is null for entityId: {} and event: {}", event.getEntityId(), event, e);
+                        }
+                        else {
+                            LOG.error("Error for entityId: {} and event: {}", event.getEntityId(), event, e);
+                        }
+                        throw e;  // Re-throw the exception after logging
                     }
                 }
                 String endpoint = INDEX_NAME + "/_bulk";
