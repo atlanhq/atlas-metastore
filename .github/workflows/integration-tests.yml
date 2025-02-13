@@ -12,7 +12,7 @@ on:
       - mlh41tests
 jobs:
   set-image-tag:
-    runs-on: metastore-sh-runner
+    runs-on: metastore-sh-runner2
     steps:
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)" >> $GITHUB_ENV
@@ -27,6 +27,7 @@ jobs:
           echo "Setting image tag for Atlas..."
 #          kubectl set image statefulset/atlas -n atlas atlas-main=${IMAGE_TAG}
   wait-for-deployment:
+    needs: set-image-tag
     runs-on: ubuntu-latest
     steps:
       - name: Wait for Matching Revision
