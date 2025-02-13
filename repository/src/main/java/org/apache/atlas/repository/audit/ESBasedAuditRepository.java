@@ -150,7 +150,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                             LOG.error("event.getEntity() is null for entityId: {} and event: {}", event.getEntityId(), event, e);
                         }
                         else if (event.getEntity().getUpdateTime() == null) {
-                            LOG.error("event.getEntity() is null for entityId: {} and event: {}", event.getEntityId(), event, e);
+                            LOG.error("event.getEntity().getUpdatedTime() is null for entityId: {} and event: {}", event.getEntityId(), event, e);
                         }
                         else {
                             LOG.error("Error for entityId: {} and event: {}", event.getEntityId(), event, e);

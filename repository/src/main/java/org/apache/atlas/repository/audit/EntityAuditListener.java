@@ -88,8 +88,10 @@ public class EntityAuditListener implements EntityChangeListener {
 
         List<EntityAuditEvent> events = new ArrayList<>();
         for (Referenceable entity : entities) {
+            LOG.info("entityID={} -> entity={}",entity.getId(), entity);
             EntityAuditEvent event = createEvent(entity, isImport ? EntityAuditAction.ENTITY_IMPORT_UPDATE : EntityAuditAction.ENTITY_UPDATE);
             events.add(event);
+            LOG.info("eventID={} -> event={}",event.getEntityId(), event);
         }
 
         for (EntityAuditRepository auditRepository: auditRepositories) {
