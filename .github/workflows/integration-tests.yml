@@ -11,12 +11,24 @@ on:
       - makerlogic
       - mlh41tests
 jobs:
-  wait-for-deployment:
-    runs-on: metastore-runner
+  set-image-tag:
+    runs-on: metastore-sh-runner
     steps:
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)" >> $GITHUB_ENV
 
+      - name: Set Image Tag in Deployment
+        run: |
+          REPOSITORY_NAME=$(echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//")
+          VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | tr -d '[:space:]')abcd
+          IMAGE_TAG=ghcr.io/atlanhq/${REPOSITORY_NAME}-${{ env.BRANCH_NAME }}:${VERSION}
+          
+          echo "Image Tag: ${IMAGE_TAG}"  # Print out the image tag
+          echo "Setting image tag for Atlas..."
+#          kubectl set image statefulset/atlas -n atlas atlas-main=${IMAGE_TAG}
+  wait-for-deployment:
+    runs-on: ubuntu-latest
+    steps:
       - name: Wait for Matching Revision
         run: |
           MAX_RETRIES=30  # Set maximum number of retries
