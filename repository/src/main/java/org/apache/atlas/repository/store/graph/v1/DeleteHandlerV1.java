@@ -61,7 +61,6 @@ import org.slf4j.LoggerFactory;
 import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 
 import java.util.*;
-import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;

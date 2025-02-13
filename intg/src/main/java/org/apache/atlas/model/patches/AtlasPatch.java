@@ -49,8 +49,6 @@ public class AtlasPatch implements Serializable {
     private long        createdTime;
     private long        updatedTime;
     private PatchStatus status;
-    private long                assetsCountToPropagate;
-    private long                assetsCountPropagated;
 
     public enum PatchStatus { UNKNOWN, APPLIED, SKIPPED, FAILED }
 
@@ -159,7 +157,7 @@ public class AtlasPatch implements Serializable {
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, description, type, action, updatedBy, createdBy, createdTime, updatedTime, status, assetsCountToPropagate, assetsCountPropagated);
+        return Objects.hash(id, description, type, action, updatedBy, createdBy, createdTime, updatedTime, status);
     }
 
     @Override
@@ -175,8 +173,6 @@ public class AtlasPatch implements Serializable {
         sb.append(", createdTime=").append(createdTime);
         sb.append(", updatedTime=").append(updatedTime);
         sb.append(", status=").append(status);
-        sb.append(", assetsCountToPropagate=").append(assetsCountToPropagate);
-        sb.append(", assetsCountPropagated=").append(assetsCountPropagated);
         sb.append('}');
 
         return sb.toString();
