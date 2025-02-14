@@ -26,8 +26,8 @@ on:
       - beta
       - development
       - master
-      - lineageondemand
-      - makerlogic
+      - win492master
+
 
 jobs:
   build:
