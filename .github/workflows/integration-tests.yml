@@ -15,10 +15,12 @@ jobs:
     runs-on: metastore-sh-runner
     steps:
       - name: Get commit ID
-        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)" >> $GITHUB_ENV
+        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
+
       - name: Get Repository Name
         run: echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
         shell: bash
+
       - name: Get branch name
         run: |
           echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
@@ -29,10 +31,28 @@ jobs:
           IMAGE_TAG=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
           
           echo "Image Tag: ${IMAGE_TAG}"  # Print out the image tag
-          echo "Setting image tag for Atlas..."
+
+      - name: Verify kubectl Installation
+        run: |
+          if ! command -v kubectl &> /dev/null; then
+            echo "kubectl is not installed! Installing..."
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            chmod +x kubectl
+            sudo mv kubectl /usr/local/bin/
+          else
+            echo "kubectl is installed!"
+          fi
+          kubectl version --client
+
+      - name: Verify Kubernetes Connection
+        run: |
+          echo "Checking if kubectl can connect to the cluster..."
+          kubectl get namespaces
+      - name: Check Pods in namespaces
+        run: |
+          kubectl get pods -n sh-runner
           kubectl get pods -n atlas
-          kubectl get statefulset atlas -n atlas -o=jsonpath='{.spec.template.spec.containers[?(@.name=="atlas-main")].image}'
-#          kubectl set image statefulset/atlas -n atlas atlas-main=${IMAGE_TAG}
+
   wait-for-deployment:
     needs: set-image-tag
     runs-on: ubuntu-latest
