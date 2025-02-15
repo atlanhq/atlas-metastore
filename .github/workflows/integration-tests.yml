@@ -3,30 +3,110 @@ name: Integration Tests for Metastore
 on:
   push:
     branches:
-      - alpha
-      - beta
-      - development
-      - master
-      - lineageondemand
-      - makerlogic
       - mlh41tests
 jobs:
-  set-image-tag:
-    runs-on: metastore-sh-runner
+  build:
+    runs-on: ubuntu-latest
     steps:
-      - name: Get commit ID
-        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
+      - uses: actions/checkout@v2
 
-      - name: Get Repository Name
-        run: echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
-        shell: bash
+      - name: Set up JDK 1.8
+        uses: actions/setup-java@v1
+        with:
+          java-version: 1.8
+
+      - name: Cache Maven packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/build.sh') }}
+          restore-keys: ${{ runner.os }}-m2
 
       - name: Get branch name
         run: |
           echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
           echo BRANCH_NAME=${GITHUB_REF#refs/heads/}
 
-      - name: Set Image Tag in Deployment
+      - name: Create Maven Settings
+        uses: s4u/maven-settings-action@v2.8.0
+        with:
+          servers: |
+            [{
+                "id": "github",
+                "username": "atlan-ci",
+                "password": "${{ secrets.ORG_PAT_GITHUB }}"
+            }]
+
+      - name: Build with Maven
+        run: |
+          branch_name=${{ env.BRANCH_NAME }}
+          if [[ $branch_name == 'main' || $branch_name == 'master' || $branch_name == 'lineageondemand' ]]
+          then
+              echo "build without dashboard"
+              chmod +x ./build.sh && ./build.sh build_without_dashboard
+          else
+              echo "build with dashboard"
+              chmod +x ./build.sh && ./build.sh
+          fi
+
+      - name: Get Repository Name
+        run: echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
+        shell: bash
+
+      - name: Get version tag
+        # run: echo "##[set-output name=version;]$(echo `git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7`)abcd"
+        run: |
+          echo "VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | head -n 1)abcd"
+          echo "VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | tr -d '[:space:]')abcd"
+          echo "VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | tr -d '[:space:]')abcd" >> $GITHUB_ENV
+
+      - name: Get commit ID
+        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
+
+      - name: Set up Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+
+      - name: Login to GitHub Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: $GITHUB_ACTOR
+          password: ${{ secrets.ORG_PAT_GITHUB }}
+
+      - name: Build and push
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          context: .
+          file: ./Dockerfile
+          no-cache: true
+          sbom: true
+          provenance: true
+          push: true
+          tags: |
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+
+      - name: Scan Image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'ubuntu:18.04'
+          vuln-type: 'os,library'
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2.1.33
+        with:
+          sarif_file: 'trivy-image-results.sarif'
+
+
+  set-image-tag:
+    runs-on: metastore-sh-runner
+    needs: build
+    steps:
+      - name: Set Image Tag
         run: |
           IMAGE_TAG=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
           
@@ -52,6 +132,10 @@ jobs:
         run: |
           kubectl get pods -n sh-runner
           kubectl get pods -n atlas
+      - name: Set atlas image
+        run: |
+          echo "Updating StatefulSet 'atlas' with image: ${IMAGE_TAG}"
+          kubectl set image statefulset/atlas -n atlas atlas-main=${IMAGE_TAG}
 
   wait-for-deployment:
     needs: set-image-tag
@@ -84,7 +168,7 @@ jobs:
           echo "❌ ERROR: Max retries reached. Commit ID did not match the revision."
           exit 1
   setup-java-sdk:
-    runs-on: metastore-runner
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout Java SDK Repo
         uses: actions/checkout@v4
