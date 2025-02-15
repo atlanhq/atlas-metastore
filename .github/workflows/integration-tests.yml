@@ -104,7 +104,7 @@ jobs:
 
   set-image-tag:
     runs-on: metastore-sh-runner
-#    needs: build
+    needs: build
     steps:
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
@@ -148,14 +148,14 @@ jobs:
       - name: Set atlas image
         run: |
           echo "Updating StatefulSet 'atlas' with image: ${{ env.IMAGE_TAG }}"
-#          kubectl set image statefulset/atlas -n atlas atlas-main=${{ env.IMAGE_TAG }}
+          kubectl set image statefulset/atlas -n atlas atlas-main=${{ env.IMAGE_TAG }}
 
   wait-for-deployment:
     needs: set-image-tag
     runs-on: ubuntu-latest
     steps:
       - name: Get commit ID
-        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
+        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)" >> $GITHUB_ENV
 
       - name: Wait for Matching Revision
         run: |
