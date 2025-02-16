@@ -28,6 +28,7 @@ on:
       - master
       - lineageondemand
       - makerlogic
+      - bulkimprovezero
 
 jobs:
   build:
