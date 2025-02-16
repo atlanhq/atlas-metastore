@@ -126,6 +126,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 StringBuilder bulkRequestBody = new StringBuilder();
                 for (EntityAuditEventV2 event : events) {
                     try {
+                        LOG.info("ESBasedAuditRepo - putEventsV2! entityID: {} and getupdateTime: {}", event.getEntityId(), event.getEntity().getUpdateTime());
                         String created = String.format("%s", event.getTimestamp());
                         String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
                         String details = event.getDetails().substring(auditDetailPrefix.length());

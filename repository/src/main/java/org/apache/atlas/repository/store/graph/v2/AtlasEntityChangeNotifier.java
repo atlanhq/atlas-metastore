@@ -110,6 +110,9 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         doFullTextMapping(updatedEntities);
         doFullTextMapping(partiallyUpdatedEntities);
 
+        for(AtlasEntityHeader entityHeader : updatedEntities) {
+            LOG.info("AtlasEntityChangeNotifier.onEntitiesMutated: EntityID: {}, getUpdateTime : {}", entityHeader.getGuid(), entityHeader.getUpdateTime());
+        }
         notifyListeners(createdEntities, EntityOperation.CREATE, isImport);
         notifyListeners(updatedEntities, EntityOperation.UPDATE, isImport);
         notifyListeners(partiallyUpdatedEntities, EntityOperation.PARTIAL_UPDATE, isImport);
