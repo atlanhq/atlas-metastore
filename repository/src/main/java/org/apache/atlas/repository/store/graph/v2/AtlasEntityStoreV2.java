@@ -97,7 +97,6 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.InputStream;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static java.lang.Boolean.FALSE;
@@ -440,30 +439,22 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     @Override
     @GraphTransaction
     public EntityMutationResponse createOrUpdate(EntityStream entityStream, boolean isPartialUpdate) throws AtlasBaseException {
-        return createOrUpdate(entityStream, isPartialUpdate, false, false);
+        return createOrUpdate(entityStream, isPartialUpdate, new BulkRequestContext());
     }
 
     @Override
     @GraphTransaction
-    public EntityMutationResponse createOrUpdate(EntityStream entityStream,  boolean replaceClassifications,
-                                                 boolean replaceBusinessAttributes, boolean isOverwriteBusinessAttributes) throws AtlasBaseException {
-        return createOrUpdate(entityStream, false, replaceClassifications, false, replaceBusinessAttributes, isOverwriteBusinessAttributes);
-    }
-
-    @Override
-    @GraphTransaction
-    public EntityMutationResponse createOrUpdate(EntityStream entityStream,
-                                                 boolean replaceClassifications, boolean appendClassifications,
-                                                 boolean replaceBusinessAttributes, boolean isOverwriteBusinessAttributes) throws AtlasBaseException {
-        return createOrUpdate(entityStream, false,
-                replaceClassifications, appendClassifications,
-                replaceBusinessAttributes, isOverwriteBusinessAttributes);
+    public EntityMutationResponse createOrUpdate(EntityStream entityStream,  BulkRequestContext context) throws AtlasBaseException {
+        return createOrUpdate(entityStream, false, context);
     }
 
     @Override
     @GraphTransaction
     public EntityMutationResponse createOrUpdateGlossary(EntityStream entityStream, boolean isPartialUpdate, boolean replaceClassification) throws AtlasBaseException {
-        return createOrUpdate(entityStream, isPartialUpdate, true, false);
+        BulkRequestContext context = new BulkRequestContext.Builder()
+                .setReplaceClassifications(replaceClassification)
+                .build();
+        return createOrUpdate(entityStream, isPartialUpdate, context);
     }
 
     @Override
@@ -1557,9 +1548,16 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
     }
 
-    private EntityMutationResponse createOrUpdate(EntityStream entityStream, boolean isPartialUpdate,
-                                                  boolean replaceClassifications, boolean appendClassifications,
-                                                  boolean replaceBusinessAttributes, boolean isOverwriteBusinessAttribute) throws AtlasBaseException {
+    private EntityMutationResponse createOrUpdate(EntityStream entityStream, boolean isPartialUpdate, boolean replaceClassifications, boolean replaceBusinessAttributes, boolean isOverwriteBusinessAttribute) throws AtlasBaseException {
+        BulkRequestContext bulkRequestContext = new BulkRequestContext.Builder()
+                .setReplaceClassifications(replaceClassifications)
+                .setReplaceBusinessAttributes(replaceBusinessAttributes)
+                .setOverwriteBusinessAttributes(isOverwriteBusinessAttribute)
+                .build();
+        return createOrUpdate(entityStream, isPartialUpdate, bulkRequestContext);
+    }
+
+    private EntityMutationResponse createOrUpdate(EntityStream entityStream, boolean isPartialUpdate, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> createOrUpdate()");
         }
@@ -1593,7 +1591,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 MetricRecorder checkForUnchangedEntities = RequestContext.get().startMetricRecord("checkForUnchangedEntities");
 
                 List<AtlasEntity>     entitiesToSkipUpdate = new ArrayList<>();
-                AtlasEntityComparator entityComparator     = new AtlasEntityComparator(typeRegistry, entityRetriever, context.getGuidAssignments(), !replaceClassifications, !replaceBusinessAttributes);
+                AtlasEntityComparator entityComparator     = new AtlasEntityComparator(typeRegistry, entityRetriever, context.getGuidAssignments(), bulkRequestContext);
                 RequestContext        reqContext           = RequestContext.get();
 
                 for (AtlasEntity entity : context.getUpdatedEntities()) {
@@ -1671,9 +1669,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
 
-            EntityMutationResponse ret = entityGraphMapper.mapAttributesAndClassifications(context, isPartialUpdate,
-                    replaceClassifications, appendClassifications,
-                    replaceBusinessAttributes, isOverwriteBusinessAttribute);
+            EntityMutationResponse ret = entityGraphMapper.mapAttributesAndClassifications(context, isPartialUpdate, bulkRequestContext);
 
             ret.setGuidAssignments(context.getGuidAssignments());
 

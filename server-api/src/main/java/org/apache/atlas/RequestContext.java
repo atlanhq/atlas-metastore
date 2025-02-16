@@ -121,6 +121,7 @@ public class RequestContext {
     private final List<String> addedOutputPorts = new ArrayList<>();
     private final List<String> removedOutputPorts = new ArrayList<>();
 
+    Map<String, Object> tagsDiff = new HashMap<>();
 
     private RequestContext() {
     }
@@ -497,6 +498,14 @@ public class RequestContext {
 
     public void addAddedClassificationAndVertices(AtlasClassification classification, Collection<Object> vertices) {
         this.addedClassificationAndVertices.put(classification, vertices);
+    }
+
+    public Map<String, List<AtlasClassification>> getAndRemoveTagsDiff(String entityGuid) {
+        return (Map<String, List<AtlasClassification>>) tagsDiff.remove(entityGuid);
+    }
+
+    public void addTagsDiff(String entityGuid, Map<String, List<AtlasClassification>> tagsDiff) {
+        this.tagsDiff.put(entityGuid, tagsDiff);
     }
 
     public void addToDeletedEdgesIds(String edgeId) {
