@@ -475,6 +475,9 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     private void notifyV2Listeners(List<AtlasEntityHeader> entityHeaders, EntityOperation operation, boolean isImport) throws AtlasBaseException {
         List<AtlasEntity> entities = toAtlasEntities(entityHeaders, operation);
+        for(AtlasEntity entity : entities) {
+            LOG.info(" AtlasEntityChangeNotifier.notifyV2Listeners -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+        }
 
         for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
             switch (operation) {
@@ -583,6 +586,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
         if (CollectionUtils.isNotEmpty(entityHeaders)) {
             for (AtlasEntityHeader entityHeader : entityHeaders) {
+
+                LOG.info(" AtlasEntityChangeNotifier.toAtlasEntities -> EntityHeaderID: {} and headerGetupdateTime: {}", entityHeader.getGuid(), entityHeader.getUpdateTime());
+
+
                 String          typeName   = entityHeader.getTypeName();
                 AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(typeName);
 
@@ -610,6 +617,8 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                         entity.setAttributes(entityHeader.getAttributes());
                     }
                 }
+
+                LOG.info(" AtlasEntityChangeNotifier.toAtlasEntities -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
 
                 if (entity != null) {
                     ret.add(entity);

@@ -131,7 +131,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         Collection<AtlasEntity>             updatedEntites;
 
         Map<String, AtlasEntity> entitiesMap = entities.stream().collect(Collectors.toMap(AtlasEntity::getGuid, Function.identity()));
-
+        LOG.info(" EntityAuditListenerV2.onEntitiesUpdated -> Differential_audits is {}", DIFFERENTIAL_AUDITS);
         if (DIFFERENTIAL_AUDITS) {
             updatedEntites = reqContext.getDifferentialEntities();
         } else {
@@ -141,7 +141,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         for (EntityAuditRepository auditRepository: auditRepositories) {
             FixedBufferList<EntityAuditEventV2> updatedEvents = getAuditEventsList();
             for (AtlasEntity entity : updatedEntites) {
-                LOG.info(" EntityAuditListenerV2 - ! onEntitiesUpdated EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+                LOG.info(" EntityAuditListenerV2.onEntitiesUpdated -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
                 final EntityAuditActionV2 action;
 
                 if (isImport) {
