@@ -110,8 +110,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         doFullTextMapping(updatedEntities);
         doFullTextMapping(partiallyUpdatedEntities);
 
-        for(AtlasEntityHeader entityHeader : updatedEntities) {
-            LOG.info("AtlasEntityChangeNotifier.onEntitiesMutated: EntityID: {}, getUpdateTime : {}", entityHeader.getGuid(), entityHeader.getUpdateTime());
+        if(updatedEntities != null) {
+            for(AtlasEntityHeader entityHeader : updatedEntities) {
+                LOG.info("AtlasEntityChangeNotifier.onEntitiesMutated: EntityID: {}, getUpdateTime : {}", entityHeader.getGuid(), entityHeader.getUpdateTime());
+            }
         }
         notifyListeners(createdEntities, EntityOperation.CREATE, isImport);
         notifyListeners(updatedEntities, EntityOperation.UPDATE, isImport);
@@ -475,8 +477,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     private void notifyV2Listeners(List<AtlasEntityHeader> entityHeaders, EntityOperation operation, boolean isImport) throws AtlasBaseException {
         List<AtlasEntity> entities = toAtlasEntities(entityHeaders, operation);
-        for(AtlasEntity entity : entities) {
-            LOG.info(" AtlasEntityChangeNotifier.notifyV2Listeners -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+        if(entities != null) {
+            for(AtlasEntity entity : entities) {
+                LOG.info(" AtlasEntityChangeNotifier.notifyV2Listeners -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+            }
         }
 
         for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
@@ -587,9 +591,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         if (CollectionUtils.isNotEmpty(entityHeaders)) {
             for (AtlasEntityHeader entityHeader : entityHeaders) {
 
-                LOG.info(" AtlasEntityChangeNotifier.toAtlasEntities -> EntityHeaderID: {} and headerGetupdateTime: {}", entityHeader.getGuid(), entityHeader.getUpdateTime());
+                if(entityHeader != null) {
+                    LOG.info(" AtlasEntityChangeNotifier.toAtlasEntities -> EntityHeaderID: {} and headerGetupdateTime: {}", entityHeader.getGuid(), entityHeader.getUpdateTime());
 
-
+                }
                 String          typeName   = entityHeader.getTypeName();
                 AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(typeName);
 
@@ -617,8 +622,9 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                         entity.setAttributes(entityHeader.getAttributes());
                     }
                 }
-
-                LOG.info(" AtlasEntityChangeNotifier.toAtlasEntities -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+                if(entity != null) {
+                    LOG.info(" AtlasEntityChangeNotifier.toAtlasEntities -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+                }
 
                 if (entity != null) {
                     ret.add(entity);

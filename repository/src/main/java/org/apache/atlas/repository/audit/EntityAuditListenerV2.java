@@ -141,7 +141,9 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         for (EntityAuditRepository auditRepository: auditRepositories) {
             FixedBufferList<EntityAuditEventV2> updatedEvents = getAuditEventsList();
             for (AtlasEntity entity : updatedEntites) {
-                LOG.info(" EntityAuditListenerV2.onEntitiesUpdated -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+                if(entity != null) {
+                    LOG.info(" EntityAuditListenerV2.onEntitiesUpdated -> EntityID: {} and getupdateTime: {}", entity.getGuid(), entity.getUpdateTime());
+                }
                 final EntityAuditActionV2 action;
 
                 if (isImport) {

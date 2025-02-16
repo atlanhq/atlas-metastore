@@ -1665,12 +1665,13 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             ret.setGuidAssignments(context.getGuidAssignments());
 
             // Log entityID and updatedTime
-            for (AtlasEntity entity : context.getUpdatedEntities()) {
-                String entityID = entity.getGuid();
-                Date updatedTime = entity.getUpdateTime();
-                LOG.info("AtlasEntityStoreV2.createOrUpdate: EntityID: {}, getUpdateTime: {}", entityID, updatedTime);
+            if(context.getUpdatedEntities() != null) {
+                for (AtlasEntity entity : context.getUpdatedEntities()) {
+                    String entityID = entity.getGuid();
+                    Date updatedTime = entity.getUpdateTime();
+                    LOG.info("AtlasEntityStoreV2.createOrUpdate: EntityID: {}, getUpdateTime: {}", entityID, updatedTime);
+                }
             }
-
             // Notify the change listeners
             entityChangeNotifier.onEntitiesMutated(ret, RequestContext.get().isImportInProgress());
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
