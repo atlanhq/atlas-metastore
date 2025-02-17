@@ -18,16 +18,15 @@
 
 package org.apache.atlas.audit.provider;
 
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.hadoop.util.ShutdownHookManager;
-import org.apache.atlas.audit.destination.*;
-import org.apache.atlas.audit.provider.hdfs.HdfsAuditProvider;
+import org.apache.atlas.audit.destination.ElasticSearchAuditDestination;
+import org.apache.atlas.audit.destination.Log4JAuditDestination;
 import org.apache.atlas.audit.queue.AuditAsyncQueue;
 import org.apache.atlas.audit.queue.AuditBatchQueue;
 import org.apache.atlas.audit.queue.AuditFileQueue;
 import org.apache.atlas.audit.queue.AuditQueue;
 import org.apache.atlas.audit.queue.AuditSummaryQueue;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -124,11 +123,11 @@ public class AuditProviderFactory {
 
 		boolean isEnabled = MiscUtil.getBooleanProperty(props,
 				AUDIT_IS_ENABLED_PROP, true);
-        if (!isEnabled) {
-            LOG.info("AuditProviderFactory: Audit not enabled..");
-            mProvider = getDefaultProvider();
-            return;
-        }
+		if (!isEnabled) {
+			LOG.info("AuditProviderFactory: Audit not enabled..");
+			mProvider = getDefaultProvider();
+			return;
+		}
 
 		boolean isAuditToHdfsEnabled = MiscUtil.getBooleanProperty(props,
 				AUDIT_HDFS_IS_ENABLED_PROP, false);
@@ -290,33 +289,33 @@ public class AuditProviderFactory {
 				return;
 			}
 
-			if (isAuditToHdfsEnabled) {
-				LOG.info("HdfsAuditProvider is enabled");
-
-				HdfsAuditProvider hdfsProvider = new HdfsAuditProvider();
-
-				boolean isAuditToHdfsAsync = MiscUtil.getBooleanProperty(props,
-						HdfsAuditProvider.AUDIT_HDFS_IS_ASYNC_PROP, false);
-
-				if (isAuditToHdfsAsync) {
-					int maxQueueSize = MiscUtil.getIntProperty(props,
-							HdfsAuditProvider.AUDIT_HDFS_MAX_QUEUE_SIZE_PROP,
-							AUDIT_ASYNC_MAX_QUEUE_SIZE_DEFAULT);
-					int maxFlushInterval = MiscUtil
-							.getIntProperty(
-									props,
-									HdfsAuditProvider.AUDIT_HDFS_MAX_FLUSH_INTERVAL_PROP,
-									AUDIT_ASYNC_MAX_FLUSH_INTERVAL_DEFAULT);
-
-					AsyncAuditProvider asyncProvider = new AsyncAuditProvider(
-							"HdfsAuditProvider", maxQueueSize,
-							maxFlushInterval, hdfsProvider);
-
-					providers.add(asyncProvider);
-				} else {
-					providers.add(hdfsProvider);
-				}
-			}
+//			if (isAuditToHdfsEnabled) {
+//				LOG.info("HdfsAuditProvider is enabled");
+//
+//				HdfsAuditProvider hdfsProvider = new HdfsAuditProvider();
+//
+//				boolean isAuditToHdfsAsync = MiscUtil.getBooleanProperty(props,
+//						HdfsAuditProvider.AUDIT_HDFS_IS_ASYNC_PROP, false);
+//
+//				if (isAuditToHdfsAsync) {
+//					int maxQueueSize = MiscUtil.getIntProperty(props,
+//							HdfsAuditProvider.AUDIT_HDFS_MAX_QUEUE_SIZE_PROP,
+//							AUDIT_ASYNC_MAX_QUEUE_SIZE_DEFAULT);
+//					int maxFlushInterval = MiscUtil
+//							.getIntProperty(
+//									props,
+//									HdfsAuditProvider.AUDIT_HDFS_MAX_FLUSH_INTERVAL_PROP,
+//									AUDIT_ASYNC_MAX_FLUSH_INTERVAL_DEFAULT);
+//
+//					AsyncAuditProvider asyncProvider = new AsyncAuditProvider(
+//							"HdfsAuditProvider", maxQueueSize,
+//							maxFlushInterval, hdfsProvider);
+//
+//					providers.add(asyncProvider);
+//				} else {
+//					providers.add(hdfsProvider);
+//				}
+//			}
 
 			/*if (isAuditToKafkaEnabled) {
 				LOG.info("KafkaAuditProvider is enabled");
@@ -379,7 +378,7 @@ public class AuditProviderFactory {
 	}
 
 	private AuditHandler getProviderFromConfig(Properties props,
-			String propPrefix, String providerName, AuditHandler consumer) {
+											   String propPrefix, String providerName, AuditHandler consumer) {
 		AuditHandler provider = null;
 		String className = MiscUtil.getStringProperty(props, propPrefix + "."
 				+ BaseAuditHandler.PROP_CLASS_NAME);
@@ -401,9 +400,9 @@ public class AuditProviderFactory {
 			}
 		} else {
 			if (providerName.equalsIgnoreCase("file")) {
-				provider = new FileAuditDestination();
+				//provider = new FileAuditDestination();
 			} else if (providerName.equalsIgnoreCase("hdfs")) {
-				provider = new HDFSAuditDestination();
+				//provider = new HDFSAuditDestination();
 			} else if (providerName.equalsIgnoreCase("elasticsearch")) {
 				provider = new ElasticSearchAuditDestination();
 			} /*else if (providerName.equalsIgnoreCase("kafka")) {
@@ -461,9 +460,9 @@ public class AuditProviderFactory {
 		int shutdownHookMaxWaitSeconds = MiscUtil.getIntProperty(props, AUDIT_SHUTDOWN_HOOK_MAX_WAIT_SEC, AUDIT_SHUTDOWN_HOOK_MAX_WAIT_SEC_DEFAULT);
 		jvmShutdownHook = new JVMShutdownHook(mProvider, shutdownHookMaxWaitSeconds);
 		String appType = this.componentAppType;
-		if (appType != null && !hbaseAppTypes.contains(appType)) {
-			ShutdownHookManager.get().addShutdownHook(jvmShutdownHook, RANGER_AUDIT_SHUTDOWN_HOOK_PRIORITY);
-		}
+//		if (appType != null && !hbaseAppTypes.contains(appType)) {
+//			ShutdownHookManager.get().addShutdownHook(jvmShutdownHook, RANGER_AUDIT_SHUTDOWN_HOOK_PRIORITY);
+//		}
 	}
 
 	private static class RangerAsyncAuditCleanup implements Runnable {

@@ -258,7 +258,7 @@ def runProcess(commandline, logdir=None, shell=False, wait=False):
         stdoutFile = open(os.path.join(logdir, timestr + ".out"), "w")
         stderrFile = open(os.path.join(logdir,timestr + ".err"), "w")
 
-    p = subprocess.Popen(commandline, stdout=stdoutFile, stderr=stderrFile, shell=shell)
+    p = subprocess.Popen(commandline, shell=shell)
 
     if wait:
         p.communicate()

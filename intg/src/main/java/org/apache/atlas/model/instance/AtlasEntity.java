@@ -95,12 +95,16 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
     private Map<String, Object>              appendRelationshipAttributes;
     private Map<String, Object>              removeRelationshipAttributes;
     private List<AtlasClassification>        classifications;
+    private List<AtlasClassification>        addOrUpdateClassifications = null;
+    private List<AtlasClassification>        removeClassifications     = null;
     private List<AtlasTermAssignmentHeader>  meanings;
     private Map<String, String>              customAttributes;
     private Map<String, Map<String, Object>> businessAttributes;
     private Set<String>                      labels;
     private Set<String>                      pendingTasks; // read-only field i.e. value provided is ignored during entity create/update
     private String                           deleteHandler;
+    private Map<String, Object>              addedRelationshipAttributes;
+    private Map<String, Object>              removedRelationshipAttributes;
 
     @JsonIgnore
     private static AtomicLong s_nextId = new AtomicLong(System.nanoTime());
@@ -234,6 +238,8 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
             setPendingTasks(other.getPendingTasks());
             setAppendRelationshipAttributes(other.getAppendRelationshipAttributes());
             setRemoveRelationshipAttributes(other.getRemoveRelationshipAttributes());
+            setAddedRelationshipAttributes(other.getAddedRelationshipAttributes());
+            setRemovedRelationshipAttributes(other.getRemovedRelationshipAttributes());
         }
     }
 
@@ -503,6 +509,22 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
         this.classifications = c;
     }
 
+    public List<AtlasClassification> getAddOrUpdateClassifications() {
+        return addOrUpdateClassifications;
+    }
+
+    public void setAddOrUpdateClassifications(List<AtlasClassification> addOrUpdateClassifications) {
+        this.addOrUpdateClassifications = addOrUpdateClassifications;
+    }
+
+    public List<AtlasClassification> getRemoveClassifications() {
+        return removeClassifications;
+    }
+
+    public void setRemoveClassifications(List<AtlasClassification> removeClassifications) {
+        this.removeClassifications = removeClassifications;
+    }
+
     public List<AtlasTermAssignmentHeader> getMeanings() {
         return meanings;
     }
@@ -527,6 +549,60 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
 
     public void setDeleteHandler(String deleteHandler) {
         this.deleteHandler = deleteHandler;
+    }
+
+    public Map<String, Object> getRemovedRelationshipAttributes() {
+        return removedRelationshipAttributes;
+    }
+
+    public void setRemovedRelationshipAttributes(Map<String, Object> removedRelationshipAttributes) {
+        this.removedRelationshipAttributes = removedRelationshipAttributes;
+    }
+
+    public boolean hasRemovedRelationshipAttribute(String name) {
+        Map<String, Object> r = this.removedRelationshipAttributes;
+
+        return r != null ? r.containsKey(name) : false;
+    }
+
+    public void setRemovedRelationshipAttribute(String name, Object value) {
+        Map<String, Object> r = this.removedRelationshipAttributes;
+
+        if (r != null) {
+            r.put(name, value);
+        } else {
+            r = new HashMap<>();
+            r.put(name, value);
+
+            this.removedRelationshipAttributes = r;
+        }
+    }
+
+    public boolean hasAddedRelationshipAttribute(String name) {
+        Map<String, Object> r = this.addedRelationshipAttributes;
+
+        return r != null ? r.containsKey(name) : false;
+    }
+
+    public Map<String, Object> getAddedRelationshipAttributes() {
+        return addedRelationshipAttributes;
+    }
+
+    public void setAddedRelationshipAttributes(Map<String, Object> addedRelationshipAttributes) {
+        this.addedRelationshipAttributes = addedRelationshipAttributes;
+    }
+
+    public void setAddedRelationshipAttribute(String name, Object value) {
+        Map<String, Object> r = this.addedRelationshipAttributes;
+
+        if (r != null) {
+            r.put(name, value);
+        } else {
+            r = new HashMap<>();
+            r.put(name, value);
+
+            this.addedRelationshipAttributes = r;
+        }
     }
 
     private void init() {
@@ -577,6 +653,12 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
         sb.append(", classifications=[");
         AtlasBaseTypeDef.dumpObjects(classifications, sb);
         sb.append(']');
+        sb.append(", addOrUpdateClassifications=[");
+        AtlasBaseTypeDef.dumpObjects(addOrUpdateClassifications, sb);
+        sb.append(']');
+        sb.append(", removeClassifications=[");
+        AtlasBaseTypeDef.dumpObjects(removeClassifications, sb);
+        sb.append(']');
         sb.append(", meanings=[");
         AtlasBaseTypeDef.dumpObjects(meanings, sb);
         sb.append(']');
@@ -619,13 +701,15 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
                 Objects.equals(customAttributes, that.customAttributes) &&
                 Objects.equals(businessAttributes, that.businessAttributes) &&
                 Objects.equals(labels, that.labels) &&
-                Objects.equals(classifications, that.classifications);
+                Objects.equals(classifications, that.classifications) &&
+                Objects.equals(addOrUpdateClassifications, that.addOrUpdateClassifications) &&
+                Objects.equals(removeClassifications, that.removeClassifications);
     }
 
     @Override
     public int hashCode() {
         return Objects.hash(super.hashCode(), guid, homeId, isProxy, isIncomplete, provenanceType, status, createdBy, updatedBy,
-                createTime, updateTime, version, relationshipAttributes, classifications, customAttributes, businessAttributes, labels);
+                createTime, updateTime, version, relationshipAttributes, classifications, customAttributes, businessAttributes, labels, addOrUpdateClassifications, removeClassifications);
     }
 
     @Override
