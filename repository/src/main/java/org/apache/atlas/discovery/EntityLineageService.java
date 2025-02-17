@@ -48,6 +48,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.atlas.util.AtlasGremlinQueryProvider;
@@ -152,7 +153,7 @@ public class EntityLineageService implements AtlasLineageService {
                 LOG.info("dhanyavg: Retrieved entity type: {}. All super types: {}", entity.getTypeName(),
                         entityType != null ? entityType.getTypeAndAllSuperTypes() : "null entityType");
 
-                LOG.info("dhanyavg: Entity type : {}", AtlasEntityType.toJson(entityType));
+                LOG.info("dhanyavg: Entity type : {}", AtlasType.toJson(entityType));
 
                 throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, entity.getTypeName());
             }
@@ -219,10 +220,14 @@ public class EntityLineageService implements AtlasLineageService {
         if (!isProcess) {
             boolean isDataSet = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
             if (!isDataSet) {
+                LOG.info("dhanyavg2: Data_set_super_type: {}, isDataSet -> {}", DATA_SET_SUPER_TYPE,entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE));
+                LOG.info("dhanyavg2: .contains(catalog) -> {}", entityType.getTypeAndAllSuperTypes().contains("catalog"));
+
                 LOG.info("dhanyavg:2 Retrieved entity type: {}. All super types: {}", typeName,
                         entityType != null ? entityType.getTypeAndAllSuperTypes() : "null entityType");
+                LOG.info("dhanyavg:2 entityType : {}", entityType);
+                LOG.info("dhanyavg:2 AtlasType.toJSON(entityType) : {}", AtlasType.toJson(entityType));
 
-                LOG.info("dhanyavg:2 Entity type : {}", AtlasEntityType.toJson(entityType));
                 throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
             }
         }
