@@ -227,6 +227,7 @@ public class EntityLineageService implements AtlasLineageService {
                         entityType != null ? entityType.getTypeAndAllSuperTypes() : "null entityType");
                 LOG.info("dhanyavg:2 entityType : {}", entityType);
                 LOG.info("dhanyavg:2 AtlasType.toJSON(entityType) : {}", AtlasType.toJson(entityType));
+                LOG.info("dhanyavg:2 AtlasEntityType.toJSON(entityType) : {}", AtlasEntityType.toJson(entityType));
 
                 throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
             }
