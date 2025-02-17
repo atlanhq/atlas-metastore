@@ -55,8 +55,6 @@ public final class ApplicationProperties extends PropertiesConfiguration {
     public static final String  ENABLE_FREETEXT_SEARCH_CONF     = "atlas.search.freetext.enable";
     public static final String  ATLAS_RUN_MODE                  = "atlas.run.mode";
     public static final String  GRAPHBD_BACKEND_JANUS           = "janus";
-    public static final String  STORAGE_BACKEND_HBASE           = "hbase";
-    public static final String  STORAGE_BACKEND_HBASE2          = "hbase2";
     public static final String  INDEX_BACKEND_SOLR              = "solr";
     public static final String  LDAP_TYPE                       =  "atlas.authentication.method.ldap.type";
     public static final String  LDAP                            =  "LDAP";
@@ -70,6 +68,7 @@ public final class ApplicationProperties extends PropertiesConfiguration {
     public static final boolean DEFAULT_INDEX_RECOVERY          = true;
     public static final AtlasRunMode DEFAULT_ATLAS_RUN_MODE     = AtlasRunMode.PROD;
     public static final String INDEX_SEARCH_MAX_RESULT_SET_SIZE = "atlas.graph.index.search.max-result-set-size";
+    public static final String DELTA_BASED_REFRESH              = "atlas.authorizer.enable.delta_based_refresh";
 
     public static final SimpleEntry<String, String> DB_CACHE_CONF               = new SimpleEntry<>("atlas.graph.cache.db-cache", "true");
     public static final SimpleEntry<String, String> DB_CACHE_CLEAN_WAIT_CONF    = new SimpleEntry<>("atlas.graph.cache.db-cache-clean-wait", "20");
@@ -320,10 +319,6 @@ public final class ApplicationProperties extends PropertiesConfiguration {
 
         // setting value for 'atlas.graph.storage.backend' (default = 'hbase2')
         String storageBackend = getString(STORAGE_BACKEND_CONF);
-
-        if (StringUtils.isEmpty(storageBackend) || storageBackend.equalsIgnoreCase(STORAGE_BACKEND_HBASE)) {
-            storageBackend = STORAGE_BACKEND_HBASE2;
-        }
 
         clearPropertyDirect(STORAGE_BACKEND_CONF);
         addPropertyDirect(STORAGE_BACKEND_CONF, storageBackend);

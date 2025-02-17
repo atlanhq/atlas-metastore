@@ -86,6 +86,8 @@ public class RequestContext {
     private boolean isPurgeRequested = false;
     private int maxAttempts = 1;
     private int attemptCount = 1;
+    private Long assetsCountToPropagate = 0L;
+    private Long assetsCountPropagated = 0L;
     private boolean isImportInProgress = false;
     private boolean     isInNotificationProcessing = false;
 
@@ -110,12 +112,16 @@ public class RequestContext {
     private boolean skipAuthorizationCheck = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
-    private boolean cacheEnabled;
 
     private boolean delayTagNotifications = false;
+    private boolean skipHasLineageCalculation = false;
+    private boolean isInvokedByIndexSearch = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
+    private final List<String> addedOutputPorts = new ArrayList<>();
+    private final List<String> removedOutputPorts = new ArrayList<>();
 
+    Map<String, Object> tagsDiff = new HashMap<>();
 
     private RequestContext() {
     }
@@ -180,6 +186,8 @@ public class RequestContext {
         this.delayTagNotifications = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
+        this.addedOutputPorts.clear();
+        this.removedOutputPorts.clear();
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -310,6 +318,23 @@ public class RequestContext {
 
     public void setAttemptCount(int attemptCount) {
         this.attemptCount = attemptCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public Long getAssetsCountPropagated() {
+        return assetsCountPropagated;
+    }
+
+
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount ;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public boolean isImportInProgress() {
@@ -473,6 +498,14 @@ public class RequestContext {
 
     public void addAddedClassificationAndVertices(AtlasClassification classification, Collection<Object> vertices) {
         this.addedClassificationAndVertices.put(classification, vertices);
+    }
+
+    public Map<String, List<AtlasClassification>> getAndRemoveTagsDiff(String entityGuid) {
+        return (Map<String, List<AtlasClassification>>) tagsDiff.remove(entityGuid);
+    }
+
+    public void addTagsDiff(String entityGuid, Map<String, List<AtlasClassification>> tagsDiff) {
+        this.tagsDiff.put(entityGuid, tagsDiff);
     }
 
     public void addToDeletedEdgesIds(String edgeId) {
@@ -747,14 +780,6 @@ public class RequestContext {
         return this.requestUri;
     }
 
-    public void setEnableCache(boolean cacheEnabled) {
-        this.cacheEnabled = cacheEnabled;
-    }
-
-    public boolean isCacheEnabled() {
-        return this.cacheEnabled;
-    }
-
     public boolean isIncludeClassificationNames() {
         return includeClassificationNames;
     }
@@ -785,6 +810,21 @@ public class RequestContext {
 
     public void setSkipProcessEdgeRestoration(boolean skipProcessEdgeRestoration) {
         this.skipProcessEdgeRestoration = skipProcessEdgeRestoration;
+    }
+
+    public boolean skipHasLineageCalculation() {
+        return skipHasLineageCalculation;
+    }
+    public void setSkipHasLineageCalculation(boolean skipHasLineageCalculation) {
+        this.skipHasLineageCalculation = skipHasLineageCalculation;
+    }
+
+    public void setIsInvokedByIndexSearch(boolean isInvokedByIndexSearch) {
+        this.isInvokedByIndexSearch = isInvokedByIndexSearch;
+    }
+
+    public boolean isInvokedByIndexSearch() {
+        return isInvokedByIndexSearch;
     }
 
     public class EntityGuidPair {
@@ -861,6 +901,22 @@ public class RequestContext {
 
     public boolean isEdgeLabelAlreadyProcessed(String processEdgeLabel) {
         return edgeLabels.contains(processEdgeLabel);
+    }
+
+    public void setAddedOutputPorts(List<String> addedOutputPorts) {
+        this.addedOutputPorts.addAll(addedOutputPorts);
+    }
+
+    public List<String> getAddedOutputPorts() {
+        return addedOutputPorts;
+    }
+
+    public void setRemovedOutputPorts(List<String> removedOutputPorts) {
+        this.removedOutputPorts.addAll(removedOutputPorts);
+    }
+
+    public List<String> getRemovedOutputPorts() {
+        return removedOutputPorts;
     }
 
 }

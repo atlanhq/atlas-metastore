@@ -28,6 +28,7 @@ public enum AtlasConfiguration {
     //web server configuration
     WEBSERVER_MIN_THREADS("atlas.webserver.minthreads", 10),
     WEBSERVER_MAX_THREADS("atlas.webserver.maxthreads", 100),
+    WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 40),
     WEBSERVER_KEEPALIVE_SECONDS("atlas.webserver.keepalivetimesecs", 60),
     WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 100),
     WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 16192),
@@ -95,6 +96,7 @@ public enum AtlasConfiguration {
     LINEAGE_ON_DEMAND_ENABLED("atlas.lineage.on.demand.enabled", true),
     LINEAGE_ON_DEMAND_DEFAULT_NODE_COUNT("atlas.lineage.on.demand.default.node.count", 3),
     LINEAGE_MAX_NODE_COUNT("atlas.lineage.max.node.count", 100),
+    LINEAGE_TIMEOUT_MS("atlas.lineage.max.timeout.ms", 15000),
 
     SUPPORTED_RELATIONSHIP_EVENTS("atlas.notification.relationships.filter", "asset_readme,asset_links"),
 
@@ -113,11 +115,27 @@ public enum AtlasConfiguration {
     HERACLES_API_SERVER_URL("atlas.heracles.api.service.url", "http://heracles-service.heracles.svc.cluster.local"),
 
     INDEXSEARCH_ASYNC_SEARCH_KEEP_ALIVE_TIME_IN_SECONDS("atlas.indexsearch.async.search.keep.alive.time.in.seconds", 300),
+
+    /**
+     *   hits elastic search async API
+     */
     ENABLE_ASYNC_INDEXSEARCH("atlas.indexsearch.async.enable", false),
     ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT("atlas.indexsearch.query.size.max.limit", 100000),
     ATLAS_INDEXSEARCH_LIMIT_UTM_TAGS("atlas.indexsearch.limit.ignore.utm.tags", ""),
+    ATLAS_INDEXSEARCH_ENABLE_REQUEST_ISOLATION("atlas.indexsearch.request.isolation.enable", false),
+    ATLAS_ELASTICSEARCH_PRODUCT_SEARCH_CLUSTER_URL("atlas.index.elasticsearch.product.cluster.url","atlas-elasticsearch2-product-search-headless.atlas.svc.cluster.local:9200"),
+    ATLAS_ELASTICSEARCH_NON_PRODUCT_SEARCH_CLUSTER_URL("atlas.index.elasticsearch.nonproduct.cluster.url","atlas-elasticsearch2-non-product-search-headless.atlas.svc.cluster.local:9200"),
     ATLAS_INDEXSEARCH_ENABLE_API_LIMIT("atlas.indexsearch.enable.api.limit", false),
+
+    /**
+     * enables janus/cassandra optimization
+     */
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION("atlas.indexsearch.enable.janus.optimization", false),
+    /***
+     * This configuration is used to enable fetching non primitive attributes in index search
+     */
+    ATLAS_INDEXSEARCH_ENABLE_FETCHING_NON_PRIMITIVE_ATTRIBUTES("atlas.indexsearch.enable.fetching.non.primitive.attributes", true),
+
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
 

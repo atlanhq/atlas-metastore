@@ -33,6 +33,7 @@ public class AtlasLineageOnDemandInfo implements Serializable {
     private LineageOnDemandRequest                  lineageOnDemandPayload;
     private boolean                                 upstreamEntityLimitReached;
     private boolean                                 downstreamEntityLimitReached;
+    private boolean                                 timeoutOccurred;
 
     public AtlasLineageOnDemandInfo() {
     }
@@ -133,6 +134,14 @@ public class AtlasLineageOnDemandInfo implements Serializable {
 
     public void setDownstreamEntityLimitReached(boolean downstreamEntityLimitReached) {
         this.downstreamEntityLimitReached = downstreamEntityLimitReached;
+    }
+
+    public void setTimeoutOccurred(boolean timeoutOccurred) {
+        this.timeoutOccurred = timeoutOccurred;
+    }
+
+    public boolean isTimeoutOccurred() {
+        return timeoutOccurred;
     }
 
     @Override

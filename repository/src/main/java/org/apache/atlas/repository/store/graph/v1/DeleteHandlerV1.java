@@ -20,6 +20,7 @@ package org.apache.atlas.repository.store.graph.v1;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasPrivilege;
@@ -44,7 +45,6 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.DeleteType;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.tasks.TaskUtil;
 import org.apache.atlas.tasks.TaskManagement;
@@ -58,14 +58,10 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
-
 
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;
-import static org.apache.atlas.AtlasClient.PROCESS_SUPER_TYPE;
 import static org.apache.atlas.model.TypeCategory.*;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
@@ -73,7 +69,6 @@ import static org.apache.atlas.model.instance.AtlasEntity.Status.PURGED;
 import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.ONE_TO_TWO;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.*;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getState;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_ADD;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_DELETE;
@@ -81,6 +76,8 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPro
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
+import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
+import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getState;
 
 public abstract class DeleteHandlerV1 {
     public static final Logger  LOG = LoggerFactory.getLogger(DeleteHandlerV1.class);
@@ -1236,22 +1233,49 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
+            // update the 'assetsCountToPropagate' on in memory java object.
+            AtlasTask currentTask = RequestContext.get().getCurrentTask();
+            currentTask.setAssetsCountToPropagate((long) addPropagationsMap.size() + removePropagationsMap.size() - 1);
+
+            //update the 'assetsCountToPropagate' in the current task vertex.
+            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+            currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+            graph.commit();
+
+            int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
+                propagatedCount++;
+                if (propagatedCount == 100){
+                    currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount - 1);
+                    currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+                    propagatedCount = 0;
+                }
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
+                propagatedCount++;
+                if (propagatedCount == 100){
+                    currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount);
+                    currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+                    propagatedCount = 0;
+                }
+            }
+            if (propagatedCount != 0){
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount);
+                currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)
             handleBlockedClassifications(edge, relationship.getBlockedPropagatedClassifications());
         }
     }
+
 
     public void handleBlockedClassifications(AtlasEdge edge, Set<AtlasClassification> blockedClassifications) throws AtlasBaseException {
         if (blockedClassifications != null) {
@@ -1485,6 +1509,10 @@ public abstract class DeleteHandlerV1 {
 
     public void removeHasLineageOnDelete(Collection<AtlasVertex> vertices) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("removeHasLineageOnDelete");
+
+        if (RequestContext.get().skipHasLineageCalculation()) {
+            return;
+        }
 
         for (AtlasVertex vertexToBeDeleted : vertices) {
             if (ACTIVE.equals(getStatus(vertexToBeDeleted))) {

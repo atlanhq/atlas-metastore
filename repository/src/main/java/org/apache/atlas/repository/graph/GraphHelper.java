@@ -60,6 +60,7 @@ import org.apache.atlas.util.AttributeValueMap;
 import org.apache.atlas.util.IndexedInstance;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.IteratorUtils;
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1081,6 +1082,10 @@ public final class GraphHelper {
         return ret;
     }
 
+    public static Boolean isEntityIncomplete(Integer value) {
+        return value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
+    }
+
     public static Boolean getEntityHasLineage(AtlasElement element) {
         if (element.getPropertyKeys().contains(HAS_LINEAGE)) {
             return element.getProperty(HAS_LINEAGE, Boolean.class);
@@ -1108,8 +1113,22 @@ public final class GraphHelper {
         return ret;
     }
 
+    public static Map getCustomAttributes(String customAttrsString) {
+        Map    ret               = null;
+
+        if (customAttrsString != null) {
+            ret = AtlasType.fromJson(customAttrsString, Map.class);
+        }
+
+        return ret;
+    }
+
     public static Set<String> getLabels(AtlasElement element) {
         return parseLabelsString(element.getProperty(LABELS_PROPERTY_KEY, String.class));
+    }
+
+    public static Set<String> getLabels(String labels) {
+        return parseLabelsString(labels);
     }
 
     public static Integer getProvenanceType(AtlasElement element) {
@@ -2024,7 +2043,6 @@ public final class GraphHelper {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
-
     public static Iterator<AtlasVertex> getActiveVertices(AtlasVertex vertex, String childrenEdgeLabel, AtlasEdgeDirection direction) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("CategoryPreProcessor.getEdges");
 
@@ -2091,6 +2109,24 @@ public final class GraphHelper {
                     .iterator();
         } catch (Exception e) {
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+        }
+        finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    public static Iterable<AtlasEdge> getEdges(AtlasVertex vertex, AtlasEdgeDirection direction, String[] edgeTypesToExclude) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.getOnlyActiveEdges");
+
+        try {
+            AtlasVertexQuery query =  vertex.query()
+                    .direction(direction);
+            if(ArrayUtils.isNotEmpty(edgeTypesToExclude)) {
+                for(String edgeTypeToExclude: edgeTypesToExclude) {
+                    query = query.hasNot("__typeName", edgeTypeToExclude);
+                }
+            }
+            return query.edges();
         }
         finally {
             RequestContext.get().endMetricRecord(metricRecorder);
