@@ -259,7 +259,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         diffEntity.setUpdatedBy(ev.getProperty(MODIFIED_BY_KEY, String.class));
         diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
         diffEntity.setAttribute(PRODUCT_GUIDS_ATTR, existingValues);
-
+        LOG.info("Caching differential entity for entityID: {} and it's updateTime: {}", diffEntity.getGuid(), diffEntity.getUpdateTime());
         RequestContext requestContext = RequestContext.get();
         requestContext.cacheDifferentialEntity(diffEntity);
     }

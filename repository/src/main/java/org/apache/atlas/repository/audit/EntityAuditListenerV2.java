@@ -134,7 +134,6 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         LOG.info(" EntityAuditListenerV2.onEntitiesUpdated -> Differential_audits is {}", DIFFERENTIAL_AUDITS);
         if (DIFFERENTIAL_AUDITS) {
             updatedEntites = reqContext.getDifferentialEntities();
-            updatedEntites = entities;
         } else {
             updatedEntites = entities;
         }
