@@ -2050,8 +2050,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
                 break;
 
-//            case PROCESS_ENTITY_TYPE:
-//                preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
+            case PROCESS_ENTITY_TYPE:
+                preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
         }
 
         //  The default global pre-processor for all AssetTypes
