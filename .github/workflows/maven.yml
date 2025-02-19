@@ -78,12 +78,12 @@ jobs:
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
 
-      # QEMU is required to build arm from a non-arm build machine
-      - name: Set up QEMU
-        id: qemu
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
+      # # QEMU is required to build arm from a non-arm build machine
+      # - name: Set up QEMU
+      #   id: qemu
+      #   uses: docker/setup-qemu-action@v3
+      #   with:
+      #     platforms: arm64
 
       - name: Set up Buildx
         id: buildx
