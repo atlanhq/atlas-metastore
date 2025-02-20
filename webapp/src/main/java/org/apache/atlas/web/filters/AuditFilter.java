@@ -60,6 +60,7 @@ public class AuditFilter implements Filter {
     private static final Logger AUDIT_LOG = LoggerFactory.getLogger("AUDIT");
     public static final String TRACE_ID   = "trace_id";
     public static final String X_ATLAN_REQUEST_ID = "X-Atlan-Request-Id";
+    public static final String X_ATLAN_CLIENT_ORIGIN = "X-Atlan-Client-Origin";
     private boolean deleteTypeOverrideEnabled                = false;
     private boolean createShellEntityForNonExistingReference = false;
 
@@ -103,8 +104,10 @@ public class AuditFilter implements Filter {
             requestContext.setCreateShellEntityForNonExistingReference(createShellEntityForNonExistingReference);
             requestContext.setForwardedAddresses(AtlasAuthorizationUtils.getForwardedAddressesFromRequest(httpRequest));
             requestContext.setSkipFailedEntities(skipFailedEntities);
+            requestContext.setClientOrigin(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN));
             requestContext.setMetricRegistry(metricsRegistry);
             MDC.put(TRACE_ID, internalRequestId);
+            MDC.put(X_ATLAN_CLIENT_ORIGIN, ofNullable(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN)).orElse(EMPTY));
             MDC.put(X_ATLAN_REQUEST_ID, ofNullable(httpRequest.getHeader(X_ATLAN_REQUEST_ID)).orElse(EMPTY));
             if (StringUtils.isNotEmpty(deleteType)) {
                 if (deleteTypeOverrideEnabled) {
@@ -155,7 +158,14 @@ public class AuditFilter implements Filter {
 
     public static void audit(AuditLog auditLog) {
         if (AUDIT_LOG.isInfoEnabled() && auditLog != null) {
-            AUDIT_LOG.info(auditLog.toString());
+            MDC.put("requestTime", DateTimeHelper.formatDateUTC(auditLog.requestTime));
+            MDC.put("user", auditLog.userName);
+            MDC.put("from", auditLog.fromAddress);
+            MDC.put("requestMethod", auditLog.requestMethod);
+            MDC.put("requestUrl", auditLog.requestUrl);
+            MDC.put("httpStatus", String.valueOf(auditLog.httpStatus));
+            MDC.put("timeTaken", String.valueOf(auditLog.timeTaken));
+            AUDIT_LOG.info("ATLAS_AUDIT - {} {} {} {}", auditLog.requestMethod, auditLog.requestUrl, auditLog.httpStatus, auditLog.timeTaken);
         }
     }
 

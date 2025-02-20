@@ -71,7 +71,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateNoPoliciesAttached;
 
-public class PersonaPreProcessor implements PreProcessor {
+public class PersonaPreProcessor extends AccessControlPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(PersonaPreProcessor.class);
 
     protected final AtlasGraph graph;
@@ -100,6 +100,7 @@ public class PersonaPreProcessor implements PreProcessor {
         if (LOG.isDebugEnabled()) {
             LOG.debug("PersonaPreProcessor.processAttributes: pre processing {}, {}", entityStruct.getAttribute(QUALIFIED_NAME), operation);
         }
+        super.processAttributes(entityStruct, context, operation);
 
         AtlasEntity entity = (AtlasEntity) entityStruct;
 
@@ -204,6 +205,7 @@ public class PersonaPreProcessor implements PreProcessor {
                         policyToBeUpdated.setAttribute(ATTR_POLICY_IS_ENABLED, enable);
 
                         context.addUpdated(policyToBeUpdated.getGuid(), policyToBeUpdated, entityType, policyVertex);
+                        RequestContext.get().cacheDifferentialEntity(policyToBeUpdated);
                     }
                 }
             }

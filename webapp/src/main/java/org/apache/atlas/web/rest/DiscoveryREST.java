@@ -67,6 +67,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.Arrays;
+
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.REQUEST_HEADER_HOST;
 import static org.apache.atlas.repository.Constants.REQUEST_HEADER_USER_AGENT;
@@ -390,6 +391,7 @@ public class DiscoveryREST {
     @Timed
     public AtlasSearchResult indexSearch(@Context HttpServletRequest servletRequest, IndexSearchParams parameters) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
+        RequestContext.get().setIsInvokedByIndexSearch(true);
         long startTime = System.currentTimeMillis();
 
         RequestContext.get().setIncludeMeanings(!parameters.isExcludeMeanings());
@@ -398,6 +400,17 @@ public class DiscoveryREST {
         try     {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.indexSearch(" + parameters + ")");
+            }
+
+            if (AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_API_LIMIT.getBoolean() && parameters.getQuerySize() > AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()) {
+                if(CollectionUtils.isEmpty(parameters.getUtmTags())) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
+                }
+                for (String utmTag : parameters.getUtmTags()) {
+                    if (Arrays.stream(AtlasConfiguration.ATLAS_INDEXSEARCH_LIMIT_UTM_TAGS.getStringArray()).anyMatch(utmTag::equalsIgnoreCase)) {
+                            throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
+                    }
+                }
             }
 
             if (StringUtils.isEmpty(parameters.getQuery())) {
@@ -432,6 +445,7 @@ public class DiscoveryREST {
             if (enableSearchLogging && parameters.isSaveSearchLog()) {
                 logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }
+            abe.setStackTrace(e.getStackTrace());
             throw abe;
         } finally {
             if(CollectionUtils.isNotEmpty(parameters.getUtmTags())) {

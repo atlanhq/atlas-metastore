@@ -62,7 +62,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateUniquenessByTags;
 
-public class PurposePreProcessor implements PreProcessor {
+public class PurposePreProcessor extends AccessControlPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(PurposePreProcessor.class);
 
     private final AtlasGraph graph;
@@ -89,6 +89,8 @@ public class PurposePreProcessor implements PreProcessor {
         if (LOG.isDebugEnabled()) {
             LOG.debug("PurposePreProcessor.processAttributes: pre processing {}, {}", entityStruct.getAttribute(QUALIFIED_NAME), operation);
         }
+
+        super.processAttributes(entityStruct, context, operation);
 
         AtlasEntity entity = (AtlasEntity) entityStruct;
 
@@ -165,6 +167,7 @@ public class PurposePreProcessor implements PreProcessor {
                                 policyToBeUpdated.setAttribute(ATTR_POLICY_RESOURCES, newTagsResources);
 
                                 context.addUpdated(policyToBeUpdated.getGuid(), policyToBeUpdated, entityType, policyVertex);
+                                RequestContext.get().cacheDifferentialEntity(policyToBeUpdated);
 
                                 existingPurposeExtInfo.addReferredEntity(policyToBeUpdated);
                             }
@@ -197,6 +200,7 @@ public class PurposePreProcessor implements PreProcessor {
                         policyToBeUpdated.setAttribute(ATTR_POLICY_IS_ENABLED, enable);
 
                         context.addUpdated(policyToBeUpdated.getGuid(), policyToBeUpdated, entityType, policyVertex);
+                        RequestContext.get().cacheDifferentialEntity(policyToBeUpdated);
                     }
                 }
             }

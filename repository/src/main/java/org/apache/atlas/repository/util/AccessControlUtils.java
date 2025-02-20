@@ -61,6 +61,10 @@ public final class AccessControlUtils {
 
     public static final String ATTR_PURPOSE_CLASSIFICATIONS  = "purposeClassifications";
 
+    public static final String ATTR_SERVICE_SERVICE_TYPE = "authServiceType";
+    public static final String ATTR_SERVICE_TAG_SERVICE  = "tagService";
+    public static final String ATTR_SERVICE_IS_ENABLED   = "authServiceIsEnabled";
+    public static final String ATTR_SERVICE_LAST_SYNC    = "authServicePolicyLastSync";
     public static final String ATTR_POLICY_TYPE  = "policyType";
     public static final String ATTR_POLICY_USERS  = "policyUsers";
     public static final String ATTR_POLICY_GROUPS  = "policyGroups";
@@ -80,6 +84,8 @@ public final class AccessControlUtils {
 
     public static final String POLICY_TYPE_ALLOW  = "allow";
     public static final String POLICY_TYPE_DENY  = "deny";
+
+    public static final String ATTR_CHANNEL_LINK = "channelLink";
 
     public static final String ACCESS_READ_PURPOSE_METADATA = "entity-read";
     public static final String ACCESS_READ_PERSONA_METADATA = "persona-asset-read";

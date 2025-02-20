@@ -39,6 +39,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
+import static org.apache.atlas.type.AtlasStructType.UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX;
 
 /**
  * Repository Constants.
@@ -269,6 +270,7 @@ public final class Constants {
 
     public static final String NAME                                    = "name";
     public static final String QUALIFIED_NAME                          = "qualifiedName";
+    public static final String UNIQUE_QUALIFIED_NAME                   = UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX + QUALIFIED_NAME;
     public static final String TYPE_NAME_PROPERTY_KEY                  = INTERNAL_PROPERTY_KEY_PREFIX + "typeName";
     public static final String INDEX_SEARCH_MAX_RESULT_SET_SIZE        = "atlas.graph.index.search.max-result-set-size";
     public static final String INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH = "atlas.graph.index.search.types.max-query-str-length";
@@ -315,6 +317,11 @@ public final class Constants {
     public static final String EDGE_ID_IN_IMPORT_KEY   = "__eIdInImport";
 
     /*
+     * Edge labels for data product relations which are hard deleted
+     */
+
+    public static final Set<String> EDGE_LABELS_FOR_HARD_DELETION = new HashSet<>(Arrays.asList( OUTPUT_PORT_PRODUCT_EDGE_LABEL, INPUT_PORT_PRODUCT_EDGE_LABEL, TERM_ASSIGNMENT_LABEL ));
+    /*
      * elasticsearch attributes
      */
 
@@ -358,7 +365,25 @@ public final class Constants {
     public static final String TASK_ENTITY_GUID             = encodePropertyKey(TASK_PREFIX + "entityGuid");
     public static final String TASK_CLASSIFICATION_TYPENAME = encodePropertyKey(TASK_PREFIX + "classificationTypeName");
     public static final String ACTIVE_STATE_VALUE           = "ACTIVE";
-
+    public static final String TASK_HEADER_ATLAN_AGENT      = "x-atlan-agent";
+    public static final String TASK_HEADER_ATLAN_AGENT_ID   = "x-atlan-agent-id";
+    public static final String TASK_HEADER_ATLAN_PKG_NAME   = "x-atlan-package-name";
+    public static final String TASK_HEADER_ATLAN_AGENT_WORKFLOW_ID = "x-atlan-agent-workflow-id";
+    public static final String TASK_HEADER_ATLAN_VIA_UI            = "x-atlan-via-ui";
+    public static final String TASK_HEADER_ATLAN_REQUEST_ID        = "x-atlan-request-id";
+    public static final String TASK_HEADER_ATLAN_GOOGLE_SHEETS_ID  = "x-atlan-google-sheets-id";
+    public static final String TASK_HEADER_ATLAN_MS_EXCEL_ID       = "x-atlan-microsoft-excel-id";
+    public static final Set<String> TASK_HEADER_SET = new HashSet<String>() {{
+        add(TASK_HEADER_ATLAN_AGENT);
+        add(TASK_HEADER_ATLAN_AGENT_ID);
+        add(TASK_HEADER_ATLAN_VIA_UI);
+        add(TASK_HEADER_ATLAN_PKG_NAME);
+        add(TASK_HEADER_ATLAN_AGENT_WORKFLOW_ID);
+        add(TASK_HEADER_ATLAN_REQUEST_ID);
+        add(TASK_HEADER_ATLAN_GOOGLE_SHEETS_ID);
+        add(TASK_HEADER_ATLAN_MS_EXCEL_ID);
+    }};
+    
     /**
      * Index Recovery vertex property keys.
      */
