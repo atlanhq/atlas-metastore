@@ -2999,7 +2999,7 @@
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
-                "isPolicyEnabled": false,
+                "isPolicyEnabled": true,
                 "policyResources":
                 [
                     "entity-type:DataProduct",
