@@ -45,6 +45,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.AtlasVertexQuery;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusEdge;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasEntityType;
@@ -2130,5 +2131,17 @@ public final class GraphHelper {
         finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    public Set<String> getActiveEdgeLabels(AtlasVertex vertex) {
+
+        return ((AtlasJanusGraph)graph).getGraph().traversal()
+                .V(vertex.getId())
+                .bothE()
+                .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE) // Filter only active edges
+                .label() // Get only edge labels
+                .dedup()
+                .toStream()
+                .collect(Collectors.toSet());
     }
 }
