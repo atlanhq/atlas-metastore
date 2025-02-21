@@ -1154,8 +1154,8 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "LINK_MESH_DATA_PRODUCT_TO_ASSET",
-                "qualifiedName": "LINK_MESH_DATA_PRODUCT_TO_ASSET",
+                "name": "LINK_ASSET_TO_DATA_PRODUCT",
+                "qualifiedName": "LINK_ASSET_TO_DATA_PRODUCT",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
