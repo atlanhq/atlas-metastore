@@ -1004,7 +1004,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 0,
+                "policyPriority": 1,
                 "policyUsers":
                 [],
                 "policyGroups":
@@ -1043,7 +1043,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 0,
+                "policyPriority": 1,
                 "policyUsers":
                 [],
                 "policyGroups":
@@ -1082,7 +1082,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 0,
+                "policyPriority": 1,
                 "policyUsers":
                 [],
                 "policyGroups":
@@ -1121,7 +1121,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 0,
+                "policyPriority": 1,
                 "policyUsers":
                 [],
                 "policyGroups":
@@ -1154,13 +1154,13 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "LINK_ASSET_TO_DATA_PRODUCT",
-                "qualifiedName": "LINK_ASSET_TO_DATA_PRODUCT",
+                "name": "LINK_ASSET_TO_MESH_DATA_PRODUCT",
+                "qualifiedName": "LINK_ASSET_TO_MESH_DATA_PRODUCT",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 0,
+                "policyPriority": 1,
                 "policyUsers":
                 [],
                 "policyGroups":
@@ -1199,7 +1199,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 0,
+                "policyPriority": 1,
                 "policyUsers":
                 [],
                 "policyGroups":
