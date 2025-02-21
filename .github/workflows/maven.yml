@@ -101,7 +101,7 @@ jobs:
         id: docker_build
         uses: docker/build-push-action@v2
         with:
-          platforms: linux/arm64
+          platforms: linux/amd64,linux/arm64
           context: .
           file: ./Dockerfile
           no-cache: true
@@ -111,6 +111,9 @@ jobs:
           tags: |
             ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
             ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+
+      - name: Check Image Manifest
+        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
 
       - name: Scan Image
         uses: aquasecurity/trivy-action@master
