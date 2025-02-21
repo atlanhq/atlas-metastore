@@ -3473,7 +3473,6 @@ public class EntityGraphMapper {
         }
     }
 
-    // TODO : HR : Changing method to cater to ony single propagation attachment. Dev->DONE Testing->PENDING
     public void processClassificationPropagationAddition(String entityGuid, String classificationVertexId) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         AtlasVertex classificationVertex = graph.getVertex(classificationVertexId);
@@ -4124,7 +4123,6 @@ public class EntityGraphMapper {
         }
     }
 
-    // TODO : HR : UPDATE TEXT Method execution split
     public void updateClassificationTextPropagation(String entityGuid, String classificationVertexId) throws AtlasBaseException {
         if (StringUtils.isEmpty(classificationVertexId)) {
             LOG.warn("updateClassificationTextPropagation(classificationVertexId={}): classification vertex id is empty", classificationVertexId);
@@ -4149,8 +4147,7 @@ public class EntityGraphMapper {
         transactionInterceptHelper.intercept();
     }
 
-    // TODO : HR : DELETE New single dettachment method entry
-    public void deleteClassificationPropagation_(String entityGuid, String classificationVertexId) throws AtlasBaseException {
+    public void deleteSingleClassificationPropagation(String entityGuid, String classificationVertexId) throws AtlasBaseException {
         try {
             if (StringUtils.isEmpty(classificationVertexId)) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification vertex id is empty", classificationVertexId);
@@ -4167,14 +4164,6 @@ public class EntityGraphMapper {
 
             AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
             AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
-            /*
-            *   gremlin> g.E('z68-39c-2exh-3c0').inV().valueMap('__typeName')
-                ==>[__typeName:[lGxs2o1samNQ9NEq2vz4bb]]
-                gremlin> g.E('z68-39c-2exh-3c0').outV().valueMap('__typeName')
-                ==>[__typeName:[Table]]
-                gremlin> g.E('z68-39c-2exh-3c0').label()
-                ==>classifiedAs
-            * */
 
             AtlasEdge propagatedEdge = graphHelper.getEdge(entityVertex, classificationVertex, CLASSIFICATION_LABEL);
 
