@@ -58,6 +58,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -95,6 +96,7 @@ public abstract class DeleteHandlerV1 {
     private   final TaskManagement       taskManagement;
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
+    private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
@@ -1235,16 +1237,32 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, addPropagationsMap.size() + removePropagationsMap.size());
+
+            int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
+                propagatedCount++;
+                if (propagatedCount == CHUNK_SIZE){
+                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount - 1);
+                    propagatedCount = 0;
+                }
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
+                propagatedCount++;
+                if (propagatedCount == CHUNK_SIZE){
+                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount);
+                    propagatedCount = 0;
+                }
+            }
+            if (propagatedCount != 0){
+                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount);
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)
