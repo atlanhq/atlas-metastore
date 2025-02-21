@@ -2880,7 +2880,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "policyPriority": 1,
+                "policyPriority": 0,
                 "policyUsers":
                 [],
                 "policyGroups":
@@ -2982,8 +2982,8 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "CUD_DATA_PRODUCT_ENTITY",
-                "qualifiedName": "CUD_DATA_PRODUCT_ENTITY",
+                "name": "CRUD_DATA_PRODUCT_ENTITY",
+                "qualifiedName": "CRUD_DATA_PRODUCT_ENTITY",
                 "description": "Allows user to perform cud operation on DataProduct assets.",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
@@ -3009,6 +3009,7 @@
                 ],
                 "policyActions":
                 [
+                    "entity-read",
                     "entity-create",
                     "entity-update",
                     "entity-delete"
