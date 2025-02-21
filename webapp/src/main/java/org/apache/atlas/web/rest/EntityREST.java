@@ -1194,24 +1194,6 @@ public class EntityREST {
         }
     }
 
-    @POST
-    @Path("bulk/task")
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    @Timed
-    public void processTasks(TaskV2Request taskV2Request) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.processTasks()");
-            }
-            entitiesStore.processTasks(taskV2Request);
-//            entityGraphMapper.processClassificationPropagationAddition(taskV2Request.getAssetVertexId(), taskV2Request.getTagVertexId());
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
 
     @POST
     @Path("repairClassificationsMappings/{guid}")

@@ -4178,7 +4178,7 @@ public class EntityGraphMapper {
 
             AtlasEdge propagatedEdge = graphHelper.getEdge(entityVertex, classificationVertex, CLASSIFICATION_LABEL);
 
-            processClassificationEdgeDeletion(classification, propagatedEdge);
+            processClassificationEdgeDeletionInChunk(classification, propagatedEdge);
 
             deleteDelegate.getHandler().deleteClassificationVertex(classificationVertex, true);
 
@@ -4217,7 +4217,7 @@ public class EntityGraphMapper {
 
             LOG.info(String.format("Number of edges to be deleted : %s for classification vertex with id : %s", propagatedEdgesSize, classificationVertexId));
 
-            List<String> deletedPropagationsGuid = processClassificationEdgeDeletion(classification, propagatedEdges);
+            List<String> deletedPropagationsGuid = processClassificationEdgeDeletionInChunk(classification, propagatedEdges);
 
             deleteDelegate.getHandler().deleteClassificationVertex(classificationVertex, true);
 
@@ -4465,7 +4465,7 @@ public class EntityGraphMapper {
     }
 
 
-    void processClassificationEdgeDeletion(AtlasClassification classification, AtlasEdge propagatedEdge) throws AtlasBaseException {
+    void processClassificationEdgeDeletionInChunk(AtlasClassification classification, AtlasEdge propagatedEdge) throws AtlasBaseException {
         AtlasVertex entityVertex = deleteDelegate.getHandler().removeTagPropagation(classification, propagatedEdge);
         String impactedGuids = GraphHelper.getGuid(entityVertex);
 
@@ -4478,7 +4478,7 @@ public class EntityGraphMapper {
         transactionInterceptHelper.intercept();
     }
 
-    List<String> processClassificationEdgeDeletion(AtlasClassification classification, List<AtlasEdge> propagatedEdges) throws AtlasBaseException {
+    List<String> processClassificationEdgeDeletionInChunk(AtlasClassification classification, List<AtlasEdge> propagatedEdges) throws AtlasBaseException {
         List<String> deletedPropagationsGuid = new ArrayList<>();
         int propagatedEdgesSize = propagatedEdges.size();
         int toIndex;
@@ -4754,34 +4754,6 @@ public class EntityGraphMapper {
             }
         }
     }
-
-//    List<AtlasEntity> updateClassificationText(AtlasVertex propagatedVertex) throws AtlasBaseException {
-//        List<AtlasEntity> propagatedEntities = new ArrayList<>();
-//        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationText");
-//
-//        AtlasEntity entity = null;
-//        for (int i = 1; i <= MAX_NUMBER_OF_RETRIES; i++) {
-//            try {
-//                entity = instanceConverter.getAndCacheEntity(graphHelper.getGuid(propagatedVertex), ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
-//                break; //do not retry on success
-//            } catch (AtlasBaseException ex) {
-//                if (i == MAX_NUMBER_OF_RETRIES) {
-//                    LOG.error(String.format("Maximum retries reached for fetching vertex with id %s from graph. Retried %s times. Skipping...", propagatedVertex.getId(), i));
-//                    continue;
-//                }
-//                LOG.warn(String.format("Vertex with id %s could not be fetched from graph. Retrying for %s time", propagatedVertex.getId(), i));
-//            }
-//        }
-//
-//        if (entity != null) {
-//            String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
-//            propagatedVertex.setProperty(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
-//            propagatedEntities.add(entity);
-//        }
-//
-//        RequestContext.get().endMetricRecord(metricRecorder);
-//        return propagatedEntities;
-//    }
 
     List<AtlasEntity> updateClassificationText(AtlasClassification classification, Collection<AtlasVertex> propagatedVertices) throws AtlasBaseException {
         List<AtlasEntity> propagatedEntities = new ArrayList<>();

@@ -349,7 +349,6 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
         }
     }
 
-    // TODO : POI #1 - init
     private void startConsumers(ExecutorService executorService) {
         int                                          numThreads            = applicationProperties.getInt(CONSUMER_THREADS_PROPERTY, 1);
         List<NotificationConsumer<HookNotification>> notificationConsumers = notificationInterface.createConsumers(NotificationType.HOOK, numThreads);
