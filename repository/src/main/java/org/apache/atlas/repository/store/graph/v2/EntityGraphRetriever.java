@@ -1014,7 +1014,7 @@ public class EntityGraphRetriever {
             Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
 
             // Fetch edges in both directions
-            retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, propertiesMap);
+            markAvailableAttributes(entityVertex, attributes, relationshipsLookup, propertiesMap);
 
             // Iterate through the resulting VertexProperty objects
             while (traversal.hasNext()) {
@@ -1062,28 +1062,35 @@ public class EntityGraphRetriever {
         return edgeNames;
     }
 
-    private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup, Map<String, Object> propertiesMap) {
+    private void markAvailableAttributes(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup, Map<String, Object> propertiesMap) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
         try {
-            // Fetch only edge Labels that are active
+            // Fetch only edge Labels that are active (useful for complex attribute marking
             Set<String> allEdgeLabels = graphHelper.getActiveEdgeLabels(entityVertex);
-            LOG.info("All Edge Labels: {}", allEdgeLabels);
-            Set<String> requestedEdgeLabels = new HashSet<>();
+            // Fetch only edge typeName that are active (useful for relationship attribute marking)
+            Set<String> allEdgeLabelTypes = graphHelper.getActiveEdgeTypeNames(entityVertex);
+            Set<String> availableAttributes = new HashSet<>();
 
+            // Get the available edge labels based on edge labels for this vertex
             allEdgeLabels.stream().filter(Objects::nonNull).forEach(edgeLabel -> attributes.forEach(attribute->{
 
                 if (edgeLabel.contains(attribute)){
-                    requestedEdgeLabels.add(attribute);
-                    return;
-                }
-
-                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeLabel) && relationshipsLookup.get(edgeLabel).contains(attribute)) {
-                    requestedEdgeLabels.add(attribute);
+                    availableAttributes.add(attribute);
                 }
             }));
 
-            requestedEdgeLabels.forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
-            LOG.info("Requested Edge Labels: {}", requestedEdgeLabels);
+            // Get the available edge labels based on edge type Names and relationship attributes for entityType of this vertex
+            // e.g. If `atlanSchema` is requested and one of the edgeTypeNames are `schema_tables`
+            // and relationship attribute has `atlanSchema` as an attribute for this vertex's entityType, then this edgeLabel is present
+            allEdgeLabelTypes.stream().filter(Objects::nonNull).forEach(edgeTypeName -> attributes.forEach(attribute->{
+
+                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
+                    availableAttributes.add(attribute);
+                }
+            }));
+            //mark the available attributes with a marker value (SPACE)
+            availableAttributes.forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
+            LOG.info("Available Attributes: {}", availableAttributes);
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }

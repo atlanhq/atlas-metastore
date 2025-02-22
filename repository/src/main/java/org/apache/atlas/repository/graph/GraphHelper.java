@@ -2144,4 +2144,16 @@ public final class GraphHelper {
                 .toStream()
                 .collect(Collectors.toSet());
     }
+
+    public Set<String> getActiveEdgeTypeNames(AtlasVertex vertex) {
+        return ((AtlasJanusGraph) graph).getGraph().traversal()
+                .V(vertex.getId())
+                .bothE()
+                .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE) // Filter only active edges
+                .values(TYPE_NAME_PROPERTY_KEY) // Extract only the __typeName property
+                .dedup() // Ensure unique values
+                .toStream()
+                .map(Object::toString)
+                .collect(Collectors.toSet());
+    }
 }
