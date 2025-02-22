@@ -1067,22 +1067,23 @@ public class EntityGraphRetriever {
         try {
             // Fetch only edge Labels that are active
             Set<String> allEdgeLabels = graphHelper.getActiveEdgeLabels(entityVertex);
-
+            LOG.info("All Edge Labels: {}", allEdgeLabels);
             Set<String> requestedEdgeLabels = new HashSet<>();
 
-            attributes.forEach(a -> {
-                if (allEdgeLabels.contains(a)) {
-                    requestedEdgeLabels.add(a);
-                }
-            });
+            allEdgeLabels.stream().filter(Objects::nonNull).forEach(edgeLabel -> attributes.forEach(attribute->{
 
-            relationshipsLookup.forEach((k,v) -> {
-                if (allEdgeLabels.contains(k)) {
-                    requestedEdgeLabels.addAll(v);
+                if (edgeLabel.contains(attribute)){
+                    requestedEdgeLabels.add(attribute);
+                    return;
                 }
-            });
+
+                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeLabel) && relationshipsLookup.get(edgeLabel).contains(attribute)) {
+                    requestedEdgeLabels.add(attribute);
+                }
+            }));
 
             requestedEdgeLabels.forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
+            LOG.info("Requested Edge Labels: {}", requestedEdgeLabels);
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
