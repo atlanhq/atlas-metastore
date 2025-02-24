@@ -17,7 +17,7 @@
 #
 
 FROM scratch
-FROM ubuntu:22.04
+FROM ubuntu:24.04
 LABEL maintainer="engineering@atlan.com"
 ARG VERSION=3.0.0-SNAPSHOT
 
