@@ -62,7 +62,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.tinkerpop.gremlin.structure.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -2106,31 +2105,37 @@ public final class GraphHelper {
         }
     }
 
-    public Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeName(AtlasVertex vertex) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeName");
+    public static Iterable<AtlasEdge> getEdges(AtlasVertex vertex, AtlasEdgeDirection direction, String[] edgeTypesToExclude) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.getOnlyActiveEdges");
 
         try {
-            return  ((AtlasJanusGraph)graph).getGraph().traversal()
-                    .V(vertex.getId())
-                    .bothE()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .project("label", "__typeName")
-                    .by(T.label)                // Get label property for "label" key
-                    .by("__typeName")          // Get typeName property for "__typeName" key
-                    .toStream()
-                    .map(m -> new AbstractMap.SimpleEntry<>(
-                            m.get("label").toString(),
-                            m.get("__typeName").toString()
-                    ))
-                    .distinct()
-                    .collect(Collectors.toSet());
-
-        } catch (Exception e) {
-            LOG.error("Error while getting labels of active edges", e);
-            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+            AtlasVertexQuery query =  vertex.query()
+                    .direction(direction);
+            if(ArrayUtils.isNotEmpty(edgeTypesToExclude)) {
+                for(String edgeTypeToExclude: edgeTypesToExclude) {
+                    query = query.hasNot("__typeName", edgeTypeToExclude);
+                }
+            }
+            return query.edges();
         }
         finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    public Set<Map.Entry<String, String>> getActiveEdgeLabels(AtlasVertex vertex) {
+        return ((AtlasJanusGraph) graph).getGraph().traversal()
+                .V(vertex.getId())
+                .bothE()
+                .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                .project("label", "__typeName")
+                .by("label")        // Get label property
+                .by("__typeName")   // Get typeName property
+                .toStream()
+                .map(m -> Map.entry(
+                        m.get("label").toString(),
+                        m.get("__typeName").toString()
+                ))
+                .collect(Collectors.toSet()); // Ensure uniqueness
     }
 }
