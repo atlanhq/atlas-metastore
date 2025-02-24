@@ -41,7 +41,7 @@ public class SearchLoggingManagement {
     @Inject
     public SearchLoggingManagement(List<SearchLogger> esSearchLoggers) {
         this.esSearchLoggers        = esSearchLoggers;
-
+        // TODO : Conditional threading exec
         this.executorService = Executors.newFixedThreadPool(AtlasConfiguration.SEARCH_LOGGER_MAX_THREADS.getInt(),
                 new ThreadFactoryBuilder()
                     .setDaemon(true)

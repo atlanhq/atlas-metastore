@@ -19,6 +19,8 @@
 
  package org.apache.atlas.audit.provider;
 
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.atlas.audit.model.AuditEventBase;
@@ -33,6 +35,7 @@ public class AsyncAuditProvider extends MultiDestAuditProvider implements
 		Runnable {
 
 	private static final Log LOG = LogFactory.getLog(AsyncAuditProvider.class);
+	public static final String ATLAS_CONSUMER_ONLY = "atlas.consumer_only";
 
 	private static int sThreadCount = 0;
 
@@ -103,9 +106,17 @@ public class AsyncAuditProvider extends MultiDestAuditProvider implements
 
 	@Override
 	public void start() {
+		// TODO : Thread condition
+        try {
+            if(ApplicationProperties.get().getBoolean(ATLAS_CONSUMER_ONLY, false)){
+				return;
+			}
+        } catch (AtlasException e) {
+            LOG.info("Error occured in reading Atlas Application Property : ");
+			e.printStackTrace();
+        }
 		mThread = new Thread(this, "AsyncAuditProvider" + (++sThreadCount));
-
-		mThread.setDaemon(true);
+        mThread.setDaemon(true);
 		mThread.start();
 
 		super.start();

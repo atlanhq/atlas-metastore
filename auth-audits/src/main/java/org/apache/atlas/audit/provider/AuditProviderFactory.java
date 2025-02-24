@@ -18,6 +18,8 @@
 
 package org.apache.atlas.audit.provider;
 
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 import org.apache.hadoop.util.ShutdownHookManager;
@@ -505,12 +507,23 @@ public class AuditProviderFactory {
 		final AtomicBoolean done = new AtomicBoolean(false);
 
 		public JVMShutdownHook(AuditHandler provider, int maxWait) {
-			this.maxWait = maxWait;
+            Thread cleanupThreadTemp = null;
+            this.maxWait = maxWait;
 			Runnable runnable = new RangerAsyncAuditCleanup(provider, startCleanup, doneCleanup);
-			cleanupThread = new Thread(runnable, "Ranger async Audit cleanup");
-			cleanupThread.setDaemon(true);
-			cleanupThread.start();
-		}
+			//TODO: Thread Condition
+			try {
+				if(!ApplicationProperties.get().getBoolean("atlas.consumer_only", false)){
+					cleanupThreadTemp = new Thread(runnable, "Ranger async Audit cleanup");
+					cleanupThreadTemp.setDaemon(true);
+					cleanupThreadTemp.start();;
+				}
+			} catch (AtlasException e) {
+				cleanupThreadTemp = null;
+				LOG.info("Error occured in reading Atlas Application Property : ");
+				e.printStackTrace();
+			}
+            cleanupThread = cleanupThreadTemp;
+        }
 
 		public void run() {
 			if (!done.compareAndSet(false, true)) {

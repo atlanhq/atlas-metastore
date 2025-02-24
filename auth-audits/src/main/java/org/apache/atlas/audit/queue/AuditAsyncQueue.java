@@ -19,6 +19,8 @@
 
 package org.apache.atlas.audit.queue;
 
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 //import org.apache.log4j.MDC;
@@ -89,7 +91,14 @@ public class AuditAsyncQueue extends AuditQueue implements Runnable {
 			logger.error("consumer is not set. Nothing will be sent to any consumer. name="
 					+ getName());
 		}
-
+        // TODO : Thread conditional
+		try {
+			if(ApplicationProperties.get().getBoolean("atlas.consumer_only", false)){
+				return;
+			}
+		} catch (AtlasException e) {
+			e.printStackTrace();
+		}
 		consumerThread = new Thread(this, this.getClass().getName()
 				+ (threadCount++));
 		consumerThread.setDaemon(true);

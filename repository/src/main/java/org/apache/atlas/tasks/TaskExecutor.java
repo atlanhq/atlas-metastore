@@ -73,6 +73,7 @@ public class TaskExecutor {
         this.metricRegistry = metricsRegistry;
     }
 
+    // TODO : Conditionalise this thread with the flag already in system
     public Thread startWatcherThread() {
 
         watcher = new TaskQueueWatcher(taskExecutorService, registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot, isActiveActiveHAEnabled, metricRegistry);

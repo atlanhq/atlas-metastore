@@ -21,7 +21,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.ha.HAConfiguration;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -56,6 +55,7 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
     private static final String SOLR_INDEX_RECOVERY_CONFIGURED_START_TIME = "atlas.graph.index.recovery.start.time";
     private static final long   SOLR_STATUS_RETRY_DEFAULT_MS              = 30000; // 30 secs default
     private static final String ATLAS_INDEX_RECOVERY_LOCK = "atlas:index-recovery:lock";
+    public static final String ATLAS_CONSUMER_ONLY = "atlas.consumer_only";
 
     private final Thread                 indexHealthMonitor;
     private final RecoveryInfoManagement recoveryInfoManagement;
@@ -65,6 +65,7 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
 
     @Inject
     public IndexRecoveryService(Configuration config, AtlasGraph graph, RedisService redisService) {
+        Thread indexHealthMonitorTemp = null;
         this.configuration               = config;
         this.isIndexRecoveryEnabled      = config.getBoolean(ApplicationProperties.INDEX_RECOVERY_CONF, DEFAULT_INDEX_RECOVERY);
         long recoveryStartTimeFromConfig = getRecoveryStartTimeFromConfig(config);
@@ -72,7 +73,16 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
         this.recoveryInfoManagement      = new RecoveryInfoManagement(graph);
 
         this.recoveryThread = new RecoveryThread(recoveryInfoManagement, graph, recoveryStartTimeFromConfig, healthCheckFrequencyMillis, redisService);
-        this.indexHealthMonitor = new Thread(recoveryThread, INDEX_HEALTH_MONITOR_THREAD_NAME);
+        // TODO : Thread conditional
+//        try {
+//            if(!ApplicationProperties.get().getBoolean(ATLAS_CONSUMER_ONLY, false)){
+        indexHealthMonitorTemp = new Thread(recoveryThread, INDEX_HEALTH_MONITOR_THREAD_NAME);
+//            }
+//        } catch (AtlasException e) {
+//            LOG.info("Error occured in reading Atlas Application Property : ");
+//            e.printStackTrace();
+//        }
+        this.indexHealthMonitor = indexHealthMonitorTemp;
     }
 
     private long getRecoveryStartTimeFromConfig(Configuration config) {

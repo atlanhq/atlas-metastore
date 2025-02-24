@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.migration;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.impexp.AtlasImportResult;
@@ -44,6 +45,7 @@ import java.io.IOException;
 import java.nio.file.Paths;
 
 import static org.apache.atlas.AtlasConstants.ATLAS_MIGRATION_MODE_FILENAME;
+import static org.apache.atlas.repository.graph.IndexRecoveryService.ATLAS_CONSUMER_ONLY;
 
 @Component
 public class DataMigrationService implements Service {
@@ -66,6 +68,7 @@ public class DataMigrationService implements Service {
 
         String fileName = getFileName();
         boolean zipFileBasedMigrationImport = StringUtils.endsWithIgnoreCase(fileName, FILE_EXTENSION_ZIP);
+        // TODO : Thread conditional
         this.thread        = (zipFileBasedMigrationImport)
             ?  new Thread(new ZipFileMigrationImporter(importService, fileName), "zipFileBasedMigrationImporter")
             :  new Thread(new FileImporter(migrator, typeDefStore, typeRegistry, storeInitializer, fileName, indexer));
@@ -73,6 +76,14 @@ public class DataMigrationService implements Service {
 
     @Override
     public void start() {
+        try {
+            if(ApplicationProperties.get().getBoolean(ATLAS_CONSUMER_ONLY, false)){
+                return;
+            }
+        } catch (AtlasException e) {
+            LOG.info("Error occured in reading Atlas Application Property : ");
+            e.printStackTrace();
+        }
         Runtime.getRuntime().addShutdownHook(thread);
         thread.start();
     }

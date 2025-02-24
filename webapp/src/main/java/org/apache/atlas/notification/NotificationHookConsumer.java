@@ -576,6 +576,7 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
             }
         }
 
+        // TODO : HR : Handle the consumer logic here
         @VisibleForTesting
         void handleMessage(AtlasKafkaMessage<HookNotification> kafkaMsg) throws AtlasServiceException, AtlasException {
             AtlasPerfTracer  perf           = null;

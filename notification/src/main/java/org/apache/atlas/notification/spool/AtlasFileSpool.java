@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.notification.spool;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.hook.FailedMessagesLogger;
 import org.apache.atlas.model.notification.MessageSource;
@@ -35,6 +36,7 @@ import static org.apache.atlas.repository.Constants.FILE_SPOOL_SOURCE;
 
 public class AtlasFileSpool implements NotificationInterface {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasFileSpool.class);
+    private static final String ATLAS_CONSUMER_ONLY = "atlas.consumer_only";
 
     private final AbstractNotification notificationHandler;
     private final SpoolConfiguration   config;
@@ -169,6 +171,15 @@ public class AtlasFileSpool implements NotificationInterface {
     }
 
     private void startPublisher() {
+        // TODO : Thread conditional
+        try {
+            if(ApplicationProperties.get().getBoolean(ATLAS_CONSUMER_ONLY, false)){
+                return;
+            }
+        } catch (AtlasException e) {
+            LOG.info("Error occured in reading Atlas Application Property : ");
+            e.printStackTrace();
+        }
         publisherThread = new Thread(publisher);
 
         publisherThread.setDaemon(true);

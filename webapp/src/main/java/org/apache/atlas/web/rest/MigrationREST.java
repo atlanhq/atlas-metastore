@@ -105,7 +105,7 @@ public class MigrationREST {
                 default:
                     throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Type of migration is not valid: " + migrationType);
             }
-
+            // TODO : Conditionally triggered new thread.
             Thread migrationThread = new Thread(migrationService);
             migrationThread.start();
 

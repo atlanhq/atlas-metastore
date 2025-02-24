@@ -19,6 +19,8 @@
 
 package org.apache.atlas.audit.queue;
 
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 //import org.apache.log4j.MDC;
@@ -34,6 +36,8 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.atlas.audit.provider.AsyncAuditProvider.ATLAS_CONSUMER_ONLY;
 
 /**
  * This is a non-blocking queue with no limit on capacity.
@@ -109,7 +113,14 @@ public class AuditSummaryQueue extends AuditQueue implements Runnable {
 		if (consumer != null) {
 			consumer.start();
 		}
-
+		// TODO : Thread conditional
+		try {
+			if(ApplicationProperties.get().getBoolean(ATLAS_CONSUMER_ONLY, false)){
+				return;
+			}
+		} catch (AtlasException e) {
+			e.printStackTrace();
+		}
 		consumerThread = new Thread(this, this.getClass().getName()
 				+ (threadCount++));
 		consumerThread.setDaemon(true);

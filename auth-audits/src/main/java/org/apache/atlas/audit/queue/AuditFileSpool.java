@@ -21,6 +21,8 @@ package org.apache.atlas.audit.queue;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
 //import org.apache.log4j.MDC;
@@ -46,6 +48,8 @@ import java.util.Properties;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+
+import static org.apache.atlas.audit.provider.AsyncAuditProvider.ATLAS_CONSUMER_ONLY;
 
 /**
  * This class temporarily stores logs in file system if the destination is
@@ -304,6 +308,14 @@ public class AuditFileSpool implements Runnable {
 				+ consumerProvider.getName());
 
 		// Let's start the thread to read
+		// TODO : Thread conditional
+		try {
+			if(ApplicationProperties.get().getBoolean(ATLAS_CONSUMER_ONLY, false)){
+				return;
+			}
+		} catch (AtlasException e) {
+			e.printStackTrace();
+		}
 		destinationThread = new Thread(this, queueProvider.getName() + "_"
 				+ consumerProvider.getName() + "_destWriter");
 		destinationThread.setDaemon(true);
