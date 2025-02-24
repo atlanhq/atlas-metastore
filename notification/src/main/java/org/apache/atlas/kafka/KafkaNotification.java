@@ -478,18 +478,23 @@ public class KafkaNotification extends AbstractNotification implements Service {
         return ret;
     }
 
-    public Map<String, Object> createTagPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertedId) {
+    public Map<String, Object> createTagPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertexId) {
         AtlasTask currentTask = RequestContext.get().getCurrentTask();
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
-        Map<String, Object> vertexMap = new HashMap<>();
 
-        vertexMap.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
-        vertexMap.put("action", classificationType);
-        vertexMap.put("assetVertexId", vertex.getIdForDisplay());
-        vertexMap.put("tagVertexId", tagVertedId);
-        vertexMap.put("parentTaskGuid", currentTask.getGuid());
-        vertexMap.put("tagTypeName", currentTask.getClassificationTypeName());
+        // Build the payload map with the required keys
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
+        payload.put("assetVertexId", vertex.getIdForDisplay());
+        payload.put("tagVertexId", tagVertexId);
+        payload.put("parentTaskGuid", currentTask.getGuid());
+        payload.put("tagTypeName", currentTask.getClassificationTypeName());
 
-        return vertexMap;
+        // Wrap the payload in the outer message with the operation field set to classificationType
+        Map<String, Object> message = new HashMap<>();
+        message.put("operation", classificationType);
+        message.put("payload", payload);
+
+        return message;
     }
 }
