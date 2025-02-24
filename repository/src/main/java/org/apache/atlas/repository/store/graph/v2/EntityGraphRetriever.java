@@ -55,6 +55,7 @@ import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasMapType;
+import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -77,10 +78,7 @@ import javax.inject.Inject;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.graphdb.relations.CacheVertexProperty;
@@ -1017,7 +1015,7 @@ public class EntityGraphRetriever {
             Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
 
             // Fetch edges in both directions
-            retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, propertiesMap);
+            markAvailableAttributes(entityVertex, attributes, relationshipsLookup, propertiesMap);
 
             // Iterate through the resulting VertexProperty objects
             while (traversal.hasNext()) {
@@ -1060,27 +1058,36 @@ public class EntityGraphRetriever {
         return edgeNames;
     }
 
-    private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
+    private void markAvailableAttributes(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup, Map<String, Object> propertiesMap) throws Exception {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("markAvailableAttributes");
         try {
-            Set<AbstractMap.SimpleEntry<String, String>> edgeLabelAndTypeName = graphHelper.retrieveEdgeLabelsAndTypeName(entityVertex);
+            // Fetch only edge Labels that are active (useful for complex attribute marking
+            Set<Map.Entry<String, String>> allEdgeLabels = graphHelper.getActiveEdgeLabels(entityVertex);
+            Set<String> availableAttributes = new HashSet<>();
 
-            Set<String> edgeLabels = new HashSet<>();
-            edgeLabelAndTypeName.stream().filter(Objects::nonNull).forEach(edgeLabelMap -> attributes.forEach(attribute->{
+            // Get the available edge labels based on edge labels for this vertex
+            allEdgeLabels.stream().filter(Objects::nonNull).map(Map.Entry::getKey).forEach(edgeLabel -> attributes.forEach(attribute->{
 
-                if (edgeLabelMap.getKey().contains(attribute)){
-                    edgeLabels.add(attribute);
-                    return;
-                }
-
-                String edgeTypeName = edgeLabelMap.getValue();
-
-                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
-                    edgeLabels.add(attribute);
+                if (edgeLabel.contains(attribute)){
+                    availableAttributes.add(attribute);
                 }
             }));
 
-            edgeLabels.stream().forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
+            // Get the available edge labels based on edge type Names and relationship attributes for entityType of this vertex
+            // e.g. If `atlanSchema` is requested and one of the edgeTypeNames are `schema_tables`
+            // and relationship attribute has `atlanSchema` as an attribute for this vertex's entityType, then this edgeLabel is present
+            allEdgeLabels.stream().filter(Objects::nonNull).map(Map.Entry::getValue).forEach(edgeTypeName -> attributes.forEach(attribute->{
+
+                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
+                    availableAttributes.add(attribute);
+                }
+            }));
+            //mark the available attributes with a marker value (SPACE)
+            availableAttributes.forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
+            LOG.info("Available Attributes: {}", availableAttributes);
+        } catch (Exception e) {
+            LOG.error("Error marking available attributes for entity vertex: {}", entityVertex.getId(), e);
+            throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
