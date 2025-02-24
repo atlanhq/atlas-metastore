@@ -1234,7 +1234,10 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
-            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, addPropagationsMap.size() + removePropagationsMap.size());
+            // Update TASK_ASSET_COUNT_TO_PROPAGATE with the number of assets to propagate
+            int assetsToPropagate = addPropagationsMap.values().stream().mapToInt(List::size).sum()
+                                  + removePropagationsMap.values().stream().mapToInt(List::size).sum();
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, assetsToPropagate);
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
