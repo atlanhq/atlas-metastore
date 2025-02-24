@@ -1061,13 +1061,11 @@ public class EntityGraphRetriever {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("markAvailableAttributes");
         try {
             // Fetch only edge Labels that are active (useful for complex attribute marking
-            Set<String> allEdgeLabels = graphHelper.getActiveEdgeLabels(entityVertex);
-            // Fetch only edge typeName that are active (useful for relationship attribute marking)
-            Set<String> allEdgeLabelTypes = graphHelper.getActiveEdgeTypeNames(entityVertex);
+            Set<Map.Entry<String, String>> allEdgeLabels = graphHelper.getActiveEdgeLabels(entityVertex);
             Set<String> availableAttributes = new HashSet<>();
 
             // Get the available edge labels based on edge labels for this vertex
-            allEdgeLabels.stream().filter(Objects::nonNull).forEach(edgeLabel -> attributes.forEach(attribute->{
+            allEdgeLabels.stream().filter(Objects::nonNull).map(Map.Entry::getKey).forEach(edgeLabel -> attributes.forEach(attribute->{
 
                 if (edgeLabel.contains(attribute)){
                     availableAttributes.add(attribute);
@@ -1077,7 +1075,7 @@ public class EntityGraphRetriever {
             // Get the available edge labels based on edge type Names and relationship attributes for entityType of this vertex
             // e.g. If `atlanSchema` is requested and one of the edgeTypeNames are `schema_tables`
             // and relationship attribute has `atlanSchema` as an attribute for this vertex's entityType, then this edgeLabel is present
-            allEdgeLabelTypes.stream().filter(Objects::nonNull).forEach(edgeTypeName -> attributes.forEach(attribute->{
+            allEdgeLabels.stream().filter(Objects::nonNull).map(Map.Entry::getValue).forEach(edgeTypeName -> attributes.forEach(attribute->{
 
                 if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
                     availableAttributes.add(attribute);

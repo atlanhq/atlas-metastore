@@ -65,17 +65,7 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.RELATIONSHIP_CREATE_INVALID_PARAMS;
@@ -2133,27 +2123,19 @@ public final class GraphHelper {
         }
     }
 
-    public Set<String> getActiveEdgeLabels(AtlasVertex vertex) {
-
-        return ((AtlasJanusGraph)graph).getGraph().traversal()
-                .V(vertex.getId())
-                .bothE()
-                .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE) // Filter only active edges
-                .label() // Get only edge labels
-                .dedup()
-                .toStream()
-                .collect(Collectors.toSet());
-    }
-
-    public Set<String> getActiveEdgeTypeNames(AtlasVertex vertex) {
+    public Set<Map.Entry<String, String>> getActiveEdgeLabels(AtlasVertex vertex) {
         return ((AtlasJanusGraph) graph).getGraph().traversal()
                 .V(vertex.getId())
                 .bothE()
-                .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE) // Filter only active edges
-                .values(TYPE_NAME_PROPERTY_KEY) // Extract only the __typeName property
-                .dedup() // Ensure unique values
+                .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                .project("label", "__typeName")
+                .by("label")        // Get label property
+                .by("__typeName")   // Get typeName property
                 .toStream()
-                .map(Object::toString)
-                .collect(Collectors.toSet());
+                .map(m -> Map.entry(
+                        m.get("label").toString(),
+                        m.get("__typeName").toString()
+                ))
+                .collect(Collectors.toSet()); // Ensure uniqueness
     }
 }

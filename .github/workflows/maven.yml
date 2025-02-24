@@ -29,6 +29,7 @@ on:
       - taskdg1924
       - taskdg1924deleteprop
       - improve_edgelabel_fetch
+      - merge_edge_label_typename_fetch
 
 jobs:
   build:
