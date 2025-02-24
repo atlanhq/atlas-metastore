@@ -28,6 +28,7 @@ on:
       - master
       - taskdg1924
       - taskdg1924deleteprop
+      - improve_edgelabel_fetch
 
 jobs:
   build:
