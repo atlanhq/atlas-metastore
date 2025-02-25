@@ -162,6 +162,8 @@ public class AtlasTaskService implements TaskService {
                 task.setCreatedTime(new Date());
                 task.setStatusPending();
                 task.setAttemptCount(0);
+                task.setAssetsCountToPropagate(0L);
+                task.setAssetsCountPropagated(0L);
                 task.setGuid(UUID.randomUUID().toString());
                 task.setCreatedBy(RequestContext.getCurrentUser());
 
@@ -268,6 +270,8 @@ public class AtlasTaskService implements TaskService {
 
         setEncodedProperty(ret, Constants.TASK_PARAMETERS, AtlasJson.toJson(task.getParameters()));
         setEncodedProperty(ret, Constants.TASK_ATTEMPT_COUNT, task.getAttemptCount());
+        setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
+        setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_PROPAGATED, task.getAssetsCountPropagated());
         setEncodedProperty(ret, Constants.TASK_ERROR_MESSAGE, task.getErrorMessage());
 
         LOG.info("Creating task vertex: {}: {}, {}: {}, {}: {} ",

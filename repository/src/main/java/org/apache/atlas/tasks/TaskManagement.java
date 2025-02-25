@@ -21,10 +21,14 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ICuratorFactory;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.ha.HAConfiguration;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.Service;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
@@ -36,11 +40,11 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BiConsumer;
+
+import static org.apache.atlas.repository.Constants.TASK_GUID;
 
 @Component
 @Order(7)
@@ -84,6 +88,53 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         this.curatorFactory = curatorFactory;
 
         createTaskTypeFactoryMap(taskTypeFactoryMap, taskFactory);
+    }
+
+    /**
+     * Updates a property of the current task's vertex in the Atlas graph.
+     *
+     * This method retrieves the current task from the request context, fetches its corresponding
+     * vertex from the Atlas graph, and updates the specified property.
+     *
+     * Edge cases handled:
+     * - Ensures `currentTask` is not null before accessing its properties.
+     * - Checks if the vertex exists before attempting updates.
+     * - Handles `null` or unexpected `propertyKey` values safely.
+     *
+     * @param propertyKey The key of the property to update.
+     * @param graph The AtlasGraph instance used for querying and updating.
+     * @param value The value to set for the specified property.
+     * @throws IllegalStateException if no matching vertex is found.
+     * @throws IllegalArgumentException if an invalid propertyKey is provided.
+     */
+    public void updateTaskVertexProperty(String propertyKey, AtlasGraph graph, long value) {
+        // Ensure current task exists
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        if (currentTask == null) {
+            throw new IllegalStateException("No current task found in request context.");
+        }
+
+        // Get the corresponding vertex
+        Iterator vertexIterator = graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices().iterator();
+
+        if (!vertexIterator.hasNext()) {
+            throw new IllegalStateException("No vertex found for task GUID: " + currentTask.getGuid());
+        }
+
+        AtlasVertex currentTaskVertex = (AtlasVertex) vertexIterator.next();
+
+        // Ensure propertyKey is valid and update the corresponding task property
+        if (propertyKey != null && Constants.TASK_ASSET_COUNT_TO_PROPAGATE.equals(propertyKey)) {
+            currentTask.setAssetsCountToPropagate(value);
+            currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountToPropagate());
+        } else if (propertyKey != null && Constants.TASK_ASSET_COUNT_PROPAGATED.equals(propertyKey)) {
+            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + value);
+            currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountPropagated());
+        } else {
+            throw new IllegalArgumentException("Unexpected or null propertyKey: " + propertyKey);
+        }
     }
 
     @Override

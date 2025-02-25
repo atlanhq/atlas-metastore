@@ -88,8 +88,6 @@ public class RequestContext {
     private int attemptCount = 1;
     private boolean isImportInProgress = false;
     private boolean     isInNotificationProcessing = false;
-
-
     private boolean     authorisedRemoveRelation = false;
     private boolean     isInTypePatching           = false;
     private boolean     createShellEntityForNonExistingReference = false;
