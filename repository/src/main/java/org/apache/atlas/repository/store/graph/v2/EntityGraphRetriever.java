@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
@@ -1014,11 +1015,19 @@ public class EntityGraphRetriever {
             // Execute the traversal to fetch properties
             Iterator<VertexProperty<Object>> traversal = ((AtlasJanusVertex)entityVertex).getWrappedElement().properties();
 
+            Pair<Map<String, Set<String>>, Integer> edgeNamesAndComplexAttributes = fetchEdgeNames(entityType);
             //  retrieve all the valid relationships for this entityType
-            Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
+            Map<String, Set<String>> relationshipsLookup = edgeNamesAndComplexAttributes.getLeft();
+            Integer complexAttributes = edgeNamesAndComplexAttributes.getRight();
 
             // Fetch edges in both directions
-            retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, propertiesMap);
+            if (complexAttributes > AtlasConfiguration.ATLAS_INDEXSEARCH_MAX_COMPLEX_ATTRIBUTES_FOR_PREFETCHING.getInt()) {
+                retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, propertiesMap);
+            } else {
+                relationshipsLookup.forEach((k1, v1) -> {
+                    v1.forEach(attribute -> propertiesMap.put(attribute, StringUtils.SPACE));
+                });
+            }
 
             // Iterate through the resulting VertexProperty objects
             while (traversal.hasNext()) {
@@ -1054,16 +1063,22 @@ public class EntityGraphRetriever {
         }
     }
 
-    private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
+    private Pair<Map<String, Set<String>>, Integer> fetchEdgeNames(AtlasEntityType entityType){
+        int[] complexAttributes = {0};
         Map<String, Map<String, AtlasAttribute>> relationships = entityType.getRelationshipAttributes();
         Map<String, Set<String>> edgeNames = new HashMap<>();
         relationships.forEach((k,v) -> {
             v.forEach((k1,v1) -> {
                 edgeNames.putIfAbsent(k1, new HashSet<>());
                 edgeNames.get(k1).add(k);
+
+                if (v1.getAttributeDef().getCardinality() != AtlasAttributeDef.Cardinality.SINGLE) {
+                    complexAttributes[0]++;
+                }
+
             });
         });
-        return edgeNames;
+        return Pair.of(edgeNames, complexAttributes[0]);
     }
 
     private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
