@@ -2982,8 +2982,8 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "CRUD_DATA_PRODUCT_ENTITY",
-                "qualifiedName": "CRUD_DATA_PRODUCT_ENTITY",
+                "name": "CUD_DATA_PRODUCT_ENTITY",
+                "qualifiedName": "CUD_DATA_PRODUCT_ENTITY",
                 "description": "Allows user to perform cud operation on DataProduct assets.",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
@@ -3009,7 +3009,6 @@
                 ],
                 "policyActions":
                 [
-                    "entity-read",
                     "entity-create",
                     "entity-update",
                     "entity-delete"
@@ -3517,6 +3516,40 @@
                 "policyActions":
                 [
                     "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
+                "name": "READ_DATA_PRODUCT_ENTITY",
+                "qualifiedName": "READ_DATA_PRODUCT_ENTITY",
+                "description": "Allows user to perform read operation on data products asset",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 1,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "policyResources":
+                [
+                    "entity-type:DataProduct",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions":
+                [
+                    "entity-read"
                 ]
             }
         }
