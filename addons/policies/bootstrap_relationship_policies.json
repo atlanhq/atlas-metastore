@@ -1042,7 +1042,7 @@
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
-                "policyType": "allow",
+                "policyType": "deny",
                 "policyPriority": 1,
                 "policyUsers":
                 [],
@@ -1081,7 +1081,7 @@
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
-                "policyType": "allow",
+                "policyType": "deny",
                 "policyPriority": 1,
                 "policyUsers":
                 [],
@@ -1159,7 +1159,7 @@
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
-                "policyType": "allow",
+                "policyType": "deny",
                 "policyPriority": 1,
                 "policyUsers":
                 [],
@@ -1198,7 +1198,7 @@
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
-                "policyType": "allow",
+                "policyType": "deny",
                 "policyPriority": 1,
                 "policyUsers":
                 [],
