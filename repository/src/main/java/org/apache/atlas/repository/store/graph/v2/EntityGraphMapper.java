@@ -2026,7 +2026,16 @@ public class EntityGraphMapper {
             }
         }
 
+        boolean needLog = CollectionUtils.isNotEmpty(corruptedCurrentElements) && CollectionUtils.isNotEmpty(currentElements);
+        if (needLog) {
+            LOG.warn("mlh173 before", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
+        }
+
         currentElements.removeAll(corruptedCurrentElements);
+
+        if (needLog) {
+            LOG.warn("mlh173 after", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
+        }
 
         if (isReference && !isSoftReference ) {
             boolean isAppendOnPartialUpdate = !isStructType ? getAppendOptionForRelationship(ctx.getReferringVertex(), attribute.getName()) : false;
@@ -3001,13 +3010,13 @@ public class EntityGraphMapper {
         } else {
             currentEntityId = getIdFromBothVertex(currentEdge, parentEntityVertex);
         }
-        
+
+        String    newEntityId = getIdFromVertex(newEntityVertex);
         if (StringUtils.isEmpty(currentEntityId)) {
-            LOG.warn("mlh173 Returning corrupted vertex : {}", currentEdge.getId());
+            LOG.warn("mlh173 Returning corrupted vertex, newEntityId : {}, {}", currentEdge.getId(), newEntityId);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND);
         }
 
-        String    newEntityId = getIdFromVertex(newEntityVertex);
         AtlasEdge ret         = currentEdge;
 
         if (!currentEntityId.equals(newEntityId)) {
