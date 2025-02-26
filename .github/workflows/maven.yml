@@ -27,7 +27,7 @@ on:
       - development
       - master
       - lineageondemand
-      - MLH-173-1
+      - mlh173custom
 
 jobs:
   build:
