@@ -1020,10 +1020,10 @@
                     "relationship-type:*",
                     "end-one-entity-type:DataDomain",
                     "end-one-entity-classification:*",
-                    "end-one-entity:{entity}",
+                    "end-one-entity:*",
                     "end-two-entity-type:Stakeholder",
                     "end-two-entity-classification:*",
-                    "end-two-entity:default/*/{entity}"
+                    "end-two-entity:*"
                 ],
                 "policyActions":
                 [
@@ -1042,7 +1042,7 @@
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
-                "policyType": "deny",
+                "policyType": "allow",
                 "policyPriority": 1,
                 "policyUsers":
                 [],
@@ -1062,7 +1062,7 @@
                     "end-one-entity:*",
                     "end-two-entity-type:Stakeholder",
                     "end-two-entity-classification:*",
-                    "end-two-entity:default/*/{entity}"
+                    "end-two-entity:*"
                 ],
                 "policyActions":
                 [
@@ -1098,10 +1098,10 @@
                     "relationship-type:*",
                     "end-one-entity-type:DataDomain",
                     "end-one-entity-classification:*",
-                    "end-one-entity:{entity}/*domain/*",
+                    "end-one-entity:*",
                     "end-two-entity-type:Stakeholder",
                     "end-two-entity-classification:*",
-                    "end-two-entity:default/*/{entity}/*"
+                    "end-two-entity:*"
                 ],
                 "policyActions":
                 [
@@ -1120,7 +1120,7 @@
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
-                "policyType": "allow",
+                "policyType": "deny",
                 "policyPriority": 1,
                 "policyUsers":
                 [],
@@ -1140,7 +1140,7 @@
                     "end-one-entity:*",
                     "end-two-entity-type:Stakeholder",
                     "end-two-entity-classification:*",
-                    "end-two-entity:default/*/{entity}/*"
+                    "end-two-entity:*"
                 ],
                 "policyActions":
                 [
@@ -1179,7 +1179,7 @@
                     "end-one-entity:*",
                     "end-two-entity-type:DataProduct",
                     "end-two-entity-classification:*",
-                    "end-two-entity:{entity}/*product/*"
+                    "end-two-entity:*"
                 ],
                 "policyActions":
                 [
@@ -1215,7 +1215,7 @@
                     "relationship-type:*",
                     "end-one-entity-type:DataProduct",
                     "end-one-entity-classification:*",
-                    "end-one-entity:{entity}/*product/*",
+                    "end-one-entity:*",
                     "end-two-entity-type:Asset",
                     "end-two-entity-classification:*",
                     "end-two-entity:*"
