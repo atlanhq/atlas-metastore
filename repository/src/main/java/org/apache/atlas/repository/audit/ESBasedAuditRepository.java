@@ -421,15 +421,17 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private void updateMappingsAndRefreshIntervalIfChanged() throws IOException, AtlasException {
         LOG.info("ESBasedAuditRepo - updateMappings!");
         ObjectMapper mapper = new ObjectMapper();
-        JsonNode activeIndexInformation = getActiveIndexInfoAsJson(mapper);
+        Map<String, JsonNode> activeIndexMappings = getActiveIndexMappings(mapper);
         JsonNode indexInformationFromConfigurationFile = mapper.readTree(getAuditIndexMappings());
-        if (!areConfigurationsSame(activeIndexInformation, indexInformationFromConfigurationFile)) {
-            Response response = updateMappings(indexInformationFromConfigurationFile);
-            if (isSuccess(response)) {
-                LOG.info("ESBasedAuditRepo - Elasticsearch mappings have been updated!");
-            } else {
-                LOG.error("Error while updating the Elasticsearch indexes!");
-                throw new AtlasException(copyToString(response.getEntity().getContent(), Charset.defaultCharset()));
+        for (String activeAuditIndex : activeIndexMappings.keySet()) {
+            if (!areConfigurationsSame(activeIndexMappings.get(activeAuditIndex), indexInformationFromConfigurationFile)) {
+                Response response = updateMappings(indexInformationFromConfigurationFile);
+                if (isSuccess(response)) {
+                    LOG.info("ESBasedAuditRepo - Elasticsearch mappings have been updated for index: {}", activeAuditIndex);
+                } else {
+                    LOG.error("Error while updating the Elasticsearch indexes for index: {}", activeAuditIndex);
+                    throw new AtlasException(copyToString(response.getEntity().getContent(), Charset.defaultCharset()));
+                }
             }
         }
 
