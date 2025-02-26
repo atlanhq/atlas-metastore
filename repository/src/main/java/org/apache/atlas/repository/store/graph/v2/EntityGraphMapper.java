@@ -2008,6 +2008,7 @@ public class EntityGraphMapper {
                 newEntry = mapCollectionElementsToVertex(arrCtx, context);
             } catch (AtlasBaseException abe) {
                 if (abe.getAtlasErrorCode() == INTERNAL_ENTITY_ID_NOT_FOUND) {
+                    LOG.warn("mlh173 adding to corruptedCurrentElements : {}", existingEdge.getId());
                     corruptedCurrentElements.add(existingEdge);
                 }
             }
@@ -3002,6 +3003,7 @@ public class EntityGraphMapper {
         }
         
         if (StringUtils.isEmpty(currentEntityId)) {
+            LOG.warn("mlh173 Returning corrupted vertex : {}", currentEdge.getId());
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND);
         }
 
