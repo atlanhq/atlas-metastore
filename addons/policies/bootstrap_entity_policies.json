@@ -3523,40 +3523,6 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "READ_DATA_PRODUCT_ENTITY",
-                "qualifiedName": "READ_DATA_PRODUCT_ENTITY",
-                "description": "Allows user to perform read operation on data products asset",
-                "policyCategory": "bootstrap",
-                "policySubCategory": "default",
-                "policyServiceName": "atlas",
-                "policyType": "allow",
-                "policyPriority": 1,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
-                    "$admin",
-                    "$api-token-default-access"
-                ],
-                "policyResourceCategory": "ENTITY",
-                "policyResources":
-                [
-                    "entity-type:DataProduct",
-                    "entity-classification:*",
-                    "entity:*"
-                ],
-                "policyActions":
-                [
-                    "entity-read"
-                ]
-            }
-        },
-        {
-            "typeName": "AuthPolicy",
-            "attributes":
-            {
                 "name": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
                 "qualifiedName": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
                 "policyCategory": "bootstrap",
@@ -3653,6 +3619,40 @@
                 "policyActions":
                 [
                     "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
+                "name": "READ_DATA_PRODUCT_ENTITY",
+                "qualifiedName": "READ_DATA_PRODUCT_ENTITY",
+                "description": "Allows user to perform read operation on data products asset",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 1,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "policyResources":
+                [
+                    "entity-type:DataProduct",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions":
+                [
+                    "entity-read"
                 ]
             }
         }
