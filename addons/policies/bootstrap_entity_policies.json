@@ -3523,6 +3523,109 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
+                "name": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
+                "qualifiedName": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 1,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "policyResources":
+                [
+                    "entity:*",
+                    "entity-type:DataDomain",
+                    "entity-classification:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions":
+                [
+                    "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
+                "name": "DATA_SUB_DOMAIN_BUSINESS_UPDATE_METADATA",
+                "qualifiedName": "DATA_SUB_DOMAIN_BUSINESS_UPDATE_METADATA",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "isPolicyEnabled": false,
+                "policyPriority": 0,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "policyResources":
+                [
+                    "entity:*/domain/*",
+                    "entity-type:DataDomain",
+                    "entity-classification:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions":
+                [
+                    "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
+                "name": "DATA_PRODUCT_BUSINESS_UPDATE_METADATA",
+                "qualifiedName": "DATA_PRODUCT_BUSINESS_UPDATE_METADATA",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 1,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "policyResources":
+                [
+                    "entity:*/product/*",
+                    "entity-type:DataProduct",
+                    "entity-classification:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions":
+                [
+                    "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
                 "name": "READ_DATA_PRODUCT_ENTITY",
                 "qualifiedName": "READ_DATA_PRODUCT_ENTITY",
                 "description": "Allows user to perform read operation on data products asset",
