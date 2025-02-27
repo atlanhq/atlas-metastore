@@ -84,6 +84,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
+import static org.apache.atlas.AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
 import static org.apache.atlas.model.TypeCategory.CLASSIFICATION;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
@@ -1992,6 +1993,7 @@ public class EntityGraphMapper {
             newElements = (List) newElements.stream().distinct().collect(Collectors.toList());
         }
 
+        List<AtlasEdge> corruptedCurrentElements = new ArrayList<>(0);
         for (int index = 0; index < newElements.size(); index++) {
             AtlasEdge               existingEdge = (isSoftReference) ? null : getEdgeAt(currentElements, index, elementType);
             AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
@@ -2000,12 +2002,33 @@ public class EntityGraphMapper {
                 removeExistingRelationWithOtherVertex(arrCtx, ctx, context);
             }
 
-            Object newEntry = mapCollectionElementsToVertex(arrCtx, context);
+            Object newEntry = null;
+            try {
+                newEntry = mapCollectionElementsToVertex(arrCtx, context);
+            } catch (AtlasBaseException abe) {
+                if (abe.getAtlasErrorCode() == INTERNAL_ENTITY_ID_NOT_FOUND) {
+                    corruptedCurrentElements.add(existingEdge);
+                }
+            }
+
             if (isReference && newEntry != null && newEntry instanceof AtlasEdge && inverseRefAttribute != null) {
                 // Update the inverse reference value.
                 AtlasEdge newEdge = (AtlasEdge) newEntry;
 
                 addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
+            }
+
+            boolean shouldLog = CollectionUtils.isNotEmpty(corruptedCurrentElements) && CollectionUtils.isNotEmpty(currentElements);
+            if (shouldLog) {
+                LOG.warn("mlh173 currentElements before", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
+            }
+
+            if (CollectionUtils.isNotEmpty(currentElements)) {
+                currentElements.removeAll(corruptedCurrentElements);
+            }
+
+            if (shouldLog) {
+                LOG.warn("mlh173 currentElements after", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
             }
 
             // not null
@@ -2989,6 +3012,13 @@ public class EntityGraphMapper {
         }
 
         String    newEntityId = getIdFromVertex(newEntityVertex);
+        if (StringUtils.isEmpty(currentEntityId)) {
+            LOG.warn("mlh173 Throwing corrupted vertex : {}", currentEdge.getId());
+            if (StringUtils.isNotEmpty(newEntityId)) {
+                LOG.warn("mlh173 newEntityId : {}", newEntityId);
+            }
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND);
+        }
         AtlasEdge ret         = currentEdge;
 
         if (!currentEntityId.equals(newEntityId)) {
