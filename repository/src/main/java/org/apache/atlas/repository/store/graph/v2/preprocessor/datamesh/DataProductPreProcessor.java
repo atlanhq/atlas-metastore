@@ -83,6 +83,10 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         entity.removeAttribute(OUTPUT_PORT_GUIDS_ATTR);
         entity.removeAttribute(INPUT_PORT_GUIDS_ATTR);
 
+        if(!entity.hasAttribute(DAAP_ASSET_DSL_ATTR) || entity.getAttribute(DAAP_ASSET_DSL_ATTR) == null){
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "DataProductAssetDSL attribute is mandatory for DataProduct creation");
+        }
+
         if (parentDomainObject == null) {
             throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot create a Product without a Domain Relationship");
         } else {
@@ -98,6 +102,8 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
             }
             entity.setAttribute(SUPER_DOMAIN_QN_ATTR, superDomainQualifiedName);
         }
+
+        entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
 
         entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
 
@@ -116,6 +122,20 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
         if(entity.hasRelationshipAttribute(DATA_DOMAIN_REL_TYPE) && entity.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE) == null){
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "DataProduct can only be moved to another Domain.");
+        }
+
+        if(entity.getAttribute(DAAP_LINEAGE_STATUS_ATTR) != null && entity.getAttribute(DAAP_LINEAGE_STATUS_ATTR).equals(DAAP_LINEAGE_STATUS_COMPLETED)){
+            if (!ARGO_SERVICE_USER_NAME.equals(RequestContext.getCurrentUser())) {
+                throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, RequestContext.getCurrentUser(), "Lineage Status Update");
+            }
+
+            if (vertex.getProperty(DAAP_LINEAGE_STATUS_ATTR, String.class).equals(DAAP_LINEAGE_STATUS_IN_PROGRESS)){
+                entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_COMPLETED);
+            }
+        }
+
+        if(entity.hasAttribute(DAAP_ASSET_DSL_ATTR)) {
+            entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
         }
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
@@ -455,6 +475,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
             }
             if(RequestContext.get().getDeleteType() == DeleteType.SOFT || RequestContext.get().getDeleteType() == DeleteType.DEFAULT){
                 vertex.setProperty(DAAP_STATUS_ATTR, DAAP_ARCHIVED_STATUS);
+                vertex.setProperty(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
             }
         }
         finally {

@@ -62,8 +62,6 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;
-import static org.apache.atlas.AtlasClient.PROCESS_SUPER_TYPE;
 import static org.apache.atlas.model.TypeCategory.*;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
@@ -1235,22 +1233,49 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
+            // update the 'assetsCountToPropagate' on in memory java object.
+            AtlasTask currentTask = RequestContext.get().getCurrentTask();
+            currentTask.setAssetsCountToPropagate((long) addPropagationsMap.size() + removePropagationsMap.size() - 1);
+
+            //update the 'assetsCountToPropagate' in the current task vertex.
+            AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+            currentTaskVertex.setProperty(TASK_ASSET_COUNT_TO_PROPAGATE, currentTask.getAssetsCountToPropagate());
+            graph.commit();
+
+            int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
+                propagatedCount++;
+                if (propagatedCount == 100){
+                    currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount - 1);
+                    currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+                    propagatedCount = 0;
+                }
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
+                propagatedCount++;
+                if (propagatedCount == 100){
+                    currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount);
+                    currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
+                    propagatedCount = 0;
+                }
+            }
+            if (propagatedCount != 0){
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + propagatedCount);
+                currentTaskVertex.setProperty(TASK_ASSET_COUNT_PROPAGATED, currentTask.getAssetsCountPropagated());
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)
             handleBlockedClassifications(edge, relationship.getBlockedPropagatedClassifications());
         }
     }
+
 
     public void handleBlockedClassifications(AtlasEdge edge, Set<AtlasClassification> blockedClassifications) throws AtlasBaseException {
         if (blockedClassifications != null) {

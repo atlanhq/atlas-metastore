@@ -40,13 +40,6 @@ public class MultiDestAuditProvider extends BaseAuditHandler {
 		setName(DEFAULT_NAME);
 	}
 
-	public MultiDestAuditProvider(AuditHandler provider) {
-		LOG.info("MultiDestAuditProvider(): provider="
-				+ (provider == null ? null : provider.getName()));
-		setName(DEFAULT_NAME);
-		addAuditProvider(provider);
-	}
-
 	@Override
 	public void init(Properties props) {
 		LOG.info("MultiDestAuditProvider.init()");

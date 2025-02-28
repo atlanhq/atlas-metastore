@@ -210,6 +210,7 @@ public class AtlasPatchRegistry {
         ret.setUpdatedBy(getEncodedProperty(vertex, MODIFIED_BY_KEY, String.class));
         ret.setCreatedTime(getEncodedProperty(vertex, TIMESTAMP_PROPERTY_KEY, Long.class));
         ret.setUpdatedTime(getEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class));
+        ret.setAssetsCountToPropagate(getEncodedProperty(vertex, TASK_ASSET_COUNT_TO_PROPAGATE, Long.class));
         ret.setStatus(getPatchStatus(vertex));
 
         return ret;

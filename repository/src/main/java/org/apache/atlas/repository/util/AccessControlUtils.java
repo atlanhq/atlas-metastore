@@ -59,17 +59,18 @@ public final class AccessControlUtils {
     public static final String ATTR_PERSONA_USERS   = "personaUsers";
     public static final String ATTR_PERSONA_GROUPS  = "personaGroups";
 
-    public static final String ATTR_PURPOSE_CLASSIFICATIONS  = "purposeClassifications";
-
     public static final String ATTR_SERVICE_SERVICE_TYPE = "authServiceType";
     public static final String ATTR_SERVICE_TAG_SERVICE  = "tagService";
     public static final String ATTR_SERVICE_IS_ENABLED   = "authServiceIsEnabled";
     public static final String ATTR_SERVICE_LAST_SYNC    = "authServicePolicyLastSync";
+
+    public static final String ATTR_PURPOSE_CLASSIFICATIONS  = "purposeClassifications";
     public static final String ATTR_POLICY_TYPE  = "policyType";
     public static final String ATTR_POLICY_USERS  = "policyUsers";
     public static final String ATTR_POLICY_GROUPS  = "policyGroups";
     public static final String ATTR_POLICY_ROLES  = "policyRoles";
     public static final String ATTR_POLICY_ACTIONS  = "policyActions";
+    public static final String ATTR_POLICY_CONDITIONS  = "policyConditions";
     public static final String ATTR_POLICY_CATEGORY  = "policyCategory";
     public static final String ATTR_POLICY_SUB_CATEGORY  = "policySubCategory";
     public static final String ATTR_POLICY_RESOURCES  = "policyResources";

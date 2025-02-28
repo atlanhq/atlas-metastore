@@ -49,14 +49,13 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusEdge;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
-import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasMapType;
+import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -71,8 +70,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.tinkerpop.gremlin.structure.VertexProperty;
-import org.janusgraph.core.Cardinality;
-import org.janusgraph.graphdb.relations.CacheVertexProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -81,11 +78,10 @@ import javax.inject.Inject;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
+import org.janusgraph.core.Cardinality;
+import org.janusgraph.graphdb.relations.CacheVertexProperty;
 
 import static org.apache.atlas.glossary.GlossaryUtils.TERM_ASSIGNMENT_ATTR_CONFIDENCE;
 import static org.apache.atlas.glossary.GlossaryUtils.TERM_ASSIGNMENT_ATTR_CREATED_BY;
@@ -119,6 +115,7 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.BOTH;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.IN;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
+import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 
 @Component
@@ -531,7 +528,7 @@ public class EntityGraphRetriever {
                 List<AtlasVertex> entitiesPropagatingTo = getImpactedVerticesV2(sourceEntityVertex, relationshipGuidToExclude,
                         classificationId, CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode),toExclude);
 
-                LOG.info("Traversed {} vertices for Classification vertex id {} excluding RelationShip GUID {}", entitiesPropagatingTo.size(), classificationId, relationshipGuidToExclude);
+                LOG.debug("Traversed {} vertices for Classification vertex id {} excluding RelationShip GUID {}", entitiesPropagatingTo.size(), classificationId, relationshipGuidToExclude);
 
                 ret.put(classificationVertex, entitiesPropagatingTo);
             }
@@ -665,7 +662,7 @@ public class EntityGraphRetriever {
             String      entityVertexId = entityVertex.getIdForDisplay();
 
             if (visitedVertices.contains(entityVertexId)) {
-                LOG.info("Already visited: {}", entityVertexId);
+                LOG.debug("Already visited: {}", entityVertexId);
 
                 continue;
             }
@@ -1002,7 +999,7 @@ public class EntityGraphRetriever {
         return mapVertexToAtlasEntityHeader(entityVertex, Collections.<String>emptySet());
     }
 
-    private Map<String, Object> preloadProperties(AtlasVertex entityVertex, AtlasEntityType entityType, Set<String> attributes) throws AtlasBaseException {
+    private Map<String, Object> preloadProperties(AtlasVertex entityVertex, AtlasEntityType entityType, Set<String> attributes) throws Exception {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("preloadProperties");
 
         try {
@@ -1018,40 +1015,62 @@ public class EntityGraphRetriever {
             Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
 
             // Fetch edges in both directions
-            retrieveEdgeLabels(entityVertex, AtlasEdgeDirection.BOTH, attributes, relationshipsLookup, propertiesMap);
+            retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, propertiesMap);
 
             // Iterate through the resulting VertexProperty objects
             while (traversal.hasNext()) {
-                try {
-                    VertexProperty<Object> property = traversal.next();
+                VertexProperty<Object> property = traversal.next();
 
-                    AtlasAttribute attribute = entityType.getAttribute(property.key()) != null ? entityType.getAttribute(property.key()) : null;
-                    TypeCategory typeCategory = attribute != null ? attribute.getAttributeType().getTypeCategory() : null;
-                    TypeCategory elementTypeCategory = attribute != null && attribute.getAttributeType().getTypeCategory() == TypeCategory.ARRAY ? ((AtlasArrayType) attribute.getAttributeType()).getElementType().getTypeCategory() : null;
+                AtlasAttribute attribute = entityType.getAttribute(property.key()) != null ? entityType.getAttribute(property.key()) : null;
+                TypeCategory typeCategory = attribute != null ? attribute.getAttributeType().getTypeCategory() : null;
+                TypeCategory elementTypeCategory = attribute != null && attribute.getAttributeType().getTypeCategory() == TypeCategory.ARRAY ? ((AtlasArrayType) attribute.getAttributeType()).getElementType().getTypeCategory() : null;
 
-                    if (property.isPresent()) {
+                if (property.isPresent()) {
 
-                        // If the attribute is not known (null)
-                        // validate if prefetched property is multi-valued
-                        boolean isMultiValuedProperty = (property instanceof CacheVertexProperty && ((CacheVertexProperty) property).propertyKey().cardinality().equals(Cardinality.SET));
+                    // If the attribute is not known (null)
+                    // validate if prefetched property is multi-valued
+                    boolean isMultiValuedProperty = (property instanceof CacheVertexProperty && ((CacheVertexProperty) property).propertyKey().cardinality().equals(Cardinality.SET));
 
-                        if (typeCategory == TypeCategory.ARRAY && (elementTypeCategory == TypeCategory.PRIMITIVE|| elementTypeCategory == TypeCategory.ENUM)) {
-                            updateAttrValue(propertiesMap, property);
-                        } else if (attribute == null && isMultiValuedProperty) {
-                            updateAttrValue(propertiesMap, property);
-                        } else if (propertiesMap.get(property.key()) == null) {
-                            propertiesMap.put(property.key(), property.value());
-                        }
+                    if (typeCategory == TypeCategory.ARRAY && (elementTypeCategory == TypeCategory.PRIMITIVE|| elementTypeCategory == TypeCategory.ENUM)) {
+                        updateAttrValue(propertiesMap, property);
+                    } else if (attribute == null && isMultiValuedProperty) {
+                        updateAttrValue(propertiesMap, property);
+                    } else if (propertiesMap.get(property.key()) == null) {
+                        propertiesMap.put(property.key(), property.value());
                     }
-                } catch (RuntimeException e) {
-                    LOG.error("Error preloading properties for entity vertex: {}", entityVertex.getId(), e);
-                    throw e; // Re-throw the exception after logging it
                 }
             }
             return propertiesMap;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
+        try {
+            Set<AbstractMap.SimpleEntry<String, String>> edgeLabelAndTypeName = graphHelper.retrieveEdgeLabelsAndTypeName(entityVertex);
+
+            Set<String> edgeLabels = new HashSet<>();
+            edgeLabelAndTypeName.stream().filter(Objects::nonNull).forEach(edgeLabelMap -> attributes.forEach(attribute->{
+
+                if (edgeLabelMap.getKey().contains(attribute)){
+                    edgeLabels.add(attribute);
+                    return;
+                }
+
+                String edgeTypeName = edgeLabelMap.getValue();
+
+                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
+                    edgeLabels.add(attribute);
+                }
+            }));
+
+            edgeLabels.stream().forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+
     }
 
     private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
@@ -1066,42 +1085,6 @@ public class EntityGraphRetriever {
         return edgeNames;
     }
 
-    private void retrieveEdgeLabels(AtlasVertex entityVertex, AtlasEdgeDirection edgeDirection, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
-        try {
-            Iterator<AtlasJanusEdge> edges = GraphHelper.getOnlyActiveEdges(entityVertex, edgeDirection);
-
-            List<String> edgeLabelsDebug = new ArrayList<>();
-            Map<String, String> edgesTypeName = new HashMap();
-
-            while (edges.hasNext()) {
-                AtlasJanusEdge edge = edges.next();
-                String label = edge.getLabel();
-                edgeLabelsDebug.add(label);
-                edgesTypeName.putIfAbsent(label, edge.getProperty(TYPE_NAME_PROPERTY_KEY, String.class));
-            }
-
-            Set<String> edgeLabels = new HashSet<>();
-            edgeLabelsDebug.stream().filter(Objects::nonNull).forEach(edgeLabel -> attributes.forEach(attribute->{
-
-                if (edgeLabel.contains(attribute)){
-                    edgeLabels.add(attribute);
-                    return;
-                }
-
-                String edgeTypeName = edgesTypeName.get(edgeLabel);
-
-                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
-                    edgeLabels.add(attribute);
-                }
-            }));
-
-            edgeLabels.stream().forEach(e -> propertiesMap.put(e, StringUtils.SPACE));
-        } finally {
-            RequestContext.get().endMetricRecord(metricRecorder);
-        }
-
-    }
     private void updateAttrValue( Map<String, Object> propertiesMap, VertexProperty<Object> property){
         Object value = propertiesMap.get(property.key());
         if (value instanceof List) {
@@ -1130,19 +1113,28 @@ public class EntityGraphRetriever {
                 AccessControlUtils.ATTR_SERVICE_SERVICE_TYPE,
                 AccessControlUtils.ATTR_SERVICE_TAG_SERVICE,
                 AccessControlUtils.ATTR_SERVICE_IS_ENABLED,
-                AccessControlUtils.ATTR_SERVICE_LAST_SYNC)
-        );
+                AccessControlUtils.ATTR_SERVICE_LAST_SYNC));
 
         return exclusionSet.stream().anyMatch(attributes::contains);
     }
 
     private AtlasEntityHeader mapVertexToAtlasEntityHeader(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
+        String typeName = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+        boolean isS3Bucket = StringUtils.isNotEmpty(typeName)
+                && typeName.equals("S3Bucket");
+
         boolean shouldPrefetch = RequestContext.get().isInvokedByIndexSearch()
                 && !isPolicyAttribute(attributes)
+                && !isS3Bucket
                 && AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION.getBoolean();
 
         if (shouldPrefetch) {
-            return mapVertexToAtlasEntityHeaderWithPrefetch(entityVertex, attributes);
+            try {
+                return mapVertexToAtlasEntityHeaderWithPrefetch(entityVertex, attributes);
+            } catch (Throwable e) {
+                LOG.error("Error mapping vertex to AtlasEntityHeader with prefetch, falling back to without prefetch", e);
+                return mapVertexToAtlasEntityHeaderWithoutPrefetch(entityVertex, attributes);
+            }
         } else {
             return mapVertexToAtlasEntityHeaderWithoutPrefetch(entityVertex, attributes);
         }
@@ -1233,7 +1225,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
-    private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
+    private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws Exception {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithPrefetch");
         AtlasEntityHeader ret = new AtlasEntityHeader();
         try {
@@ -1263,7 +1255,7 @@ public class EntityGraphRetriever {
                 ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
             }
             ret.setIsIncomplete(isIncomplete);
-            ret.setLabels(getLabels(entityVertex));
+            ret.setLabels(getLabels((String)properties.get(Constants.LABELS_PROPERTY_KEY)));
 
             ret.setCreatedBy(properties.get(CREATED_BY_KEY) != null ? (String) properties.get(CREATED_BY_KEY) : null);
             ret.setUpdatedBy(properties.get(MODIFIED_BY_KEY) != null ? (String) properties.get(MODIFIED_BY_KEY) : null);

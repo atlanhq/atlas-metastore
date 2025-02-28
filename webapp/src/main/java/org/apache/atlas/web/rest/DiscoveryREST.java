@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.web.rest;
 
-import org.apache.atlas.AtlasClient;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
@@ -25,6 +24,7 @@ import org.apache.atlas.SortOrder;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
+import org.apache.atlas.discovery.ESBasedSuggestionService;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.*;
@@ -34,9 +34,11 @@ import org.apache.atlas.model.searchlog.SearchLogSearchParams;
 import org.apache.atlas.model.searchlog.SearchLogSearchResult;
 import org.apache.atlas.model.searchlog.SearchRequestLogData.SearchRequestLogDataBuilder;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.searchlog.SearchLoggingManagement;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
+import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -68,6 +70,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Arrays;
 
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.REQUEST_HEADER_HOST;
 import static org.apache.atlas.repository.Constants.REQUEST_HEADER_USER_AGENT;
@@ -92,6 +95,8 @@ public class DiscoveryREST {
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasDiscoveryService discoveryService;
     private final SearchLoggingManagement loggerManagement;
+
+    private final ESBasedSuggestionService esBasedSuggestionService = new ESBasedSuggestionService(AtlasElasticsearchDatabase.getLowLevelClient());
 
     private static final String INDEXSEARCH_TAG_NAME = "indexsearch";
     private static final Set<String> TRACKING_UTM_TAGS = new HashSet<>(Arrays.asList("ui_main_list", "ui_popup_searchbar"));
@@ -297,7 +302,7 @@ public class DiscoveryREST {
                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
                 if (entityType != null) {
-                    String[] defaultAttrNames = new String[] { AtlasClient.QUALIFIED_NAME, AtlasClient.NAME };
+                    String[] defaultAttrNames = new String[] { QUALIFIED_NAME, NAME };
 
                     for (String defaultAttrName : defaultAttrNames) {
                         AtlasStructType.AtlasAttribute attribute = entityType.getAttribute(defaultAttrName);
@@ -311,14 +316,14 @@ public class DiscoveryREST {
                 }
 
                 if (StringUtils.isEmpty(attrName)) {
-                    attrName = AtlasClient.QUALIFIED_NAME;
+                    attrName = QUALIFIED_NAME;
                 }
             }
 
             SearchParameters searchParams = new SearchParameters();
             FilterCriteria   attrFilter   = new FilterCriteria();
 
-            attrFilter.setAttributeName(StringUtils.isEmpty(attrName) ? AtlasClient.QUALIFIED_NAME : attrName);
+            attrFilter.setAttributeName(StringUtils.isEmpty(attrName) ? QUALIFIED_NAME : attrName);
             attrFilter.setOperator(SearchParameters.Operator.STARTS_WITH);
             attrFilter.setAttributeValue(attrValuePrefix);
 
@@ -402,6 +407,8 @@ public class DiscoveryREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.indexSearch(" + parameters + ")");
             }
 
+            RequestContext.get().endMetricRecord(RequestContext.get().startMetricRecord("dslSize"), parameters.getQuerySize());
+            RequestContext.get().endMetricRecord(RequestContext.get().startMetricRecord("attributeSize"), CollectionUtils.isNotEmpty(parameters.getAttributes()) ? parameters.getAttributes().size() : 0);
             if (AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_API_LIMIT.getBoolean() && parameters.getQuerySize() > AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()) {
                 if(CollectionUtils.isEmpty(parameters.getUtmTags())) {
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
@@ -441,7 +448,7 @@ public class DiscoveryREST {
             }
             throw abe;
         } catch (Exception e) {
-            AtlasBaseException abe = new AtlasBaseException(e.getMessage(), e.getCause());
+            AtlasBaseException abe = new AtlasBaseException(e.getMessage(), e);
             if (enableSearchLogging && parameters.isSaveSearchLog()) {
                 logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }
@@ -879,17 +886,19 @@ public class DiscoveryREST {
     }
 
     @Path("suggestions")
-    @GET
+    @POST
     @Timed
-    public AtlasSuggestionsResult getSuggestions(@QueryParam("prefixString") String prefixString, @QueryParam("fieldName") String fieldName) {
+    public ESBasedSuggestionService.SuggestionResponse getSuggestions(Object queryStr) {
         AtlasPerfTracer perf = null;
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.getSuggestions(" + prefixString + "," + fieldName + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.getSuggestions(" + queryStr + ")");
             }
 
-            return discoveryService.getSuggestions(prefixString, fieldName);
+            return esBasedSuggestionService.searchSuggestions(AtlasType.toJson(queryStr));
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         } finally {
             AtlasPerfTracer.log(perf);
         }

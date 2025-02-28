@@ -23,14 +23,15 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.EntityAuditEvent;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.EntityAuditEvent;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
 import org.apache.atlas.model.audit.EntityAuditSearchResult;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.NotImplementedException;
@@ -76,6 +77,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final Logger LOG = LoggerFactory.getLogger(ESBasedAuditRepository.class);
     public static final String INDEX_BACKEND_CONF = "atlas.graph.index.search.hostname";
     private static final String TOTAL_FIELD_LIMIT = "atlas.index.audit.elasticsearch.total_field_limit";
+    private static  final String INDEX_REFRESH_INTERVAL= "atlas.index.audit.elasticsearch.refresh_interval";
     public static final String INDEX_NAME = "entity_audits";
     private static final String ENTITYID = "entityId";
     private static final String TYPE_NAME = "typeName";
@@ -118,32 +120,37 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     @Override
     public void putEventsV2(List<EntityAuditEventV2> events) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("pushInES");
         try {
             if (events != null && events.size() > 0) {
-
                 Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
                 String entityPayloadTemplate = getQueryTemplate(requestContextHeaders);
 
                 StringBuilder bulkRequestBody = new StringBuilder();
                 for (EntityAuditEventV2 event : events) {
-                    String created = String.format("%s", event.getTimestamp());
-                    String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
-                    String details = event.getDetails().substring(auditDetailPrefix.length());
+                    try {
+                        String created = String.format("%s", event.getTimestamp());
+                        String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
+                        String details = event.getDetails().substring(auditDetailPrefix.length());
 
-                    String bulkItem = MessageFormat.format(entityPayloadTemplate,
-                            event.getEntityId(),
-                            event.getAction(),
-                            details,
-                            event.getUser(),
-                            event.getEntityId() + ":" + event.getEntity().getUpdateTime().getTime(),
-                            event.getEntityQualifiedName(),
-                            event.getEntity().getTypeName(),
-                            created,
-                            "" + event.getEntity().getUpdateTime().getTime());
+                        String bulkItem = MessageFormat.format(entityPayloadTemplate,
+                                event.getEntityId(),
+                                event.getAction(),
+                                details,
+                                event.getUser(),
+                                event.getEntityId() + ":" + event.getEntity().getUpdateTime().getTime(),
+                                event.getEntityQualifiedName(),
+                                event.getEntity().getTypeName(),
+                                created,
+                                "" + event.getEntity().getUpdateTime().getTime());
 
-                    bulkRequestBody.append(bulkMetadata);
-                    bulkRequestBody.append(bulkItem);
-                    bulkRequestBody.append("\n");
+                        bulkRequestBody.append(bulkMetadata);
+                        bulkRequestBody.append(bulkItem);
+                        bulkRequestBody.append("\n");
+                    } catch (Exception e) {
+                        LOG.error("getUpdateTime null exception for processing event of entityId: {}", event.getEntityId(), e);
+                        throw e;
+                    }
                 }
                 String endpoint = INDEX_NAME + "/_bulk";
                 HttpEntity entity = new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON);
@@ -172,6 +179,8 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             }
         } catch (Exception e) {
             throw new AtlasBaseException("Unable to push entity audits to ES", e);
+        }finally {
+            RequestContext.get().endMetricRecord(metric);
         }
     }
 
@@ -340,7 +349,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 LOG.info("Updating ES total field limit");
                 updateFieldLimit();
             }
-            updateMappingsIfChanged();
+            updateMappingsAndRefreshIntervalIfChanged();
         } catch (IOException e) {
             LOG.error("error", e);
             throw new AtlasException(e);
@@ -409,7 +418,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         }
     }
 
-    private void updateMappingsIfChanged() throws IOException, AtlasException {
+    private void updateMappingsAndRefreshIntervalIfChanged() throws IOException, AtlasException {
         LOG.info("ESBasedAuditRepo - updateMappings!");
         ObjectMapper mapper = new ObjectMapper();
         JsonNode activeIndexInformation = getActiveIndexInfoAsJson(mapper);
@@ -423,7 +432,38 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 throw new AtlasException(copyToString(response.getEntity().getContent(), Charset.defaultCharset()));
             }
         }
+
+        validateAndUpdateRefreshInterval(activeIndexInformation);
     }
+
+    private void validateAndUpdateRefreshInterval(JsonNode activeIndexInformation) throws IOException {
+        String refreshInterval = configuration.getString(INDEX_REFRESH_INTERVAL);
+        JsonNode definedInterval = activeIndexInformation.get("entity_audits").get("settings").get("index").get("refresh_interval");
+        if (refreshInterval == null || !refreshInterval.matches("\\d+s") || definedInterval != null && definedInterval.asText("1s").equals(refreshInterval)) {
+            return;
+        }
+        updateRefreshInterval();
+    }
+
+    private void updateRefreshInterval() {
+        LOG.info("ESBasedAuditRepo - updateRefreshInterval!");
+        Request request = new Request("PUT", INDEX_NAME + "/_settings");
+        String requestBody = String.format("{\"index.refresh_interval\": \"%s\"}", configuration.getString(INDEX_REFRESH_INTERVAL));
+        HttpEntity entity = new NStringEntity(requestBody, ContentType.APPLICATION_JSON);
+        request.setEntity(entity);
+        Response response;
+        try {
+            response = lowLevelClient.performRequest(request);
+            if (response.getStatusLine().getStatusCode() != 200) {
+                LOG.error("Error while updating the Elasticsearch refresh interval! Error: " + copyToString(response.getEntity().getContent(), defaultCharset()));
+            } else {
+                LOG.info("ES refresh interval has been updated");
+            }
+        } catch (IOException e) {
+            LOG.error("Error while updating the refresh interval", e);
+        }
+    }
+
 
     private JsonNode getActiveIndexInfoAsJson(ObjectMapper mapper) throws IOException {
         Request request = new Request("GET", INDEX_NAME);

@@ -56,15 +56,7 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.Iterator;
 
@@ -83,7 +75,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGOR
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PURPOSE;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsPolicyEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyCategory;
-import static org.apache.atlas.services.tag.RangerServiceTag.TAG_RESOURCE_NAME;
 
 @Component
 public class CachePolicyTransformerImpl {
@@ -476,6 +467,7 @@ public class CachePolicyTransformerImpl {
 
         List<String> users = (List<String>) atlasPolicy.getAttribute("policyUsers");
         List<String> groups = (List<String>) atlasPolicy.getAttribute("policyGroups");
+
         List<String> roles = (List<String>) atlasPolicy.getAttribute("policyRoles");
 
         List<RangerPolicyItemAccess> accesses = new ArrayList<>();
@@ -555,7 +547,7 @@ public class CachePolicyTransformerImpl {
     private List<RangerPolicyItemCondition> getPolicyConditions(AtlasEntityHeader atlasPolicy) {
         List<RangerPolicyItemCondition> ret = new ArrayList<>();
 
-        if (!atlasPolicy.hasAttribute("policyConditions")) {
+        if (!atlasPolicy.hasAttribute("policyConditions") || atlasPolicy.getAttribute("policyConditions") == null) {
             return null;
         }
 

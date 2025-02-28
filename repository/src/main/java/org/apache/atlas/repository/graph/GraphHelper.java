@@ -27,23 +27,14 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.Status;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusEdge;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
-import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
-import org.apache.atlas.type.AtlasArrayType;
-import org.apache.atlas.type.AtlasMapType;
-import org.apache.atlas.utils.AtlasPerfMetrics;
-import org.apache.atlas.v1.model.instance.Id;
-import org.apache.atlas.v1.model.instance.Referenceable;
-import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
-import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -53,34 +44,34 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.AtlasVertexQuery;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusEdge;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasMapType;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.type.AtlasType;
-import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.util.AttributeValueMap;
 import org.apache.atlas.util.IndexedInstance;
+import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.v1.model.instance.Id;
+import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.IteratorUtils;
+import org.apache.commons.lang.ArrayUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.tinkerpop.gremlin.structure.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.RELATIONSHIP_CREATE_INVALID_PARAMS;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
-
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.isReference;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_ONLY_PROPAGATION_DELETE;
@@ -1081,6 +1072,10 @@ public final class GraphHelper {
         return ret;
     }
 
+    public static Boolean isEntityIncomplete(Integer value) {
+        return value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
+    }
+
     public static Boolean getEntityHasLineage(AtlasElement element) {
         if (element.getPropertyKeys().contains(HAS_LINEAGE)) {
             return element.getProperty(HAS_LINEAGE, Boolean.class);
@@ -1108,8 +1103,22 @@ public final class GraphHelper {
         return ret;
     }
 
+    public static Map getCustomAttributes(String customAttrsString) {
+        Map    ret               = null;
+
+        if (customAttrsString != null) {
+            ret = AtlasType.fromJson(customAttrsString, Map.class);
+        }
+
+        return ret;
+    }
+
     public static Set<String> getLabels(AtlasElement element) {
         return parseLabelsString(element.getProperty(LABELS_PROPERTY_KEY, String.class));
+    }
+
+    public static Set<String> getLabels(String labels) {
+        return parseLabelsString(labels);
     }
 
     public static Integer getProvenanceType(AtlasElement element) {
@@ -2024,7 +2033,6 @@ public final class GraphHelper {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
-
     public static Iterator<AtlasVertex> getActiveVertices(AtlasVertex vertex, String childrenEdgeLabel, AtlasEdgeDirection direction) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("CategoryPreProcessor.getEdges");
 
@@ -2080,7 +2088,7 @@ public final class GraphHelper {
      * @param vertex entity vertex
      * @return Iterator of children edges
      */
-    public static Iterator<AtlasJanusEdge> getOnlyActiveEdges(AtlasVertex vertex, AtlasEdgeDirection direction) throws AtlasBaseException {
+    public Iterator<AtlasJanusEdge> getOnlyActiveEdges(AtlasVertex vertex, AtlasEdgeDirection direction) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.getOnlyActiveEdges");
 
         try {
@@ -2090,6 +2098,58 @@ public final class GraphHelper {
                     .edges()
                     .iterator();
         } catch (Exception e) {
+            LOG.error("Error while getting active edges of vertex", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+        }
+        finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    public static Iterable<AtlasEdge> getEdges(AtlasVertex vertex, AtlasEdgeDirection direction, String[] edgeTypesToExclude) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.getOnlyActiveEdges");
+
+        try {
+            AtlasVertexQuery query =  vertex.query()
+                    .direction(direction);
+            if(ArrayUtils.isNotEmpty(edgeTypesToExclude)) {
+                for(String edgeTypeToExclude: edgeTypesToExclude) {
+                    query = query.hasNot("__typeName", edgeTypeToExclude);
+                }
+            }
+            return query.edges();
+        }
+        finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    public Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeName(AtlasVertex vertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeName");
+
+        try {
+            return ((AtlasJanusGraph) graph).getGraph().traversal()
+                    .V(vertex.getId())
+                    .bothE()
+                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                    .project(LABEL_PROPERTY_KEY, TYPE_NAME_PROPERTY_KEY)
+                    .by(T.label)
+                    .by(TYPE_NAME_PROPERTY_KEY)
+                    .toStream()
+                    .map(m -> {
+                        Object label = m.get(LABEL_PROPERTY_KEY);
+                        Object typeName = m.get(TYPE_NAME_PROPERTY_KEY);
+                        String labelStr = (label != null) ? label.toString() : "";
+                        String typeNameStr = (typeName != null) ? typeName.toString() : "";
+
+                        return new AbstractMap.SimpleEntry<>(labelStr, typeNameStr);
+                    })
+                    .filter(entry -> !entry.getKey().isEmpty())
+                    .distinct()
+                    .collect(Collectors.toSet());
+
+        } catch (Exception e) {
+            LOG.error("Error while getting labels of active edges", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         }
         finally {
