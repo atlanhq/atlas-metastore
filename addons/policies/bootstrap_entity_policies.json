@@ -3486,43 +3486,6 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "BM_UPDATE_AI_ASSETS",
-                "qualifiedName": "BM_UPDATE_AI_ASSETS",
-                "description": "Allows user to update AI assets business metadata.",
-                "policyCategory": "bootstrap",
-                "policySubCategory": "default",
-                "policyServiceName": "atlas",
-                "policyType": "allow",
-                "policyPriority": 0,
-                "policyUsers":
-                [],
-                "policyGroups":
-                [],
-                "policyRoles":
-                [
-                    "$admin",
-                    "$api-token-default-access"
-                ],
-                "policyResourceCategory": "ENTITY",
-                "isPolicyEnabled": true,
-                "policyResources":
-                [
-                    "entity-type:AIApplication",
-                    "entity-type:AIModel",
-                    "entity-classification:*",
-                    "entity:*",
-                    "entity-business-metadata:*"
-                ],
-                "policyActions":
-                [
-                    "entity-update-business-metadata"
-                ]
-            }
-        },
-        {
-            "typeName": "AuthPolicy",
-            "attributes":
-            {
                 "name": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
                 "qualifiedName": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
                 "policyCategory": "bootstrap",
@@ -3618,6 +3581,43 @@
                 "policyActions":
                 [
                     "entity-read"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
+                "name": "BM_UPDATE_AI_ASSETS",
+                "qualifiedName": "BM_UPDATE_AI_ASSETS",
+                "description": "Allows user to update AI assets business metadata.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources":
+                [
+                    "entity-type:AIApplication",
+                    "entity-type:AIModel",
+                    "entity-classification:*",
+                    "entity:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions":
+                [
+                    "entity-update-business-metadata"
                 ]
             }
         }
