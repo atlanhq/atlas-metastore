@@ -2021,7 +2021,9 @@ public class EntityGraphMapper {
 
             boolean shouldLog = CollectionUtils.isNotEmpty(currentElements);
             if (shouldLog) {
-                LOG.warn("mlh173 currentElements before {}", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
+                LOG.warn("mlh173 attribute name {}", ctx.getAttribute().getName());
+                List<String> ids = currentElements.stream().map(x -> ((AtlasEdge) x).getId().toString()).collect(Collectors.toList());
+                LOG.warn("mlh173 currentElements before {}", StringUtils.join(ids, ","));
             }
 
             if (CollectionUtils.isNotEmpty(currentElements)) {
@@ -2029,7 +2031,8 @@ public class EntityGraphMapper {
             }
 
             if (shouldLog) {
-                LOG.warn("mlh173 currentElements after {}", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
+                List<String> ids = currentElements.stream().map(x -> ((AtlasEdge) x).getId().toString()).collect(Collectors.toList());
+                LOG.warn("mlh173 currentElements after {}", StringUtils.join(ids, ","));
             }
 
             // not null
