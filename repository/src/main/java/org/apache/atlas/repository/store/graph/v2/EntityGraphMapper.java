@@ -2018,7 +2018,7 @@ public class EntityGraphMapper {
                 addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
             }
 
-            boolean shouldLog = CollectionUtils.isNotEmpty(corruptedCurrentElements) && CollectionUtils.isNotEmpty(currentElements);
+            boolean shouldLog = CollectionUtils.isNotEmpty(currentElements);
             if (shouldLog) {
                 LOG.warn("mlh173 currentElements before", currentElements.stream().map(x -> ((AtlasEdge) x).getId()).toArray());
             }
@@ -3012,6 +3012,12 @@ public class EntityGraphMapper {
         }
 
         String    newEntityId = getIdFromVertex(newEntityVertex);
+
+        LOG.warn("mlh173 currentEntityId outer {}, {}", currentEntityId, currentEdge.getId());
+        if (StringUtils.isNotEmpty(newEntityId)) {
+            LOG.warn("mlh173 newEntityId outer : {}", newEntityId);
+        }
+
         if (StringUtils.isEmpty(currentEntityId)) {
             LOG.warn("mlh173 Throwing corrupted vertex : {}", currentEdge.getId());
             if (StringUtils.isNotEmpty(newEntityId)) {
