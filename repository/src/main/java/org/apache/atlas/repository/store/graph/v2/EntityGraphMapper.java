@@ -1944,7 +1944,7 @@ public class EntityGraphMapper {
         return newMap;
     }
 
-    public List mapArrayValue(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
+        public List mapArrayValue(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> mapArrayValue({})", ctx);
         }
@@ -2007,6 +2007,7 @@ public class EntityGraphMapper {
                 newEntry = mapCollectionElementsToVertex(arrCtx, context);
             } catch (AtlasBaseException abe) {
                 if (abe.getAtlasErrorCode() == INTERNAL_ENTITY_ID_NOT_FOUND) {
+                    LOG.warn("mlh173 adding to corruptedCurrentElements {}", existingEdge.getId());
                     corruptedCurrentElements.add(existingEdge);
                 }
             }
