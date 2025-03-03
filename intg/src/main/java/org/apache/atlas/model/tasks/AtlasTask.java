@@ -215,7 +215,7 @@ public class AtlasTask {
         this.cleanupRequired = cleanupRequired;
     }
 
-    public boolean isCleanupRequired() {
+    public boolean getCleanupRequired() {
         return cleanupRequired;
     }
 
