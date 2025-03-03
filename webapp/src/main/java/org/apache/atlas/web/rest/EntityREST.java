@@ -20,6 +20,7 @@ package org.apache.atlas.web.rest;
 import com.google.common.collect.Lists;
 import com.sun.jersey.core.header.FormDataContentDisposition;
 import com.sun.jersey.multipart.FormDataParam;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
@@ -40,6 +41,7 @@ import org.apache.atlas.repository.audit.ESBasedAuditRepository;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
+import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.ClassificationAssociator;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
@@ -72,6 +74,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.*;
+import java.util.stream.Stream;
 
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.AtlasErrorCode.DEPRECATED_API;
@@ -97,6 +100,7 @@ public class EntityREST {
     public static final String QUALIFIED_NAME  = "qualifiedName";
     private static final int HUNDRED_THOUSAND = 100000;
     private static final int TWO_MILLION = HUNDRED_THOUSAND * 10 * 2;
+    private static  final int  ENTITIES_ALLOWED_IN_BULK = AtlasConfiguration.ATLAS_BULK_API_MAX_ENTITIES_ALLOWED.getInt();
     private static final Set<String> ATTRS_WITH_TWO_MILLION_LIMIT = new HashSet<String>() {{
         add("rawQueryText");
         add("variablesSchemaBase64");
@@ -415,7 +419,12 @@ public class EntityREST {
             }
             validateAttributeLength(Lists.newArrayList(entity.getEntity()));
 
-            return entitiesStore.createOrUpdate(new AtlasEntityStream(entity), replaceClassifications, replaceBusinessAttributes, isOverwriteBusinessAttributes);
+            BulkRequestContext context = new BulkRequestContext.Builder()
+                    .setReplaceClassifications(replaceClassifications)
+                    .setReplaceBusinessAttributes(replaceBusinessAttributes)
+                    .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
+                    .build();
+            return entitiesStore.createOrUpdate(new AtlasEntityStream(entity), context);
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -808,24 +817,48 @@ public class EntityREST {
     @Timed
     public EntityMutationResponse createOrUpdate(AtlasEntitiesWithExtInfo entities,
                                                  @QueryParam("replaceClassifications") @DefaultValue("false") boolean replaceClassifications,
+                                                 @QueryParam("replaceTags") @DefaultValue("false") boolean replaceTags,
+                                                 @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
                                                  @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
     ) throws AtlasBaseException {
+
+        if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
+            throw new AtlasBaseException(BAD_REQUEST, "Only one of [replaceClassifications, replaceTags, appendTags] can be true");
+        }
+
         AtlasPerfTracer perf = null;
         RequestContext.get().setEnableCache(false);
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
         try {
+
+            if (CollectionUtils.isEmpty(entities.getEntities())) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "no entities to create/update.");
+            }
+            int entitiesCount = entities.getEntities().size();
+
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.createOrUpdate(entityCount=" +
-                        (CollectionUtils.isEmpty(entities.getEntities()) ? 0 : entities.getEntities().size()) + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.createOrUpdate(entityCount=" + entitiesCount+ ")");
+            }
+
+            if( entitiesCount > ENTITIES_ALLOWED_IN_BULK) {
+                RequestContext.get().endMetricRecord(RequestContext.get().startMetricRecord("requestThrottledDueToBulkEntityOperation"));
+                throw new AtlasBaseException(AtlasErrorCode.EXCEEDED_MAX_ENTITIES_ALLOWED, String.valueOf(ENTITIES_ALLOWED_IN_BULK));
             }
 
             validateAttributeLength(entities.getEntities());
 
             EntityStream entityStream = new AtlasEntityStream(entities);
 
-            return entitiesStore.createOrUpdate(entityStream, replaceClassifications, replaceBusinessAttributes, isOverwriteBusinessAttributes);
+            BulkRequestContext context = new BulkRequestContext.Builder()
+                    .setReplaceClassifications(replaceClassifications)
+                    .setReplaceTags(replaceTags)
+                    .setAppendTags(appendTags)
+                    .setReplaceBusinessAttributes(replaceBusinessAttributes)
+                    .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
+                    .build();
+            return entitiesStore.createOrUpdate(entityStream, context);
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -1143,7 +1176,7 @@ public class EntityREST {
                             event.setDetail(null);
                         }
                     } catch (AtlasBaseException abe) {
-                            throw abe;
+                        throw abe;
                     }
                 }
             }
@@ -1782,7 +1815,7 @@ public class EntityREST {
             RepairIndex repairIndex = new RepairIndex();
             repairIndex.setupGraph();
 
-           repairIndex.restoreSelective(guid, referredEntities);
+            repairIndex.restoreSelective(guid, referredEntities);
         } catch (Exception e) {
             LOG.error("Exception while repairEntityIndex ", e);
             throw new AtlasBaseException(e);
@@ -1885,18 +1918,18 @@ public class EntityREST {
         AtlasPerfTracer perf = null;
 
 
-       try {
-           if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-               perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairAccessControlAlias");
-           }
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairAccessControlAlias");
+            }
 
-           entitiesStore.repairAccesscontrolAlias(guid);
+            entitiesStore.repairAccesscontrolAlias(guid);
 
-           LOG.info("Repaired access control alias for entity with guid {}", guid);
+            LOG.info("Repaired access control alias for entity with guid {}", guid);
 
-       } finally {
-              AtlasPerfTracer.log(perf);
-       }
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
 
 
     }
