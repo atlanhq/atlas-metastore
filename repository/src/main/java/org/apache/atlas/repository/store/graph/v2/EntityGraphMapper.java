@@ -2989,17 +2989,10 @@ public class EntityGraphMapper {
         }
 
         String    newEntityId = getIdFromVertex(newEntityVertex);
-
-        if (StringUtils.isEmpty(currentEntityId)) {
-            LOG.warn("mlh173 Returning edge with corrupted vertex : {}", currentEdge.getId());
-            if (StringUtils.isNotEmpty(newEntityId)) {
-                LOG.warn("mlh173 newEntityId : {}", newEntityId);
-            }
-            //return null;
-        }
         AtlasEdge ret         = currentEdge;
 
         if (StringUtils.isEmpty(currentEntityId) || !currentEntityId.equals(newEntityId)) {
+            // Checking if currentEntityId is null or empty as corrupted vertex on the other side of the edge should result into creation of new edge
             // create a new relationship edge to the new attribute vertex from the instance
             String relationshipName = AtlasGraphUtilsV2.getTypeName(currentEdge);
 
@@ -3008,14 +3001,11 @@ public class EntityGraphMapper {
             }
 
             if (edgeDirection == IN) {
-                LOG.warn("mlh173 currentEdge.getInVertex() {}", currentEdge.getInVertex().getId());
                 ret = getOrCreateRelationship(newEntityVertex, currentEdge.getInVertex(), relationshipName, relationshipAttributes);
 
             } else if (edgeDirection == OUT) {
-                LOG.warn("mlh173 currentEdge.getOutVertex() {}", currentEdge.getOutVertex().getId());
                 ret = getOrCreateRelationship(currentEdge.getOutVertex(), newEntityVertex, relationshipName, relationshipAttributes);
             } else {
-                LOG.warn("mlh173 parentEntityVertex {}", parentEntityVertex.getId());
                 ret = getOrCreateRelationship(newEntityVertex, parentEntityVertex, relationshipName, relationshipAttributes);
             }
 
@@ -3088,7 +3078,7 @@ public class EntityGraphMapper {
                             }
 
                         } catch (NullPointerException npe) {
-                            LOG.warn("mlh173 deleteEdge: {}", edge.getId());
+                            LOG.warn("Ignoring deleting edge with corrupted vertex: {}", edge.getId());
                         }
                     }
 
