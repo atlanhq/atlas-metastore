@@ -642,6 +642,22 @@ public class TaskRegistry {
         if (assetsCountPropagated != null){
             ret.setAssetsCountPropagated(assetsCountPropagated);
         }
+
+        Long assetsFailedToPropagate = v.getProperty(Constants.TASK_ASSET_COUNT_FAILED, Long.class);
+        if (assetsFailedToPropagate != null){
+            ret.setAssetsFailedToPropagate(assetsFailedToPropagate);
+        }
+
+        Boolean cleanupRequired = v.getProperty(Constants.TASK_CLEANUP_REQUIRED, Boolean.class);
+        if (cleanupRequired != null){
+            ret.setCleanupRequired(cleanupRequired);
+        }
+
+        String cleanupStatus = v.getProperty(Constants.TASK_CLEANUP_STATUS, String.class);
+        if (cleanupStatus != null){
+            ret.setCleanupStatus(AtlasTask.CleanupStatus.valueOf(cleanupStatus));
+        }
+
         return ret;
     }
 
