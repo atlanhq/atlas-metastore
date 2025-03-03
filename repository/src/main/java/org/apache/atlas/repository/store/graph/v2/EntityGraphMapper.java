@@ -2999,7 +2999,7 @@ public class EntityGraphMapper {
         }
         AtlasEdge ret         = currentEdge;
 
-        if (!currentEntityId.equals(newEntityId)) {
+        if (StringUtils.isEmpty(currentEntityId) || !currentEntityId.equals(newEntityId)) {
             // create a new relationship edge to the new attribute vertex from the instance
             String relationshipName = AtlasGraphUtilsV2.getTypeName(currentEdge);
 
@@ -3008,11 +3008,14 @@ public class EntityGraphMapper {
             }
 
             if (edgeDirection == IN) {
+                LOG.warn("mlh173 currentEdge.getInVertex() {}", currentEdge.getInVertex().getId());
                 ret = getOrCreateRelationship(newEntityVertex, currentEdge.getInVertex(), relationshipName, relationshipAttributes);
 
             } else if (edgeDirection == OUT) {
+                LOG.warn("mlh173 currentEdge.getOutVertex() {}", currentEdge.getOutVertex().getId());
                 ret = getOrCreateRelationship(currentEdge.getOutVertex(), newEntityVertex, relationshipName, relationshipAttributes);
             } else {
+                LOG.warn("mlh173 parentEntityVertex {}", parentEntityVertex.getId());
                 ret = getOrCreateRelationship(newEntityVertex, parentEntityVertex, relationshipName, relationshipAttributes);
             }
 
