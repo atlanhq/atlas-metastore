@@ -3248,10 +3248,10 @@ public class EntityGraphMapper {
                         int toIndex = Math.min((offset + CHUNK_SIZE), currentAssetsBatchSize);
                         List<AtlasVertex> entityVertices = currentAssetVerticesBatch.subList(offset, toIndex);
                         for (AtlasVertex vertex : entityVertices) {
-                            Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
+                            Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
                             int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                             LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                            kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                            kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
                             LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
 
                             List<AtlasClassification> deletedClassifications = new ArrayList<>();
@@ -3583,10 +3583,10 @@ public class EntityGraphMapper {
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 for (AtlasVertex vertex: chunkedVerticesToPropagate) {
-                    Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                    Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
                     int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                     LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
                     LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
                 }
                 AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
@@ -4168,10 +4168,10 @@ public class EntityGraphMapper {
             int end = Math.min(i + batchSize, impactedVertices.size());
             List<AtlasVertex> batch = impactedVertices.subList(i, end);
             for (AtlasVertex vertex : batch) {
-                Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
+                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
                 int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                 LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
                 LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
 
                 String entityGuid = graphHelper.getGuid(vertex);
@@ -4446,10 +4446,10 @@ public class EntityGraphMapper {
                 List<AtlasVertex> verticesChunkToRemoveTag = VerticesToRemoveTag.subList(offset, toIndex);
 
                 for (AtlasVertex vertex: verticesChunkToRemoveTag) {
-                    Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                    Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
                     int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                     LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
                     LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
                 }
                 List<String> impactedGuids = verticesChunkToRemoveTag.stream()
