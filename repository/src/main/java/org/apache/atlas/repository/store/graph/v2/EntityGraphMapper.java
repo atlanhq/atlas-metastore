@@ -2995,7 +2995,7 @@ public class EntityGraphMapper {
             if (StringUtils.isNotEmpty(newEntityId)) {
                 LOG.warn("mlh173 newEntityId : {}", newEntityId);
             }
-            return null;
+            //return null;
         }
         AtlasEdge ret         = currentEdge;
 
