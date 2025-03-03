@@ -84,7 +84,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
-import static org.apache.atlas.AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
 import static org.apache.atlas.model.TypeCategory.CLASSIFICATION;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
@@ -1993,7 +1992,6 @@ public class EntityGraphMapper {
             newElements = (List) newElements.stream().distinct().collect(Collectors.toList());
         }
 
-        List<AtlasEdge> corruptedCurrentElements = new ArrayList<>(0);
         for (int index = 0; index < newElements.size(); index++) {
             AtlasEdge               existingEdge = (isSoftReference) ? null : getEdgeAt(currentElements, index, elementType);
             AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
@@ -2002,37 +2000,12 @@ public class EntityGraphMapper {
                 removeExistingRelationWithOtherVertex(arrCtx, ctx, context);
             }
 
-            Object newEntry = null;
-            try {
-                newEntry = mapCollectionElementsToVertex(arrCtx, context);
-            } catch (AtlasBaseException abe) {
-                if (abe.getAtlasErrorCode() == INTERNAL_ENTITY_ID_NOT_FOUND) {
-                    LOG.warn("mlh173 adding to corruptedCurrentElements {}", existingEdge.getId());
-                    corruptedCurrentElements.add(existingEdge);
-                }
-            }
-
+            Object newEntry = mapCollectionElementsToVertex(arrCtx, context);
             if (isReference && newEntry != null && newEntry instanceof AtlasEdge && inverseRefAttribute != null) {
                 // Update the inverse reference value.
                 AtlasEdge newEdge = (AtlasEdge) newEntry;
 
                 addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
-            }
-
-            boolean shouldLog = CollectionUtils.isNotEmpty(currentElements);
-            if (shouldLog) {
-                LOG.warn("mlh173 attribute name {}", ctx.getAttribute().getName());
-                List<String> ids = currentElements.stream().map(x -> ((AtlasEdge) x).getId().toString()).collect(Collectors.toList());
-                LOG.warn("mlh173 currentElements before {}", StringUtils.join(ids, ","));
-            }
-
-            if (CollectionUtils.isNotEmpty(currentElements)) {
-                currentElements.removeAll(corruptedCurrentElements);
-            }
-
-            if (shouldLog) {
-                List<String> ids = currentElements.stream().map(x -> ((AtlasEdge) x).getId().toString()).collect(Collectors.toList());
-                LOG.warn("mlh173 currentElements after {}", StringUtils.join(ids, ","));
             }
 
             // not null
@@ -3017,17 +2990,12 @@ public class EntityGraphMapper {
 
         String    newEntityId = getIdFromVertex(newEntityVertex);
 
-        LOG.warn("mlh173 currentEntityId outer {}, {}", currentEntityId, currentEdge.getId());
-        if (StringUtils.isNotEmpty(newEntityId)) {
-            LOG.warn("mlh173 newEntityId outer : {}", newEntityId);
-        }
-
         if (StringUtils.isEmpty(currentEntityId)) {
-            LOG.warn("mlh173 Throwing corrupted vertex : {}", currentEdge.getId());
+            LOG.warn("mlh173 Returning edge with corrupted vertex : {}", currentEdge.getId());
             if (StringUtils.isNotEmpty(newEntityId)) {
                 LOG.warn("mlh173 newEntityId : {}", newEntityId);
             }
-            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND);
+            return null;
         }
         AtlasEdge ret         = currentEdge;
 
@@ -3108,11 +3076,16 @@ public class EntityGraphMapper {
                             continue;
                         }
 
-                        boolean deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
-                                true, attribute.getRelationshipEdgeDirection(), entityVertex);
+                        try {
+                            boolean deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
+                                    true, attribute.getRelationshipEdgeDirection(), entityVertex);
 
-                        if (!deleted) {
-                            additionalElements.add(edge);
+                            if (!deleted) {
+                                additionalElements.add(edge);
+                            }
+
+                        } catch (NullPointerException npe) {
+                            LOG.warn("mlh173 deleteEdge: {}", edge.getId());
                         }
                     }
 
