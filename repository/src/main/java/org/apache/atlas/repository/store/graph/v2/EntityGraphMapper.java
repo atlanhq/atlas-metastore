@@ -1943,7 +1943,7 @@ public class EntityGraphMapper {
         return newMap;
     }
 
-        public List mapArrayValue(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
+    public List mapArrayValue(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> mapArrayValue({})", ctx);
         }
