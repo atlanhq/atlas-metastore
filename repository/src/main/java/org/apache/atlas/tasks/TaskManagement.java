@@ -126,9 +126,16 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         AtlasVertex currentTaskVertex = (AtlasVertex) vertexIterator.next();
 
         // Ensure propertyKey is valid and update the corresponding task property
-        if (propertyKey != null && Constants.TASK_ASSET_COUNT_TO_PROPAGATE.equals(propertyKey)) {
-            currentTask.setAssetsCountToPropagate(value);
-            currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountToPropagate());
+        if (Constants.TASK_ASSET_COUNT_TO_PROPAGATE.equals(propertyKey)) {
+            if (propertyKey != null) {
+                currentTask.setAssetsCountToPropagate(value);
+                currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountToPropagate());
+            } else if (propertyKey != null && Constants.TASK_ASSET_COUNT_PROPAGATED.equals(propertyKey)) {
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + value);
+                currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountPropagated());
+            } else {
+                throw new IllegalArgumentException("Unexpected or null propertyKey: " + propertyKey);
+            }
         } else if (propertyKey != null && Constants.TASK_ASSET_COUNT_PROPAGATED.equals(propertyKey)) {
             currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + value);
             currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountPropagated());
