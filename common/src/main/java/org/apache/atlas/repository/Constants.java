@@ -272,6 +272,8 @@ public final class Constants {
     public static final String QUALIFIED_NAME                          = "qualifiedName";
     public static final String UNIQUE_QUALIFIED_NAME                   = UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX + QUALIFIED_NAME;
     public static final String TYPE_NAME_PROPERTY_KEY                  = INTERNAL_PROPERTY_KEY_PREFIX + "typeName";
+
+    public static final String LABEL_PROPERTY_KEY                      = "label";
     public static final String INDEX_SEARCH_MAX_RESULT_SET_SIZE        = "atlas.graph.index.search.max-result-set-size";
     public static final String INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH = "atlas.graph.index.search.types.max-query-str-length";
     public static final String INDEX_SEARCH_TAGS_MAX_QUERY_STR_LENGTH  = "atlas.graph.index.search.tags.max-query-str-length";
@@ -317,6 +319,11 @@ public final class Constants {
     public static final String EDGE_ID_IN_IMPORT_KEY   = "__eIdInImport";
 
     /*
+     * Edge labels for data product relations which are hard deleted
+     */
+
+    public static final Set<String> EDGE_LABELS_FOR_HARD_DELETION = new HashSet<>(Arrays.asList( OUTPUT_PORT_PRODUCT_EDGE_LABEL, INPUT_PORT_PRODUCT_EDGE_LABEL, TERM_ASSIGNMENT_LABEL ));
+    /*
      * elasticsearch attributes
      */
 
@@ -361,6 +368,9 @@ public final class Constants {
     public static final String TASK_CLASSIFICATION_TYPENAME = encodePropertyKey(TASK_PREFIX + "classificationTypeName");
     public static final String TASK_ASSET_COUNT_TO_PROPAGATE = encodePropertyKey(TASK_PREFIX + "assetsCountToPropagate");
     public static final String TASK_ASSET_COUNT_PROPAGATED = encodePropertyKey(TASK_PREFIX + "assetsCountPropagated");
+    public static final String TASK_ASSET_COUNT_FAILED = encodePropertyKey(TASK_PREFIX + "assetsFailedToPropagate");
+    public static final String TASK_CLEANUP_REQUIRED = encodePropertyKey(TASK_PREFIX + "cleanupRequired");
+    public static final String TASK_CLEANUP_STATUS = encodePropertyKey(TASK_PREFIX + "cleanupStatus");
     public static final String ACTIVE_STATE_VALUE           = "ACTIVE";
     public static final String TASK_HEADER_ATLAN_AGENT      = "x-atlan-agent";
     public static final String TASK_HEADER_ATLAN_AGENT_ID   = "x-atlan-agent-id";

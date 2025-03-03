@@ -88,8 +88,6 @@ public class RequestContext {
     private int attemptCount = 1;
     private boolean isImportInProgress = false;
     private boolean     isInNotificationProcessing = false;
-    private Long        assetsCountToPropagate = 0L;
-    private Long        assetsCountPropagated = 0L;
     private boolean     authorisedRemoveRelation = false;
     private boolean     isInTypePatching           = false;
     private boolean     createShellEntityForNonExistingReference = false;
@@ -113,9 +111,12 @@ public class RequestContext {
     private boolean cacheEnabled;
 
     private boolean delayTagNotifications = false;
+    private boolean skipHasLineageCalculation = false;
+    private boolean isInvokedByIndexSearch = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
 
+    Map<String, Object> tagsDiff = new HashMap<>();
 
     private RequestContext() {
     }
@@ -312,23 +313,6 @@ public class RequestContext {
         this.attemptCount = attemptCount;
     }
 
-    public Long getAssetsCountToPropagate() {
-        return assetsCountToPropagate;
-    }
-
-    public Long getAssetsCountPropagated() {
-        return assetsCountPropagated;
-    }
-
-
-    public void setAssetsCountToPropagate(Long assetsCount) {
-        this.assetsCountToPropagate = assetsCount ;
-    }
-
-    public void setAssetsCountPropagated(Long assetsCountPropagated) {
-        this.assetsCountPropagated = assetsCountPropagated;
-    }
-
     public boolean isImportInProgress() {
         return isImportInProgress;
     }
@@ -490,6 +474,14 @@ public class RequestContext {
 
     public void addAddedClassificationAndVertices(AtlasClassification classification, Collection<Object> vertices) {
         this.addedClassificationAndVertices.put(classification, vertices);
+    }
+
+    public Map<String, List<AtlasClassification>> getAndRemoveTagsDiff(String entityGuid) {
+        return (Map<String, List<AtlasClassification>>) tagsDiff.remove(entityGuid);
+    }
+
+    public void addTagsDiff(String entityGuid, Map<String, List<AtlasClassification>> tagsDiff) {
+        this.tagsDiff.put(entityGuid, tagsDiff);
     }
 
     public void addToDeletedEdgesIds(String edgeId) {
@@ -686,6 +678,12 @@ public class RequestContext {
         }
     }
 
+    public void endMetricRecord(MetricRecorder recorder,long invocations){
+        if (metrics != null && recorder != null) {
+            metrics.recordMetric(recorder, invocations);
+        }
+    }
+
     public void recordEntityGuidUpdate(AtlasEntity entity, String guidInRequest) {
         recordEntityGuidUpdate(new EntityGuidPair(entity, guidInRequest));
     }
@@ -779,7 +777,7 @@ public class RequestContext {
     }
 
     public void setClientOrigin(String clientOrigin) {
-        this.clientOrigin = StringUtils.isEmpty(this.clientOrigin) ? "other" :clientOrigin;
+        this.clientOrigin = StringUtils.isEmpty(clientOrigin) ? "other" :clientOrigin;
     }
 
     public Map<String, String> getEvaluateEntityHeaderCache() {
@@ -796,6 +794,21 @@ public class RequestContext {
 
     public void setSkipProcessEdgeRestoration(boolean skipProcessEdgeRestoration) {
         this.skipProcessEdgeRestoration = skipProcessEdgeRestoration;
+    }
+
+    public boolean skipHasLineageCalculation() {
+        return skipHasLineageCalculation;
+    }
+    public void setSkipHasLineageCalculation(boolean skipHasLineageCalculation) {
+        this.skipHasLineageCalculation = skipHasLineageCalculation;
+    }
+
+    public void setIsInvokedByIndexSearch(boolean isInvokedByIndexSearch) {
+        this.isInvokedByIndexSearch = isInvokedByIndexSearch;
+    }
+
+    public boolean isInvokedByIndexSearch() {
+        return isInvokedByIndexSearch;
     }
 
     public class EntityGuidPair {

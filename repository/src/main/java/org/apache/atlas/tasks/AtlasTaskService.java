@@ -9,7 +9,6 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.tasks.TaskSearchParams;
 import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory;
@@ -164,6 +163,9 @@ public class AtlasTaskService implements TaskService {
                 task.setAttemptCount(0);
                 task.setAssetsCountToPropagate(0L);
                 task.setAssetsCountPropagated(0L);
+                task.setAssetsFailedToPropagate(0L);
+                task.setCleanupRequired(false);
+                task.setCleanupStatus(AtlasTask.CleanupStatus.PENDING);
                 task.setGuid(UUID.randomUUID().toString());
                 task.setCreatedBy(RequestContext.getCurrentUser());
 
@@ -272,7 +274,9 @@ public class AtlasTaskService implements TaskService {
         setEncodedProperty(ret, Constants.TASK_ATTEMPT_COUNT, task.getAttemptCount());
         setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
         setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_PROPAGATED, task.getAssetsCountPropagated());
-        setEncodedProperty(ret, Constants.TASK_ERROR_MESSAGE, task.getErrorMessage());
+        setEncodedProperty(ret, Constants.TASK_ASSET_COUNT_FAILED, task.getAssetsFailedToPropagate());
+        setEncodedProperty(ret, Constants.TASK_CLEANUP_REQUIRED, task.getCleanupRequired());
+        setEncodedProperty(ret, Constants.TASK_CLEANUP_STATUS, task.getCleanupStatus());
 
         LOG.info("Creating task vertex: {}: {}, {}: {}, {}: {} ",
                 Constants.TASK_TYPE, task.getType(),
