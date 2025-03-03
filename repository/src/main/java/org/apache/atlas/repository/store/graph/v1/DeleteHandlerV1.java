@@ -1223,10 +1223,10 @@ public abstract class DeleteHandlerV1 {
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
-                Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
                 int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                 LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
                 LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
 
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
@@ -1240,10 +1240,10 @@ public abstract class DeleteHandlerV1 {
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
-                Map<String, Object> kafkaMessage = kfknotif.createTagPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
                 int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
                 LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_PLANNED_RELATIONSHIPS, Collections.singletonList(kafkaMessage.toString()), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
                 LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
 
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);

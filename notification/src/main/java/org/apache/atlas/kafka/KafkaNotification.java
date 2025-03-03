@@ -65,13 +65,13 @@ public class KafkaNotification extends AbstractNotification implements Service {
     public    static final String PROPERTY_PREFIX            = "atlas.kafka";
     public    static final String ATLAS_HOOK_TOPIC           = AtlasConfiguration.NOTIFICATION_HOOK_TOPIC_NAME.getString();
     public    static final String ATLAS_ENTITIES_TOPIC       = AtlasConfiguration.NOTIFICATION_ENTITIES_TOPIC_NAME.getString();
-    public    static final String ATLAS_RELATIONSHIPS_TOPIC       = AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_TOPIC_NAME.getString();
+    public    static final String EMIT_SUB_TASKS = AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_TOPIC_NAME.getString();
     public    static final String ATLAS_TAG_PROP_EVENTS = AtlasConfiguration.NOTIFICATION_PROPAGATION_TOPIC_NAME.getString();
     protected static final String CONSUMER_GROUP_ID_PROPERTY = "group.id";
 
     private   static final String[] ATLAS_HOOK_CONSUMER_TOPICS     = AtlasConfiguration.NOTIFICATION_HOOK_CONSUMER_TOPIC_NAMES.getStringArray(ATLAS_HOOK_TOPIC);
     private   static final String[] ATLAS_ENTITIES_CONSUMER_TOPICS = AtlasConfiguration.NOTIFICATION_ENTITIES_CONSUMER_TOPIC_NAMES.getStringArray(ATLAS_ENTITIES_TOPIC);
-    private   static final String[] ATLAS_RELATIONSHIPS_CONSUMER_TOPICS = AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_CONSUMER_TOPIC_NAMES.getStringArray(ATLAS_RELATIONSHIPS_TOPIC);
+    private   static final String[] ATLAS_RELATIONSHIPS_CONSUMER_TOPICS = AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_CONSUMER_TOPIC_NAMES.getStringArray(EMIT_SUB_TASKS);
 
     private static final String DEFAULT_CONSUMER_CLOSED_ERROR_MESSAGE = "This consumer has already been closed.";
 
@@ -79,8 +79,8 @@ public class KafkaNotification extends AbstractNotification implements Service {
         {
             put(NotificationType.HOOK, ATLAS_HOOK_TOPIC);
             put(NotificationType.ENTITIES, ATLAS_ENTITIES_TOPIC);
-            put(NotificationType.RELATIONSHIPS, ATLAS_RELATIONSHIPS_TOPIC);
-            put(NotificationType.EMIT_PLANNED_RELATIONSHIPS, ATLAS_TAG_PROP_EVENTS);
+            put(NotificationType.RELATIONSHIPS, EMIT_SUB_TASKS);
+            put(NotificationType.EMIT_SUB_TASKS, ATLAS_TAG_PROP_EVENTS);
         }
     };
 
@@ -478,7 +478,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
         return ret;
     }
 
-    public Map<String, Object> createTagPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertexId) {
+    public Map<String, Object> createObjectPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertexId) {
         AtlasTask currentTask = RequestContext.get().getCurrentTask();
         AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
 
