@@ -47,12 +47,15 @@ public interface NotificationInterface {
         // Notifications from the Atlas integration hooks.
         HOOK(new HookMessageDeserializer()),
 
+        EMIT_SUB_TASKS(new EntityMessageDeserializer()),
+
         // Notifications to entity change consumers.
         ENTITIES(new EntityMessageDeserializer()),
 
         RELATIONSHIPS(new EntityMessageDeserializer()),
 
         ATLAS_DISTRIBUTED_TASKS(new AtlasDistributedTaskMessageDeserializer());
+
 
         private final AtlasNotificationMessageDeserializer deserializer;
 

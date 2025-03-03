@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.authorize.AtlasRelationshipAccessRequest;
@@ -37,6 +38,7 @@ import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
+import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
@@ -98,6 +100,8 @@ public abstract class DeleteHandlerV1 {
     private   final TaskUtil             taskUtil;
     private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
+    KafkaNotification kfknotif;
+    int numPartitions = Integer.parseInt(TAG_PROP_EVENTS_PARTITION_COUNT); // Total number of partitions in the Kafka topic
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
@@ -521,25 +525,20 @@ public abstract class DeleteHandlerV1 {
 
     public void authorizeRemoveRelation(AtlasEdge edge) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("authoriseRemoveRelation");
-        if(!RequestContext.get().isAuthorisedRemoveRelation()) {
-            if (isRequestFromWorkFlow()) {
-                RequestContext.get().setAuthorisedRemoveRelation(true);
-            }
-            AtlasEntityHeader end1Entity, end2Entity;
-            String relationShipType = getTypeName(edge);
-            AtlasRelationshipDef relationshipDef = typeRegistry.getRelationshipDefByName(relationShipType);
-            if (relationshipDef == null) {
-                return;
-            }
-
-            end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getOutVertex());
-            end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getInVertex());
-
-            AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_REMOVE, relationShipType, end1Entity, end2Entity));
+        AtlasEntityHeader end1Entity, end2Entity;
+        String relationShipType = getTypeName(edge);
+        AtlasRelationshipDef relationshipDef = typeRegistry.getRelationshipDefByName(relationShipType);
+        if (relationshipDef == null) {
+            return;
         }
+
+        end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getOutVertex());
+        end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getInVertex());
+
+        AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_REMOVE, relationShipType, end1Entity, end2Entity ));
+
         RequestContext.get().endMetricRecord(metric);
     }
-
 
     public Map<AtlasVertex, List<AtlasVertex>> removeTagPropagation(AtlasEdge edge) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("removeTagPropagationEdge");
@@ -841,7 +840,7 @@ public abstract class DeleteHandlerV1 {
                             AtlasType      elemType = arrType.getElementType();
 
                             if (isReference(elemType.getTypeCategory())) {
-                                List<AtlasEdge> edges = getActiveCollectionElementsUsingRelationship(instanceVertex, attributeInfo);
+                                List<AtlasEdge> edges = getCollectionElementsUsingRelationship(instanceVertex, attributeInfo);
 
                                 if (CollectionUtils.isNotEmpty(edges)) {
                                     for (AtlasEdge edge : edges) {
@@ -1244,6 +1243,12 @@ public abstract class DeleteHandlerV1 {
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
+                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
+                LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
+                LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+
                 List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
 
                 addTagPropagation(classificationVertex, entitiesToAddPropagation);
@@ -1255,6 +1260,12 @@ public abstract class DeleteHandlerV1 {
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
+                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
+                LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
+                LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+
                 List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
 
                 removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
@@ -1272,7 +1283,6 @@ public abstract class DeleteHandlerV1 {
             handleBlockedClassifications(edge, relationship.getBlockedPropagatedClassifications());
         }
     }
-
     public void handleBlockedClassifications(AtlasEdge edge, Set<AtlasClassification> blockedClassifications) throws AtlasBaseException {
         if (blockedClassifications != null) {
             List<AtlasVertex> propagatableClassifications  = getPropagatableClassifications(edge);
@@ -1612,14 +1622,6 @@ public abstract class DeleteHandlerV1 {
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
-    }
-    private boolean isRequestFromWorkFlow() {
-        String workflowID = RequestContext.get().getRequestContextHeaders().getOrDefault("x-atlan-agent-workflow-id", "");
-        boolean isWorkFlowRequest = !workflowID.isEmpty();
-        if(isWorkFlowRequest){
-            LOG.info("Authorised one time request for workflow with id : {} ", workflowID);
-        }
-        return isWorkFlowRequest;
     }
 
     private String getLabel(String guid, String label){
