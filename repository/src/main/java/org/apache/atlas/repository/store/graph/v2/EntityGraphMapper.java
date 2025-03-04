@@ -37,6 +37,7 @@ import org.apache.atlas.model.typedef.AtlasEntityDef.AtlasRelationshipAttributeD
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef.Cardinality;
+import org.apache.atlas.notification.NotificationException;
 import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
@@ -3249,10 +3250,7 @@ public class EntityGraphMapper {
                         List<AtlasVertex> entityVertices = currentAssetVerticesBatch.subList(offset, toIndex);
                         for (AtlasVertex vertex : entityVertices) {
                             Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
-                            int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
-                            LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                            kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
-                            LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+                            kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
 
                             List<AtlasClassification> deletedClassifications = new ArrayList<>();
                             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex));
@@ -3291,6 +3289,8 @@ public class EntityGraphMapper {
                         offset += CHUNK_SIZE;
 
 
+                    } catch (NotificationException e) {
+                        throw new RuntimeException(e);
                     } finally {
                         LOG.info("For offset {} , classificationEdge were : {}", offset, classificationEdgeCount);
                         classificationEdgeCount = 0;
@@ -3584,10 +3584,7 @@ public class EntityGraphMapper {
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 for (AtlasVertex vertex: chunkedVerticesToPropagate) {
                     Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
-                    int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
-                    LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
-                    LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
                 }
                 AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
                 List<String> impactedVerticesGuidsToLock        = chunkedVerticesToPropagate.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
@@ -3621,6 +3618,8 @@ public class EntityGraphMapper {
         } catch (AtlasBaseException exception) {
             LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
             throw exception;
+        } catch (NotificationException e) {
+            throw new RuntimeException(e);
         } finally {
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
         }
@@ -4169,11 +4168,11 @@ public class EntityGraphMapper {
             List<AtlasVertex> batch = impactedVertices.subList(i, end);
             for (AtlasVertex vertex : batch) {
                 Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
-                int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
-                LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
-                LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
-
+                try {
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
+                } catch (NotificationException e) {
+                    throw new RuntimeException(e);
+                }
                 String entityGuid = graphHelper.getGuid(vertex);
                 AtlasEntity entity = instanceConverter.getAndCacheEntity(entityGuid, true);
 
@@ -4447,10 +4446,7 @@ public class EntityGraphMapper {
 
                 for (AtlasVertex vertex: verticesChunkToRemoveTag) {
                     Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
-                    int partition = Math.abs((Integer) kafkaMessage.get("parentTaskGuid")) % numPartitions;
-                    LOG.debug("sending message with  guid={} to partition={}",kafkaMessage.get("parentTaskVertexId"), partition);
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, Collections.singletonList(kafkaMessage.toString()), partition);
-                    LOG.debug("Message with guid={} sent to partition={} sent successfully.",kafkaMessage.get("parentTaskVertexId"), partition );
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
                 }
                 List<String> impactedGuids = verticesChunkToRemoveTag.stream()
                         .map(entityVertex -> GraphHelper.getGuid(entityVertex))
@@ -4470,6 +4466,8 @@ public class EntityGraphMapper {
         } catch (AtlasBaseException exception) {
             LOG.error("Error while removing classification from vertices with classification vertex id {}", classificationVertex.getIdForDisplay());
             throw exception;
+        } catch (NotificationException e) {
+            throw new RuntimeException(e);
         } finally {
             RequestContext.get().endMetricRecord(propagatedClassificationDeletionMetricRecorder);
         }
@@ -4485,8 +4483,16 @@ public class EntityGraphMapper {
 
         do {
             toIndex = ((offset + CHUNK_SIZE > propagatedEdgesSize) ? propagatedEdgesSize : (offset + CHUNK_SIZE));
-
-            List<AtlasVertex> entityVertices = deleteDelegate.getHandler().removeTagPropagation(classification, propagatedEdges.subList(offset, toIndex));
+            List<AtlasEdge> chunk = propagatedEdges.subList(offset, toIndex);
+            for (AtlasEdge edge : chunk) {
+                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
+                try {
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
+                } catch (NotificationException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            List<AtlasVertex> entityVertices = deleteDelegate.getHandler().removeTagPropagation(classification, chunk);
             List<String> impactedGuids = entityVertices.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
 
             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedGuids);
