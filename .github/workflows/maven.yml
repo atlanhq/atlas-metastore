@@ -28,7 +28,7 @@ on:
       - master
       - lineageondemand
       - makerlogic
-      - tagpropv1.5master
+      - tagpropv1master
 
 jobs:
   build:
