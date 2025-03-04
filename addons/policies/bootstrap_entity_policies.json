@@ -3103,6 +3103,7 @@
                 [
                     "$admin",
                     "$member",
+                    "$guest",
                     "$api-token-default-access"
                 ],
                 "policyResourceCategory": "ENTITY",
