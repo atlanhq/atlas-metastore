@@ -27,7 +27,7 @@ on:
       - development
       - master
       - lineageondemand
-      - tagpropv1master
+      - tagpropv1master2
 
 jobs:
   build:
