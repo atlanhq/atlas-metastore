@@ -17,6 +17,8 @@
  */
 package org.apache.atlas.kafka;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
@@ -478,9 +480,14 @@ public class KafkaNotification extends AbstractNotification implements Service {
         return ret;
     }
 
-    public Map<String, Object> createObjectPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertexId) {
+    public List<String> createObjectPropKafkaMessage(AtlasVertex vertex, AtlasGraph graph, String classificationType, String tagVertexId) {
+        // Get the current task and its associated vertex
         AtlasTask currentTask = RequestContext.get().getCurrentTask();
-        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query().has(TASK_GUID, currentTask.getGuid()).vertices().iterator().next();
+        AtlasVertex currentTaskVertex = (AtlasVertex) graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices()
+                .iterator()
+                .next();
 
         // Build the payload map with the required keys
         Map<String, Object> payload = new HashMap<>();
@@ -495,6 +502,19 @@ public class KafkaNotification extends AbstractNotification implements Service {
         message.put("operation", classificationType);
         message.put("payload", payload);
 
-        return message;
+        // Convert the message map to a JSON string using Jackson's ObjectMapper
+        ObjectMapper mapper = new ObjectMapper();
+        String jsonMessage;
+        try {
+            jsonMessage = mapper.writeValueAsString(message);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException("Error converting message to JSON", e);
+        }
+
+        // Wrap the JSON string in a List<String>
+        List<String> messageList = new ArrayList<>();
+        messageList.add(jsonMessage);
+
+        return messageList;
     }
 }

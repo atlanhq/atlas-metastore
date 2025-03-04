@@ -1242,9 +1242,9 @@ public abstract class DeleteHandlerV1 {
 
             int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
-                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
                 try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
@@ -1260,9 +1260,9 @@ public abstract class DeleteHandlerV1 {
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
-                Map<String, Object> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
                 try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, (List<String>) kafkaMessage);
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
