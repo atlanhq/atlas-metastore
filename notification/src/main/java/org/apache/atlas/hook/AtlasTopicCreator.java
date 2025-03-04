@@ -32,10 +32,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import org.apache.atlas.AtlasConfiguration;
-import static org.apache.atlas.repository.Constants.TAG_PROP_EVENTS_PARTITION_COUNT;
+import static org.apache.atlas.repository.Constants.OBJ_PROP_EVENTS_PARTITION_COUNT;
 
 /**
  * A class to create Kafka topics used by Atlas components.
@@ -70,8 +69,8 @@ public class AtlasTopicCreator {
                 List<String[]> topicDetails = new ArrayList<>();
 
                 for (String topicName : topicNames) {
-                    if (AtlasConfiguration.NOTIFICATION_PROPAGATION_TOPIC_NAME.getString().equals(topicName)) {
-                        topicDetails.add(new String[]{topicName, TAG_PROP_EVENTS_PARTITION_COUNT}); // 5 partitions for 'TAG_PROP_EVENTS'
+                    if (AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_NAME.getString().equals(topicName)) {
+                        topicDetails.add(new String[]{topicName, OBJ_PROP_EVENTS_PARTITION_COUNT}); // 5 partitions for 'TAG_PROP_EVENTS'
                     } else {
                         topicDetails.add(new String[]{topicName, String.valueOf(atlasProperties.getInt("atlas.notification.partitions", 1))}); // 1 partition for all others
                     }
