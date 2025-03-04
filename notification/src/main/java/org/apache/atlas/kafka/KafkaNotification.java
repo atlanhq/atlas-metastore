@@ -81,8 +81,10 @@ public class KafkaNotification extends AbstractNotification implements Service {
         {
             put(NotificationType.HOOK, ATLAS_HOOK_TOPIC);
             put(NotificationType.ENTITIES, ATLAS_ENTITIES_TOPIC);
-            put(NotificationType.RELATIONSHIPS, EMIT_SUB_TASKS);
-            put(NotificationType.EMIT_SUB_TASKS, ATLAS_TAG_PROP_EVENTS);
+            put(NotificationType.RELATIONSHIPS, ATLAS_RELATIONSHIPS_TOPIC);
+            put(NotificationType.ATLAS_DISTRIBUTED_TASKS, ATLAS_DISTRIBUTED_TASKS_TOPIC);
+            put(NotificationType.EMIT_SUB_TASKS, ATLAS_OBJ_PROP_EVENTS);
+
         }
     };
 
