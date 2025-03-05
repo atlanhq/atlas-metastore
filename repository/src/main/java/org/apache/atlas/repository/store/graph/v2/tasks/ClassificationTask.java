@@ -38,7 +38,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.atlas.model.tasks.AtlasTask.Status.*;
-
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE;
 
 public abstract class ClassificationTask extends AbstractTask {
@@ -98,18 +97,24 @@ public abstract class ClassificationTask extends AbstractTask {
         }
 
         RequestContext.get().setUser(userName, null);
+
         try {
             setStatus(IN_PROGRESS);
+
             run(params);
+
             setStatus(COMPLETE);
         } catch (AtlasBaseException e) {
             LOG.error("Task: {}: Error performing task!", getTaskGuid(), e);
+
             setStatus(FAILED);
+
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
             graph.commit();
         }
+
         return getStatus();
     }
 
