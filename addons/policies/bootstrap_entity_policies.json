@@ -3487,7 +3487,7 @@
             "attributes":
             {
                 "name": "DATA_DOMAIN_AND_PRODUCT_BUSINESS_UPDATE_METADATA",
-                "qualifiedName": "DATA_DOMAIN_BUSINESS_UPDATE_METADATA",
+                "qualifiedName": "DATA_DOMAIN_AND_PRODUCT_BUSINESS_UPDATE_METADATA",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",

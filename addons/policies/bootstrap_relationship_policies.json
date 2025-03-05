@@ -999,7 +999,7 @@
             "attributes":
             {
                 "name": "LINK_MESH_DATA_DOMAIN_AND_STAKEHOLDER_TITLE_TO_STAKE_HOLDER",
-                "qualifiedName": "LINK_MESH_DATA_DOMAIN_TO_STAKE_HOLDER",
+                "qualifiedName": "LINK_MESH_DATA_DOMAIN_AND_STAKEHOLDER_TITLE_TO_STAKE_HOLDER",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
