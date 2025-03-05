@@ -51,6 +51,7 @@ import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.Future;
 
+import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.TASK_GUID;
 import static org.apache.atlas.security.SecurityProperties.TRUSTSTORE_PASSWORD_KEY;
 import static org.apache.atlas.security.SecurityProperties.TLS_ENABLED;
@@ -498,7 +499,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
         payload.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
         payload.put("assetVertexId", vertex.getIdForDisplay());
         payload.put("tagVertexId", tagVertexId);
-        payload.put("parentTaskGuid", currentTask.getEntityGuid());
+        payload.put("assetGuid", vertex.getProperty(GUID_PROPERTY_KEY, String.class));
         payload.put("tagTypeName", currentTask.getClassificationTypeName());
 
         // Wrap the payload in the outer message with the operation field set to classificationType
