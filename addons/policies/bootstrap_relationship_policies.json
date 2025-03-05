@@ -1123,7 +1123,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
-                "isPolicyEnabled": false,
+                "isPolicyEnabled": true,
                 "policyPriority": 1,
                 "policyUsers":
                 [],
