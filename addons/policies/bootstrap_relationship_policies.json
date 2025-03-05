@@ -998,7 +998,7 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "LINK_MESH_DATA_DOMAIN_TO_STAKE_HOLDER",
+                "name": "LINK_MESH_DATA_DOMAIN_AND_STAKEHOLDER_TITLE_TO_STAKE_HOLDER",
                 "qualifiedName": "LINK_MESH_DATA_DOMAIN_TO_STAKE_HOLDER",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
@@ -1018,6 +1018,7 @@
                 "policyResources":
                 [
                     "relationship-type:*",
+                    "end-one-entity-type:StakeholderTitle",
                     "end-one-entity-type:DataDomain",
                     "end-one-entity-classification:*",
                     "end-one-entity:*",
@@ -1043,6 +1044,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
+                "isPolicyEnabled": false,
                 "policyPriority": 1,
                 "policyUsers":
                 [],
@@ -1121,6 +1123,7 @@
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
                 "policyType": "allow",
+                "isPolicyEnabled": false,
                 "policyPriority": 1,
                 "policyUsers":
                 [],
