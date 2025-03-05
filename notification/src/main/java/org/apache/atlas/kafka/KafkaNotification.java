@@ -498,7 +498,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
         payload.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
         payload.put("assetVertexId", vertex.getIdForDisplay());
         payload.put("tagVertexId", tagVertexId);
-        payload.put("parentTaskGuid", currentTask.getGuid());
+        payload.put("parentTaskGuid", currentTask.getEntityGuid());
         payload.put("tagTypeName", currentTask.getClassificationTypeName());
 
         // Wrap the payload in the outer message with the operation field set to classificationType
