@@ -86,11 +86,6 @@
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-graphdb-api</artifactId>
         </dependency>
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-repository</artifactId>
-        </dependency>
-
     </dependencies>
 
     <build>

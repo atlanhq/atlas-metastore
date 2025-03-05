@@ -28,7 +28,6 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.notification.AbstractNotification;
 import org.apache.atlas.notification.NotificationConsumer;
 import org.apache.atlas.notification.NotificationException;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.Service;
@@ -499,7 +498,7 @@ public class KafkaNotification extends AbstractNotification implements Service {
         payload.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
         payload.put("assetVertexId", vertex.getIdForDisplay());
         payload.put("tagVertexId", tagVertexId);
-        payload.put("assetGuid", GraphHelper.getGuid(vertex));
+        payload.put("parentTaskGuid", currentTask.getEntityGuid());
         payload.put("tagTypeName", currentTask.getClassificationTypeName());
 
         // Wrap the payload in the outer message with the operation field set to classificationType
