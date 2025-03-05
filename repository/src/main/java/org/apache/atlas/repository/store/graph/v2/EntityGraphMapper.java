@@ -3560,7 +3560,7 @@ public class EntityGraphMapper {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
             }
 
-//            return processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            processClassificationPropagationAddition(impactedVertices, classificationVertex);
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
 
