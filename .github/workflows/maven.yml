@@ -30,6 +30,7 @@ on:
       - mlh-170-create-diff
       - cassaop
       - ixop
+      - dq651
 
 jobs:
   build:
