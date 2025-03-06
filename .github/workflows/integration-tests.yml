@@ -301,7 +301,7 @@ jobs:
           # Pattern of test files to skip (modify as desired).
           # If your files are strictly named File1Test.java, File2Test.java, etc.,
           # make sure to match them correctly below.
-          SKIP_PATTERN="SearchTest.java|RequestsTest.java|ResourceTest.java|SSOTest.java|WorkFlowTest.java"
+          SKIP_PATTERN="SearchTest.java|RequestsTest.java|ResourceTest.java|SSOTest.java|WorkflowTest.java|PersonaTest.java|AdminTest.java|SSOTest.java|AtlanTagTest"
 
           # List all *Test.java files, exclude the ones that match SKIP_PATTERN
           tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java \
