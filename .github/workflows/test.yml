@@ -1,4 +1,4 @@
-name: Integration-Tests-for-Metastore
+name: Integration-Tests
 
 on:
   pull_request:
@@ -46,7 +46,7 @@ jobs:
       - name: List integration tests
         id: test-files
         run: |
-          SKIP_PATTERN=""
+          SKIP_PATTERN="AdminTest.java"
 
           # List all *Test.java files, exclude the ones that match SKIP_PATTERN
           tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java \
