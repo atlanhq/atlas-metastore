@@ -3521,9 +3521,9 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
-                "name": "CRUD_DATA_PRODUCT_ENTITY",
-                "qualifiedName": "CRUD_DATA_PRODUCT_ENTITY",
-                "description": "Allows user to perform CRUD operation on data products asset",
+                "name": "CRUD_ENTITY_BOOT",
+                "qualifiedName": "CRUD_ENTITY_BOOT",
+                "description": "Allows user to perform CRUD operation on entities",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
