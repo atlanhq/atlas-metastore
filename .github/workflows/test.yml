@@ -10,7 +10,6 @@ on:
       - mlh41temp
 
 jobs:
-
   setup-java-sdk:
     runs-on: ubuntu-latest
     steps:
