@@ -87,7 +87,6 @@ jobs:
             console.log("It's my turn now!");
   build:
     runs-on: ubuntu-latest
-    needs: waiting-in-queue
     steps:
       - uses: actions/checkout@v2
 
@@ -185,7 +184,9 @@ jobs:
 
   set-image-tag:
     runs-on: metastore-sh-runner
-    needs: build
+    needs:
+      - build
+      - waiting-in-queue
     steps:
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
@@ -288,6 +289,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       tests: ${{ steps.test-files.outputs.tests }}
+      test_count: ${{ steps.test-files.outputs.test_count }}  # <-- new output
     steps:
       - name: Checkout Java SDK Repo
         uses: actions/checkout@v4
@@ -298,9 +300,6 @@ jobs:
       - name: List integration tests
         id: test-files
         run: |
-          # Pattern of test files to skip (modify as desired).
-          # If your files are strictly named File1Test.java, File2Test.java, etc.,
-          # make sure to match them correctly below.
           SKIP_PATTERN="SearchTest.java|RequestsTest.java|ResourceTest.java|SSOTest.java|WorkflowTest.java|PersonaTest.java|AdminTest.java|SSOTest.java|AtlanTagTest"
 
           # List all *Test.java files, exclude the ones that match SKIP_PATTERN
@@ -318,6 +317,10 @@ jobs:
 
           # Output for use in later jobs
           echo "tests=$json_tests" >> $GITHUB_OUTPUT
+
+          # Count how many test classes we found
+          test_count=$(echo "$tests" | wc -w)
+          echo "test_count=$test_count" >> $GITHUB_OUTPUT
 
   integration-test:
     needs:
@@ -382,20 +385,27 @@ jobs:
       - name: Summarize JUnit XML
         id: summary
         run: |
+          # 1) Pull the expected test file count
+          initial_count=${{ needs.list-integration-tests.outputs.test_count }}
+
           echo "### Integration Test Results" > test-summary.md
           echo "" >> test-summary.md
+
           all_passed=true
           total_failures=0
+          real_count=0  # track how many XML files we actually parse
 
           # Find all JUnit XML files under test-results/
           while IFS= read -r -d '' xmlfile; do
-            # 1. Get the base filename (e.g. TEST-com.atlan.java.sdk.SupersetAssetTest.xml)
+            real_count=$(( real_count + 1 ))
+
+            # 1. Get the base filename 
             basefile=$(basename "$xmlfile")
 
-            # 2. Remove the "TEST-" prefix and the ".xml" suffix (leaving com.atlan.java.sdk.SupersetAssetTest)
+            # 2. Remove the "TEST-" prefix and the ".xml" suffix
             no_prefix=$(echo "$basefile" | sed -E 's/^TEST-//; s/\.xml$//')
 
-            # 3. Remove the package prefix if present (com.atlan.java.sdk.) => SupersetAssetTest
+            # 3. Remove the package prefix if present (com.atlan.java.sdk.)
             test_name=$(echo "$no_prefix" | sed -E 's/^com\.atlan\.java\.sdk\.//')
 
             # 4. Parse the number of failures
@@ -412,14 +422,22 @@ jobs:
             fi
           done < <(find test-results -name '*.xml' -print0)
 
-          # Overall pass/fail summary
+          # 2) Compare the actual number of files we found vs. initial_count
+          if [ "$real_count" -lt "$initial_count" ]; then
+            echo "" >> test-summary.md
+            echo "⚠️ **Some test results are missing**." >> test-summary.md
+            echo "Only $real_count out of $initial_count expected results were found." >> test-summary.md
+            all_passed=false
+          fi
+
+          # 3) Overall pass/fail summary
           if [ "$all_passed" = true ]; then
             echo "" >> test-summary.md
             echo "✅ **All integration tests passed!** Ready to merge. 🚀" >> test-summary.md
             echo "ALL_TESTS_PASSED=true" >> $GITHUB_ENV
           else
             echo "" >> test-summary.md
-            echo "❌ **Some tests failed.** Total failures: $total_failures" >> test-summary.md
+            echo "❌ **Some tests failed or results were missing.** Total failures: $total_failures" >> test-summary.md
             echo "ALL_TESTS_PASSED=false" >> $GITHUB_ENV
           fi
 
