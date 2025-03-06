@@ -29,6 +29,7 @@ on:
       - lineageondemand
       - cassandrapoliciesoptimisation
       - ixop
+      - dq651
 
 jobs:
   build:
