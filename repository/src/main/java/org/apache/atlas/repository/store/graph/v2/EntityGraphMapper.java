@@ -26,6 +26,7 @@ import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.TimeBoundary;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.*;
@@ -36,6 +37,8 @@ import org.apache.atlas.model.typedef.AtlasEntityDef.AtlasRelationshipAttributeD
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef.Cardinality;
+import org.apache.atlas.notification.NotificationException;
+import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
@@ -71,6 +74,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
+import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,6 +85,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
@@ -135,7 +140,6 @@ import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.MEANINGS_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.MEANINGS_TEXT_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.MEANING_NAMES_PROPERTY_KEY;
-
 
 @Component
 public class EntityGraphMapper {
@@ -199,6 +203,9 @@ public class EntityGraphMapper {
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
+    Configuration configuration;
+    KafkaNotification kfknotif;
+
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
@@ -216,7 +223,16 @@ public class EntityGraphMapper {
         this.retrieverNoRelation  = new EntityGraphRetriever(graph, typeRegistry, true);
         this.fullTextMapperV2     = fullTextMapperV2;
         this.taskManagement       = taskManagement;
-        this.transactionInterceptHelper = transactionInterceptHelper;}
+        this.transactionInterceptHelper = transactionInterceptHelper;
+        try {
+            this.configuration = ApplicationProperties.get();
+            this.kfknotif = new KafkaNotification(configuration);
+
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
 
     @VisibleForTesting
     public void setTasksUseFlag(boolean value) {
@@ -3205,9 +3221,10 @@ public class EntityGraphMapper {
         long classificationEdgeCount = 0;
         long classificationEdgeInMemoryCount = 0;
         Iterator<AtlasVertex> tagVertices = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
+
         List<AtlasVertex> tagVerticesProcessed = new ArrayList<>(0);
         List<AtlasVertex> currentAssetVerticesBatch = new ArrayList<>(0);
-
+        int totalCount = 0;
         while (tagVertices != null && tagVertices.hasNext()) {
             if (cleanedUpCount >= CLEANUP_MAX){
                 return;
@@ -3226,6 +3243,8 @@ public class EntityGraphMapper {
             }
 
             int currentAssetsBatchSize = currentAssetVerticesBatch.size();
+            totalCount += currentAssetsBatchSize;
+
             if (currentAssetsBatchSize > 0) {
                 LOG.info("To clean up tag {} from {} entities", classificationName, currentAssetsBatchSize);
                 int offset = 0;
@@ -3234,6 +3253,9 @@ public class EntityGraphMapper {
                         int toIndex = Math.min((offset + CHUNK_SIZE), currentAssetsBatchSize);
                         List<AtlasVertex> entityVertices = currentAssetVerticesBatch.subList(offset, toIndex);
                         for (AtlasVertex vertex : entityVertices) {
+                            List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
+                            kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+
                             List<AtlasClassification> deletedClassifications = new ArrayList<>();
                             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex));
                             List<AtlasEdge> classificationEdges = GraphHelper.getClassificationEdges(vertex, null, classificationName);
@@ -3257,17 +3279,22 @@ public class EntityGraphMapper {
                                     classificationEdgeInMemoryCount = 0;
                                 }
                             }
+
                             try {
                                 AtlasEntity entity = repairClassificationMappings(vertex);
                                 entityChangeNotifier.onClassificationDeletedFromEntity(entity, deletedClassifications);
                             } catch (IllegalStateException | AtlasBaseException e) {
                                 e.printStackTrace();
                             }
+
                         }
 
                         transactionInterceptHelper.intercept();
-
                         offset += CHUNK_SIZE;
+
+
+                    } catch (NotificationException e) {
+                        throw new RuntimeException(e);
                     } finally {
                         LOG.info("For offset {} , classificationEdge were : {}", offset, classificationEdgeCount);
                         classificationEdgeCount = 0;
@@ -3283,7 +3310,6 @@ public class EntityGraphMapper {
                         e.printStackTrace();
                     }
                 }
-                transactionInterceptHelper.intercept();
 
                 cleanedUpCount += currentAssetsBatchSize;
                 currentAssetVerticesBatch.clear();
@@ -3292,6 +3318,10 @@ public class EntityGraphMapper {
             tagVertices = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
         }
 
+        taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, totalCount);
+        taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, totalCount);
+
+        transactionInterceptHelper.intercept();
         LOG.info("Completed cleaning up classification {}", classificationName);
     }
 
@@ -3483,8 +3513,9 @@ public class EntityGraphMapper {
     }
 
 
-    public List<String> propagateClassification(String entityGuid, String classificationVertexId, String relationshipGuid, Boolean previousRestrictPropagationThroughLineage,Boolean previousRestrictPropagationThroughHierarchy) throws AtlasBaseException {
+    public void propagateClassification(String entityGuid, String classificationVertexId, String relationshipGuid, Boolean previousRestrictPropagationThroughLineage, Boolean previousRestrictPropagationThroughHierarchy) throws AtlasBaseException {
         try {
+
             if (StringUtils.isEmpty(entityGuid) || StringUtils.isEmpty(classificationVertexId)) {
                 LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): entityGuid and/or classification vertex id is empty", entityGuid, classificationVertexId);
 
@@ -3528,13 +3559,13 @@ public class EntityGraphMapper {
             Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
             List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
 
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, impactedVertices.size() - 1);
+
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
-
-                return null;
             }
 
-            return processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            processClassificationPropagationAddition(impactedVertices, classificationVertex);
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
 
@@ -3542,50 +3573,50 @@ public class EntityGraphMapper {
         }
     }
 
-    public List<String> processClassificationPropagationAddition(List<AtlasVertex> verticesToPropagate, AtlasVertex classificationVertex) throws AtlasBaseException{
+    public void processClassificationPropagationAddition(List<AtlasVertex> verticesToPropagate, AtlasVertex classificationVertex) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
         int impactedVerticesSize = verticesToPropagate.size();
-        int offset = 0;
-        int toIndex;
         LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
 
         try {
-            do {
-                toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
-                List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
-
-                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
-                List<String> impactedVerticesGuidsToLock        = chunkedVerticesToPropagate.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
-                GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedVerticesGuidsToLock);
-                RequestContext.get().endMetricRecord(metricRecorder);
-
-                AtlasClassification classification       = entityRetriever.toAtlasClassification(classificationVertex);
-                List<AtlasVertex>   entitiesPropagatedTo = deleteDelegate.getHandler().addTagPropagation(classificationVertex, chunkedVerticesToPropagate);
-
-                if (CollectionUtils.isEmpty(entitiesPropagatedTo)) {
-                    return null;
+//                List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
+                for (AtlasVertex vertex: verticesToPropagate) {
+                    List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 }
+//                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
+//                List<String> impactedVerticesGuidsToLock        = chunkedVerticesToPropagate.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
+//                GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedVerticesGuidsToLock);
+//                RequestContext.get().endMetricRecord(metricRecorder);
 
-                List<AtlasEntity>   propagatedEntitiesChunked       = updateClassificationText(classification, entitiesPropagatedTo);
-                List<String>        chunkedPropagatedEntitiesGuids  = propagatedEntitiesChunked.stream().map(x -> x.getGuid()).collect(Collectors.toList());
-                entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntitiesChunked, Collections.singletonList(classification), false);
+//                AtlasClassification classification       = entityRetriever.toAtlasClassification(classificationVertex);
+//                List<AtlasVertex>   entitiesPropagatedTo = deleteDelegate.getHandler().addTagPropagation(classificationVertex, chunkedVerticesToPropagate);
 
-                propagatedEntitiesGuids.addAll(chunkedPropagatedEntitiesGuids);
+//                if (CollectionUtils.isEmpty(entitiesPropagatedTo)) {
+//                    return null;
+//                }
 
-                offset += CHUNK_SIZE;
-
-                transactionInterceptHelper.intercept();
-
-            } while (offset < impactedVerticesSize);
-        } catch (AtlasBaseException exception) {
-            LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
-            throw exception;
+//                List<AtlasEntity>   propagatedEntitiesChunked       = updateClassificationText(classification, entitiesPropagatedTo);
+//                List<String>        chunkedPropagatedEntitiesGuids  = propagatedEntitiesChunked.stream().map(x -> x.getGuid()).collect(Collectors.toList());
+//                entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntitiesChunked, Collections.singletonList(classification), false);
+//
+//                propagatedEntitiesGuids.addAll(chunkedPropagatedEntitiesGuids);
+//
+//                transactionInterceptHelper.intercept();
+//
+//                int propagatedAssetsCount = (offset + CHUNK_SIZE >= impactedVerticesSize && impactedVerticesSize == verticesToPropagate.size())
+//                        ? toIndex - offset - 1 // Subtract 1 for the last chunk
+//                        : toIndex - offset;
+//
+//                offset += CHUNK_SIZE;
+//
+//                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedAssetsCount);
+        } catch (NotificationException e) {
+            throw new RuntimeException(e);
         } finally {
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
         }
-
-    return propagatedEntitiesGuids;
 
     }
 
@@ -4119,38 +4150,50 @@ public class EntityGraphMapper {
         AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
         LOG.info("Fetched classification : {} ", classification.toString());
         List<AtlasVertex> impactedVertices = graphHelper.getAllPropagatedEntityVertices(classificationVertex);
+
+        taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, impactedVertices.size());
+
         LOG.info("impactedVertices : {}", impactedVertices.size());
         int batchSize = 100;
         for (int i = 0; i < impactedVertices.size(); i += batchSize) {
             int end = Math.min(i + batchSize, impactedVertices.size());
             List<AtlasVertex> batch = impactedVertices.subList(i, end);
             for (AtlasVertex vertex : batch) {
+                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
+                try {
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                } catch (NotificationException e) {
+                    throw new RuntimeException(e);
+                }
                 String entityGuid = graphHelper.getGuid(vertex);
                 AtlasEntity entity = instanceConverter.getAndCacheEntity(entityGuid, true);
 
-                if (entity != null) {
-                    vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
-                    entityChangeNotifier.onClassificationUpdatedToEntity(entity, Collections.singletonList(classification));
-                }
+//                if (entity != null) {
+//                    vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
+//                    entityChangeNotifier.onClassificationUpdatedToEntity(entity, Collections.singletonList(classification));
+//                }
             }
+
+//            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, end);
+
             transactionInterceptHelper.intercept();
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
         }
     }
 
-    public List<String> deleteClassificationPropagation(String entityGuid, String classificationVertexId) throws AtlasBaseException {
+    public void deleteClassificationPropagation(String entityGuid, String classificationVertexId) throws AtlasBaseException {
         try {
             if (StringUtils.isEmpty(classificationVertexId)) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification vertex id is empty", classificationVertexId);
 
-                return null;
+                return;
             }
 
             AtlasVertex classificationVertex = graph.getVertex(classificationVertexId);
             if (classificationVertex == null) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification vertex not found", classificationVertexId);
 
-                return null;
+                return;
             }
 
             AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
@@ -4159,20 +4202,26 @@ public class EntityGraphMapper {
             if (propagatedEdges.isEmpty()) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification edges empty", classificationVertexId);
 
-                return null;
+                return;
             }
 
             int propagatedEdgesSize = propagatedEdges.size();
 
             LOG.info(String.format("Number of edges to be deleted : %s for classification vertex with id : %s", propagatedEdgesSize, classificationVertexId));
+            for (AtlasEdge edge : propagatedEdges) {
+                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
+                try {
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                } catch (NotificationException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+//            List<String> deletedPropagationsGuid = processClassificationEdgeDeletionInChunk(classification, propagatedEdges);
 
-            List<String> deletedPropagationsGuid = processClassificationEdgeDeletionInChunk(classification, propagatedEdges);
-
-            deleteDelegate.getHandler().deleteClassificationVertex(classificationVertex, true);
+//            deleteDelegate.getHandler().deleteClassificationVertex(classificationVertex, true);
 
             transactionInterceptHelper.intercept();
-
-            return deletedPropagationsGuid;
+            //            return deletedPropagationsGuid;
         } catch (Exception e) {
             LOG.error("Error while removing classification id {} with error {} ", classificationVertexId, e.getMessage());
             throw new AtlasBaseException(e);
@@ -4323,6 +4372,8 @@ public class EntityGraphMapper {
                 .filter(vertex -> vertex != null)
                 .collect(Collectors.toList());
 
+        taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, verticesToRemove.size() + verticesToAddClassification.size());
+
         //Remove classifications from unreachable vertices
         processPropagatedClassificationDeletionFromVertices(verticesToRemove, currentClassificationVertex, classification);
 
@@ -4391,23 +4442,27 @@ public class EntityGraphMapper {
                 toIndex = ((offset + CHUNK_SIZE > propagatedVerticesSize) ? propagatedVerticesSize : (offset + CHUNK_SIZE));
                 List<AtlasVertex> verticesChunkToRemoveTag = VerticesToRemoveTag.subList(offset, toIndex);
 
+                for (AtlasVertex vertex: verticesChunkToRemoveTag) {
+                    List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                }
                 List<String> impactedGuids = verticesChunkToRemoveTag.stream()
                         .map(entityVertex -> GraphHelper.getGuid(entityVertex))
                         .collect(Collectors.toList());
                 GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedGuids);
 
-                List<AtlasVertex> updatedVertices = deleteDelegate.getHandler().removeTagPropagation(classificationVertex, verticesChunkToRemoveTag);
-                List<AtlasEntity> updatedEntities = updateClassificationText(classification, updatedVertices);
-                entityChangeNotifier.onClassificationsDeletedFromEntities(updatedEntities, Collections.singletonList(classification));
+//                List<AtlasVertex> updatedVertices = deleteDelegate.getHandler().removeTagPropagation(classificationVertex, verticesChunkToRemoveTag);
+//                List<AtlasEntity> updatedEntities = updateClassificationText(classification, updatedVertices);
+//                entityChangeNotifier.onClassificationsDeletedFromEntities(updatedEntities, Collections.singletonList(classification));
 
+                int propagatedAssetsCount = toIndex - offset;
                 offset += CHUNK_SIZE;
-
+                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedAssetsCount);
                 transactionInterceptHelper.intercept();
 
             } while (offset < propagatedVerticesSize);
-        } catch (AtlasBaseException exception) {
-            LOG.error("Error while removing classification from vertices with classification vertex id {}", classificationVertex.getIdForDisplay());
-            throw exception;
+        } catch (NotificationException e) {
+            throw new RuntimeException(e);
         } finally {
             RequestContext.get().endMetricRecord(propagatedClassificationDeletionMetricRecorder);
         }
@@ -4419,10 +4474,20 @@ public class EntityGraphMapper {
         int toIndex;
         int offset = 0;
 
+        taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, propagatedEdgesSize);
+
         do {
             toIndex = ((offset + CHUNK_SIZE > propagatedEdgesSize) ? propagatedEdgesSize : (offset + CHUNK_SIZE));
-
-            List<AtlasVertex> entityVertices = deleteDelegate.getHandler().removeTagPropagation(classification, propagatedEdges.subList(offset, toIndex));
+            List<AtlasEdge> chunk = propagatedEdges.subList(offset, toIndex);
+            for (AtlasEdge edge : chunk) {
+                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
+                try {
+                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                } catch (NotificationException e) {
+                    throw new RuntimeException(e);
+                }
+            }
+            List<AtlasVertex> entityVertices = deleteDelegate.getHandler().removeTagPropagation(classification, chunk);
             List<String> impactedGuids = entityVertices.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
 
             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedGuids);
@@ -4434,8 +4499,11 @@ public class EntityGraphMapper {
                 deletedPropagationsGuid.addAll(propagatedEntities.stream().map(x -> x.getGuid()).collect(Collectors.toList()));
             }
 
+            int propagatedAssetsCount = toIndex - offset;
+
             offset += CHUNK_SIZE;
 
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedAssetsCount);
             transactionInterceptHelper.intercept();
 
         } while (offset < propagatedEdgesSize);

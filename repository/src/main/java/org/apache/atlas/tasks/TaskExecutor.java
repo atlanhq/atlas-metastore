@@ -189,7 +189,7 @@ public class TaskExecutor {
 
             AbstractTask runnableTask = factory.create(task);
 
-            registry.inProgress(taskVertex, task);
+            registry.inProgress(taskVertex, task, runnableTask);
 
             runnableTask.run();
 
