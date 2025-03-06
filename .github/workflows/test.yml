@@ -1,0 +1,200 @@
+name: Integration-Tests-for-Metastore
+
+on:
+  pull_request:
+    branches:
+      - master
+      - mlh41tests
+  push:
+    branches:
+      - mlh41temp
+
+jobs:
+
+  setup-java-sdk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-java
+          ref: main
+
+      - name: Set up JDK for SDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Compile
+        uses: burrunan/gradle-cache-action@v1
+        with:
+          arguments: assemble shadowJar test
+
+  list-integration-tests:
+    runs-on: ubuntu-latest
+    outputs:
+      tests: ${{ steps.test-files.outputs.tests }}
+      test_count: ${{ steps.test-files.outputs.test_count }}  # <-- new output
+    steps:
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-java
+          ref: main
+
+      - name: List integration tests
+        id: test-files
+        run: |
+          SKIP_PATTERN="SearchTest.java|RequestsTest.java|ResourceTest.java|SSOTest.java|WorkflowTest.java|PersonaTest.java|AdminTest.java|SSOTest.java|AtlanTagTest"
+
+          # List all *Test.java files, exclude the ones that match SKIP_PATTERN
+          tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java \
+            | grep -vE "${SKIP_PATTERN}" \
+            | sed -E 's|.*/src/test/java/com/atlan/java/sdk/||; s|/|.|g; s|\.java$||' \
+            | tr '\n' ' ')
+
+          # Print the final list of tests for visibility
+          echo "Proceeding with the following tests:"
+          echo "$tests"
+          
+          # Convert the space-separated test list into JSON array
+          json_tests=$(echo "$tests[@]}" | jq -R -c 'split(" ")[:-1]')
+
+          # Output for use in later jobs
+          echo "tests=$json_tests" >> $GITHUB_OUTPUT
+
+          # Count how many test classes we found
+          test_count=$(echo "$tests" | wc -w)
+          echo "test_count=$test_count" >> $GITHUB_OUTPUT
+
+  integration-test:
+    needs:
+      - setup-java-sdk
+      - list-integration-tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        tests: ${{ fromJson(needs.list-integration-tests.outputs.tests) }}
+    concurrency:
+      group: ${{ matrix.tests }}
+    name: "Integration"
+    steps:
+      - name: Checkout Java SDK Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-java
+          ref: main
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+
+      - name: Run integration test for ${{ matrix.tests }}
+        run: |
+          # Run ONLY the test class for this matrix entry
+          ./gradlew -PintegrationTests integration-tests:test \
+            --tests "com.atlan.java.sdk.${{ matrix.tests }}" \
+            --rerun-tasks
+        env:
+          ATLAN_BASE_URL: "https://gcpotel.atlan.com/"
+          ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
+
+      - name: Move JUnit XML results
+        if: success() || failure()
+        run: |
+          mkdir -p integration-tests/build/test-results/${{ matrix.tests }}
+          mv integration-tests/build/test-results/test/* integration-tests/build/test-results/${{ matrix.tests }} || true
+      - name: Upload JUnit test results
+        if: success() || failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tests }}-junit-results
+          path: integration-tests/build/test-results/${{ matrix.tests }}
+
+  report-test-results:
+    needs: integration-test
+    if: always()  # Run this even if tests fail
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Test Results
+        uses: actions/download-artifact@v4
+        with:
+          # This will download all artifacts, including each test's folder
+          path: test-results
+
+      - name: Summarize JUnit XML
+        id: summary
+        run: |
+          # 1) Pull the expected test file count
+          initial_count=${{ needs.list-integration-tests.outputs.test_count }}
+
+          echo "### Integration Test Results" > test-summary.md
+          echo "" >> test-summary.md
+
+          all_passed=true
+          total_failures=0
+          real_count=0  # track how many XML files we actually parse
+
+          # Find all JUnit XML files under test-results/
+          while IFS= read -r -d '' xmlfile; do
+            real_count=$(( real_count + 1 ))
+
+            # 1. Get the base filename 
+            basefile=$(basename "$xmlfile")
+
+            # 2. Remove the "TEST-" prefix and the ".xml" suffix
+            no_prefix=$(echo "$basefile" | sed -E 's/^TEST-//; s/\.xml$//')
+
+            # 3. Remove the package prefix if present (com.atlan.java.sdk.)
+            test_name=$(echo "$no_prefix" | sed -E 's/^com\.atlan\.java\.sdk\.//')
+
+            # 4. Parse the number of failures
+            file_failures=$(grep -Po 'failures="\K\d+' "$xmlfile" | paste -sd+ - | bc)
+            [[ -z "$file_failures" ]] && file_failures=0
+
+            # 5. Print a concise summary line
+            if [ "$file_failures" -gt 0 ]; then
+              echo "❌ Failures found in: $test_name ($file_failures failures)" >> test-summary.md
+              all_passed=false
+              total_failures=$((total_failures + file_failures))
+            else
+              echo "✅ No failures in: $test_name" >> test-summary.md
+            fi
+          done < <(find test-results -name '*.xml' -print0)
+
+          # 2) Compare the actual number of files we found vs. initial_count
+          if [ "$real_count" -lt "$initial_count" ]; then
+            echo "" >> test-summary.md
+            echo "⚠️ **Some test results are missing**." >> test-summary.md
+            echo "Only $real_count out of $initial_count expected results were found." >> test-summary.md
+            all_passed=false
+          fi
+
+          # 3) Overall pass/fail summary
+          if [ "$all_passed" = true ]; then
+            echo "" >> test-summary.md
+            echo "✅ **All integration tests passed!** Ready to merge. 🚀" >> test-summary.md
+            echo "ALL_TESTS_PASSED=true" >> $GITHUB_ENV
+          else
+            echo "" >> test-summary.md
+            echo "❌ **Some tests failed or results were missing.** Total failures: $total_failures" >> test-summary.md
+            echo "ALL_TESTS_PASSED=false" >> $GITHUB_ENV
+          fi
+
+      - name: Output Test Summary to Logs
+        run: |
+          echo "--------------------------------------------------"
+          echo "✅ Printing the test summary before posting to PR"
+          echo "--------------------------------------------------"
+          cat test-summary.md
+
+      - name: Post Comment on PR
+        uses: mshick/add-pr-comment@v2
+        if: github.event_name == 'pull_request'
+        with:
+          message-path: test-summary.md
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
