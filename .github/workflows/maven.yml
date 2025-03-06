@@ -28,6 +28,7 @@ on:
       - master
       - lineageondemand
       - cassandrapoliciesoptimisation
+      - dq651
 
 jobs:
   build:
