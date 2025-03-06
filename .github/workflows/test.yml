@@ -4,10 +4,6 @@ on:
   pull_request:
     branches:
       - master
-      - mlh41tests
-  push:
-    branches:
-      - mlh41temp
 
 jobs:
   setup-java-sdk:
