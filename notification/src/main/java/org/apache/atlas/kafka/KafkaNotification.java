@@ -497,10 +497,14 @@ public class KafkaNotification extends AbstractNotification implements Service {
         // Build the payload map with the required keys
         Map<String, Object> payload = new HashMap<>();
         payload.put("parentTaskVertexId", currentTaskVertex.getIdForDisplay());
+        payload.put("parentTaskGuid", currentTask.getGuid());
         payload.put("assetVertexId", vertex.getIdForDisplay());
         payload.put("tagVertexId", tagVertexId);
         payload.put("assetGuid", vertex.getProperty(GUID_PROPERTY_KEY, String.class));
         payload.put("tagTypeName", currentTask.getClassificationTypeName());
+        payload.put("eventId", UUID.randomUUID().toString());
+        payload.put("timestamp", new Date());
+        payload.put("traceId", RequestContext.get().getTraceId());
 
         // Wrap the payload in the outer message with the operation field set to classificationType
         Map<String, Object> message = new HashMap<>();
