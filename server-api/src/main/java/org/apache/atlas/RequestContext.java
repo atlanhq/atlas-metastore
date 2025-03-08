@@ -110,7 +110,6 @@ public class RequestContext {
     private boolean skipAuthorizationCheck = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
-    private boolean cacheEnabled;
 
     private boolean delayTagNotifications = false;
     private boolean skipHasLineageCalculation = false;
@@ -758,14 +757,6 @@ public class RequestContext {
         return this.requestUri;
     }
 
-    public void setEnableCache(boolean cacheEnabled) {
-        this.cacheEnabled = cacheEnabled;
-    }
-
-    public boolean isCacheEnabled() {
-        return this.cacheEnabled;
-    }
-
     public boolean isIncludeClassificationNames() {
         return includeClassificationNames;
     }
@@ -888,5 +879,4 @@ public class RequestContext {
     public boolean isEdgeLabelAlreadyProcessed(String processEdgeLabel) {
         return edgeLabels.contains(processEdgeLabel);
     }
-
 }
