@@ -17,7 +17,7 @@ jobs:
             /*
               We'll block until *no older runs* of this same workflow are
               still in 'queued' or 'in_progress' status. That effectively
-              enforces a FIFO sequence for all runs of "Sleep-for-4-Minutes."
+              enforces a FIFO sequence for all runs of "Integration-Tests-for-Metastore"
             */
             const { owner, repo } = context.repo;
             const currentRunId = context.runId;
@@ -38,7 +38,7 @@ jobs:
               let response = await github.rest.actions.listWorkflowRunsForRepo({
                 owner,
                 repo,
-                workflow_id: "Sleep-for-4-Minutes", // or use the numeric ID instead of name
+                workflow_id: "Integration-Tests-for-Metastore", // or use the numeric ID instead of name
                 status: "queued",
                 per_page: 100
               });
@@ -58,7 +58,7 @@ jobs:
                 response = await github.rest.actions.listWorkflowRunsForRepo({
                   owner,
                   repo,
-                  workflow_id: "Sleep-for-4-Minutes",
+                  workflow_id: "Integration-Tests-for-Metastore",
                   status: "in_progress",
                   per_page: 100
                 });
@@ -223,10 +223,6 @@ jobs:
         run: |
           echo "Checking if kubectl can connect to the cluster..."
           kubectl get namespaces
-      - name: Check Pods in namespaces
-        run: |
-          kubectl get pods -n sh-runner
-          kubectl get pods -n atlas
       - name: Set atlas image
         run: |
           echo "Updating StatefulSet 'atlas' with image: ${{ env.IMAGE_TAG }}"
