@@ -319,7 +319,7 @@ jobs:
           # Count how many test classes we found
           test_count=$(echo "$tests" | wc -w)
           echo "test_count=$test_count" >> $GITHUB_OUTPUT
-          console.log(test_count)
+          echo "$test_count"
   integration-test:
     needs:
       - wait-for-deployment
