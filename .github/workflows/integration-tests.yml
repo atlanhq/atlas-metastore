@@ -15,7 +15,7 @@ jobs:
         with:
           script: |
             /*
-              We'll block until *no older runs* of this same workflow are
+              We'll wait until *no older runs* of this same workflow are
               still in 'queued' or 'in_progress' status. That effectively
               enforces a FIFO sequence for all runs of "Integration-Tests-for-Metastore"
             */
