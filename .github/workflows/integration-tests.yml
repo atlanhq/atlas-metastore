@@ -65,9 +65,9 @@ jobs:
                 });
                 for(const run of response.data.workflow_runs) {
                   if(run.id !== currentRunId) {
-                    console.log(run.id);
                     const otherCreated = new Date(run.created_at).getTime();
                     if(otherCreated < creationTime) {
+                      console.log(run.id);
                       blockingFound = true;
                       break;
                     }
@@ -319,7 +319,7 @@ jobs:
           # Count how many test classes we found
           test_count=$(echo "$tests" | wc -w)
           echo "test_count=$test_count" >> $GITHUB_OUTPUT
-
+          console.log(test_count)
   integration-test:
     needs:
       - wait-for-deployment
@@ -392,34 +392,43 @@ jobs:
           all_passed=true
           total_failures=0
           real_count=0  # track how many XML files we actually parse
-
-          # Find all JUnit XML files under test-results/
-          while IFS= read -r -d '' xmlfile; do
-            real_count=$(( real_count + 1 ))
-
-            # 1. Get the base filename 
-            basefile=$(basename "$xmlfile")
-
-            # 2. Remove the "TEST-" prefix and the ".xml" suffix
-            no_prefix=$(echo "$basefile" | sed -E 's/^TEST-//; s/\.xml$//')
-
-            # 3. Remove the package prefix if present (com.atlan.java.sdk.)
-            test_name=$(echo "$no_prefix" | sed -E 's/^com\.atlan\.java\.sdk\.//')
-
-            # 4. Parse the number of failures
-            file_failures=$(grep -Po 'failures="\K\d+' "$xmlfile" | paste -sd+ - | bc)
-            [[ -z "$file_failures" ]] && file_failures=0
-
-            # 5. Print a concise summary line
-            if [ "$file_failures" -gt 0 ]; then
-              echo "❌ Failures found in: $test_name ($file_failures failures)" >> test-summary.md
-              all_passed=false
-              total_failures=$((total_failures + file_failures))
-            else
-              echo "✅ No failures in: $test_name" >> test-summary.md
-            fi
-          done < <(find test-results -name '*.xml' -print0)
-
+          
+          # Check if the test-results directory exists
+          if [ ! -d "test-results" ]; then
+            echo "⚠️ Test results directory not found. Tests were not run properly." >> test-summary.md
+          else
+            # Find all JUnit XML files under test-results/
+            while IFS= read -r -d '' xmlfile; do
+              real_count=$(( real_count + 1 ))
+          
+              # 1. Get the base filename 
+              basefile=$(basename "$xmlfile")
+          
+              # 2. Remove the "TEST-" prefix and the ".xml" suffix
+              no_prefix=$(echo "$basefile" | sed -E 's/^TEST-//; s/\.xml$//')
+          
+              # 3. Remove the package prefix if present (com.atlan.java.sdk.)
+              test_name=$(echo "$no_prefix" | sed -E 's/^com\.atlan\.java\.sdk\.//')
+          
+              # 4. Parse the number of failures
+              file_failures=$(grep -Po 'failures="\K\d+' "$xmlfile" | paste -sd+ - | bc)
+              [[ -z "$file_failures" ]] && file_failures=0
+          
+              # 5. Print a concise summary line
+              if [ "$file_failures" -gt 0 ]; then
+                echo "❌ Failures found in: $test_name ($file_failures failures)" >> test-summary.md
+                all_passed=false
+                total_failures=$(( total_failures + file_failures ))
+              else
+                echo "✅ No failures in: $test_name" >> test-summary.md
+              fi
+            done < <(find test-results -name '*.xml' -print0)
+          fi
+          
+          # Print the real count vs. the initial expected count
+          echo "" >> test-summary.md
+          echo "Test files found: $real_count out of expected: $initial_count" >> test-summary.md
+          
           # 2) Compare the actual number of files we found vs. initial_count
           if [ "$real_count" -lt "$initial_count" ]; then
             echo "" >> test-summary.md
