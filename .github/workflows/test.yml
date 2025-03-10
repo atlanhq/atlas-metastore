@@ -118,7 +118,9 @@ jobs:
           path: integration-tests/build/test-results/${{ matrix.tests }}
 
   report-test-results:
-    needs: integration-test
+    needs:
+      - integration-test
+      - list-integration-tests  # ✅ Now it has direct access to the outputs
     if: always()  # Run this even if tests fail
     runs-on: ubuntu-latest
     steps:
