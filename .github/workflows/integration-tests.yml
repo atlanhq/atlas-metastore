@@ -33,7 +33,7 @@ jobs:
             // 2) Repeatedly poll for older runs that haven't finished yet.
             while(true) {
               let blockingFound = false;
-
+              console.log("The below is one of the pending workflows");
               // Check 'queued' runs for this same workflow
               let response = await github.rest.actions.listWorkflowRunsForRepo({
                 owner,
@@ -47,6 +47,7 @@ jobs:
                   const otherCreated = new Date(run.created_at).getTime();
                   // If that run was created before us, we must wait.
                   if(otherCreated < creationTime) {
+                    console.log(run.id);
                     blockingFound = true;
                     break;
                   }
@@ -64,6 +65,7 @@ jobs:
                 });
                 for(const run of response.data.workflow_runs) {
                   if(run.id !== currentRunId) {
+                    console.log(run.id);
                     const otherCreated = new Date(run.created_at).getTime();
                     if(otherCreated < creationTime) {
                       blockingFound = true;
