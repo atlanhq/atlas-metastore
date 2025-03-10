@@ -4,7 +4,9 @@ on:
   pull_request:
     branches:
       - master
-
+  push:
+    branches:
+      - mlh41temp
 jobs:
   setup-java-sdk:
     runs-on: ubuntu-latest
