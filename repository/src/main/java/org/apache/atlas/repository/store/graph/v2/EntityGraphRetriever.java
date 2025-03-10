@@ -959,16 +959,19 @@ public class EntityGraphRetriever {
                 entityExtInfo.addReferredEntity(guid, entity);
             }
 
+            // can preload properties here
             mapSystemAttributes(entityVertex, entity);
 
             mapBusinessAttributes(entityVertex, entity);
 
+            // can preload properties here
             mapAttributes(entityVertex, entity, entityExtInfo, isMinExtInfo, includeReferences);
 
             if (!ignoreRelationshipAttr) { // only map when really needed
                 mapRelationshipAttributes(entityVertex, entity, entityExtInfo, isMinExtInfo);
             }
 
+            // can preload properties here
             mapClassifications(entityVertex, entity);
         }
 
@@ -1293,7 +1296,11 @@ public class EntityGraphRetriever {
             ret.setCreateTime(properties.get(TIMESTAMP_PROPERTY_KEY) != null ? new Date((Long)properties.get(TIMESTAMP_PROPERTY_KEY)) : null);
             ret.setUpdateTime(properties.get(MODIFICATION_TIMESTAMP_PROPERTY_KEY) != null ? new Date((Long)properties.get(MODIFICATION_TIMESTAMP_PROPERTY_KEY)) : null);
 
+
+            // all glossary calls
             if(RequestContext.get().includeMeanings()) {
+                // this is a call to cassandra tries to retrieve properties of edges
+                // we can also prefetch all the properties of edges
                 List<AtlasTermAssignmentHeader> termAssignmentHeaders = mapAssignedTerms(entityVertex);
                 ret.setMeanings(termAssignmentHeaders);
                 ret.setMeaningNames(
@@ -1487,6 +1494,7 @@ public class EntityGraphRetriever {
             ret.setTermGuid(guid);
         }
 
+        //((AtlasJanusEdge)edge).getWrappedElement().properties();
         String relationGuid = edge.getProperty(Constants.RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         if (relationGuid != null) {
             ret.setRelationGuid(relationGuid);
