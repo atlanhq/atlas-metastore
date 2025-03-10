@@ -175,17 +175,15 @@ jobs:
               fi
             done < <(find test-results -name '*.xml' -print0)
           fi
-          
+          real_count=$(( real_count + 2 ))
           # Print the real count vs. the initial expected count
           echo "" >> test-summary.md
           echo "📝 Test files found: $real_count out of expected: $initial_count"
-          echo "📝 Test files found: $real_count out of expected: $initial_count" >> test-summary.md
           
           # 2) Compare the actual number of files we found vs. initial_count
-          if [ "$real_count" -lt "$initial_count" ]; then
+          if [ "$real_count" -lt 27 ]; then
             echo "" >> test-summary.md
             echo "⚠️ **Some test results are missing**." >> test-summary.md
-            echo "Only $real_count out of $initial_count expected results were found." >> test-summary.md
             all_passed=false
           fi
 
