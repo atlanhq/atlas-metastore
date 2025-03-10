@@ -65,7 +65,7 @@ jobs:
 
           # Count how many test classes we found
           test_count=$(echo "$tests" | wc -w)
-          echo "test_count=$test_count" | tee -a "$GITHUB_OUTPUT"
+          echo "test_count=$test_count" >> $GITHUB_OUTPUT
 
           # Print for debugging
           echo "Tests: $test_count"
