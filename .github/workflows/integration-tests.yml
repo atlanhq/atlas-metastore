@@ -319,7 +319,9 @@ jobs:
           # Count how many test classes we found
           test_count=$(echo "$tests" | wc -w)
           echo "test_count=$test_count" >> $GITHUB_OUTPUT
-          echo "$test_count"
+          
+          # Print for debugging
+          echo "Tests: $test_count"
   integration-test:
     needs:
       - wait-for-deployment
@@ -370,7 +372,9 @@ jobs:
 
 
   report-test-results:
-    needs: integration-test
+    needs:
+      - integration-test
+      - list-integration-tests  # ✅ Now it has direct access to the outputs
     if: always()  # Run this even if tests fail
     runs-on: ubuntu-latest
     steps:
@@ -428,7 +432,7 @@ jobs:
           # Print the real count vs. the initial expected count
           echo "" >> test-summary.md
           echo "📝 Test files found: $real_count out of expected: $initial_count"
-          echo "Test files found: $real_count out of expected: $initial_count" >> test-summary.md
+          echo "📝 Test files found: $real_count out of expected: $initial_count" >> test-summary.md
           
           # 2) Compare the actual number of files we found vs. initial_count
           if [ "$real_count" -lt "$initial_count" ]; then
