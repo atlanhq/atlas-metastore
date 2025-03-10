@@ -66,7 +66,8 @@ jobs:
           # Count how many test classes we found
           test_count=$(echo "$tests" | wc -w)
           echo "test_count=$test_count" >> $GITHUB_OUTPUT
-          echo "$test_count"
+          # Print for debugging
+          echo "Tests: $test_count"
 
   integration-test:
     needs:
@@ -130,6 +131,9 @@ jobs:
         id: summary
         run: |
           # 1) Pull the expected test file count
+          echo "All outputs from list-integration-tests:"
+          echo "${{ toJson(needs.list-integration-tests.outputs) }}"
+          
           initial_count=${{ needs.list-integration-tests.outputs.test_count }}
           echo "📝 Test files expected: $initial_count"
           
