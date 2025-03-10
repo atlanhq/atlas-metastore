@@ -2893,6 +2893,7 @@
                 "policyResources":
                 [
                     "entity-type:DataDomain",
+                    "entity-type:DataProduct",
                     "entity-classification:*",
                     "entity:*"
                 ],
@@ -3526,6 +3527,7 @@
                 "description": "Allows user to perform CRUD operation on entities",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
+                "isPolicyEnabled": false,
                 "policyServiceName": "atlas",
                 "policyType": "allow",
                 "policyPriority": 0,
