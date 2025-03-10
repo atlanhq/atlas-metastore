@@ -427,6 +427,7 @@ jobs:
           
           # Print the real count vs. the initial expected count
           echo "" >> test-summary.md
+          echo "📝 Test files found: $real_count out of expected: $initial_count"
           echo "Test files found: $real_count out of expected: $initial_count" >> test-summary.md
           
           # 2) Compare the actual number of files we found vs. initial_count
