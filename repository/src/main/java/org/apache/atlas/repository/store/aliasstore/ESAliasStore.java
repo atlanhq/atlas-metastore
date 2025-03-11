@@ -49,6 +49,8 @@ import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.AI_APPLICATION;
+import static org.apache.atlas.repository.Constants.AI_MODEL;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_DOMAIN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_METADATA;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_GLOSSARY;
@@ -268,8 +270,7 @@ public class ESAliasStore implements IndexAliasStore {
                     for (String asset : assets) {
                         List<Map<String, Object>> mustMap = new ArrayList<>();
                         mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*ai/*")));
-                        mustMap.add(mapOf("term", mapOf("__typeName.keyword", "AIApplication")));
-                        mustMap.add(mapOf("term", mapOf("__typeName.keyword", "AIModel")));
+                        mustMap.add(mapOf("terms", mapOf("__typeName.keyword", Arrays.asList(AI_APPLICATION, AI_MODEL))));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                 }
