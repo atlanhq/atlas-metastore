@@ -429,7 +429,7 @@ public class EntityLineageService implements AtlasLineageService {
         // Get timeout checker from context or create new one
         TimeoutChecker timeoutChecker = atlasLineageOnDemandContext.getTimeoutChecker();
         // Check timeout before starting traversal
-        if (timeoutChecker!=null && timeoutChecker.hasTimedOut()) {
+        if (timeoutChecker.hasTimedOut()) {
             handleTimeout(ret);
             return;
         }
@@ -451,7 +451,7 @@ public class EntityLineageService implements AtlasLineageService {
 
             while (incomingEdges.hasNext()) {
                 // Check timeout periodically
-                if (timeoutChecker!=null && timeoutChecker.hasTimedOut()) {
+                if (timeoutChecker.hasTimedOut()) {
                     handleTimeout(ret);
                     return;
                 }
@@ -486,7 +486,7 @@ public class EntityLineageService implements AtlasLineageService {
 
                 while (outgoingEdges.hasNext()) {
                     // Check timeout in inner loop as well
-                    if (timeoutChecker!=null && timeoutChecker.hasTimedOut()) {
+                    if (timeoutChecker.hasTimedOut()) {
                         handleTimeout(ret);
                         return;
                     }
