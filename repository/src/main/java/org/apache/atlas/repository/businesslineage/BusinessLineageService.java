@@ -31,9 +31,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
+import org.apache.atlas.repository.store.graph.v2.*;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.AtlasGremlinQueryProvider;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -48,6 +46,8 @@ import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.updateModificationMetadata;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.INPUT_PORT_GUIDS_ATTR;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.OUTPUT_PORT_GUIDS_ATTR;
 
 @Service
 public class BusinessLineageService implements AtlasBusinessLineageService {
@@ -61,31 +61,30 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     private static final String TYPE_DOMAIN = "DataDomain";
 
     private final AtlasGraph graph;
-    private final AtlasGremlinQueryProvider gremlinQueryProvider;
     private final EntityGraphRetriever entityRetriever;
-    private final AtlasTypeRegistry atlasTypeRegistry;
     private final TransactionInterceptHelper   transactionInterceptHelper;
     private final GraphHelper graphHelper;
     private final AtlasRelationshipStoreV2 relationshipStoreV2;
+    private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
 
 
     @Inject
-    BusinessLineageService(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, TransactionInterceptHelper transactionInterceptHelper, AtlasRelationshipStoreV2 relationshipStoreV2) {
+    BusinessLineageService(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, TransactionInterceptHelper transactionInterceptHelper, AtlasRelationshipStoreV2 relationshipStoreV2, IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier) {
         this.graph = atlasGraph;
-        this.gremlinQueryProvider = AtlasGremlinQueryProvider.INSTANCE;
         this.entityRetriever = new EntityGraphRetriever(atlasGraph, typeRegistry);
-        this.atlasTypeRegistry = typeRegistry;
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.graphHelper = new GraphHelper(atlasGraph);
         this.relationshipStoreV2 = relationshipStoreV2;
+        this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
     }
 
     @Override
     public void createLineage(BusinessLineageRequest request) throws AtlasBaseException, RepositoryException {
 
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("BusinessLineageService.createLineage");
+        List<AtlasVertex> updatedVertices = new ArrayList<>();
 
         try {
             List<BusinessLineageRequest.LineageOperation> lineageOperations = request.getLineageOperations();
@@ -114,11 +113,15 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 }
 
                 if (StringUtils.isEmpty(edgeLabel)) {
-                    processProductAssetLink(assetGuid, productGuid, operation);
+                    AtlasVertex updatedVertex = processProductAssetLink(assetGuid, productGuid, operation);
+                    if (!updatedVertices.contains(updatedVertex)) {
+                        updatedVertices.add(updatedVertex);
+                    }
                 } else {
                     processProductAssetInputRelation(assetGuid, productGuid, operation, edgeLabel);
                 }
             }
+            handleEntityMutation(updatedVertices);
             commitChanges();
         } catch (AtlasBaseException | RepositoryException e){
             LOG.error("Error while creating lineage", e);
@@ -128,7 +131,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         }
     }
 
-    public void processProductAssetLink (String assetGuid, String productGuid, BusinessLineageRequest.OperationType operation) throws AtlasBaseException {
+    public AtlasVertex processProductAssetLink (String assetGuid, String productGuid, BusinessLineageRequest.OperationType operation) throws AtlasBaseException {
         try {
             AtlasVertex assetVertex = entityRetriever.getEntityVertex(assetGuid);
             AtlasVertex productVertex = entityRetriever.getEntityVertex(productGuid);
@@ -148,6 +151,8 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 default:
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Invalid operation type");
             }
+
+            return assetVertex;
         } catch (AtlasBaseException e){
             LOG.error("Error while processing product asset link", e);
             throw e;
@@ -165,10 +170,10 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
 
             switch (operation) {
                 case ADD:
-                    addInputRelation(assetVertex, productVertex, edgeLabel);
+                    addInputRelation(assetVertex, productVertex, edgeLabel, assetGuid, operation);
                     break;
                 case REMOVE:
-                    removeInputRelation(assetVertex, productVertex, edgeLabel);
+                    removeInputRelation(assetVertex, productVertex, edgeLabel, assetGuid, operation);
                     break;
                 default:
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Invalid operation type");
@@ -220,25 +225,26 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         }
     }
 
-    public void addInputRelation(AtlasVertex assetVertex, AtlasVertex productVertex, String edgeLabel) throws AtlasBaseException, RepositoryException{
+    public void addInputRelation(AtlasVertex assetVertex, AtlasVertex productVertex, String edgeLabel, String assetGuid, BusinessLineageRequest.OperationType operation) throws AtlasBaseException, RepositoryException{
         try{
             if(StringUtils.equals(INPUT_PORT_PRODUCT_EDGE_LABEL, edgeLabel)) {
-                AtlasEdge outputPortEdge = graphHelper.getEdge(assetVertex, productVertex, OUTPUT_PORT_PRODUCT_EDGE_LABEL);
-                AtlasEdge existingInputPortEdge = graphHelper.getEdge(assetVertex, productVertex, INPUT_PORT_PRODUCT_EDGE_LABEL);
-                if(outputPortEdge == null && existingInputPortEdge == null){
+                List<String> daapOutputPortGuids = productVertex.getMultiValuedProperty(OUTPUT_PORT_GUIDS_ATTR, String.class);
+                List<String> daapInputPortGuids = productVertex.getMultiValuedProperty(INPUT_PORT_GUIDS_ATTR, String.class);
+                if(!daapOutputPortGuids.contains(assetGuid) && !daapInputPortGuids.contains(assetGuid)){
                     AtlasRelationship relationship = new AtlasRelationship();
                     relationship.setTypeName(REL_DATA_PRODUCT_TO_INPUT_PORTS);
-                    AtlasEdge newInputPortEdge = relationshipStoreV2.getOrCreate(assetVertex, productVertex, relationship, true);
+                    relationshipStoreV2.getOrCreate(assetVertex, productVertex, relationship, true);
                     LOG.info("Added input relation between asset and product");
                 }
+                updateInternalAttr(productVertex, assetGuid, operation);
             }
-        } catch (AtlasBaseException | RepositoryException e){
+        } catch (AtlasBaseException e){
             LOG.error("Error while adding input relation", e);
             throw e;
         }
     }
 
-    public void removeInputRelation(AtlasVertex assetVertex, AtlasVertex productVertex, String edgeLabel) throws AtlasBaseException, RepositoryException{
+    public void removeInputRelation(AtlasVertex assetVertex, AtlasVertex productVertex, String edgeLabel, String assetGuid, BusinessLineageRequest.OperationType operation) throws AtlasBaseException, RepositoryException{
         try{
             if(StringUtils.equals(INPUT_PORT_PRODUCT_EDGE_LABEL, edgeLabel)) {
 
@@ -246,11 +252,40 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 if(inputPortEdge != null){
                     graph.removeEdge(inputPortEdge);
                 }
+                updateInternalAttr(productVertex, assetGuid, operation);
             }
         } catch (AtlasBaseException | RepositoryException e){
             LOG.error("Error while removing input relation", e);
             throw e;
         }
+    }
+
+    private void updateInternalAttr (AtlasVertex productVertex, String assetGuid, BusinessLineageRequest.OperationType operation) throws AtlasBaseException {
+        try {
+            List<String> inputPortGuidsAttr = productVertex.getMultiValuedProperty(INPUT_PORT_GUIDS_ATTR, String.class);
+
+            if (operation == BusinessLineageRequest.OperationType.ADD) {
+                if (!inputPortGuidsAttr.contains(assetGuid)) {
+                    AtlasGraphUtilsV2.addEncodedProperty(productVertex, INPUT_PORT_GUIDS_ATTR , assetGuid);
+                }
+            }
+
+            if (operation == BusinessLineageRequest.OperationType.REMOVE) {
+                if (inputPortGuidsAttr.contains(assetGuid)) {
+                    AtlasGraphUtilsV2.removeItemFromListPropertyValue(productVertex, INPUT_PORT_GUIDS_ATTR, assetGuid);
+                }
+            }
+
+        } catch (Exception e){
+            LOG.error("Error while updating internal attribute", e);
+            throw e;
+        }
+    }
+
+    private void handleEntityMutation(List<AtlasVertex> vertices) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("handleEntityMutation");
+        this.atlasAlternateChangeNotifier.onEntitiesMutation(vertices);
+        RequestContext.get().endMetricRecord(metricRecorder);
     }
 
     private void cacheDifferentialMeshEntity(AtlasVertex ev, Set<String> existingValues) {

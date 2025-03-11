@@ -279,6 +279,7 @@ public enum AtlasErrorCode {
     KEYCLOAK_INIT_FAILED(500, "ATLAS-500-00-022", "Failed to initialize keycloak client: {0}"),
 
     MAINTENANCE_MODE_ENABLED(503, "ATLAS-503-00-001", "Atlas is in maintenance mode for this specific operation. Please try again later."),
+    SERVICE_UNAVAILABLE(503, "ATLAS-503-00-002", "Service is unavailable or a network error occurred: {0}"),
 
     BATCH_SIZE_TOO_LARGE(406, "ATLAS-406-00-001", "Batch size is too large, please use a smaller batch size"),
 
@@ -295,7 +296,8 @@ public enum AtlasErrorCode {
     TASK_TYPE_NOT_SUPPORTED(400, "ATLAS-400-00-112", "Task type {0} is not supported"),
 
     PERSONA_POLICY_ASSETS_LIMIT_EXCEEDED(400, "ATLAS-400-00-113", "Exceeded limit of maximum allowed assets across policies for a Persona: Limit: {0}, assets: {1}"),
-    ADMIN_LIST_SHOULD_NOT_BE_EMPTY(400, "ATLAS-400-00-114", "Admin list should not be empty for type {0}");
+    ADMIN_LIST_SHOULD_NOT_BE_EMPTY(400, "ATLAS-400-00-114", "Admin list should not be empty for type {0}"),
+    EXCEEDED_MAX_ENTITIES_ALLOWED(400, "ATLAS-400-00-212", "Request Error - Entities should be less than or equal to: {0}");
 
     private String errorCode;
     private String errorMessage;

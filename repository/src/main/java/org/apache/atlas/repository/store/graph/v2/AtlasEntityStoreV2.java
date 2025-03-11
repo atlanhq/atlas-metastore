@@ -34,8 +34,10 @@ import org.apache.atlas.model.instance.*;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.Status;
+import org.apache.atlas.model.notification.AtlasDistributedTaskNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
+import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graph.GraphHelper;
@@ -100,6 +102,7 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 import static java.lang.Boolean.FALSE;
+import static org.apache.atlas.AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.authorize.AtlasPrivilege.*;
@@ -125,6 +128,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     static final boolean DEFERRED_ACTION_ENABLED = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
 
+    static final String PROCESS_ENTITY_TYPE = "Process";
+
     private static final String ATTR_MEANINGS = "meanings";
 
     private final AtlasGraph                graph;
@@ -143,12 +148,16 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     private final ESAliasStore esAliasStore;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
+    private final AtlasDistributedTaskNotificationSender taskNotificationSender;
+
+    private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
+    private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
 
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
                               AtlasRelationshipStore atlasRelationshipStore, FeatureFlagStore featureFlagStore,
-                              IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier) {
+                              IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier, AtlasDistributedTaskNotificationSender taskNotificationSender) {
 
         this.graph                = graph;
         this.deleteDelegate       = deleteDelegate;
@@ -164,6 +173,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.featureFlagStore = featureFlagStore;
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
+        this.taskNotificationSender = taskNotificationSender;
         try {
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
         } catch (AtlasException e) {
@@ -1712,6 +1722,19 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
     }
 
+    private void checkAndCreateProcessRelationshipsCleanupTaskNotification(AtlasEntityType entityType, AtlasVertex vertex) {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("checkAndCreateAtlasDistributedTaskNotification");
+        try {
+            if (RELATIONSHIP_CLEANUP_SUPPORTED_TYPES.stream().anyMatch(type -> entityType.getTypeAndAllSuperTypes().contains(type))) {
+                AtlasDistributedTaskNotification notification = taskNotificationSender.createRelationshipCleanUpTask(vertex.getIdForDisplay(), RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS);
+                taskNotificationSender.send(notification);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+        }
+
+    }
+
     private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapper entityGraphMapper, boolean isPartialUpdate) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
         EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapper);
@@ -1754,6 +1777,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         }
 
                         String guidVertex = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+
+                        if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+                            checkAndCreateProcessRelationshipsCleanupTaskNotification(entityType, vertex);
+                        }
 
                         if (!StringUtils.equals(guidVertex, guid)) { // if entity was found by unique attribute
                             entity.setGuid(guidVertex);
@@ -2104,6 +2131,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 updateModificationMetadata(vertex);
 
                 String typeName = getTypeName(vertex);
+
+                if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+                    checkAndCreateProcessRelationshipsCleanupTaskNotification(typeRegistry.getEntityTypeByName(typeName), vertex);
+                }
 
                 List<PreProcessor> preProcessors = getPreProcessor(typeName);
                 for(PreProcessor processor : preProcessors){

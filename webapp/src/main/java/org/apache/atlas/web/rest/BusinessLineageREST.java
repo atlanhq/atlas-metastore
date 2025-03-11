@@ -1,5 +1,6 @@
 package org.apache.atlas.web.rest;
 
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -19,6 +20,8 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
+
+import static org.apache.atlas.repository.util.AccessControlUtils.ARGO_SERVICE_USER_NAME;
 
 @Path("business-lineage")
 @Singleton
@@ -52,13 +55,17 @@ public class BusinessLineageREST {
         // Set request context parameters
         RequestContext.get().setIncludeClassifications(true);
         RequestContext.get().setIncludeMeanings(false);
-        RequestContext.get().getRequestContextHeaders().put("route", "business-lineage-rest");
+        RequestContext.get().getRequestContextHeaders().put("x-atlan-route", "business-lineage-rest");
 
         AtlasPerfTracer perf = null;
         try {
             // Start performance tracing if enabled
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "BusinessLineageREST.createLineage()");
+            }
+
+            if (!ARGO_SERVICE_USER_NAME.equals(RequestContext.getCurrentUser())) {
+                throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, RequestContext.getCurrentUser(), "Lineage creation");
             }
 
             // Create lineage

@@ -71,6 +71,10 @@ public class PreProcessorUtils {
     public static final String DAAP_STATUS_ATTR = "daapStatus";
     public static final String DAAP_ARCHIVED_STATUS = "Archived";
     public static final String DAAP_ASSET_DSL_ATTR = "dataProductAssetsDSL";
+    public static final String DAAP_LINEAGE_STATUS_ATTR = "daapLineageStatus";
+    public static final String DAAP_LINEAGE_STATUS_IN_PROGRESS = "InProgress";
+    public static final String DAAP_LINEAGE_STATUS_COMPLETED = "Completed";
+    public static final String DAAP_LINEAGE_STATUS_PENDING = "Pending";
 
     //Migration Constants
     public static final String MIGRATION_TYPE_PREFIX = "MIGRATION:";

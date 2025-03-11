@@ -368,7 +368,7 @@ public class EntityGraphMapper {
                     setSystemAttributesToEntity(vertex, createdEntity);
                     resp.addEntity(CREATE, constructHeader(createdEntity, vertex, entityType.getAllAttributes()));
 
-                    if (bulkRequestContext.isAppendClassifications()) {
+                    if (bulkRequestContext.isAppendTags()) {
                         if (CollectionUtils.isNotEmpty(createdEntity.getAddOrUpdateClassifications())) {
                             createdEntity.setClassifications(createdEntity.getAddOrUpdateClassifications());
                             createdEntity.setAddOrUpdateClassifications(null);
@@ -2416,8 +2416,13 @@ public class EntityGraphMapper {
                         .filter(guid -> !currentElementGuids.contains(guid))
                         .collect(Collectors.toList());
             }
-            RequestContext.get().setAddedOutputPorts(addedGuids);
-            RequestContext.get().setRemovedOutputPorts(removedGuids);
+
+            String productGuid = toVertex.getProperty("__guid", String.class);
+            AtlasEntity diffEntity = RequestContext.get().getDifferentialEntity(productGuid);
+            if (diffEntity != null){
+                diffEntity.setAddedRelationshipAttribute(OUTPUT_PORTS, addedGuids);
+                diffEntity.setRemovedRelationshipAttribute(OUTPUT_PORTS, removedGuids);
+            }
         }
     }
 
@@ -3009,7 +3014,8 @@ public class EntityGraphMapper {
         String    newEntityId = getIdFromVertex(newEntityVertex);
         AtlasEdge ret         = currentEdge;
 
-        if (!currentEntityId.equals(newEntityId)) {
+        if (StringUtils.isEmpty(currentEntityId) || !currentEntityId.equals(newEntityId)) {
+            // Checking if currentEntityId is null or empty as corrupted vertex on the other side of the edge should result into creation of new edge
             // create a new relationship edge to the new attribute vertex from the instance
             String relationshipName = AtlasGraphUtilsV2.getTypeName(currentEdge);
 
@@ -3086,11 +3092,15 @@ public class EntityGraphMapper {
                             continue;
                         }
 
-                        boolean deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
-                                true, attribute.getRelationshipEdgeDirection(), entityVertex);
+                        try {
+                            boolean deleted = deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
+                                    true, attribute.getRelationshipEdgeDirection(), entityVertex);
 
-                        if (!deleted) {
-                            additionalElements.add(edge);
+                            if (!deleted) {
+                                additionalElements.add(edge);
+                            }
+                        } catch (NullPointerException npe) {
+                            LOG.warn("Ignoring deleting edge with corrupted vertex: {}", edge.getId());
                         }
                     }
 

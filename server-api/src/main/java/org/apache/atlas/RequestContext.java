@@ -103,11 +103,6 @@ public class RequestContext {
 
     private boolean     includeClassificationNames = false;
     private boolean     skipProcessEdgeRestoration = false;
-
-
-
-    private String     lineageInputLabel = "";
-    private String     lineageOutputLabel = "";
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
     private String traceId;
@@ -123,8 +118,6 @@ public class RequestContext {
     private boolean isInvokedByIndexSearch = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
-    private final List<String> addedOutputPorts = new ArrayList<>();
-    private final List<String> removedOutputPorts = new ArrayList<>();
 
     Map<String, Object> tagsDiff = new HashMap<>();
 
@@ -191,8 +184,6 @@ public class RequestContext {
         this.delayTagNotifications = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
-        this.addedOutputPorts.clear();
-        this.removedOutputPorts.clear();
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -251,21 +242,6 @@ public class RequestContext {
         return removedElementsMap;
     }
 
-    public String getLineageInputLabel() {
-        return lineageInputLabel;
-    }
-
-    public void setLineageInputLabel(String lineageInputLabel) {
-        this.lineageInputLabel = lineageInputLabel;
-    }
-
-    public String getLineageOutputLabel() {
-        return lineageOutputLabel;
-    }
-
-    public void setLineageOutputLabel(String lineageOutputLabel) {
-        this.lineageOutputLabel = lineageOutputLabel;
-    }
     public Map<String, List<Object>> getNewElementsCreatedMap() {
         return newElementsCreatedMap;
     }
@@ -922,21 +898,4 @@ public class RequestContext {
     public boolean isEdgeLabelAlreadyProcessed(String processEdgeLabel) {
         return edgeLabels.contains(processEdgeLabel);
     }
-
-    public void setAddedOutputPorts(List<String> addedOutputPorts) {
-        this.addedOutputPorts.addAll(addedOutputPorts);
-    }
-
-    public List<String> getAddedOutputPorts() {
-        return addedOutputPorts;
-    }
-
-    public void setRemovedOutputPorts(List<String> removedOutputPorts) {
-        this.removedOutputPorts.addAll(removedOutputPorts);
-    }
-
-    public List<String> getRemovedOutputPorts() {
-        return removedOutputPorts;
-    }
-
 }
