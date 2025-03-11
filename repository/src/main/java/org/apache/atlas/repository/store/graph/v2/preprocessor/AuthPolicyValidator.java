@@ -56,6 +56,10 @@ public class AuthPolicyValidator {
         add(POLICY_SUB_CATEGORY_PRODUCT);
     }};
 
+    private static final Set<String> AI_POLICY_VALID_SUB_CATEGORIES = new HashSet<String>(){{
+        add(POLICY_SUB_CATEGORY_AI);
+    }};
+
     private static final Set<String> PERSONA_METADATA_POLICY_ACTIONS = new HashSet<String>(){{
         add("persona-asset-read");
         add("persona-asset-update");
@@ -117,8 +121,16 @@ public class AuthPolicyValidator {
         add(ENTITY_READ.getType());
     }};
 
+    private static final Set<String> AI_POLICY_ACTIONS = new HashSet<String>(){{
+        add(ENTITY_READ.getType());
+    }};
+
     private static final Map<String, Set<String>> DATAMESH_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
         put(POLICY_SUB_CATEGORY_PRODUCT, DATAMESH_POLICY_ACTIONS);
+    }};
+
+    private static final Map<String, Set<String>> AI_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
+        put(POLICY_SUB_CATEGORY_AI, AI_POLICY_ACTIONS);
     }};
 
     private static final Set<String> PERSONA_POLICY_VALID_RESOURCE_KEYS = new HashSet<String>() {{
@@ -136,7 +148,7 @@ public class AuthPolicyValidator {
             policyCategory = getPolicyCategory(existingPolicy);
         }
 
-        if (POLICY_CATEGORY_PERSONA.equals(policyCategory) || POLICY_CATEGORY_PURPOSE.equals(policyCategory) || POLICY_CATEGORY_DATAMESH.equals(policyCategory)) {
+        if (POLICY_CATEGORY_PERSONA.equals(policyCategory) || POLICY_CATEGORY_PURPOSE.equals(policyCategory) || POLICY_CATEGORY_DATAMESH.equals(policyCategory)) || POLICY_CATEGORY_AI.equals(policyCategory) {
 
             if (operation == CREATE) {
                 String policySubCategory = getPolicySubCategory(policy);
@@ -221,6 +233,18 @@ public class AuthPolicyValidator {
                             "Please provide valid values for attribute " + ATTR_POLICY_ACTIONS + ": Invalid actions "+ copyOfActions);
                 }
 
+                if  (POLICY_CATEGORY_AI.equals(policyCategory)) {
+                    validateParam (!AI_POLICY_VALID_SUB_CATEGORIES.contains(policySubCategory),
+                            "Please provide valid value for attribute " + ATTR_POLICY_SUB_CATEGORY + ":"+ AI_POLICY_VALID_SUB_CATEGORIES);
+
+                    //validate ai policy actions
+                    Set<String> validActions = AI_POLICY_VALID_ACTIONS.get(policySubCategory);
+                    List<String> copyOfActions = new ArrayList<>(policyActions);
+                    copyOfActions.removeAll(validActions);
+                    validateParam (CollectionUtils.isNotEmpty(copyOfActions),
+                            "Please provide valid values for attribute " + ATTR_POLICY_ACTIONS + ": Invalid actions "+ copyOfActions);
+                }
+
             } else {
 
                 validateOperation (StringUtils.isNotEmpty(policyCategory) && !policyCategory.equals(getPolicyCategory(existingPolicy)),
@@ -299,6 +323,19 @@ public class AuthPolicyValidator {
 
                     //validate datamesh policy actions
                     Set<String> validActions = DATAMESH_POLICY_VALID_ACTIONS.get(policySubCategory);
+                    List<String> copyOfActions = new ArrayList<>(policyActions);
+                    copyOfActions.removeAll(validActions);
+                    validateParam (CollectionUtils.isNotEmpty(copyOfActions),
+                            "Please provide valid values for attribute " + ATTR_POLICY_ACTIONS + ": Invalid actions "+ copyOfActions);
+
+                }
+                
+                if (POLICY_CATEGORY_AI.equals(policyCategory)) {
+                    validateParam (!AI_POLICY_VALID_SUB_CATEGORIES.contains(policySubCategory),
+                            "Please provide valid value for attribute " + ATTR_POLICY_SUB_CATEGORY + ":"+ AI_POLICY_VALID_SUB_CATEGORIES);
+
+                    //validate datamesh policy actions
+                    Set<String> validActions = AI_POLICY_VALID_ACTIONS.get(policySubCategory);
                     List<String> copyOfActions = new ArrayList<>(policyActions);
                     copyOfActions.removeAll(validActions);
                     validateParam (CollectionUtils.isNotEmpty(copyOfActions),

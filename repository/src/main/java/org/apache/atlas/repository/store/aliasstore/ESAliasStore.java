@@ -54,6 +54,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PE
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_GLOSSARY;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_PRODUCT;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_SUB_DOMAIN;
+import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_ASSET;
 import static org.apache.atlas.repository.util.AccessControlUtils.getConnectionQualifiedNameFromPolicyAssets;
 import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAllowPolicy;
@@ -261,6 +262,14 @@ public class ESAliasStore implements IndexAliasStore {
                         List<Map<String, Object>> mustMap = new ArrayList<>();
                         mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*product/*")));
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
+                        allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                    }
+                } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_AI_ASSET)) {
+                    for (String asset : assets) {
+                        List<Map<String, Object>> mustMap = new ArrayList<>();
+                        mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*ai/*")));
+                        mustMap.add(mapOf("term", mapOf("__typeName.keyword", "AIApplication")));
+                        mustMap.add(mapOf("term", mapOf("__typeName.keyword", "AIModel")));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                 }
