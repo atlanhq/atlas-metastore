@@ -148,7 +148,7 @@ public class AuthPolicyValidator {
             policyCategory = getPolicyCategory(existingPolicy);
         }
 
-        if (POLICY_CATEGORY_PERSONA.equals(policyCategory) || POLICY_CATEGORY_PURPOSE.equals(policyCategory) || POLICY_CATEGORY_DATAMESH.equals(policyCategory)) || POLICY_CATEGORY_AI.equals(policyCategory) {
+        if (POLICY_CATEGORY_PERSONA.equals(policyCategory) || POLICY_CATEGORY_PURPOSE.equals(policyCategory) || POLICY_CATEGORY_DATAMESH.equals(policyCategory) || POLICY_CATEGORY_AI.equals(policyCategory)) {
 
             if (operation == CREATE) {
                 String policySubCategory = getPolicySubCategory(policy);
@@ -233,7 +233,7 @@ public class AuthPolicyValidator {
                             "Please provide valid values for attribute " + ATTR_POLICY_ACTIONS + ": Invalid actions "+ copyOfActions);
                 }
 
-                if  (POLICY_CATEGORY_AI.equals(policyCategory)) {
+                if (POLICY_CATEGORY_AI.equals(policyCategory)) {
                     validateParam (!AI_POLICY_VALID_SUB_CATEGORIES.contains(policySubCategory),
                             "Please provide valid value for attribute " + ATTR_POLICY_SUB_CATEGORY + ":"+ AI_POLICY_VALID_SUB_CATEGORIES);
 
@@ -334,7 +334,7 @@ public class AuthPolicyValidator {
                     validateParam (!AI_POLICY_VALID_SUB_CATEGORIES.contains(policySubCategory),
                             "Please provide valid value for attribute " + ATTR_POLICY_SUB_CATEGORY + ":"+ AI_POLICY_VALID_SUB_CATEGORIES);
 
-                    //validate datamesh policy actions
+                    //validate ai policy actions
                     Set<String> validActions = AI_POLICY_VALID_ACTIONS.get(policySubCategory);
                     List<String> copyOfActions = new ArrayList<>(policyActions);
                     copyOfActions.removeAll(validActions);
