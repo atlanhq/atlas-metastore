@@ -71,6 +71,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_PR
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_SERVICE_NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_SUB_CATEGORY;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_DATAMESH;
+import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_AI;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PERSONA;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PURPOSE;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsPolicyEnabled;
@@ -387,6 +388,17 @@ public class CachePolicyTransformerImpl {
 
                     rangerPolicies.add(rangerPolicy);
 
+                } else if (POLICY_CATEGORY_AI.equals(policyCategory)) {
+                    RangerPolicy rangerPolicy = getRangerPolicy(atlasPolicy, serviceType);
+
+                    //GET policy Item
+                    setPolicyItems(rangerPolicy, atlasPolicy);
+
+                    //GET policy Resources
+                    setPolicyResourcesForAIPolicies(rangerPolicy, atlasPolicy);
+
+                    rangerPolicies.add(rangerPolicy);
+
                 } else {
                     rangerPolicies.add(toRangerPolicy(atlasPolicy, serviceType));
                 }
@@ -416,6 +428,22 @@ public class CachePolicyTransformerImpl {
     }
 
     private void setPolicyResourcesForDatameshPolicies(RangerPolicy rangerPolicy, AtlasEntityHeader atlasPolicy) {
+        Map<String, RangerPolicyResource> resources = getFinalResources(atlasPolicy);
+
+        if (!resources.containsKey("entity-classification")) {
+            RangerPolicyResource resource = new RangerPolicyResource(Arrays.asList("*"), false, false);
+            resources.put("entity-classification", resource);
+        }
+
+        if (!resources.containsKey("entity-type")) {
+            RangerPolicyResource resource = new RangerPolicyResource(Arrays.asList("*"), false, false);
+            resources.put("entity-type", resource);
+        }
+
+        rangerPolicy.setResources(resources);
+    }
+
+    private void setPolicyResourcesForAIPolicies(RangerPolicy rangerPolicy, AtlasEntityHeader atlasPolicy) {
         Map<String, RangerPolicyResource> resources = getFinalResources(atlasPolicy);
 
         if (!resources.containsKey("entity-classification")) {
