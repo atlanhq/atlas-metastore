@@ -35,6 +35,9 @@ import org.apache.atlas.utils.KafkaUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.ConfigurationConverter;
 import org.apache.commons.lang.StringUtils;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.ListTopicsResult;
+import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.Producer;
@@ -252,6 +255,26 @@ public class KafkaNotification extends AbstractNotification implements Service {
         LOG.info("<== KafkaNotification.createConsumers(notificationType={}, numConsumers={}, autoCommitEnabled={})", notificationType, numConsumers, autoCommitEnabled);
 
         return consumers;
+    }
+
+    public boolean isKafkaTopicExists(String topicName) {
+        try (AdminClient adminClient = AdminClient.create(this.properties)) {
+            ListTopicsResult topics = adminClient.listTopics();
+            return topics.names().get().contains(topicName);
+        } catch (Exception e) {
+            LOG.error("Error checking Kafka topic existence: {}", topicName, e);
+            return false;
+        }
+    }
+
+    public void createKafkaTopic(String topicName, int partitions) {
+        try (AdminClient adminClient = AdminClient.create(this.properties)) {
+            NewTopic newTopic = new NewTopic(topicName, partitions, (short) 1);
+            adminClient.createTopics(Collections.singletonList(newTopic)).all().get();
+            LOG.info("Kafka topic created: {}", topicName);
+        } catch (Exception e) {
+            LOG.error("Error creating Kafka topic: {}", topicName, e);
+        }
     }
 
     @Override

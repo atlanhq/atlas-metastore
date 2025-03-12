@@ -24,6 +24,7 @@ import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.ha.HAConfiguration;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.Constants;
@@ -42,7 +43,6 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.BiConsumer;
 
 import static org.apache.atlas.repository.Constants.TASK_GUID;
 
@@ -59,7 +59,10 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final Map<String, TaskFactory>  taskTypeFactoryMap;
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
+    private final KafkaNotification kafkaNotification;
+
     private Thread watcherThread = null;
+    private Thread watcherThreadV2 = null;
     private Thread updaterThread = null;
 
     public enum DeleteType {
@@ -68,10 +71,11 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     @Inject
-    public TaskManagement(Configuration configuration, TaskRegistry taskRegistry, ICuratorFactory curatorFactory, RedisService redisService, MetricsRegistry metricsRegistry) {
+    public TaskManagement(Configuration configuration, TaskRegistry taskRegistry, ICuratorFactory curatorFactory, RedisService redisService, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification) {
         this.configuration      = configuration;
         this.registry           = taskRegistry;
         this.redisService       = redisService;
+        this.kafkaNotification = kafkaNotification;
         this.statistics         = new Statistics();
         this.taskTypeFactoryMap = new HashMap<>();
         this.curatorFactory = curatorFactory;
@@ -79,9 +83,10 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     @VisibleForTesting
-    TaskManagement(Configuration configuration, TaskRegistry taskRegistry, TaskFactory taskFactory, ICuratorFactory curatorFactory, RedisService redisService) {
+    TaskManagement(Configuration configuration, TaskRegistry taskRegistry, TaskFactory taskFactory, ICuratorFactory curatorFactory, RedisService redisService, KafkaNotification kafkaNotification) {
         this.configuration      = configuration;
         this.registry           = taskRegistry;
+        this.kafkaNotification = kafkaNotification;
         this.metricRegistry = null;
         this.redisService       = redisService;
         this.statistics         = new Statistics();
@@ -347,12 +352,38 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         }
 
         try {
-            startWatcherThread();
-            startUpdaterThread();
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+                LOG.info("Checking Kafka topic for tag propagation!");
+                String topicName = AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_NAME.getString();
+                if (!kafkaNotification.isKafkaTopicExists(topicName)) {
+                    kafkaNotification.createKafkaTopic(topicName, 10);
+                }
+                LOG.info("TaskManagement: Distributed task management is enabled. Starting Kafka based task management!");
+                startUpdaterThread();
+                startWatcherThreadV2();
+            } else {
+                LOG.info("TaskManagement: Distributed task management is disabled. Starting in-mem task management!");
+                startWatcherThread();
+            }
+
         } catch (Exception e) {
             LOG.error("TaskManagement: Error while re queue tasks");
             e.printStackTrace();
         }
+    }
+
+    private void startWatcherThreadV2() {
+        if (this.taskExecutor == null) {
+            final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
+            final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry);
+        }
+
+        if (watcherThreadV2 == null) {
+            watcherThreadV2 = this.taskExecutor.startWatcherThreadV2();
+        }
+
+        this.statistics.print();
     }
 
     @VisibleForTesting
