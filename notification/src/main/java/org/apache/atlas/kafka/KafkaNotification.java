@@ -278,7 +278,6 @@ public class KafkaNotification extends AbstractNotification implements Service {
     @Override
     public void sendInternal(NotificationType notificationType, List<String> messages) throws NotificationException {
         KafkaProducer producer = getOrCreateProducer(notificationType);
-
         sendInternalToProducer(producer, notificationType, messages);
     }
 
@@ -502,13 +501,14 @@ public class KafkaNotification extends AbstractNotification implements Service {
         payload.put("tagVertexId", tagVertexId);
         payload.put("assetGuid", vertex.getProperty(GUID_PROPERTY_KEY, String.class));
         payload.put("tagTypeName", currentTask.getClassificationTypeName());
-        payload.put("eventId", UUID.randomUUID().toString());
-        payload.put("timestamp", new Date());
-        payload.put("traceId", RequestContext.get().getTraceId());
 
         // Wrap the payload in the outer message with the operation field set to classificationType
         Map<String, Object> message = new HashMap<>();
         message.put("operation", classificationType);
+        message.put("traceId", RequestContext.get().getTraceId());
+        message.put("timestamp", new Date());
+        message.put("eventId", UUID.randomUUID().toString());
+
         message.put("payload", payload);
 
         // Convert the message map to a JSON string using Jackson's ObjectMapper
