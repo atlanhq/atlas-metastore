@@ -49,11 +49,14 @@ import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.AI_APPLICATION;
+import static org.apache.atlas.repository.Constants.AI_MODEL;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_DOMAIN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_METADATA;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_GLOSSARY;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_PRODUCT;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_SUB_DOMAIN;
+import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_ASSET;
 import static org.apache.atlas.repository.util.AccessControlUtils.getConnectionQualifiedNameFromPolicyAssets;
 import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAllowPolicy;
@@ -261,6 +264,13 @@ public class ESAliasStore implements IndexAliasStore {
                         List<Map<String, Object>> mustMap = new ArrayList<>();
                         mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*product/*")));
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
+                        allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                    }
+                } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_AI_ASSET)) {
+                    for (String asset : assets) {
+                        List<Map<String, Object>> mustMap = new ArrayList<>();
+                        mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*ai/*")));
+                        mustMap.add(mapOf("terms", mapOf("__typeName.keyword", Arrays.asList(AI_APPLICATION, AI_MODEL))));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                 }
