@@ -203,14 +203,13 @@ public class EntityGraphMapper {
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
-    Configuration configuration;
-    KafkaNotification kfknotif;
+    private final KafkaNotification kafkaNotification;
 
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
                              AtlasInstanceConverter instanceConverter, IFullTextMapper fullTextMapperV2,
-                             TaskManagement taskManagement, TransactionInterceptHelper transactionInterceptHelper) {
+                             TaskManagement taskManagement, TransactionInterceptHelper transactionInterceptHelper, KafkaNotification kafkaNotification) {
         this.restoreHandlerV1 = restoreHandlerV1;
         this.graphHelper          = new GraphHelper(graph);
         this.deleteDelegate       = deleteDelegate;
@@ -224,14 +223,7 @@ public class EntityGraphMapper {
         this.fullTextMapperV2     = fullTextMapperV2;
         this.taskManagement       = taskManagement;
         this.transactionInterceptHelper = transactionInterceptHelper;
-        try {
-            this.configuration = ApplicationProperties.get();
-            this.kfknotif = new KafkaNotification(configuration);
-
-        } catch (AtlasException e) {
-            throw new RuntimeException(e);
-        }
-
+        this.kafkaNotification = kafkaNotification;
     }
 
     @VisibleForTesting
@@ -3248,8 +3240,8 @@ public class EntityGraphMapper {
                         int toIndex = Math.min((offset + CHUNK_SIZE), currentAssetsBatchSize);
                         List<AtlasVertex> entityVertices = currentAssetVerticesBatch.subList(offset, toIndex);
                         for (AtlasVertex vertex : entityVertices) {
-                            List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
-                            kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                            List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
+                            kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                             LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                             List<AtlasClassification> deletedClassifications = new ArrayList<>();
                             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex));
@@ -3570,14 +3562,13 @@ public class EntityGraphMapper {
 
     public void processClassificationPropagationAddition(List<AtlasVertex> verticesToPropagate, AtlasVertex classificationVertex) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
-        List<String> propagatedEntitiesGuids = new ArrayList<>();
         int impactedVerticesSize = verticesToPropagate.size();
         LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
 
         try {
             for (AtlasVertex vertex: verticesToPropagate) {
-                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
-                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
             }
         } catch (NotificationException e) {
             throw new RuntimeException(e);
@@ -4126,9 +4117,9 @@ public class EntityGraphMapper {
             int end = Math.min(i + batchSize, impactedVertices.size());
             List<AtlasVertex> batch = impactedVertices.subList(i, end);
             for (AtlasVertex vertex : batch) {
-                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
+                List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
                 try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
@@ -4176,9 +4167,9 @@ public class EntityGraphMapper {
 
             LOG.info(String.format("Number of edges to be deleted : %s for classification vertex with id : %s", propagatedEdgesSize, classificationVertexId));
             for (AtlasEdge edge : propagatedEdges) {
-                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
+                List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
                 try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
@@ -4410,8 +4401,8 @@ public class EntityGraphMapper {
                 List<AtlasVertex> verticesChunkToRemoveTag = VerticesToRemoveTag.subList(offset, toIndex);
 
                 for (AtlasVertex vertex: verticesChunkToRemoveTag) {
-                    List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
+                    kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 }
                 List<String> impactedGuids = verticesChunkToRemoveTag.stream()
                         .map(entityVertex -> GraphHelper.getGuid(entityVertex))
@@ -4447,9 +4438,9 @@ public class EntityGraphMapper {
             toIndex = ((offset + CHUNK_SIZE > propagatedEdgesSize) ? propagatedEdgesSize : (offset + CHUNK_SIZE));
             List<AtlasEdge> chunk = propagatedEdges.subList(offset, toIndex);
             for (AtlasEdge edge : chunk) {
-                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
+                List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
                 try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }

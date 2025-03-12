@@ -103,10 +103,7 @@ public class TaskQueueWatcherV2 implements Runnable {
 
                 List<AtlasTask> tasks = fetcher.getTasks();
                 if (CollectionUtils.isNotEmpty(tasks)) {
-                    final CountDownLatch latch = new CountDownLatch(tasks.size());
-                    submitAll(tasks, latch);
-                    LOG.info("Submitted {} tasks to the queue", tasks.size());
-                    waitForTasksToComplete(latch);
+                    submitAll(tasks);
                 } else {
                     redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
                 }
@@ -131,14 +128,18 @@ public class TaskQueueWatcherV2 implements Runnable {
         }
     }
 
-    private void submitAll(List<AtlasTask> tasks, CountDownLatch latch) {
+    private void submitAll(List<AtlasTask> tasks) {
         if (CollectionUtils.isNotEmpty(tasks)) {
 
             for (AtlasTask task : tasks) {
                 if (task != null) {
                     TASK_LOG.log(task);
                 }
-                this.executorService.submit(new TaskExecutor.TaskConsumerConsumerV2(task, this.registry, this.taskTypeFactoryMap, this.statistics, latch));
+                if (AtlasTask.Status.IN_PROGRESS.equals(task.getStatus())) {
+                    LOG.info("TaskQueueWatcherV2: Task {} is in IN_PROGRESS state, will not be submitted to the queue again, stopping queue", task.getGuid());
+                    break;
+                }
+                this.executorService.submit(new TaskExecutor.TaskConsumerV2(task, this.registry, this.taskTypeFactoryMap, this.statistics));
             }
 
             LOG.info("TasksFetcher: Submitted {} tasks to the queue", tasks.size());

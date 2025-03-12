@@ -225,24 +225,21 @@ public class TaskExecutor {
         }
     }
 
-    static class TaskConsumerConsumerV2 implements Runnable {
+    static class TaskConsumerV2 implements Runnable {
         private static final int MAX_ATTEMPT_COUNT = 3;
 
         private final Map<String, TaskFactory>  taskTypeFactoryMap;
         private final TaskRegistry              registry;
         private final TaskManagement.Statistics statistics;
         private final AtlasTask                 task;
-        private CountDownLatch  latch;
 
         AtlasPerfTracer perf = null;
 
-        public TaskConsumerConsumerV2(AtlasTask task, TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                            CountDownLatch latch) {
+        public TaskConsumerV2(AtlasTask task, TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics) {
             this.task               = task;
             this.registry           = registry;
             this.taskTypeFactoryMap = taskTypeFactoryMap;
             this.statistics         = statistics;
-            this.latch = latch;
         }
 
         @Override
@@ -257,7 +254,7 @@ public class TaskExecutor {
                     return;
                 }
 
-                TASK_LOG.info("Task guid = "+task.getGuid());
+                TASK_LOG.info("Task guid = " + task.getGuid());
                 taskVertex = registry.getVertex(task.getGuid());
                 if (taskVertex == null) {
                     TASK_LOG.warn("Task not scheduled as vertex not found", task);
@@ -285,10 +282,8 @@ public class TaskExecutor {
                 }
 
                 LOG.info(String.format("Started performing task with guid: %s", task.getGuid()));
-
                 performTask(taskVertex, task);
-
-                LOG.info(String.format("Finished task with guid: %s", task.getGuid()));
+                LOG.info(String.format("Triggered task with guid: %s", task.getGuid()));
 
             } catch (InterruptedException exception) {
                 registry.updateStatus(taskVertex, task);
@@ -308,11 +303,8 @@ public class TaskExecutor {
             } finally {
                 if (task != null) {
                     this.registry.commit();
-
                     TASK_LOG.log(task);
                 }
-
-                latch.countDown();
                 RequestContext.get().clearCache();
                 AtlasPerfTracer.log(perf);
             }
@@ -330,8 +322,6 @@ public class TaskExecutor {
             registry.inProgress(taskVertex, task, runnableTask);
 
             runnableTask.run();
-            //registry.complete(taskVertex, task);
-            //statistics.successPrint();
         }
     }
 
