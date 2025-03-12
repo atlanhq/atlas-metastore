@@ -1060,7 +1060,8 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}/*ai/*",
+        "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-type:AIModel",
         "entity-classification:*"
@@ -1093,6 +1094,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-type:AIModel",
         "entity-classification:*",
@@ -1164,7 +1166,8 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}/*ai/*",
+        "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-type:AIModel",
         "entity-classification:*"
@@ -1177,7 +1180,8 @@
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
       "resources": [
-        "entity:{entity}/*ai/*",
+        "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-type:AIModel",
         "entity-classification:*",

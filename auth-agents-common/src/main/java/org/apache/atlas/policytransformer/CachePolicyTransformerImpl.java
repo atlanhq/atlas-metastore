@@ -71,7 +71,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_PR
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_SERVICE_NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_SUB_CATEGORY;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_DATAMESH;
-import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_AI;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PERSONA;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PURPOSE;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsPolicyEnabled;
@@ -385,17 +384,6 @@ public class CachePolicyTransformerImpl {
 
                     //GET policy Resources
                     setPolicyResourcesForDatameshPolicies(rangerPolicy, atlasPolicy);
-
-                    rangerPolicies.add(rangerPolicy);
-
-                } else if (POLICY_CATEGORY_AI.equals(policyCategory)) {
-                    RangerPolicy rangerPolicy = getRangerPolicy(atlasPolicy, serviceType);
-
-                    //GET policy Item
-                    setPolicyItems(rangerPolicy, atlasPolicy);
-
-                    //GET policy Resources
-                    setPolicyResourcesForAIPolicies(rangerPolicy, atlasPolicy);
 
                     rangerPolicies.add(rangerPolicy);
 
