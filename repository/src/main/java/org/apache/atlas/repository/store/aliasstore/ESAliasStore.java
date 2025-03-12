@@ -286,7 +286,7 @@ public class ESAliasStore implements IndexAliasStore {
                     }
                     
                     for (String asset : assets) {
-                        if (asset.size() > 0) {
+                        if (asset.length() > 0) {
                             List<Map<String, Object>> mustMap = new ArrayList<>();
                             mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
                             mustMap.add(mapOf("terms", mapOf("__typeName.keyword", Arrays.asList(AI_APPLICATION, AI_MODEL))));
