@@ -279,7 +279,7 @@ public class ESAliasStore implements IndexAliasStore {
                             typeTerms.add(AI_APPLICATION);
                         } 
                         if (typeResources.contains(AI_MODEL)) {
-                            typeTerms.add(AI_APPLICATION);
+                            typeTerms.add(AI_MODEL);
                         }
                         if (typeTerms.size() > 0) {
                             mustMap.add(mapOf("terms", mapOf("__typeName.keyword", typeTerms)));
