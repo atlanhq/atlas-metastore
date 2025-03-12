@@ -27,6 +27,8 @@ on:
       - development
       - master
       - lineageondemand
+      - cassandrapoliciesoptimisation
+      - ixop
       - makerlogic
       - tagpropv1master
 
@@ -36,7 +38,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
 
       - name: Set up JDK 1.8
         uses: actions/setup-java@v1
@@ -67,15 +69,8 @@ jobs:
 
       - name: Build with Maven
         run: |
-          branch_name=${{ env.BRANCH_NAME }}
-          if [[ $branch_name == 'main' || $branch_name == 'master' || $branch_name == 'tagpropv1.5master' ]]
-          then
-              echo "build without dashboard"
-              chmod +x ./build.sh && ./build.sh build_without_dashboard
-          else
-              echo "build with dashboard"
-              chmod +x ./build.sh && ./build.sh
-          fi
+          echo "build without dashboard"
+          chmod +x ./build.sh && ./build.sh
 
       - name: Get Repository Name
         run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
