@@ -57,12 +57,15 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PE
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_PRODUCT;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_SUB_DOMAIN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_ASSET;
+import static org.apache.atlas.repository.util.AccessControlUtils.RESOURCES_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.getConnectionQualifiedNameFromPolicyAssets;
 import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsAllowPolicy;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicies;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyActions;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyAssets;
+import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyResources;
+import static org.apache.atlas.repository.util.AccessControlUtils.getFilteredPolicyResources;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyConnectionQN;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPurposeTags;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
@@ -267,11 +270,27 @@ public class ESAliasStore implements IndexAliasStore {
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                 } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_AI_ASSET)) {
-                    for (String asset : assets) {
+                    List<String> resources = getPolicyResources(policy);
+                    List<String> typeResources = getFilteredPolicyResources(resources, RESOURCES_ENTITY_TYPE);
+                    if typeResources.size() > 0 {
+                        List<String> typeTerms = new ArrayList<>();
                         List<Map<String, Object>> mustMap = new ArrayList<>();
-                        mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
-                        mustMap.add(mapOf("terms", mapOf("__typeName.keyword", Arrays.asList(AI_APPLICATION, AI_MODEL))));
+                        if typeResources.contains(AI_APPLICATION) {
+                            typeTerms.add(AI_APPLICATION)
+                        } if typeResources.contains(AI_MODEL) {
+                            typeTerms.add(AI_APPLICATION)
+                        }
+                        mustMap.add(mapOf("terms", mapOf("__typeName.keyword", typeTerms)));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                    }
+                    
+                    for (String asset : assets) {
+                        if asset.size() > 0 {
+                            List<Map<String, Object>> mustMap = new ArrayList<>();
+                            mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
+                            mustMap.add(mapOf("terms", mapOf("__typeName.keyword", Arrays.asList(AI_APPLICATION, AI_MODEL))));
+                            allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                        }
                     }
                 }
             }
