@@ -70,8 +70,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;
 import static org.apache.atlas.AtlasClient.PROCESS_SUPER_TYPE;
-import static org.apache.atlas.AtlasConfiguration.LINEAGE_TIMEOUT_MS;
-import static org.apache.atlas.AtlasErrorCode.*;
 import static org.apache.atlas.AtlasErrorCode.INSTANCE_LINEAGE_QUERY_FAILED;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.lineage.AtlasLineageInfo.LineageDirection.*;
@@ -101,6 +99,7 @@ public class EntityLineageService implements AtlasLineageService {
     private static final boolean LINEAGE_USING_GREMLIN = AtlasConfiguration.LINEAGE_USING_GREMLIN.getBoolean();
     private static final Integer DEFAULT_LINEAGE_MAX_NODE_COUNT       = 9000;
     private static final int     LINEAGE_ON_DEMAND_DEFAULT_DEPTH      = 3;
+    private static final long LINEAGE_TIMEOUT_MS = AtlasConfiguration.LINEAGE_TIMEOUT_MS.getLong();
     private static final String  SEPARATOR                            = "->";
     public static final String DATASET_PROCESS_LINEAGE = "DatasetProcessLineage";
     public static final String CONNECTION_PROCESS_LINEAGE = "ConnectionProcessLineage";
