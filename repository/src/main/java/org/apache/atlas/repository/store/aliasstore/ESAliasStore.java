@@ -272,20 +272,21 @@ public class ESAliasStore implements IndexAliasStore {
                 } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_AI_ASSET)) {
                     List<String> resources = getPolicyResources(policy);
                     List<String> typeResources = getFilteredPolicyResources(resources, RESOURCES_ENTITY_TYPE);
-                    if typeResources.size() > 0 {
+                    if (typeResources.size() > 0) {
                         List<String> typeTerms = new ArrayList<>();
                         List<Map<String, Object>> mustMap = new ArrayList<>();
-                        if typeResources.contains(AI_APPLICATION) {
-                            typeTerms.add(AI_APPLICATION)
-                        } if typeResources.contains(AI_MODEL) {
-                            typeTerms.add(AI_APPLICATION)
+                        if (typeResources.contains(AI_APPLICATION)) {
+                            typeTerms.add(AI_APPLICATION);
+                        } 
+                        if (typeResources.contains(AI_MODEL)) {
+                            typeTerms.add(AI_APPLICATION);
                         }
                         mustMap.add(mapOf("terms", mapOf("__typeName.keyword", typeTerms)));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                     
                     for (String asset : assets) {
-                        if asset.size() > 0 {
+                        if (asset.size() > 0) {
                             List<Map<String, Object>> mustMap = new ArrayList<>();
                             mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
                             mustMap.add(mapOf("terms", mapOf("__typeName.keyword", Arrays.asList(AI_APPLICATION, AI_MODEL))));
