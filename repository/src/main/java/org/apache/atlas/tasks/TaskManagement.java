@@ -62,6 +62,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final KafkaNotification kafkaNotification;
 
     private Thread watcherThread = null;
+    private Thread watcherThreadV2 = null;
     private Thread updaterThread = null;
 
     public enum DeleteType {
@@ -350,19 +351,39 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
             return;
         }
 
-        LOG.info("Checking Kafka topic for tag propagation!");
-        String topicName = AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_NAME.getString();
-        if (!kafkaNotification.isKafkaTopicExists(topicName)) {
-            kafkaNotification.createKafkaTopic(topicName, 10);
-        }
-
         try {
-            startWatcherThread();
-            startUpdaterThread();
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+                LOG.info("Checking Kafka topic for tag propagation!");
+                String topicName = AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_NAME.getString();
+                if (!kafkaNotification.isKafkaTopicExists(topicName)) {
+                    kafkaNotification.createKafkaTopic(topicName, 10);
+                }
+                LOG.info("TaskManagement: Distributed task management is enabled. Starting Kafka based task management!");
+                startUpdaterThread();
+                startWatcherThreadV2();
+            } else {
+                LOG.info("TaskManagement: Distributed task management is disabled. Starting in-mem task management!");
+                startWatcherThread();
+            }
+
         } catch (Exception e) {
             LOG.error("TaskManagement: Error while re queue tasks");
             e.printStackTrace();
         }
+    }
+
+    private void startWatcherThreadV2() {
+        if (this.taskExecutor == null) {
+            final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
+            final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry);
+        }
+
+        if (watcherThreadV2 == null) {
+            watcherThreadV2 = this.taskExecutor.startWatcherThreadV2();
+        }
+
+        this.statistics.print();
     }
 
     @VisibleForTesting

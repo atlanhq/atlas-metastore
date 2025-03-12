@@ -53,7 +53,9 @@ public class TaskExecutor {
     private final MetricsRegistry metricRegistry;
 
     private TaskQueueWatcher watcher;
+    private TaskQueueWatcherV2 watcherV2;
     private Thread watcherThread;
+    private Thread watcherThreadV2;
     private Thread updaterThread;
     private RedisService redisService;
 
@@ -82,9 +84,19 @@ public class TaskExecutor {
         return watcherThread;
     }
 
+    public Thread startWatcherThreadV2() {
+        watcherV2 = new TaskQueueWatcherV2(taskExecutorService, registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot, isActiveActiveHAEnabled, metricRegistry);
+        watcherThreadV2 = new Thread(watcherV2);
+        watcherThreadV2.start();
+        return watcherThreadV2;
+    }
+
     public void stopQueueWatcher() {
         if (watcher != null) {
             watcher.shutdown();
+        }
+        if (watcherV2 != null) {
+            watcherV2.shutdown();
         }
     }
 
@@ -210,6 +222,116 @@ public class TaskExecutor {
             registry.complete(taskVertex, task);
 
             statistics.successPrint();
+        }
+    }
+
+    static class TaskConsumerConsumerV2 implements Runnable {
+        private static final int MAX_ATTEMPT_COUNT = 3;
+
+        private final Map<String, TaskFactory>  taskTypeFactoryMap;
+        private final TaskRegistry              registry;
+        private final TaskManagement.Statistics statistics;
+        private final AtlasTask                 task;
+        private CountDownLatch  latch;
+
+        AtlasPerfTracer perf = null;
+
+        public TaskConsumerConsumerV2(AtlasTask task, TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
+                            CountDownLatch latch) {
+            this.task               = task;
+            this.registry           = registry;
+            this.taskTypeFactoryMap = taskTypeFactoryMap;
+            this.statistics         = statistics;
+            this.latch = latch;
+        }
+
+        @Override
+        public void run() {
+            AtlasVertex taskVertex = null;
+            int         attemptCount;
+
+            try {
+                RequestContext.get().setTraceId("task-"+task.getGuid());
+                if (task == null) {
+                    TASK_LOG.info("Task not scheduled as it was not found");
+                    return;
+                }
+
+                TASK_LOG.info("Task guid = "+task.getGuid());
+                taskVertex = registry.getVertex(task.getGuid());
+                if (taskVertex == null) {
+                    TASK_LOG.warn("Task not scheduled as vertex not found", task);
+                }
+
+                if (task.getStatus() == AtlasTask.Status.COMPLETE) {
+                    TASK_LOG.warn("Task not scheduled as status was COMPLETE!", task);
+                }
+
+                if (perfEnabled) {
+                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, String.format("atlas.task:%s", task.getGuid(), task.getType()));
+                }
+
+                statistics.increment(1);
+
+                attemptCount = task.getAttemptCount();
+
+                if (attemptCount >= MAX_ATTEMPT_COUNT) {
+                    TASK_LOG.warn("Max retry count for task exceeded! Skipping!", task);
+
+                    task.setStatus(AtlasTask.Status.FAILED);
+                    registry.updateStatus(taskVertex, task);
+
+                    return;
+                }
+
+                LOG.info(String.format("Started performing task with guid: %s", task.getGuid()));
+
+                performTask(taskVertex, task);
+
+                LOG.info(String.format("Finished task with guid: %s", task.getGuid()));
+
+            } catch (InterruptedException exception) {
+                registry.updateStatus(taskVertex, task);
+                TASK_LOG.error("{}: {}: Interrupted!", task, exception);
+
+                statistics.error();
+            } catch (Exception exception) {
+                if (task != null) {
+                    registry.updateStatus(taskVertex, task);
+
+                    TASK_LOG.error("Error executing task. Please perform the operation again!", task, exception);
+                } else {
+                    LOG.error("Error executing. Please perform the operation again!", exception);
+                }
+
+                statistics.error();
+            } finally {
+                if (task != null) {
+                    this.registry.commit();
+
+                    TASK_LOG.log(task);
+                }
+
+                latch.countDown();
+                RequestContext.get().clearCache();
+                AtlasPerfTracer.log(perf);
+            }
+        }
+
+        private void performTask(AtlasVertex taskVertex, AtlasTask task) throws Exception {
+            TaskFactory  factory      = taskTypeFactoryMap.get(task.getType());
+            if (factory == null) {
+                LOG.error("taskTypeFactoryMap does not contain task of type: {}", task.getType());
+                return;
+            }
+
+            AbstractTask runnableTask = factory.create(task);
+
+            registry.inProgress(taskVertex, task, runnableTask);
+
+            runnableTask.run();
+            //registry.complete(taskVertex, task);
+            //statistics.successPrint();
         }
     }
 
