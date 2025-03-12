@@ -352,7 +352,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         }
 
         try {
-            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
                 LOG.info("Checking Kafka topic for tag propagation!");
                 String topicName = AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_NAME.getString();
                 if (!kafkaNotification.isKafkaTopicExists(topicName)) {
