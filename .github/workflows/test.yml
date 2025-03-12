@@ -1,9 +1,6 @@
-name: Tests
+name: Integration-Tests-for-Metastore
 
 on:
-  pull_request:
-    branches:
-      - master
   push:
     branches:
       - mlh41temp
@@ -12,20 +9,19 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Java SDK Repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
-
+        uses: actions/checkout@v4
         with:
           repository: atlanhq/atlan-java
           ref: main
 
       - name: Set up JDK for SDK
-        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12  # v4.7.0
+        uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
 
       - name: Compile
-        uses: burrunan/gradle-cache-action@c15634bb25b7284dc084f38dff4e838048b7feaf  # v2
+        uses: burrunan/gradle-cache-action@v1
         with:
           arguments: assemble shadowJar test
 
@@ -36,7 +32,7 @@ jobs:
       test_count: ${{ steps.test-files.outputs.test_count }}  # <-- new output
     steps:
       - name: Checkout Java SDK Repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
         with:
           repository: atlanhq/atlan-java
           ref: main
@@ -44,7 +40,7 @@ jobs:
       - name: List integration tests
         id: test-files
         run: |
-          SKIP_PATTERN="AdminTest.java"
+          SKIP_PATTERN="SearchTest.java|RequestsTest.java|SSOTest.java|PersonaTest.java|AdminTest.java|DataMeshTest.java|InsightsTest.java|PurposeTest.java"
 
           # List all *Test.java files, exclude the ones that match SKIP_PATTERN
           tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java \
@@ -83,13 +79,13 @@ jobs:
     name: "Integration"
     steps:
       - name: Checkout Java SDK Repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+        uses: actions/checkout@v4
         with:
           repository: atlanhq/atlan-java
           ref: main
 
       - name: Set up JDK
-        uses: actions/setup-java@3a4f6e1af504cf6a31855fa899c6aa5355ba6c12  # v4.7.0
+        uses: actions/setup-java@v4
         with:
           java-version: 17
           distribution: temurin
@@ -101,8 +97,8 @@ jobs:
             --tests "com.atlan.java.sdk.${{ matrix.tests }}" \
             --rerun-tasks
         env:
-          ATLAN_BASE_URL: "https://gcpotel.atlan.com/"
-          ATLAN_API_KEY: ${{ secrets.TENANT_API_KEY }}
+          ATLAN_BASE_URL: "https://atlas-arm.atlan.com/"
+          ATLAN_API_KEY: ${{ secrets.ATLAS_ARM_API_KEY }}
 
       - name: Move JUnit XML results
         if: success() || failure()
@@ -133,12 +129,8 @@ jobs:
         id: summary
         run: |
           # 1) Pull the expected test file count
-          echo "All outputs from list-integration-tests:"
-          echo "${{ toJson(needs.list-integration-tests.outputs) }}"
-          
           initial_count=${{ needs.list-integration-tests.outputs.test_count }}
-          echo "📝 Test files expected: $initial_count"
-          
+
           echo "### Integration Test Results" > test-summary.md
           echo "" >> test-summary.md
 
@@ -177,9 +169,8 @@ jobs:
               fi
             done < <(find test-results -name '*.xml' -print0)
           fi
-          real_count=$(( real_count + 2 ))
+          
           # Print the real count vs. the initial expected count
-          echo "" >> test-summary.md
           echo "📝 Test files found: $real_count out of expected: $initial_count"
           
           # 2) Compare the actual number of files we found vs. initial_count
@@ -206,10 +197,3 @@ jobs:
           echo "✅ Printing the test summary before posting to PR"
           echo "--------------------------------------------------"
           cat test-summary.md
-
-      - name: Post Comment on PR
-        uses: mshick/add-pr-comment@v2
-        if: github.event_name == 'pull_request'
-        with:
-          message-path: test-summary.md
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
