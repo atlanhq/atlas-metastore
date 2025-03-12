@@ -11,7 +11,6 @@ on:
       - mlh41-integration-tests
       - mlh41tests
       - mlh40java17
-      - lin-160-master
     types:
       - completed
 
