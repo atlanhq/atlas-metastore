@@ -54,6 +54,7 @@ public class TaskExecutor {
 
     private TaskQueueWatcher watcher;
     private Thread watcherThread;
+    private Thread updaterThread;
     private RedisService redisService;
 
     public TaskExecutor(TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
@@ -84,6 +85,19 @@ public class TaskExecutor {
     public void stopQueueWatcher() {
         if (watcher != null) {
             watcher.shutdown();
+        }
+    }
+
+    public Thread startUpdaterThread() {
+        TaskUpdater updater = new TaskUpdater(registry, redisService);
+        updaterThread = new Thread(updater);
+        updaterThread.start();
+        return updaterThread;
+    }
+
+    public void stopUpdaterThread() {
+        if (updaterThread != null) {
+            updaterThread.interrupt();
         }
     }
 

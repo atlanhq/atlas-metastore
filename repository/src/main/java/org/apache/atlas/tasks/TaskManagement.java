@@ -60,6 +60,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
     private Thread watcherThread = null;
+    private Thread updaterThread = null;
 
     public enum DeleteType {
         SOFT,
@@ -160,10 +161,14 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     public boolean isWatcherActive() {
         return watcherThread != null;
     }
+    public boolean isTaskUpdatorActive() {
+        return updaterThread != null;
+    }
 
     @Override
     public void stop() throws AtlasException {
         stopQueueWatcher();
+        stopTaskUpdater();
         LOG.info("TaskManagement: Stopped!");
     }
 
@@ -183,6 +188,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     @Override
     public void instanceIsPassive() throws AtlasException {
         stopQueueWatcher();
+        stopTaskUpdater();
         LOG.info("TaskManagement.instanceIsPassive(): no action needed");
     }
 
@@ -323,6 +329,12 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         this.statistics.print();
     }
 
+    private synchronized void startUpdaterThread() {
+        if (updaterThread == null) {
+            updaterThread = this.taskExecutor.startUpdaterThread();
+        }
+    }
+
     private void startInternal() {
         if (AtlasConfiguration.TASKS_USE_ENABLED.getBoolean() == false) {
             return;
@@ -336,6 +348,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
 
         try {
             startWatcherThread();
+            startUpdaterThread();
         } catch (Exception e) {
             LOG.error("TaskManagement: Error while re queue tasks");
             e.printStackTrace();
@@ -362,6 +375,11 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private void stopQueueWatcher() {
         taskExecutor.stopQueueWatcher();
         watcherThread = null;
+    }
+
+    private void stopTaskUpdater() {
+        taskExecutor.stopUpdaterThread();
+        updaterThread = null;
     }
 
     static class Statistics {
