@@ -281,8 +281,10 @@ public class ESAliasStore implements IndexAliasStore {
                         if (typeResources.contains(AI_MODEL)) {
                             typeTerms.add(AI_APPLICATION);
                         }
-                        mustMap.add(mapOf("terms", mapOf("__typeName.keyword", typeTerms)));
-                        allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                        if (typeTerms.size() > 0) {
+                            mustMap.add(mapOf("terms", mapOf("__typeName.keyword", typeTerms)));
+                            allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                        }
                     }
                     
                     for (String asset : assets) {
