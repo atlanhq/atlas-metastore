@@ -3250,7 +3250,7 @@ public class EntityGraphMapper {
                         for (AtlasVertex vertex : entityVertices) {
                             List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLEANUP_CLASSIFICATION_PROPAGATION, vertex.getIdForDisplay());
                             kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
-
+                            LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                             List<AtlasClassification> deletedClassifications = new ArrayList<>();
                             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(graphHelper.getGuid(vertex));
                             List<AtlasEdge> classificationEdges = GraphHelper.getClassificationEdges(vertex, null, classificationName);
@@ -3579,6 +3579,7 @@ public class EntityGraphMapper {
                 for (AtlasVertex vertex: verticesToPropagate) {
                     List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 }
 //                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
 //                List<String> impactedVerticesGuidsToLock        = chunkedVerticesToPropagate.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
@@ -4157,6 +4158,7 @@ public class EntityGraphMapper {
                 List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_TEXT_UPDATE, classificationVertexId);
                 try {
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
@@ -4207,6 +4209,7 @@ public class EntityGraphMapper {
                 List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
                 try {
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
@@ -4440,6 +4443,7 @@ public class EntityGraphMapper {
                 for (AtlasVertex vertex: verticesChunkToRemoveTag) {
                     List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 }
                 List<String> impactedGuids = verticesChunkToRemoveTag.stream()
                         .map(entityVertex -> GraphHelper.getGuid(entityVertex))
@@ -4478,6 +4482,7 @@ public class EntityGraphMapper {
                 List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
                 try {
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }

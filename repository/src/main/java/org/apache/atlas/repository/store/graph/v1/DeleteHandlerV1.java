@@ -1246,6 +1246,7 @@ public abstract class DeleteHandlerV1 {
                 List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
                 try {
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
@@ -1264,6 +1265,7 @@ public abstract class DeleteHandlerV1 {
                 List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
                 try {
                     kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
                 } catch (NotificationException e) {
                     throw new RuntimeException(e);
                 }
