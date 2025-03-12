@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.tasks.AtlasTask;
@@ -54,7 +55,11 @@ public class ClassificationPropagationTasks {
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            entityGraphMapper.updateClassificationTextPropagation(classificationVertexId);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().updateClassificationTextPropagation(classificationVertexId);
+            } else {
+                entityGraphMapper.updateClassificationTextPropagation(classificationVertexId);
+            }
         }
     }
 
@@ -67,8 +72,11 @@ public class ClassificationPropagationTasks {
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-
-            entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().deleteClassificationPropagation(entityGuid, classificationVertexId);
+            } else {
+                entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
+            }
         }
     }
 
@@ -82,11 +90,19 @@ public class ClassificationPropagationTasks {
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             if (parameters.get(PARAM_DELETED_EDGE_IDS) != null) {
                 Set<String> deletedEdgeIds    =  AtlasType.fromJson((String) parameters.get(PARAM_DELETED_EDGE_IDS), Set.class);
-                entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeIds);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    entityGraphMapper.getTagPropagator().deleteClassificationOnlyPropagation(deletedEdgeIds);
+                } else {
+                    entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeIds);
+                }
             } else {
                 String deletedEdgeId          =  (String) parameters.get(PARAM_DELETED_EDGE_ID);
                 String classificationVertexId =  (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-                entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    entityGraphMapper.getTagPropagator().deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                } else {
+                    entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                }
             }
         }
     }
@@ -103,7 +119,11 @@ public class ClassificationPropagationTasks {
             String referencedVertexId = (String) parameters.get(PARAM_REFERENCED_VERTEX_ID);
             boolean isTermEntityEdge = (boolean) parameters.get(PARAM_IS_TERM_ENTITY_EDGE);
 
-            entityGraphMapper.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            } else {
+                entityGraphMapper.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            }
         }
     }
 
@@ -115,8 +135,11 @@ public class ClassificationPropagationTasks {
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String            classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-
-            entityGraphMapper.classificationRefreshPropagation(classificationVertexId);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().classificationRefreshPropagation(classificationVertexId);
+            } else {
+                entityGraphMapper.classificationRefreshPropagation(classificationVertexId);
+            }
         }
     }
 
@@ -129,7 +152,6 @@ public class ClassificationPropagationTasks {
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String            relationshipEdgeId = (String) parameters.get(PARAM_RELATIONSHIP_EDGE_ID);
             AtlasRelationship relationship       = AtlasType.fromJson((String) parameters.get(PARAM_RELATIONSHIP_OBJECT), AtlasRelationship.class);
-
             entityGraphMapper.updateTagPropagations(relationshipEdgeId, relationship);
         }
     }
@@ -146,7 +168,11 @@ public class ClassificationPropagationTasks {
             if(parameters.containsKey(PARAM_BATCH_LIMIT)) {
                 batchLimit = (int) parameters.get(PARAM_BATCH_LIMIT);
             }
-            entityGraphMapper.cleanUpClassificationPropagation(classificationName, batchLimit);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().cleanUpClassificationPropagation(classificationName, batchLimit);
+            } else {
+                entityGraphMapper.cleanUpClassificationPropagation(classificationName, batchLimit);
+            }
         }
     }
 }

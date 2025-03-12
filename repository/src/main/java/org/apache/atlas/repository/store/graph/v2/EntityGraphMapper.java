@@ -162,6 +162,7 @@ public class EntityGraphMapper {
     private static final String ATTR_MEANINGS = "meanings";
     private static final String ATTR_ANCHOR = "anchor";
     private static final String ATTR_CATEGORIES = "categories";
+
     private static final List<String> ALLOWED_DATATYPES_FOR_DEFAULT_NULL = new ArrayList() {
         {
             add("int");
@@ -196,6 +197,7 @@ public class EntityGraphMapper {
     private final TaskManagement            taskManagement;
     private final TransactionInterceptHelper   transactionInterceptHelper;
     private final EntityGraphRetriever       retrieverNoRelation;
+    private final TagPropagator tagPropagator;
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
@@ -203,7 +205,7 @@ public class EntityGraphMapper {
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
                              AtlasInstanceConverter instanceConverter, IFullTextMapper fullTextMapperV2,
-                             TaskManagement taskManagement, TransactionInterceptHelper transactionInterceptHelper) {
+                             TaskManagement taskManagement, TransactionInterceptHelper transactionInterceptHelper, TagPropagator tagPropagator) {
         this.restoreHandlerV1 = restoreHandlerV1;
         this.graphHelper          = new GraphHelper(graph);
         this.deleteDelegate       = deleteDelegate;
@@ -212,11 +214,16 @@ public class EntityGraphMapper {
         this.relationshipStore    = relationshipStore;
         this.entityChangeNotifier = entityChangeNotifier;
         this.instanceConverter    = instanceConverter;
+        this.tagPropagator        = tagPropagator;
         this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
         this.retrieverNoRelation  = new EntityGraphRetriever(graph, typeRegistry, true);
         this.fullTextMapperV2     = fullTextMapperV2;
         this.taskManagement       = taskManagement;
         this.transactionInterceptHelper = transactionInterceptHelper;}
+
+    public TagPropagator getTagPropagator() {
+        return tagPropagator;
+    }
 
     @VisibleForTesting
     public void setTasksUseFlag(boolean value) {
@@ -3557,8 +3564,12 @@ public class EntityGraphMapper {
 
                 return null;
             }
-
-            return processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                tagPropagator.processClassificationPropagationAddition(impactedVertices, classificationVertex);
+                return new ArrayList<>();
+            } else {
+                return processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            }
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
 
