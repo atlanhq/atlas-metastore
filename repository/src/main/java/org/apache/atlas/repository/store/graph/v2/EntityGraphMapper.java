@@ -3575,38 +3575,10 @@ public class EntityGraphMapper {
         LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
 
         try {
-//                List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
-                for (AtlasVertex vertex: verticesToPropagate) {
-                    List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
-                }
-//                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
-//                List<String> impactedVerticesGuidsToLock        = chunkedVerticesToPropagate.stream().map(x -> GraphHelper.getGuid(x)).collect(Collectors.toList());
-//                GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedVerticesGuidsToLock);
-//                RequestContext.get().endMetricRecord(metricRecorder);
-
-//                AtlasClassification classification       = entityRetriever.toAtlasClassification(classificationVertex);
-//                List<AtlasVertex>   entitiesPropagatedTo = deleteDelegate.getHandler().addTagPropagation(classificationVertex, chunkedVerticesToPropagate);
-
-//                if (CollectionUtils.isEmpty(entitiesPropagatedTo)) {
-//                    return null;
-//                }
-
-//                List<AtlasEntity>   propagatedEntitiesChunked       = updateClassificationText(classification, entitiesPropagatedTo);
-//                List<String>        chunkedPropagatedEntitiesGuids  = propagatedEntitiesChunked.stream().map(x -> x.getGuid()).collect(Collectors.toList());
-//                entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntitiesChunked, Collections.singletonList(classification), false);
-//
-//                propagatedEntitiesGuids.addAll(chunkedPropagatedEntitiesGuids);
-//
-//                transactionInterceptHelper.intercept();
-//
-//                int propagatedAssetsCount = (offset + CHUNK_SIZE >= impactedVerticesSize && impactedVerticesSize == verticesToPropagate.size())
-//                        ? toIndex - offset - 1 // Subtract 1 for the last chunk
-//                        : toIndex - offset;
-//
-//                offset += CHUNK_SIZE;
-//
-//                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedAssetsCount);
+            for (AtlasVertex vertex: verticesToPropagate) {
+                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(vertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+            }
         } catch (NotificationException e) {
             throw new RuntimeException(e);
         } finally {
