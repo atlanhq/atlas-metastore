@@ -123,6 +123,17 @@ public class AuthPolicyValidator {
 
     private static final Set<String> AI_POLICY_ACTIONS = new HashSet<String>(){{
         add(ENTITY_READ.getType());
+        add("persona-aiasset-read");
+        add("persona-aiasset-create");
+        add("persona-aiasset-update");
+        add("persona-aiasset-delete");
+        add("persona-aiasset-business-update-metadata");
+        add("persona-aiasset-add-terms");
+        add("persona-aiasset-update-terms");
+        add("persona-aiasset-remove-terms");
+        add("persona-aiasset-add-classification");
+        add("persona-aiasset-update-classification");
+        add("persona-aiasset-remove-classification"); 
     }};
 
     private static final Map<String, Set<String>> DATAMESH_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
