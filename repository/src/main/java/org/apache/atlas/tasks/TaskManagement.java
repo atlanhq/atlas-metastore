@@ -166,6 +166,11 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     public boolean isWatcherActive() {
         return watcherThread != null;
     }
+
+    public boolean isWatcherV2Active() {
+        return watcherThreadV2 != null;
+    }
+
     public boolean isTaskUpdatorActive() {
         return updaterThread != null;
     }
@@ -335,6 +340,12 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     private synchronized void startUpdaterThread() {
+        if (this.taskExecutor == null) {
+            final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
+            final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry);
+        }
+
         if (updaterThread == null) {
             updaterThread = this.taskExecutor.startUpdaterThread();
         }

@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.tasks;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -45,11 +46,17 @@ public class TaskFactoryRegistry {
     @PostConstruct
     public void startTaskManagement() throws AtlasException {
         try {
-            if (taskManagement.isWatcherActive() && taskManagement.isTaskUpdatorActive()) {
-                LOG.info("TaskFactoryRegistry: TaskManagement already started!");
-                return;
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                if (taskManagement.isWatcherV2Active() && taskManagement.isTaskUpdatorActive()) {
+                    LOG.info("TaskFactoryRegistry: TaskManagement already started!");
+                    return;
+                }
+            } else {
+                if (taskManagement.isWatcherActive()) {
+                    LOG.info("TaskFactoryRegistry: TaskManagement already started!");
+                    return;
+                }
             }
-
             LOG.info("TaskFactoryRegistry: Starting TaskManagement...");
             taskManagement.start();
         } catch (AtlasException e) {
