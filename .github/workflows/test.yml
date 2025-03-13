@@ -1,4 +1,4 @@
-name: Integration-Tests-for-Metastore
+name: Integration-Tests
 
 on:
   push:
@@ -97,7 +97,7 @@ jobs:
             --tests "com.atlan.java.sdk.${{ matrix.tests }}" \
             --rerun-tasks
         env:
-          ATLAN_BASE_URL: "https://atlas-amd.atlan.com/"
+          ATLAN_BASE_URL: "https://atlas-ad.atlan.com/"
           ATLAN_API_KEY: ${{ secrets.ATLAS_AMD_API_KEY }}
 
       - name: Move JUnit XML results
