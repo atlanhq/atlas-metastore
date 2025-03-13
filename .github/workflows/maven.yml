@@ -27,7 +27,7 @@ on:
       - development
       - master
       - lineageondemand
-      - cassandrapoliciesoptimisation
+      - classifications_optimisation
       - ixop
 
 jobs:
