@@ -98,13 +98,13 @@ public abstract class DeleteHandlerV1 {
     private   final TaskManagement       taskManagement;
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
+    private   final KafkaNotification    kafkaNotification;
     private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
-    KafkaNotification kfknotif;
-    int numPartitions = Integer.parseInt(OBJ_PROP_EVENTS_PARTITION_COUNT); // Total number of partitions in the Kafka topic
-    public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
+    public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement, KafkaNotification kafkaNotification) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
+        this.kafkaNotification             = kafkaNotification;
         this.entityRetriever               = new EntityGraphRetriever(graph, typeRegistry);
         this.shouldUpdateInverseReferences = shouldUpdateInverseReference;
         this.softDelete                    = softDelete;
@@ -525,20 +525,25 @@ public abstract class DeleteHandlerV1 {
 
     public void authorizeRemoveRelation(AtlasEdge edge) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("authoriseRemoveRelation");
-        AtlasEntityHeader end1Entity, end2Entity;
-        String relationShipType = getTypeName(edge);
-        AtlasRelationshipDef relationshipDef = typeRegistry.getRelationshipDefByName(relationShipType);
-        if (relationshipDef == null) {
-            return;
+        if(!RequestContext.get().isAuthorisedRemoveRelation()) {
+            if (isRequestFromWorkFlow()) {
+                RequestContext.get().setAuthorisedRemoveRelation(true);
+            }
+            AtlasEntityHeader end1Entity, end2Entity;
+            String relationShipType = getTypeName(edge);
+            AtlasRelationshipDef relationshipDef = typeRegistry.getRelationshipDefByName(relationShipType);
+            if (relationshipDef == null) {
+                return;
+            }
+
+            end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getOutVertex());
+            end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getInVertex());
+
+            AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_REMOVE, relationShipType, end1Entity, end2Entity));
         }
-
-        end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getOutVertex());
-        end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(edge.getInVertex());
-
-        AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_REMOVE, relationShipType, end1Entity, end2Entity ));
-
         RequestContext.get().endMetricRecord(metric);
     }
+
 
     public Map<AtlasVertex, List<AtlasVertex>> removeTagPropagation(AtlasEdge edge) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("removeTagPropagationEdge");
@@ -840,7 +845,7 @@ public abstract class DeleteHandlerV1 {
                             AtlasType      elemType = arrType.getElementType();
 
                             if (isReference(elemType.getTypeCategory())) {
-                                List<AtlasEdge> edges = getCollectionElementsUsingRelationship(instanceVertex, attributeInfo);
+                                List<AtlasEdge> edges = getActiveCollectionElementsUsingRelationship(instanceVertex, attributeInfo);
 
                                 if (CollectionUtils.isNotEmpty(edges)) {
                                     for (AtlasEdge edge : edges) {
@@ -1236,56 +1241,46 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
-            // Update TASK_ASSET_COUNT_TO_PROPAGATE with the number of assets to propagate
             int assetsToPropagate = addPropagationsMap.values().stream().mapToInt(List::size).sum()
-                                  + removePropagationsMap.values().stream().mapToInt(List::size).sum();
+                    + removePropagationsMap.values().stream().mapToInt(List::size).sum();
             taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, assetsToPropagate);
 
-            int propagatedCount = 0;
             for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
-                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
-                try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
-                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
-                } catch (NotificationException e) {
-                    throw new RuntimeException(e);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                    try {
+                        kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                        LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
+                    } catch (NotificationException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
+                    addTagPropagation(classificationVertex, entitiesToAddPropagation);
                 }
 
-                List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
-
-                addTagPropagation(classificationVertex, entitiesToAddPropagation);
-                propagatedCount++;
-                if (propagatedCount == CHUNK_SIZE){
-                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount - 1);
-                    propagatedCount = 0;
-                }
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
-                List<String> kafkaMessage = kfknotif.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertex.getIdForDisplay());
-                try {
-                    kfknotif.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
-                    LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
-                } catch (NotificationException e) {
-                    throw new RuntimeException(e);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                    try {
+                        kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                        LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
+                    } catch (NotificationException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
+                    removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
                 }
-                List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
-
-                removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
-                propagatedCount++;
-                if (propagatedCount == CHUNK_SIZE){
-                    taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount);
-                    propagatedCount = 0;
-                }
-            }
-            if (propagatedCount != 0){
-                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_PROPAGATED, graph, propagatedCount);
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)
             handleBlockedClassifications(edge, relationship.getBlockedPropagatedClassifications());
         }
     }
+
     public void handleBlockedClassifications(AtlasEdge edge, Set<AtlasClassification> blockedClassifications) throws AtlasBaseException {
         if (blockedClassifications != null) {
             List<AtlasVertex> propagatableClassifications  = getPropagatableClassifications(edge);
@@ -1625,6 +1620,14 @@ public abstract class DeleteHandlerV1 {
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
+    }
+    private boolean isRequestFromWorkFlow() {
+        String workflowID = RequestContext.get().getRequestContextHeaders().getOrDefault("x-atlan-agent-workflow-id", "");
+        boolean isWorkFlowRequest = !workflowID.isEmpty();
+        if(isWorkFlowRequest){
+            LOG.info("Authorised one time request for workflow with id : {} ", workflowID);
+        }
+        return isWorkFlowRequest;
     }
 
     private String getLabel(String guid, String label){

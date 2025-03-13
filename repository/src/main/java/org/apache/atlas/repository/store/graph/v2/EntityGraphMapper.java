@@ -3565,6 +3565,7 @@ public class EntityGraphMapper {
                 return null;
             }
             if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, impactedVertices.size());
                 tagPropagator.processClassificationPropagationAddition(impactedVertices, classificationVertex);
                 return new ArrayList<>();
             } else {
@@ -4173,7 +4174,7 @@ public class EntityGraphMapper {
         }
     }
 
-    public List<String> deleteClassificationPropagation(String entityGuid, String classificationVertexId) throws AtlasBaseException {
+    public List<String> deleteClassificationPropagation(String classificationVertexId) throws AtlasBaseException {
         try {
             if (StringUtils.isEmpty(classificationVertexId)) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification vertex id is empty", classificationVertexId);

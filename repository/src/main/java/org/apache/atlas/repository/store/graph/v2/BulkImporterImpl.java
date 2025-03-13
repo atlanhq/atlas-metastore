@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.impexp.AtlasImportRequest;
 import org.apache.atlas.model.impexp.AtlasImportResult;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -56,15 +57,17 @@ public class BulkImporterImpl implements BulkImporter {
     private final AtlasTypeRegistry typeRegistry;
     private final AtlasEntityChangeNotifier entityChangeNotifier;
     private final TagPropagator tagPropagator;
+    private final KafkaNotification kafkaNotification;
 
     @Inject
     public BulkImporterImpl(AtlasGraph atlasGraph, AtlasEntityStore entityStore,
-                            AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier, TagPropagator tagPropagator) {
+                            AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier, TagPropagator tagPropagator, KafkaNotification kafkaNotification) {
         this.atlasGraph = atlasGraph;
         this.entityStore = entityStore;
         this.typeRegistry = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
         this.tagPropagator = tagPropagator;
+        this.kafkaNotification = kafkaNotification;
     }
 
     @Override
@@ -73,7 +76,7 @@ public class BulkImporterImpl implements BulkImporter {
 
         if (importResult.getRequest().getOptions() != null &&
                 importResult.getRequest().getOptions().containsKey(AtlasImportRequest.OPTION_KEY_MIGRATION)) {
-            importStrategy = new MigrationImport(this.atlasGraph, new AtlasGraphProvider(), this.typeRegistry, entityChangeNotifier, tagPropagator);
+            importStrategy = new MigrationImport(this.atlasGraph, new AtlasGraphProvider(), this.typeRegistry, entityChangeNotifier, tagPropagator, kafkaNotification);
         } else {
             importStrategy = new RegularImport(this.atlasGraph, this.entityStore, this.typeRegistry);
         }

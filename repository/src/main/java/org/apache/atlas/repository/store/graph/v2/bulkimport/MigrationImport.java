@@ -21,6 +21,7 @@ package org.apache.atlas.repository.store.graph.v2.bulkimport;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.impexp.AtlasImportRequest;
 import org.apache.atlas.model.impexp.AtlasImportResult;
 import org.apache.atlas.model.instance.EntityMutationResponse;
@@ -47,14 +48,16 @@ public class MigrationImport extends ImportStrategy {
     private final AtlasTypeRegistry typeRegistry;
     private final AtlasEntityChangeNotifier entityChangeNotifier;
     private final TagPropagator tagPropagator;
+    private final KafkaNotification kafkaNotification;
 
     public MigrationImport(AtlasGraph graph, AtlasGraphProvider graphProvider,
-                           AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier, TagPropagator tagPropagator) {
+                           AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier, TagPropagator tagPropagator, KafkaNotification kafkaNotification) {
         this.graph = graph;
         this.graphProvider = graphProvider;
         this.typeRegistry = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
         this.tagPropagator = tagPropagator;
+        this.kafkaNotification = kafkaNotification;
         LOG.info("MigrationImport: Using bulkLoading...");
     }
 
@@ -127,9 +130,9 @@ public class MigrationImport extends ImportStrategy {
         return ret;
     }
 
-    private AtlasEntityStoreV2 createEntityStore(AtlasGraph graph, AtlasTypeRegistry typeRegistry) throws AtlasException {
+    private AtlasEntityStoreV2 createEntityStore(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         FullTextMapperV2Nop fullTextMapperV2 = new FullTextMapperV2Nop();
-        DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null);
+        DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null, kafkaNotification);
         RestoreHandlerV1 restoreHandlerV1 = new RestoreHandlerV1(graph, typeRegistry);
 
         AtlasRelationshipStore relationshipStore = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);

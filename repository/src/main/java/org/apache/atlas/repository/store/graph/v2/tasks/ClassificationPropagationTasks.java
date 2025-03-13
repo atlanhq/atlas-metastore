@@ -70,12 +70,11 @@ public class ClassificationPropagationTasks {
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
             if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
-                entityGraphMapper.getTagPropagator().deleteClassificationPropagation(entityGuid, classificationVertexId);
+                entityGraphMapper.getTagPropagator().deleteClassificationPropagation(classificationVertexId);
             } else {
-                entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
+                entityGraphMapper.deleteClassificationPropagation(classificationVertexId);
             }
         }
     }
