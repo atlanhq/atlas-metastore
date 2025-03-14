@@ -19,6 +19,7 @@
 package org.apache.atlas.repository.store.graph.v1;
 
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.DeleteType;
 import org.apache.atlas.tasks.TaskManagement;
@@ -43,11 +44,11 @@ public class DeleteHandlerDelegate {
     private final TaskManagement      taskManagement;
 
     @Inject
-    public DeleteHandlerDelegate(AtlasGraph graph, AtlasTypeRegistry typeRegistry, TaskManagement taskManagement) {
+    public DeleteHandlerDelegate(AtlasGraph graph, AtlasTypeRegistry typeRegistry, TaskManagement taskManagement, KafkaNotification kafkaNotification) {
         this.graph = graph;
         this.taskManagement    = taskManagement;
-        this.softDeleteHandler = new SoftDeleteHandlerV1(graph, typeRegistry, taskManagement);
-        this.hardDeleteHandler = new HardDeleteHandlerV1(graph, typeRegistry, taskManagement);
+        this.softDeleteHandler = new SoftDeleteHandlerV1(graph, typeRegistry, taskManagement, kafkaNotification);
+        this.hardDeleteHandler = new HardDeleteHandlerV1(graph, typeRegistry, taskManagement, kafkaNotification);
         this.defaultHandler    = getDefaultConfiguredHandler(typeRegistry);
     }
 

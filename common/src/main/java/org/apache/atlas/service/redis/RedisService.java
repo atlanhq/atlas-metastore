@@ -8,6 +8,10 @@ public interface RedisService {
 
   void releaseDistributedLock(String key);
 
+  int getSetSize(String key);
+
+  String getHashValue(String key, String field);
+
   String getValue(String key);
 
   String putValue(String key, String value);

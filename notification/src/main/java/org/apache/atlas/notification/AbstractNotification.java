@@ -120,7 +120,7 @@ public abstract class AbstractNotification implements NotificationInterface {
      */
     public abstract void sendInternal(NotificationType type, List<String> messages) throws NotificationException;
 
-
+    public abstract void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) throws NotificationException;
     // ----- utility methods -------------------------------------------------
 
     public static String getMessageJson(Object message) {

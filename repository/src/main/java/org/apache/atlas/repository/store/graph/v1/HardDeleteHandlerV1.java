@@ -18,9 +18,9 @@
 
 package org.apache.atlas.repository.store.graph.v1;
 
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -37,8 +37,8 @@ import javax.inject.Inject;
 public class HardDeleteHandlerV1 extends DeleteHandlerV1 {
 
     @Inject
-    public HardDeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, TaskManagement taskManagement) {
-        super(graph, typeRegistry, true, false, taskManagement);
+    public HardDeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, TaskManagement taskManagement, KafkaNotification kafkaNotification) {
+        super(graph, typeRegistry, true, false, taskManagement, kafkaNotification);
     }
 
     @Override

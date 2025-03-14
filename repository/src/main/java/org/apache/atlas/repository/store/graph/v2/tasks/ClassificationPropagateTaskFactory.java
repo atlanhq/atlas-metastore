@@ -22,8 +22,8 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.TagPropagator;
 import org.apache.atlas.tasks.TaskFactory;
-import org.apache.atlas.tasks.TaskManagement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -75,13 +75,15 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
     private final EntityGraphMapper      entityGraphMapper;
     private final DeleteHandlerDelegate  deleteDelegate;
     private final AtlasRelationshipStore relationshipStore;
+    private final TagPropagator tagPropagator;
 
     @Inject
-    public ClassificationPropagateTaskFactory(AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
+    public ClassificationPropagateTaskFactory(AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TagPropagator tagPropagator) {
         this.graph             = graph;
         this.entityGraphMapper = entityGraphMapper;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
+        this.tagPropagator = tagPropagator;
     }
 
     public org.apache.atlas.tasks.AbstractTask create(AtlasTask task) {
@@ -98,10 +100,10 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
             case CLASSIFICATION_PROPAGATION_DELETE:
                 return new ClassificationPropagationTasks.Delete(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
 
-            case CLASSIFICATION_ONLY_PROPAGATION_DELETE:
+            case CLASSIFICATION_ONLY_PROPAGATION_DELETE: // deperecated
                 return new ClassificationPropagationTasks.DeleteOnlyPropagations(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
 
-            case CLASSIFICATION_ONLY_PROPAGATION_DELETE_ON_HARD_DELETE:
+            case CLASSIFICATION_ONLY_PROPAGATION_DELETE_ON_HARD_DELETE: // deperecated
                 return new ClassificationPropagationTasks.DeleteOnlyPropagationsOnHardDelete(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_REFRESH_PROPAGATION:
@@ -110,9 +112,8 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
             case CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE:
                 return new ClassificationPropagationTasks.UpdateRelationship(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
 
-                case CLEANUP_CLASSIFICATION_PROPAGATION:
+            case CLEANUP_CLASSIFICATION_PROPAGATION:
                 return new ClassificationPropagationTasks.CleanUpClassificationPropagation(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
-
 
             default:
                 LOG.warn("Type: {} - {} not found!. The task will be ignored.", taskType, taskGuid);

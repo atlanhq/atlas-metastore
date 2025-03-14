@@ -336,7 +336,6 @@
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-notification</artifactId>
         </dependency>
-
     </dependencies>
 
     <profiles>

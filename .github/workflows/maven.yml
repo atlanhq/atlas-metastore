@@ -29,6 +29,8 @@ on:
       - lineageondemand
       - cassandrapoliciesoptimisation
       - ixop
+      - makerlogic
+      - tagpropv1master
 
 jobs:
   build:
