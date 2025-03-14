@@ -2,17 +2,25 @@ package org.apache.atlas.tasks;
 
 import com.esotericsoftware.minlog.Log;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.redis.RedisService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Date;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
+
+import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
 
 
 public class TaskUpdater implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(TaskUpdater.class);
 
+    private static final long TASK_STUCK_THRESHOLD = 600000L; // 10 mins
+    private static final long TASK_UPDATER_THREAD_WAIT_TIME = 60000L; // 1 min
     private final TaskRegistry registry;
     private final RedisService redisService;
 
@@ -27,39 +35,35 @@ public class TaskUpdater implements Runnable {
             try {
                 List<AtlasTask> inProgressTasks = registry.getInProgressTasks();
                 Log.debug("TaskUpdater: Found {} in-progress tasks to update", String.valueOf(inProgressTasks.size()));
-                // I want to do the following for each task in inProgressTasks
-                // 1. fetch the same task from redis
-                // 2. fetch assetsCountpropagated for the task from redis
-                // 3. update the task with the fetched assetsCountpropagated
-                // 4. fetch assetsCountFailed for the task from redis
-                // 5. update the task with the fetched assetsCountFailed
-                // 6. if assetsCountFailed > 0 mark task as failed
-                // 7. if assetsCountpropagated == assetsCountToPropagate mark task as completed
-                // 8. for each subtask fetch lastupdated key from redis 'HSET task:123e4567-e89b-12d3-a456-426614174000 last_updated 1709827400'
-                // 9. if current time - lastupdated > 10 mins mark task as failed
+
                 for (AtlasTask task : inProgressTasks) {
                     String taskGuid = task.getGuid();
                     int successTaskValue = redisService.getSetSize("task:" + taskGuid + ":success");
                     int failedTaskValue = redisService.getSetSize("task:" + taskGuid + ":failed");
                     task.setAssetsCountPropagated((long) successTaskValue);
                     task.setAssetsFailedToPropagate((long) failedTaskValue);
-                    if (task.getAssetsFailedToPropagate() > 0) {
-                        task.setStatus(AtlasTask.Status.FAILED);
-                    } else if (Objects.equals(task.getAssetsCountPropagated(), task.getAssetsCountToPropagate())) {
-                        task.setStatus(AtlasTask.Status.COMPLETE);
+
+                    // Check if the task is complete or failed
+                    if (task.getAssetsCountPropagated() + task.getAssetsFailedToPropagate() == task.getAssetsCountToPropagate()) {
+                        if (task.getAssetsFailedToPropagate() > 0) {
+                            task.setStatus(AtlasTask.Status.FAILED);
+                        } else {
+                            task.setStatus(AtlasTask.Status.COMPLETE);
+                        }
                     } else {
                         // Check if task is stuck
                         String lastUpdated = redisService.getHashValue(taskGuid, "last_updated");
                         if (Objects.nonNull(lastUpdated)) {
                             long lastUpdatedTime = Long.parseLong(lastUpdated);
                             long currentTime = System.currentTimeMillis();
-                            if (currentTime - lastUpdatedTime > 600000) {
+                            if (currentTime - lastUpdatedTime > TASK_STUCK_THRESHOLD) {
                                 task.setStatus(AtlasTask.Status.FAILED);
                             }
                         }
                     }
+                    saveTaskVertex(task);
                 }
-                Thread.sleep(10000); // Sleep for 10 secs before next check
+                Thread.sleep(TASK_UPDATER_THREAD_WAIT_TIME); // Sleep for 1 min before next check
             } catch (InterruptedException e) {
                 LOG.error("TaskUpdater thread interrupted", e);
                 Thread.currentThread().interrupt();
@@ -67,6 +71,41 @@ public class TaskUpdater implements Runnable {
             } catch (Exception e) {
                 LOG.error("Error in TaskUpdater", e);
             }
+        }
+    }
+
+    private void saveTaskVertex(AtlasTask task) {
+        // Get the vertex for this task
+        AtlasVertex taskVertex = registry.getVertex(task.getGuid());
+        if (taskVertex != null) {
+            // Update the status and attempt count via the existing method
+            registry.updateStatus(taskVertex, task);
+
+            // Update the count attributes that aren't handled by updateStatus()
+            setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_PROPAGATED, task.getAssetsCountPropagated());
+            setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_FAILED, task.getAssetsFailedToPropagate());
+
+            // If the task is complete, consider updating end time and time taken
+            if (task.getStatus() == AtlasTask.Status.COMPLETE || task.getStatus() == AtlasTask.Status.FAILED) {
+                if (task.getEndTime() == null) {
+                    task.setEndTime(new Date());
+                    setEncodedProperty(taskVertex, Constants.TASK_END_TIME, task.getEndTime().getTime());
+
+                    if (task.getStartTime() != null) {
+                        long timeTaken = TimeUnit.MILLISECONDS.toSeconds(
+                                task.getEndTime().getTime() - task.getStartTime().getTime());
+                        task.setTimeTakenInSeconds(timeTaken);
+                        setEncodedProperty(taskVertex, Constants.TASK_TIME_TAKEN_IN_SECONDS, timeTaken);
+                    }
+                }
+            }
+
+            // Commit the changes
+            registry.commit();
+            LOG.info("Updated task {} with status {} and counts (success: {}, failed: {})",
+                    task.getGuid(), task.getStatus(), task.getAssetsCountPropagated(), task.getAssetsFailedToPropagate());
+        } else {
+            LOG.warn("Could not find vertex for task {}", task.getGuid());
         }
     }
 }
