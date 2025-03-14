@@ -1,10 +1,12 @@
 package org.apache.atlas.tasks;
 
 import com.esotericsoftware.minlog.Log;
+import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.redis.RedisService;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -23,6 +25,7 @@ public class TaskUpdater implements Runnable {
     private static final long TASK_UPDATER_THREAD_WAIT_TIME = 60000L; // 1 min
     private final TaskRegistry registry;
     private final RedisService redisService;
+    private static final String ATLAS_TASK_UPDATER_LOCK = "atlas:task:updater:lock";
 
     public TaskUpdater(TaskRegistry registry, RedisService redisService) {
         this.registry = registry;
@@ -33,35 +36,45 @@ public class TaskUpdater implements Runnable {
     public void run() {
         while (true) {
             try {
+                if (!redisService.acquireDistributedLock(ATLAS_TASK_UPDATER_LOCK)) {
+                    Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
+                    continue;
+                }
+                LOG.info("TaskQueueWatcher: Acquired distributed lock: {}", ATLAS_TASK_UPDATER_LOCK);
+
                 List<AtlasTask> inProgressTasks = registry.getInProgressTasks();
                 Log.debug("TaskUpdater: Found {} in-progress tasks to update", String.valueOf(inProgressTasks.size()));
 
-                for (AtlasTask task : inProgressTasks) {
-                    String taskGuid = task.getGuid();
-                    int successTaskValue = redisService.getSetSize("task:" + taskGuid + ":success");
-                    int failedTaskValue = redisService.getSetSize("task:" + taskGuid + ":failed");
-                    task.setAssetsCountPropagated((long) successTaskValue);
-                    task.setAssetsFailedToPropagate((long) failedTaskValue);
+                if (CollectionUtils.isEmpty(inProgressTasks)) {
+                    redisService.releaseDistributedLock(ATLAS_TASK_UPDATER_LOCK);
+                } else {
+                    for (AtlasTask task : inProgressTasks) {
+                        String taskGuid = task.getGuid();
+                        int successTaskValue = redisService.getSetSize("task:" + taskGuid + ":success");
+                        int failedTaskValue = redisService.getSetSize("task:" + taskGuid + ":failed");
+                        task.setAssetsCountPropagated((long) successTaskValue);
+                        task.setAssetsFailedToPropagate((long) failedTaskValue);
 
-                    // Check if the task is complete or failed
-                    if (task.getAssetsCountPropagated() + task.getAssetsFailedToPropagate() == task.getAssetsCountToPropagate()) {
-                        if (task.getAssetsFailedToPropagate() > 0) {
-                            task.setStatus(AtlasTask.Status.FAILED);
-                        } else {
-                            task.setStatus(AtlasTask.Status.COMPLETE);
-                        }
-                    } else {
-                        // Check if task is stuck
-                        String lastUpdated = redisService.getHashValue(taskGuid, "last_updated");
-                        if (Objects.nonNull(lastUpdated)) {
-                            long lastUpdatedTime = Long.parseLong(lastUpdated);
-                            long currentTime = System.currentTimeMillis();
-                            if (currentTime - lastUpdatedTime > TASK_STUCK_THRESHOLD) {
+                        // Check if the task is complete or failed
+                        if (task.getAssetsCountPropagated() + task.getAssetsFailedToPropagate() == task.getAssetsCountToPropagate()) {
+                            if (task.getAssetsFailedToPropagate() > 0) {
                                 task.setStatus(AtlasTask.Status.FAILED);
+                            } else {
+                                task.setStatus(AtlasTask.Status.COMPLETE);
+                            }
+                        } else {
+                            // Check if task is stuck
+                            String lastUpdated = redisService.getHashValue(taskGuid, "last_updated");
+                            if (Objects.nonNull(lastUpdated)) {
+                                long lastUpdatedTime = Long.parseLong(lastUpdated);
+                                long currentTime = System.currentTimeMillis();
+                                if (currentTime - lastUpdatedTime > TASK_STUCK_THRESHOLD) {
+                                    task.setStatus(AtlasTask.Status.FAILED);
+                                }
                             }
                         }
+                        saveTaskVertex(task);
                     }
-                    saveTaskVertex(task);
                 }
                 Thread.sleep(TASK_UPDATER_THREAD_WAIT_TIME); // Sleep for 1 min before next check
             } catch (InterruptedException e) {
@@ -70,6 +83,8 @@ public class TaskUpdater implements Runnable {
                 break;
             } catch (Exception e) {
                 LOG.error("Error in TaskUpdater", e);
+            } finally {
+                redisService.releaseDistributedLock(ATLAS_TASK_UPDATER_LOCK);
             }
         }
     }

@@ -75,14 +75,14 @@ public class TaskQueueWatcherV2 implements Runnable {
 
     public void shutdown() {
         shouldRun.set(false);
-        LOG.info("TaskQueueWatcher: Shutdown");
+        LOG.info("TaskQueueWatcherV2: Shutdown");
     }
 
     @Override
     public void run() {
         boolean isMaintenanceMode = AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
         if (isMaintenanceMode) {
-            LOG.info("TaskQueueWatcher: Maintenance mode is enabled, new tasks will not be loaded into the queue until next restart");
+            LOG.info("TaskQueueWatcherV2: Maintenance mode is enabled, new tasks will not be loaded into the queue until next restart");
             return;
         }
         shouldRun.set(true);
