@@ -19,8 +19,8 @@ package org.apache.atlas.tasks;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasConstants;
-import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
@@ -41,36 +41,32 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class TaskQueueWatcherV2 implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(TaskQueueWatcherV2.class);
     private static final TaskExecutor.TaskLogger TASK_LOG = TaskExecutor.TaskLogger.getLogger();
-    private final String zkRoot;
-    private final boolean isActiveActiveHAEnabled;
     private final MetricsRegistry metricRegistry;
 
     private TaskRegistry registry;
     private final ExecutorService executorService;
     private final Map<String, TaskFactory> taskTypeFactoryMap;
     private final TaskManagement.Statistics statistics;
-    private final ICuratorFactory curatorFactory;
+    private static final String KAFKA_TOPIC_CREATION_LOCK = "atlas:kafka:topic:lock";
     private final RedisService redisService;
 
     private static long pollInterval = AtlasConfiguration.TASKS_REQUEUE_POLL_INTERVAL.getLong();
-    private static final String TASK_LOCK = "/task-lock";
     private static final String ATLAS_TASK_LOCK = "atlas:task:lock";
+    private final KafkaNotification kafkaNotification;
 
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
 
     public TaskQueueWatcherV2(ExecutorService executorService, TaskRegistry registry,
                               Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                              ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry) {
+                              RedisService redisService, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification) {
 
         this.registry = registry;
         this.executorService = executorService;
         this.taskTypeFactoryMap = taskTypeFactoryMap;
         this.statistics = statistics;
-        this.curatorFactory = curatorFactory;
         this.redisService = redisService;
-        this.zkRoot = zkRoot;
-        this.isActiveActiveHAEnabled = isActiveActiveHAEnabled;
         this.metricRegistry = metricsRegistry;
+        this.kafkaNotification = kafkaNotification;
     }
 
     public void shutdown() {
@@ -90,6 +86,9 @@ public class TaskQueueWatcherV2 implements Runnable {
         if (LOG.isDebugEnabled()) {
             LOG.debug("TaskQueueWatcher: running {}:{}", Thread.currentThread().getName(), Thread.currentThread().getId());
         }
+
+        ensureKafkaTopicExists();
+
         while (shouldRun.get()) {
             RequestContext requestContext = RequestContext.get();
             requestContext.setMetricRegistry(this.metricRegistry);
@@ -116,6 +115,40 @@ public class TaskQueueWatcherV2 implements Runnable {
             } finally {
                 redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
                 fetcher.clearTasks();
+            }
+        }
+    }
+
+    private void ensureKafkaTopicExists() {
+        boolean lockAcquired = false;
+        try {
+            lockAcquired = redisService.acquireDistributedLock(KAFKA_TOPIC_CREATION_LOCK);
+            if (lockAcquired) {
+                LOG.info("Checking Kafka topic for tag propagation");
+                String topicName = AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_NAME.getString();
+
+                // Get partition count from configuration or default to 10
+                int partitionCount = AtlasConfiguration.NOTIFICATION_OBJ_PROPAGATION_TOPIC_PARTITIONS.getInt();
+
+                if (!kafkaNotification.isKafkaTopicExists(topicName)) {
+                    LOG.info("Creating Kafka topic: {} with {} partitions", topicName, partitionCount);
+                    kafkaNotification.createKafkaTopic(topicName, partitionCount);
+                    LOG.info("Successfully created Kafka topic: {}", topicName);
+                } else {
+                    LOG.info("Kafka topic: {} already exists", topicName);
+                }
+            } else {
+                LOG.info("Another instance is already checking Kafka topic existence");
+            }
+        } catch (Exception e) {
+            LOG.error("Error checking/creating Kafka topic for tag propagation", e);
+        } finally {
+            if (lockAcquired) {
+                try {
+                    redisService.releaseDistributedLock(KAFKA_TOPIC_CREATION_LOCK);
+                } catch (Exception e) {
+                    LOG.error("Error releasing Kafka topic creation lock", e);
+                }
             }
         }
     }

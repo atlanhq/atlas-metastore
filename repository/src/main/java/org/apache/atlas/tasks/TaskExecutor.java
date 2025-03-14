@@ -20,6 +20,7 @@ package org.apache.atlas.tasks;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.service.metrics.MetricsRegistry;
@@ -58,9 +59,11 @@ public class TaskExecutor {
     private Thread watcherThreadV2;
     private Thread updaterThread;
     private RedisService redisService;
+    private final KafkaNotification kafkaNotification;
 
     public TaskExecutor(TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                        ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry) {
+                        ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification) {
+        this.kafkaNotification = kafkaNotification;
         this.taskExecutorService = Executors.newSingleThreadExecutor(new ThreadFactoryBuilder()
                                                                     .setDaemon(true)
                                                                     .setNameFormat(TASK_NAME_FORMAT + Thread.currentThread().getName())
@@ -85,7 +88,7 @@ public class TaskExecutor {
     }
 
     public Thread startWatcherThreadV2() {
-        watcherV2 = new TaskQueueWatcherV2(taskExecutorService, registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot, isActiveActiveHAEnabled, metricRegistry);
+        watcherV2 = new TaskQueueWatcherV2(taskExecutorService, registry, taskTypeFactoryMap, statistics, redisService, metricRegistry, kafkaNotification);
         watcherThreadV2 = new Thread(watcherV2);
         watcherThreadV2.start();
         return watcherThreadV2;

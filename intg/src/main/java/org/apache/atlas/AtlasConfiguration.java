@@ -139,7 +139,8 @@ public enum AtlasConfiguration {
     OTEL_SERVICE_NAME(" OTEL_SERVICE_NAME", "atlas"),
     OTEL_EXPORTER_OTLP_ENDPOINT("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
     ATLAS_BULK_API_MAX_ENTITIES_ALLOWED("atlas.bulk.api.max.entities.allowed", 10000),
-    ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED("atlas.distributed.task.management.enabled", true);
+    ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED("atlas.distributed.task.management.enabled", true),
+    NOTIFICATION_OBJ_PROPAGATION_TOPIC_PARTITIONS("atlas.obj.prop.topic.partitions", 10);
 
 
 

@@ -2,6 +2,7 @@ package org.apache.atlas.tasks;
 
 import com.esotericsoftware.minlog.Log;
 import org.apache.atlas.AtlasConstants;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -40,7 +41,7 @@ public class TaskUpdater implements Runnable {
                     Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
                     continue;
                 }
-                LOG.info("TaskQueueWatcher: Acquired distributed lock: {}", ATLAS_TASK_UPDATER_LOCK);
+                LOG.info("TaskUpdater: Acquired distributed lock: {}", ATLAS_TASK_UPDATER_LOCK);
 
                 List<AtlasTask> inProgressTasks = registry.getInProgressTasks();
                 Log.debug("TaskUpdater: Found {} in-progress tasks to update", String.valueOf(inProgressTasks.size()));
