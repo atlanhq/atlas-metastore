@@ -57,10 +57,6 @@ public class AuthPolicyValidator {
         add(POLICY_SUB_CATEGORY_PRODUCT);
     }};
 
-    private static final Set<String> AI_POLICY_VALID_SUB_CATEGORIES = new HashSet<String>(){{
-        add(POLICY_SUB_CATEGORY_AI);
-    }};
-
     private static final Set<String> PERSONA_METADATA_POLICY_ACTIONS = new HashSet<String>(){{
         add("persona-asset-read");
         add("persona-asset-update");
