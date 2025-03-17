@@ -107,10 +107,6 @@ public class AuthPolicyValidator {
         add("persona-aiasset-remove-classification"); 
     }};
 
-<<<<<<< HEAD
-
-=======
->>>>>>> aigov-52-persona-purpose-beta
     private static final Map<String, Set<String>> PERSONA_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
         put(POLICY_SUB_CATEGORY_METADATA, PERSONA_METADATA_POLICY_ACTIONS);
         put(POLICY_SUB_CATEGORY_DATA, DATA_POLICY_ACTIONS);
