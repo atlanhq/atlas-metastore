@@ -19,6 +19,8 @@
 
 package org.apache.atlas.plugin.util;
 
+import org.apache.atlas.plugin.model.GroupInfo;
+import org.apache.atlas.plugin.model.UserInfo;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
@@ -59,7 +61,7 @@ public class RangerUserStore implements Serializable {
         setUserGroupMapping(userGroups);
         buildMap(users, groups);
     }
-    
+
     public String getServiceName() {
         return serviceName;
     }
@@ -67,7 +69,7 @@ public class RangerUserStore implements Serializable {
     public void setServiceName(String serviceName) {
         this.serviceName = serviceName;
     }
-    
+
     public Long getUserStoreVersion() {
         return userStoreVersion;
     }
