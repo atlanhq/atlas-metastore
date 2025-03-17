@@ -435,7 +435,7 @@
       "actions": ["entity-read"]
     }
   ],
-  "persona-domain-update": [
+  "persona-domain-update": [ 
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
