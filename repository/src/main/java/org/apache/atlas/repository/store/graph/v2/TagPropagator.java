@@ -270,7 +270,7 @@ public class TagPropagator {
 
             LOG.info(String.format("Number of edges to be deleted : %s for classification vertex with id : %s", propagatedEdgesSize, classificationVertexId));
             for (AtlasEdge edge : propagatedEdges) {
-                List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, edge.getIdForDisplay());
+                List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(edge.getOutVertex(), graph, CLASSIFICATION_PROPAGATION_DELETE, classificationVertexId);
                 try {
                     kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
                 } catch (NotificationException e) {
