@@ -145,7 +145,7 @@ public final class Constants {
 
     public static final String AI_APPLICATION       = "AIApplication";
     public static final String AI_MODEL             = "AIModel";
-
+    
     public static final String STAKEHOLDER_ENTITY_TYPE       = "Stakeholder";
     public static final String STAKEHOLDER_TITLE_ENTITY_TYPE = "StakeholderTitle";
 

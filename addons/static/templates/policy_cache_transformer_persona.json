@@ -45,12 +45,10 @@
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:{entity-type}",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
         "end-one-entity:{entity}/*",
-
         "end-two-entity-type:Catalog",
         "end-two-entity-type:Connection",
         "end-two-entity-type:Process",
@@ -74,7 +72,6 @@
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:Catalog",
         "end-one-entity-type:Connection",
         "end-one-entity-type:Process",
@@ -82,7 +79,6 @@
         "end-one-entity-type:ProcessExecution",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:{entity-type}",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}",
@@ -152,7 +148,9 @@
         "entity-classification:*",
         "entity-business-metadata:*"
       ],
-      "actions": ["entity-update-business-metadata"]
+      "actions": [
+        "entity-update-business-metadata"
+      ]
     }
   ],
   "persona-entity-add-classification": [
@@ -183,7 +181,9 @@
         "entity-classification:*",
         "classification:*"
       ],
-      "actions": ["entity-update-classification"]
+      "actions": [
+        "entity-update-classification"
+      ]
     }
   ],
   "persona-entity-remove-classification": [
@@ -209,17 +209,17 @@
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:AtlasGlossaryTerm",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:{entity-type}",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}",
         "end-two-entity:{entity}/*"
       ],
-      "actions": ["add-relationship"]
+      "actions": [
+        "add-relationship"
+      ]
     }
   ],
   "persona-remove-terms": [
@@ -228,22 +228,19 @@
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:AtlasGlossaryTerm",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:{entity-type}",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}",
         "end-two-entity:{entity}/*"
       ],
-      "actions": ["remove-relationship"]
+      "actions": [
+        "remove-relationship"
+      ]
     }
   ],
-
-
-
   "persona-glossary-read": [
     {
       "policyType": "ACCESS",
@@ -255,27 +252,31 @@
         "entity-type:AtlasGlossaryCategory",
         "entity-classification:*"
       ],
-      "actions": ["entity-read"]
+      "actions": [
+        "entity-read"
+      ]
     },
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:AtlasGlossary",
         "end-one-entity-type:AtlasGlossaryTerm",
         "end-one-entity-type:AtlasGlossaryCategory",
         "end-one-entity-classification:*",
         "end-one-entity:*{entity}",
-
         "end-two-entity-type:AtlasGlossary",
         "end-two-entity-type:AtlasGlossaryTerm",
         "end-two-entity-type:AtlasGlossaryCategory",
         "end-two-entity-classification:*",
         "end-two-entity:*{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-glossary-update": [
@@ -289,41 +290,47 @@
         "entity-type:AtlasGlossaryCategory",
         "entity-classification:*"
       ],
-      "actions": ["entity-update"]
+      "actions": [
+        "entity-update"
+      ]
     },
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:AtlasGlossary",
         "end-one-entity-type:AtlasGlossaryTerm",
         "end-one-entity-type:AtlasGlossaryCategory",
         "end-one-entity-classification:*",
         "end-one-entity:*{entity}",
-
         "end-two-entity-type:*",
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:*",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:*",
         "end-two-entity-classification:*",
         "end-two-entity:*{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-glossary-create": [
@@ -337,7 +344,9 @@
         "entity-type:AtlasGlossaryCategory",
         "entity-classification:*"
       ],
-      "actions": ["entity-create"]
+      "actions": [
+        "entity-create"
+      ]
     }
   ],
   "persona-glossary-delete": [
@@ -351,7 +360,9 @@
         "entity-type:AtlasGlossaryCategory",
         "entity-classification:*"
       ],
-      "actions": ["entity-delete"]
+      "actions": [
+        "entity-delete"
+      ]
     }
   ],
   "persona-glossary-update-custom-metadata": [
@@ -366,7 +377,9 @@
         "entity-classification:*",
         "entity-business-metadata:*"
       ],
-      "actions": ["entity-update-business-metadata"]
+      "actions": [
+        "entity-update-business-metadata"
+      ]
     }
   ],
   "persona-glossary-add-classifications": [
@@ -399,7 +412,9 @@
         "entity-classification:*",
         "classification:*"
       ],
-      "actions": ["entity-update-classification"]
+      "actions": [
+        "entity-update-classification"
+      ]
     }
   ],
   "persona-glossary-delete-classifications": [
@@ -420,7 +435,6 @@
       ]
     }
   ],
-
   "persona-domain-read": [
     {
       "policyType": "ACCESS",
@@ -432,10 +446,12 @@
         "entity-type:DataProduct",
         "entity-classification:*"
       ],
-      "actions": ["entity-read"]
+      "actions": [
+        "entity-read"
+      ]
     }
   ],
-  "persona-domain-update": [ 
+  "persona-domain-update": [
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
@@ -472,58 +488,61 @@
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink Stakeholder to this Domain",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
-
         "end-two-entity-type:Stakeholder",
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink any Stakeholder Title to this Domain's Stakeholder",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:StakeholderTitle",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:Stakeholder",
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink any DataDomain, DataProduct OR DataContract to this Domain",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataDomain",
         "end-two-entity-type:DataProduct",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
         "end-one-entity:{entity}/*",
-
         "end-two-entity-type:DataDomain",
         "end-two-entity-type:DataProduct",
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -531,19 +550,21 @@
       "description": "Link/unlink any DataDomain, DataProduct OR DataContract to this Domain",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataDomain",
         "end-one-entity-type:DataProduct",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:DataDomain",
         "end-two-entity-type:DataProduct",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}",
         "end-two-entity:{entity}/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -551,16 +572,18 @@
       "description": "Link/unlink resource to this Domain",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
-
         "end-two-entity-type:Resource",
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -568,16 +591,18 @@
       "description": "Link/unlink term to this Sub Domain",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:AtlasGlossaryTerm",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:DataDomain",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-business-update-metadata": [
@@ -590,10 +615,11 @@
         "entity-classification:*",
         "entity-business-metadata:*"
       ],
-      "actions": ["entity-update-business-metadata"]
+      "actions": [
+        "entity-update-business-metadata"
+      ]
     }
   ],
-
   "persona-domain-sub-domain-read": [
     {
       "policyResourceCategory": "ENTITY",
@@ -603,7 +629,9 @@
         "entity-type:DataDomain",
         "entity-classification:*"
       ],
-      "actions": ["entity-read"]
+      "actions": [
+        "entity-read"
+      ]
     }
   ],
   "persona-domain-sub-domain-create": [
@@ -615,7 +643,9 @@
         "entity-type:DataDomain",
         "entity-classification:*"
       ],
-      "actions": ["entity-create"]
+      "actions": [
+        "entity-create"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -623,18 +653,20 @@
       "description": "Link/unlink this DataProduct to any parent Domain",
       "resources": [
         "relationship-type:*",
-        
         "end-one-entity:{entity}/*",
         "end-one-entity:{entity}",
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
-        
         "end-two-entity:{entity}/*",
         "end-one-entity:{entity}",
         "end-two-entity-type:DataDomain",
         "end-two-entity-classification:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-sub-domain-update": [
@@ -658,7 +690,6 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "description": "Create Stakeholder for Sub Domains",
-
       "resources": [
         "entity:default/*/{entity}/*",
         "entity-type:Stakeholder",
@@ -675,37 +706,39 @@
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink Stakeholder to Sub Domains",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}/*domain/*",
-
         "end-two-entity-type:Stakeholder",
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink any Stakeholder Title to sub-domains's Stakeholder",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:StakeholderTitle",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:Stakeholder",
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -713,16 +746,18 @@
       "description": "Link/unlink resource to this Sub Domain",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}/*domain/*",
-
         "end-two-entity-type:Resource",
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -730,16 +765,18 @@
       "description": "Link/unlink term to this Sub Domain",
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:AtlasGlossaryTerm",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:DataDomain",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}/*domain/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-sub-domain-delete": [
@@ -751,7 +788,9 @@
         "entity-type:DataDomain",
         "entity-classification:*"
       ],
-      "actions": ["entity-delete"]
+      "actions": [
+        "entity-delete"
+      ]
     }
   ],
   "persona-domain-sub-domain-business-update-metadata": [
@@ -764,10 +803,11 @@
         "entity-classification:*",
         "entity-business-metadata:*"
       ],
-      "actions": ["entity-update-business-metadata"]
+      "actions": [
+        "entity-update-business-metadata"
+      ]
     }
   ],
-
   "persona-domain-product-read": [
     {
       "policyResourceCategory": "ENTITY",
@@ -777,7 +817,9 @@
         "entity-type:DataProduct",
         "entity-classification:*"
       ],
-      "actions": ["entity-read"]
+      "actions": [
+        "entity-read"
+      ]
     }
   ],
   "persona-domain-product-create": [
@@ -789,7 +831,9 @@
         "entity-type:DataProduct",
         "entity-classification:*"
       ],
-      "actions": ["entity-create"]
+      "actions": [
+        "entity-create"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -797,36 +841,38 @@
       "description": "Link/unlink this DataProduct to any parent Domain",
       "resources": [
         "relationship-type:*",
-        
         "end-one-entity:{entity}/*",
         "end-one-entity:{entity}",
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
-        
         "end-two-entity:{entity}/*",
         "end-two-entity-type:DataProduct",
         "end-two-entity-classification:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink any Asset to this DataProduct",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:Asset",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:DataProduct",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}/*product/*"
       ],
-
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-product-update": [
@@ -850,39 +896,39 @@
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink any Asset to this DataProduct",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:Asset",
         "end-one-entity-classification:*",
         "end-one-entity:*",
-
         "end-two-entity-type:DataProduct",
         "end-two-entity-classification:*",
         "end-two-entity:{entity}/*product/*"
       ],
-
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
       "description": "Link/unlink any Asset to this DataProduct",
-
       "resources": [
         "relationship-type:*",
-
         "end-one-entity-type:DataProduct",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}/*product/*",
-
         "end-two-entity-type:Asset",
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-product-delete": [
@@ -894,7 +940,9 @@
         "entity-type:DataProduct",
         "entity-classification:*"
       ],
-      "actions": ["entity-delete"]
+      "actions": [
+        "entity-delete"
+      ]
     }
   ],
   "persona-domain-product-business-update-metadata": [
@@ -907,10 +955,11 @@
         "entity-classification:*",
         "entity-business-metadata:*"
       ],
-      "actions": ["entity-update-business-metadata"]
+      "actions": [
+        "entity-update-business-metadata"
+      ]
     }
   ],
-
   "select": [
     {
       "policyType": "ACCESS",
@@ -920,7 +969,9 @@
         "entity:{entity}/*",
         "entity-type:{entity-type}"
       ],
-      "actions": ["select"]
+      "actions": [
+        "select"
+      ]
     }
   ],
 
