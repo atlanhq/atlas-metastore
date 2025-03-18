@@ -1060,10 +1060,20 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:*",
-        "entity:default/ai/aiapplication/*",
         "entity:default/ai/aimodel/*",
-        "entity-type:AIApplication",
         "entity-type:AIModel",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create", "entity-update"]
+    }
+  ],
+  "persona-aiasset-app-create": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:default/ai/aiapplication/*",
+        "entity-type:AIApplication",
         "entity-classification:*"
       ],
       "actions": ["entity-create", "entity-update"]
