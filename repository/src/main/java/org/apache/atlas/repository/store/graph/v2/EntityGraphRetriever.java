@@ -69,6 +69,7 @@ import org.apache.atlas.v1.model.instance.Id;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.tinkerpop.gremlin.structure.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -1081,6 +1082,17 @@ public class EntityGraphRetriever {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+    private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
+        Map<String, Map<String, AtlasAttribute>> relationships = entityType.getRelationshipAttributes();
+        Map<String, Set<String>> edgeNames = new HashMap<>();
+        relationships.forEach((k,v) -> {
+            v.forEach((k1,v1) -> {
+                edgeNames.putIfAbsent(k1, new HashSet<>());
+                edgeNames.get(k1).add(k);
+            });
+        });
+        return edgeNames;
     }
 
     private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
