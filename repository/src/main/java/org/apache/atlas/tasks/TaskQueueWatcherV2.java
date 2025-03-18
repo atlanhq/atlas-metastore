@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -99,12 +100,14 @@ public class TaskQueueWatcherV2 implements Runnable {
                     continue;
                 }
                 LOG.info("TaskQueueWatcher: Acquired distributed lock: {}", ATLAS_TASK_LOCK);
-
-                List<AtlasTask> tasks = fetcher.getTasks();
-                if (CollectionUtils.isNotEmpty(tasks)) {
-                    submitAll(tasks);
-                } else {
-                    redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                List<AtlasTask> inProgressTasks = registry.getInProgressTasksES();
+                if(inProgressTasks.isEmpty()){
+                    List<AtlasTask> tasks = fetcher.getTasks();
+                    if (CollectionUtils.isNotEmpty(tasks)) {
+                        submitAll(Collections.singletonList(tasks.get(0)));
+                    } else {
+                        redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                    }
                 }
                 Thread.sleep(pollInterval);
             } catch (InterruptedException interruptedException) {

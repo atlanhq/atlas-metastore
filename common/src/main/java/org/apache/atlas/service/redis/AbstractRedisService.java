@@ -74,12 +74,12 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public int getSetSize(String key) {
-        return redisCacheClient.getSet(key).size();
+        return redisCacheClient.getSet(convertToNamespace(key)).size();
     }
 
     @Override
     public String getHashValue(String key, String field) {
-        return (String) redisCacheClient.getMap(key).get(field);
+        return (String) redisCacheClient.getMap(convertToNamespace(key)).get(field);
     }
 
     @Override

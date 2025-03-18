@@ -43,7 +43,7 @@ public class TaskUpdater implements Runnable {
                 }
                 LOG.info("TaskUpdater: Acquired distributed lock: {}", ATLAS_TASK_UPDATER_LOCK);
 
-                List<AtlasTask> inProgressTasks = registry.getInProgressTasks();
+                List<AtlasTask> inProgressTasks = registry.getInProgressTasksES();
                 Log.debug("TaskUpdater: Found {} in-progress tasks to update", String.valueOf(inProgressTasks.size()));
 
                 if (CollectionUtils.isEmpty(inProgressTasks)) {
@@ -55,12 +55,13 @@ public class TaskUpdater implements Runnable {
                         int failedTaskValue = redisService.getSetSize("task:" + taskGuid + ":failed");
                         task.setAssetsCountPropagated((long) successTaskValue);
                         task.setAssetsFailedToPropagate((long) failedTaskValue);
-
+                        LOG.info("TaskUpdater_> task currently when in taskUpdater -> {}", task);
                         // Check if the task is complete or failed
                         if (task.getAssetsCountPropagated() + task.getAssetsFailedToPropagate() == task.getAssetsCountToPropagate()) {
                             if (task.getAssetsFailedToPropagate() > 0) {
                                 task.setStatus(AtlasTask.Status.FAILED);
                             } else {
+                                LOG.info("TaskUpdater_> STATUS MARKED AS COMPLETE");
                                 task.setStatus(AtlasTask.Status.COMPLETE);
                             }
                         } else {

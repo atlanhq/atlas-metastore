@@ -26,6 +26,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.tasks.AbstractTask;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -57,6 +58,7 @@ public abstract class ClassificationTask extends AbstractTask {
     public static final String PARAM_IS_TERM_ENTITY_EDGE       = "isTermEntityEdge";
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE = "previousRestrictPropagationThroughLineage";
 
+    private final TransactionInterceptHelper transactionInterceptHelper;
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY = "previousRestrictPropagationThroughHierarchy";
   
     protected final AtlasGraph             graph;
@@ -68,13 +70,14 @@ public abstract class ClassificationTask extends AbstractTask {
                               AtlasGraph graph,
                               EntityGraphMapper entityGraphMapper,
                               DeleteHandlerDelegate deleteDelegate,
-                              AtlasRelationshipStore relationshipStore) {
+                              AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
         super(task);
 
         this.graph             = graph;
         this.entityGraphMapper = entityGraphMapper;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
+        this.transactionInterceptHelper = transactionInterceptHelper;
     }
 
     @Override
@@ -102,8 +105,6 @@ public abstract class ClassificationTask extends AbstractTask {
             setStatus(IN_PROGRESS);
 
             run(params);
-
-            setStatus(COMPLETE);
         } catch (AtlasBaseException e) {
             LOG.error("Task: {}: Error performing task!", getTaskGuid(), e);
 
@@ -112,7 +113,7 @@ public abstract class ClassificationTask extends AbstractTask {
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
-            graph.commit();
+            transactionInterceptHelper.intercept();
         }
 
         return getStatus();

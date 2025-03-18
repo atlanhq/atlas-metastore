@@ -23,6 +23,7 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.type.AtlasType;
@@ -61,9 +62,12 @@ public class TaskExecutor {
     private RedisService redisService;
     private final KafkaNotification kafkaNotification;
 
+    private final TransactionInterceptHelper transactionInterceptHelper;
+
     public TaskExecutor(TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                        ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification) {
+                        ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper) {
         this.kafkaNotification = kafkaNotification;
+        this.transactionInterceptHelper = transactionInterceptHelper;
         this.taskExecutorService = Executors.newSingleThreadExecutor(new ThreadFactoryBuilder()
                                                                     .setDaemon(true)
                                                                     .setNameFormat(TASK_NAME_FORMAT + Thread.currentThread().getName())

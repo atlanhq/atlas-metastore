@@ -23,6 +23,7 @@ import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.repository.store.graph.v2.TagPropagator;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.tasks.TaskFactory;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -76,14 +77,16 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
     private final DeleteHandlerDelegate  deleteDelegate;
     private final AtlasRelationshipStore relationshipStore;
     private final TagPropagator tagPropagator;
+    private final TransactionInterceptHelper transactionInterceptHelper;
 
     @Inject
-    public ClassificationPropagateTaskFactory(AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TagPropagator tagPropagator) {
+    public ClassificationPropagateTaskFactory(TransactionInterceptHelper transactionInterceptHelper, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TagPropagator tagPropagator) {
         this.graph             = graph;
         this.entityGraphMapper = entityGraphMapper;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
         this.tagPropagator = tagPropagator;
+        this.transactionInterceptHelper = transactionInterceptHelper;
     }
 
     public org.apache.atlas.tasks.AbstractTask create(AtlasTask task) {
@@ -92,28 +95,28 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
 
         switch (taskType) {
             case CLASSIFICATION_PROPAGATION_ADD:
-                return new ClassificationPropagationTasks.Add(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.Add(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLASSIFICATION_PROPAGATION_TEXT_UPDATE:
-                return new ClassificationPropagationTasks.UpdateText(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.UpdateText(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLASSIFICATION_PROPAGATION_DELETE:
-                return new ClassificationPropagationTasks.Delete(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.Delete(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLASSIFICATION_ONLY_PROPAGATION_DELETE: // deperecated
-                return new ClassificationPropagationTasks.DeleteOnlyPropagations(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.DeleteOnlyPropagations(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLASSIFICATION_ONLY_PROPAGATION_DELETE_ON_HARD_DELETE: // deperecated
-                return new ClassificationPropagationTasks.DeleteOnlyPropagationsOnHardDelete(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.DeleteOnlyPropagationsOnHardDelete(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLASSIFICATION_REFRESH_PROPAGATION:
-                return new ClassificationPropagationTasks.RefreshPropagation(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.RefreshPropagation(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE:
-                return new ClassificationPropagationTasks.UpdateRelationship(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.UpdateRelationship(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             case CLEANUP_CLASSIFICATION_PROPAGATION:
-                return new ClassificationPropagationTasks.CleanUpClassificationPropagation(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.CleanUpClassificationPropagation(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
 
             default:
                 LOG.warn("Type: {} - {} not found!. The task will be ignored.", taskType, taskGuid);
