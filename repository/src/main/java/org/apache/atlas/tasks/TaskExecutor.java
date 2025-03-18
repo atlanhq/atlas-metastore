@@ -108,7 +108,7 @@ public class TaskExecutor {
     }
 
     public Thread startUpdaterThread() {
-        TaskUpdater updater = new TaskUpdater(registry, redisService);
+        TaskUpdater updater = new TaskUpdater(registry, redisService, transactionInterceptHelper);
         updaterThread = new Thread(updater);
         updaterThread.start();
         return updaterThread;

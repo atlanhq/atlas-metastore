@@ -12,6 +12,8 @@ public interface RedisService {
 
   String getHashValue(String key, String field);
 
+  void expireHash(String key);
+
   String getValue(String key);
 
   String putValue(String key, String value);
@@ -22,4 +24,5 @@ public interface RedisService {
 
   Logger getLogger();
 
+  void expireKey(String key);
 }

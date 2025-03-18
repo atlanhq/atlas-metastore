@@ -2,10 +2,10 @@ package org.apache.atlas.tasks;
 
 import com.esotericsoftware.minlog.Log;
 import org.apache.atlas.AtlasConstants;
-import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
@@ -26,11 +26,13 @@ public class TaskUpdater implements Runnable {
     private static final long TASK_UPDATER_THREAD_WAIT_TIME = 60000L; // 1 min
     private final TaskRegistry registry;
     private final RedisService redisService;
+    private final TransactionInterceptHelper transactionInterceptHelper;
     private static final String ATLAS_TASK_UPDATER_LOCK = "atlas:task:updater:lock";
 
-    public TaskUpdater(TaskRegistry registry, RedisService redisService) {
+    public TaskUpdater(TaskRegistry registry, RedisService redisService, TransactionInterceptHelper transactionInterceptHelper) {
         this.registry = registry;
         this.redisService = redisService;
+        this.transactionInterceptHelper = transactionInterceptHelper;
     }
 
     @Override
@@ -55,25 +57,13 @@ public class TaskUpdater implements Runnable {
                         int failedTaskValue = redisService.getSetSize("task:" + taskGuid + ":failed");
                         task.setAssetsCountPropagated((long) successTaskValue);
                         task.setAssetsFailedToPropagate((long) failedTaskValue);
-                        LOG.info("TaskUpdater_> task currently when in taskUpdater -> {}", task);
+                        LOG.info("TaskUpdater-> task currently when in taskUpdater -> {}", task);
                         // Check if the task is complete or failed
                         if (task.getAssetsCountPropagated() + task.getAssetsFailedToPropagate() == task.getAssetsCountToPropagate()) {
-                            if (task.getAssetsFailedToPropagate() > 0) {
-                                task.setStatus(AtlasTask.Status.FAILED);
-                            } else {
-                                LOG.info("TaskUpdater_> STATUS MARKED AS COMPLETE");
-                                task.setStatus(AtlasTask.Status.COMPLETE);
-                            }
+                            markTaskAsCompleted(task);
                         } else {
                             // Check if task is stuck
-                            String lastUpdated = redisService.getHashValue(taskGuid, "last_updated");
-                            if (Objects.nonNull(lastUpdated)) {
-                                long lastUpdatedTime = Long.parseLong(lastUpdated);
-                                long currentTime = System.currentTimeMillis();
-                                if (currentTime - lastUpdatedTime > TASK_STUCK_THRESHOLD) {
-                                    task.setStatus(AtlasTask.Status.FAILED);
-                                }
-                            }
+                            handleForTaskExpiryTime(task, taskGuid);
                         }
                         saveTaskVertex(task);
                     }
@@ -89,6 +79,37 @@ public class TaskUpdater implements Runnable {
                 redisService.releaseDistributedLock(ATLAS_TASK_UPDATER_LOCK);
             }
         }
+    }
+
+    private void handleForTaskExpiryTime(AtlasTask task, String taskGuid) {
+        String lastUpdated = redisService.getHashValue(taskGuid, "last_updated");
+        if (Objects.nonNull(lastUpdated)) {
+            long lastUpdatedTime = Long.parseLong(lastUpdated);
+            long currentTime = System.currentTimeMillis();
+            if (currentTime - lastUpdatedTime > TASK_STUCK_THRESHOLD) {
+                task.setStatus(AtlasTask.Status.FAILED);
+                LOG.info("TaskUpdater-> Task expired, status marked as FAILED for task {}", task.getGuid());
+                expireRedisKeys(taskGuid);
+            }
+        }
+    }
+
+    private void markTaskAsCompleted(AtlasTask task) {
+        if (task.getAssetsFailedToPropagate() > 0) {
+            LOG.info("TaskUpdater-> STATUS MARKED AS FAILED for task {}", task.getGuid());
+            task.setStatus(AtlasTask.Status.FAILED);
+        } else {
+            LOG.info("TaskUpdater-> STATUS MARKED AS COMPLETE for task {}", task.getGuid());
+            task.setStatus(AtlasTask.Status.COMPLETE);
+        }
+        // Expire the Redis keys
+        expireRedisKeys(task.getGuid());
+    }
+
+    private void expireRedisKeys(String taskGuid) {
+        redisService.expireKey("task:" + taskGuid + ":success");
+        redisService.expireKey("task:" + taskGuid + ":failed");
+        redisService.expireHash(taskGuid);
     }
 
     private void saveTaskVertex(AtlasTask task) {
@@ -118,7 +139,7 @@ public class TaskUpdater implements Runnable {
             }
 
             // Commit the changes
-            registry.commit();
+            transactionInterceptHelper.intercept();
             LOG.info("Updated task {} with status {} and counts (success: {}, failed: {})",
                     task.getGuid(), task.getStatus(), task.getAssetsCountPropagated(), task.getAssetsFailedToPropagate());
         } else {

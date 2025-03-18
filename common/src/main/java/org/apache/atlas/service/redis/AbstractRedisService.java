@@ -12,6 +12,7 @@ import org.redisson.config.ReadMode;
 import javax.annotation.PreDestroy;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -80,6 +81,16 @@ public abstract class AbstractRedisService implements RedisService {
     @Override
     public String getHashValue(String key, String field) {
         return (String) redisCacheClient.getMap(convertToNamespace(key)).get(field);
+    }
+
+    @Override
+    public void expireKey(String key) {
+        redisCacheClient.getBucket(convertToNamespace(key)).expire(Duration.ofSeconds(60));
+    }
+
+    @Override
+    public void expireHash(String key) {
+        redisCacheClient.getMap(convertToNamespace(key)).expire(Duration.ofSeconds(60));
     }
 
     @Override
