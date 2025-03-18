@@ -20,8 +20,8 @@ package org.apache.atlas.discovery;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasSearchResultScrubRequest;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.*;
 import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasFullTextResult;
@@ -1257,7 +1257,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         )));
         mustClauses.add(mustClause);
 
-        List<Map<String, Object>>filterClauses = new ArrayList<>();
+        List<Map<String, Object>> filterClauses = new ArrayList<>();
         filterClauses.add(getMap("terms", getMap("_index", Collections.singletonList(VERTEX_INDEX_NAME))));
 
         Map<String, Object> boolQuery = new HashMap<>();

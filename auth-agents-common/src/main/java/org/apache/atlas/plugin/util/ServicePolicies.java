@@ -19,10 +19,13 @@
 
 package org.apache.atlas.plugin.util;
 
-import com.fasterxml.jackson.databind.annotation.JsonSerialize;
+
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import org.apache.atlas.authorizer.store.PoliciesStore;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+import com.fasterxml.jackson.annotation.JsonInclude;
 
 import org.apache.atlas.plugin.model.RangerPolicy;
 import org.apache.atlas.plugin.model.RangerPolicyDelta;
@@ -33,14 +36,14 @@ import org.apache.atlas.plugin.policyengine.RangerPolicyEngineImpl;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 @XmlRootElement
 @XmlAccessorType(XmlAccessType.FIELD)
 public class ServicePolicies implements java.io.Serializable {
@@ -55,6 +58,7 @@ public class ServicePolicies implements java.io.Serializable {
 	private RangerServiceDef   serviceDef;
 	private String             auditMode = RangerPolicyEngine.AUDIT_DEFAULT;
 	private TagPolicies        tagPolicies;
+	private AbacPolicies       abacPolicies;
 	private Map<String, SecurityZoneInfo> securityZones;
 	private List<RangerPolicyDelta> policyDeltas;
 	private Map<String, String> serviceConfig;
@@ -160,6 +164,14 @@ public class ServicePolicies implements java.io.Serializable {
 		this.tagPolicies = tagPolicies;
 	}
 
+	public AbacPolicies getAbacPolicies() {
+		return abacPolicies;
+	}
+
+	public void setAbacPolicies(AbacPolicies abacPolicies) {
+		this.abacPolicies = abacPolicies;
+	}
+
 	public Map<String, SecurityZoneInfo> getSecurityZones() { return securityZones; }
 
 	public void setSecurityZones(Map<String, SecurityZoneInfo> securityZones) {
@@ -185,7 +197,7 @@ public class ServicePolicies implements java.io.Serializable {
 
 	public void setPolicyDeltas(List<RangerPolicyDelta> policyDeltas) { this.policyDeltas = policyDeltas; }
 
-	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
+	@JsonInclude(JsonInclude.Include.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class TagPolicies implements java.io.Serializable {
@@ -303,7 +315,100 @@ public class ServicePolicies implements java.io.Serializable {
 		}
 	}
 
-	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
+	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@XmlRootElement
+	@XmlAccessorType(XmlAccessType.FIELD)
+	public static class AbacPolicies implements java.io.Serializable {
+		private static final long serialVersionUID = 1L;
+
+		private String serviceName;
+		private String serviceId;
+		private Long policyVersion;
+		private Date policyUpdateTime;
+		private List<RangerPolicy> policies;
+		private RangerServiceDef serviceDef;
+		private String auditMode = RangerPolicyEngine.AUDIT_DEFAULT;
+		private Map<String, String> serviceConfig;
+
+		public String getServiceName() {
+			return serviceName;
+		}
+
+		public void setServiceName(String serviceName) {
+			this.serviceName = serviceName;
+		}
+
+		public String getServiceId() {
+			return serviceId;
+		}
+
+		public void setServiceId(String serviceId) {
+			this.serviceId = serviceId;
+		}
+
+		public Long getPolicyVersion() {
+			return policyVersion;
+		}
+
+		public void setPolicyVersion(Long policyVersion) {
+			this.policyVersion = policyVersion;
+		}
+
+		public Date getPolicyUpdateTime() {
+			return policyUpdateTime;
+		}
+
+		public void setPolicyUpdateTime(Date policyUpdateTime) {
+			this.policyUpdateTime = policyUpdateTime;
+		}
+
+		public List<RangerPolicy> getPolicies() {
+			return policies == null ? new ArrayList<>() : policies;
+		}
+
+		public void setPolicies(List<RangerPolicy> policies) {
+			this.policies = policies;
+		}
+
+		public RangerServiceDef getServiceDef() {
+			return serviceDef;
+		}
+
+		public void setServiceDef(RangerServiceDef serviceDef) {
+			this.serviceDef = serviceDef;
+		}
+
+		public String getAuditMode() {
+			return auditMode;
+		}
+
+		public void setAuditMode(String auditMode) {
+			this.auditMode = auditMode;
+		}
+
+		public Map<String, String> getServiceConfig() {
+			return serviceConfig;
+		}
+
+		public void setServiceConfig(Map<String, String> serviceConfig) {
+			this.serviceConfig = serviceConfig;
+		}
+
+		@Override
+		public String toString() {
+			return "serviceName=" + serviceName + ", "
+					+ "serviceId=" + serviceId + ", "
+					+ "policyVersion=" + policyVersion + ", "
+					+ "policyUpdateTime=" + policyUpdateTime + ", "
+					+ "policies=" + policies + ", "
+					+ "serviceDef=" + serviceDef + ", "
+					+ "auditMode=" + auditMode
+					+ "serviceConfig=" + serviceConfig
+					;
+		}
+	}
+
+	@JsonInclude(JsonInclude.Include.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class SecurityZoneInfo implements java.io.Serializable {
@@ -374,6 +479,28 @@ public class ServicePolicies implements java.io.Serializable {
 			ret.setTagPolicies(tagPolicies);
 		}
 
+		if (source.getAbacPolicies() != null) {
+			AbacPolicies abacPolicies = copyHeader(source.getAbacPolicies(), null);
+			ret.setAbacPolicies(abacPolicies);
+		}
+
+		return ret;
+	}
+
+	static public AbacPolicies copyHeader(AbacPolicies source, String componentServiceName) {
+		AbacPolicies ret = new AbacPolicies();
+
+		ret.setServiceName(source.getServiceName());
+		ret.setServiceId(source.getServiceId());
+		ret.setPolicyVersion(source.getPolicyVersion());
+		ret.setAuditMode(source.getAuditMode());
+		ret.setPolicyUpdateTime(source.getPolicyUpdateTime());
+		ret.setPolicies(Collections.emptyList());
+
+		if (componentServiceName != null) {
+			ret.setServiceDef(ServiceDefUtil.normalizeAccessTypeDefs(source.getServiceDef(), componentServiceName));
+		}
+
 		return ret;
 	}
 
@@ -436,6 +563,15 @@ public class ServicePolicies implements java.io.Serializable {
 
 		if (ret.getTagPolicies() != null) {
 			ret.getTagPolicies().setPolicies(newTagPolicies);
+		}
+
+		if (servicePolicies.getAbacPolicies() != null ) {
+			List<RangerPolicy> oldAbacPolicies = PoliciesStore.getAbacPolicies() != null ? PoliciesStore.getAbacPolicies() : new ArrayList<>();;
+			List<RangerPolicy> abacPoliciesAfterDelete =
+				RangerPolicyDeltaUtil.deletePoliciesByDelta(oldAbacPolicies, deletedDeltaMap);
+			List<RangerPolicy> newAbacPolicies =
+					RangerPolicyDeltaUtil.applyDeltas(abacPoliciesAfterDelete, servicePolicies.getPolicyDeltas(), servicePolicies.getAbacPolicies().getServiceName(), servicePolicies.getAbacPolicies().getServiceName());
+			ret.getAbacPolicies().setPolicies(newAbacPolicies);
 		}
 
 		return ret;
