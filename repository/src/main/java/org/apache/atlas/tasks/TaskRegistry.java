@@ -90,8 +90,11 @@ public class TaskRegistry {
     @GraphTransaction
     public AtlasTask save(AtlasTask task) {
         AtlasVertex vertex = createVertex(task);
-
         return toAtlasTask(vertex);
+    }
+
+    public AtlasGraph getGraph() {
+        return graph;
     }
 
     public List<AtlasTask> getPendingTasks() {

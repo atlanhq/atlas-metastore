@@ -61,11 +61,11 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
     private final KafkaNotification kafkaNotification;
-
     private final TransactionInterceptHelper transactionInterceptHelper;
     private Thread watcherThread = null;
     private Thread watcherThreadV2 = null;
     private Thread updaterThread = null;
+    private final AtlasGraph graph;
 
     public enum DeleteType {
         SOFT,
@@ -73,12 +73,13 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     @Inject
-    public TaskManagement(Configuration configuration, TaskRegistry taskRegistry, ICuratorFactory curatorFactory, RedisService redisService, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper) {
+    public TaskManagement(Configuration configuration, TaskRegistry taskRegistry, ICuratorFactory curatorFactory, RedisService redisService, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper, AtlasGraph graph) {
         this.configuration      = configuration;
         this.registry           = taskRegistry;
         this.redisService       = redisService;
         this.kafkaNotification = kafkaNotification;
         this.transactionInterceptHelper = transactionInterceptHelper;
+        this.graph = graph;
         this.statistics         = new Statistics();
         this.taskTypeFactoryMap = new HashMap<>();
         this.curatorFactory = curatorFactory;
@@ -86,11 +87,12 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     @VisibleForTesting
-    TaskManagement(Configuration configuration, TaskRegistry taskRegistry, TaskFactory taskFactory, ICuratorFactory curatorFactory, RedisService redisService, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper) {
+    TaskManagement(Configuration configuration, TaskRegistry taskRegistry, TaskFactory taskFactory, ICuratorFactory curatorFactory, RedisService redisService, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper, AtlasGraph graph) {
         this.configuration      = configuration;
         this.registry           = taskRegistry;
         this.kafkaNotification = kafkaNotification;
         this.transactionInterceptHelper = transactionInterceptHelper;
+        this.graph = graph;
         this.metricRegistry = null;
         this.redisService       = redisService;
         this.statistics         = new Statistics();
@@ -333,7 +335,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         if (this.taskExecutor == null) {
             final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
             final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
-            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, transactionInterceptHelper);
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, graph, transactionInterceptHelper);
         }
 
         if (watcherThread == null) {
@@ -347,7 +349,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         if (this.taskExecutor == null) {
             final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
             final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
-            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, transactionInterceptHelper);
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, graph, transactionInterceptHelper);
         }
 
         if (updaterThread == null) {
@@ -386,7 +388,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         if (this.taskExecutor == null) {
             final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
             final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
-            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, transactionInterceptHelper);
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, graph, transactionInterceptHelper);
         }
 
         if (watcherThreadV2 == null) {

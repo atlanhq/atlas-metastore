@@ -2,12 +2,19 @@ package org.apache.atlas.tasks;
 
 import com.esotericsoftware.minlog.Log;
 import org.apache.atlas.AtlasConstants;
+import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graphdb.AtlasEdge;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -16,7 +23,12 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.atlas.repository.Constants.EDGE_PENDING_TASKS_PROPERTY_KEY;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_ENTITY_GUID;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_RELATIONSHIP_EDGE_ID;
+import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 
 
 public class TaskUpdater implements Runnable {
@@ -26,13 +38,17 @@ public class TaskUpdater implements Runnable {
     private static final long TASK_UPDATER_THREAD_WAIT_TIME = 60000L; // 1 min
     private final TaskRegistry registry;
     private final RedisService redisService;
+    private final AtlasGraph graph;
+    private final GraphHelper graphHelper;
     private final TransactionInterceptHelper transactionInterceptHelper;
     private static final String ATLAS_TASK_UPDATER_LOCK = "atlas:task:updater:lock";
 
-    public TaskUpdater(TaskRegistry registry, RedisService redisService, TransactionInterceptHelper transactionInterceptHelper) {
+    public TaskUpdater(TaskRegistry registry, RedisService redisService, AtlasGraph graph, TransactionInterceptHelper transactionInterceptHelper) {
         this.registry = registry;
         this.redisService = redisService;
+        this.graph = graph;
         this.transactionInterceptHelper = transactionInterceptHelper;
+        graphHelper = new GraphHelper(graph);
     }
 
     @Override
@@ -94,7 +110,7 @@ public class TaskUpdater implements Runnable {
         }
     }
 
-    private void markTaskAsCompleted(AtlasTask task) {
+    private void markTaskAsCompleted(AtlasTask task) throws AtlasBaseException, EntityNotFoundException {
         if (task.getAssetsFailedToPropagate() > 0) {
             LOG.info("TaskUpdater-> STATUS MARKED AS FAILED for task {}", task.getGuid());
             task.setStatus(AtlasTask.Status.FAILED);
@@ -102,8 +118,39 @@ public class TaskUpdater implements Runnable {
             LOG.info("TaskUpdater-> STATUS MARKED AS COMPLETE for task {}", task.getGuid());
             task.setStatus(AtlasTask.Status.COMPLETE);
         }
+
+        if (CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE.equals(task.getType())) {
+            this.removePendingTaskFromEdge((String) task.getParameters().get(PARAM_RELATIONSHIP_EDGE_ID), task.getGuid());
+        } else {
+            this.removePendingTaskFromEntity((String) task.getParameters().get(PARAM_ENTITY_GUID), task.getGuid());
+        }
+
         // Expire the Redis keys
         expireRedisKeys(task.getGuid());
+    }
+
+    private void removePendingTaskFromEdge(String edgeId, String taskGuid) {
+        if (StringUtils.isEmpty(edgeId) || StringUtils.isEmpty(taskGuid)) {
+            return;
+        }
+        AtlasEdge edge = registry.getGraph().getEdge(edgeId);
+        if (edge == null) {
+            LOG.warn("Error fetching edge: {}", edgeId);
+            return;
+        }
+        AtlasGraphUtilsV2.removeItemFromListProperty(edge, EDGE_PENDING_TASKS_PROPERTY_KEY, taskGuid);
+    }
+
+    private void removePendingTaskFromEntity(String entityGuid, String taskGuid) throws EntityNotFoundException {
+        if (StringUtils.isEmpty(entityGuid) || StringUtils.isEmpty(taskGuid)) {
+            return;
+        }
+        AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
+        if (entityVertex == null) {
+            LOG.warn("Error fetching vertex: {}", entityVertex);
+            return;
+        }
+        entityVertex.removePropertyValue(PENDING_TASKS_PROPERTY_KEY, taskGuid);
     }
 
     private void expireRedisKeys(String taskGuid) {
