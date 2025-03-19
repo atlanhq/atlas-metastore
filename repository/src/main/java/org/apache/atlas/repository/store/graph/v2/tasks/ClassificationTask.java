@@ -85,7 +85,7 @@ public abstract class ClassificationTask extends AbstractTask {
     public AtlasTask.Status perform() throws AtlasBaseException {
         Map<String, Object> params = getTaskDef().getParameters();
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord(getTaskGuid());
-
+        long taskStart = System.currentTimeMillis();
         if (MapUtils.isEmpty(params)) {
             LOG.warn("Task: {}: Unable to process task: Parameters is not readable!", getTaskGuid());
 
@@ -117,6 +117,8 @@ public abstract class ClassificationTask extends AbstractTask {
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
+            LOG.info("ObjectPropProducer::perform() [Producer Latency] => completed in {} ms",
+                    (System.currentTimeMillis() - taskStart));
             transactionInterceptHelper.intercept();
         }
 
