@@ -1139,26 +1139,7 @@
         "end-two-entity-classification:*",
         "end-two-entity:{entity}"
       ],
-      "actions": ["add-relationship"]
-    }
-  ],
-  "persona-ai-application-update-terms": [
-    {
-      "policyResourceCategory": "RELATIONSHIP",
-      "policyType": "ACCESS",
-      "description": "Unlink term to this AI asset",
-      "resources": [
-        "relationship-type:*",
-
-        "end-one-entity-type:AtlasGlossaryTerm",
-        "end-one-entity-classification:*",
-        "end-one-entity:*",
-
-        "end-two-entity-type:AIApplication",
-        "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
-      ],
-      "actions": ["update-relationship"]
+      "actions": ["add-relationship", "update-relationship"]
     }
   ],
   "persona-ai-application-remove-terms": [
@@ -1192,21 +1173,6 @@
       ],
       "actions": [
         "entity-add-classification",
-        "entity-update-classification"
-      ]
-    }
-  ],
-  "persona-ai-application-update-classification": [
-    {
-      "policyResourceCategory": "ENTITY",
-      "policyType": "ACCESS",
-      "resources": [
-        "entity:{entity}",
-        "entity-type:AIApplication",
-        "entity-classification:*",
-        "classification:*"
-      ],
-      "actions": [
         "entity-update-classification"
       ]
     }
@@ -1324,26 +1290,7 @@
         "end-two-entity-classification:*",
         "end-two-entity:{entity}"
       ],
-      "actions": ["add-relationship"]
-    }
-  ],
-  "persona-ai-model-update-terms": [
-    {
-      "policyResourceCategory": "RELATIONSHIP",
-      "policyType": "ACCESS",
-      "description": "Unlink term to this AI asset",
-      "resources": [
-        "relationship-type:*",
-
-        "end-one-entity-type:AtlasGlossaryTerm",
-        "end-one-entity-classification:*",
-        "end-one-entity:*",
-
-        "end-two-entity-type:AIModel",
-        "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
-      ],
-      "actions": ["update-relationship"]
+      "actions": ["add-relationship", "update-relationship"]
     }
   ],
   "persona-ai-model-remove-terms": [
@@ -1377,21 +1324,6 @@
       ],
       "actions": [
         "entity-add-classification",
-        "entity-update-classification"
-      ]
-    }
-  ],
-  "persona-ai-model-update-classification": [
-    {
-      "policyResourceCategory": "ENTITY",
-      "policyType": "ACCESS",
-      "resources": [
-        "entity:{entity}",
-        "entity-type:AIModel",
-        "entity-classification:*",
-        "classification:*"
-      ],
-      "actions": [
         "entity-update-classification"
       ]
     }
