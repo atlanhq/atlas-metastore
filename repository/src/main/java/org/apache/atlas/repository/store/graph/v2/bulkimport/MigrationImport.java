@@ -19,7 +19,9 @@
 package org.apache.atlas.repository.store.graph.v2.bulkimport;
 
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.model.impexp.AtlasImportRequest;
 import org.apache.atlas.model.impexp.AtlasImportResult;
 import org.apache.atlas.model.instance.EntityMutationResponse;
@@ -45,13 +47,17 @@ public class MigrationImport extends ImportStrategy {
     private final AtlasGraphProvider graphProvider;
     private final AtlasTypeRegistry typeRegistry;
     private final AtlasEntityChangeNotifier entityChangeNotifier;
+    private final TagPropagator tagPropagator;
+    private final KafkaNotification kafkaNotification;
 
     public MigrationImport(AtlasGraph graph, AtlasGraphProvider graphProvider,
-                           AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier) {
+                           AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier, TagPropagator tagPropagator, KafkaNotification kafkaNotification) {
         this.graph = graph;
         this.graphProvider = graphProvider;
         this.typeRegistry = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
+        this.tagPropagator = tagPropagator;
+        this.kafkaNotification = kafkaNotification;
         LOG.info("MigrationImport: Using bulkLoading...");
     }
 
@@ -69,7 +75,12 @@ public class MigrationImport extends ImportStrategy {
         long index = 0;
         int streamSize = entityStream.size();
         EntityMutationResponse ret = new EntityMutationResponse();
-        EntityCreationManager creationManager = createEntityCreationManager(importResult, dataMigrationStatusService);
+        EntityCreationManager creationManager;
+        try {
+            creationManager = createEntityCreationManager(importResult, dataMigrationStatusService);
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
 
         try {
             LOG.info("Migration Import: Size: {}: Starting...", streamSize);
@@ -93,7 +104,7 @@ public class MigrationImport extends ImportStrategy {
     }
 
     private EntityCreationManager createEntityCreationManager(AtlasImportResult importResult,
-                                                              DataMigrationStatusService dataMigrationStatusService) {
+                                                              DataMigrationStatusService dataMigrationStatusService) throws AtlasException {
         AtlasGraph graphBulk = graphProvider.getBulkLoading();
 
         EntityGraphRetriever entityGraphRetriever = new EntityGraphRetriever(this.graph, typeRegistry);
@@ -121,12 +132,12 @@ public class MigrationImport extends ImportStrategy {
 
     private AtlasEntityStoreV2 createEntityStore(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         FullTextMapperV2Nop fullTextMapperV2 = new FullTextMapperV2Nop();
-        DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null);
+        DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null, kafkaNotification);
         RestoreHandlerV1 restoreHandlerV1 = new RestoreHandlerV1(graph, typeRegistry);
 
         AtlasRelationshipStore relationshipStore = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
         EntityGraphMapper entityGraphMapper = new EntityGraphMapper(deleteDelegate, restoreHandlerV1, typeRegistry,
-                graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null);
+                graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null, tagPropagator);
         AtlasRelationshipStoreV2 atlasRelationshipStoreV2 = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
 
         return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null);
