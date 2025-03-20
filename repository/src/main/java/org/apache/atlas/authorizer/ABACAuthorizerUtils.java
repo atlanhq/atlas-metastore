@@ -43,7 +43,7 @@ public class ABACAuthorizerUtils {
     private static boolean ABACAuthorizerEnabled = false;
     static {
         try {
-            ABACAuthorizerEnabled = ApplicationProperties.get().getBoolean("atlas.authorizer.enable.abac", false);
+            ABACAuthorizerEnabled = ApplicationProperties.get().getBoolean("atlas.authorizer.enable.abac", true);
 
             if (ABACAuthorizerEnabled) {
                 LOG.info("ABAC_AUTH: ABAC authorizer enabled!");
