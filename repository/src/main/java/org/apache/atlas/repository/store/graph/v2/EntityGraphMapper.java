@@ -1701,7 +1701,7 @@ public class EntityGraphMapper {
                     Map<String, Object> relationshipAttributes = getRelationshipAttributes(ctx.getValue());
 
                     if (ctx.getCurrentEdge() != null && getStatus(ctx.getCurrentEdge()) != DELETED) {
-                        ret = updateRelationship(ctx.getCurrentEdge(), entityVertex, attributeVertex, attribute.getRelationshipEdgeDirection(), relationshipAttributes);
+                        ret = updateRelationship(ctx, entityVertex, attributeVertex, attribute.getRelationshipEdgeDirection(), relationshipAttributes);
                     } else {
                         String      relationshipName = attribute.getRelationshipName();
                         AtlasVertex fromVertex;
@@ -2997,12 +2997,14 @@ public class EntityGraphMapper {
     }
 
 
-    private AtlasEdge updateRelationship(AtlasEdge currentEdge, final AtlasVertex parentEntityVertex, final AtlasVertex newEntityVertex,
+    private AtlasEdge updateRelationship(AttributeMutationContext ctx, final AtlasVertex parentEntityVertex, final AtlasVertex newEntityVertex,
                                          AtlasRelationshipEdgeDirection edgeDirection,  Map<String, Object> relationshipAttributes)
             throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Updating entity reference using relationship {} for reference attribute {}", getTypeName(newEntityVertex));
         }
+
+        AtlasEdge currentEdge = ctx.getCurrentEdge();
 
         // Max's manager updated from Jane to Julius (Max.manager --> Jane.subordinates)
         // manager attribute (OUT direction), current manager vertex (Jane) (IN vertex)
@@ -3040,8 +3042,12 @@ public class EntityGraphMapper {
                 ret = getOrCreateRelationship(newEntityVertex, parentEntityVertex, relationshipName, relationshipAttributes);
             }
 
-            //record entity update on new relationship vertex
-            recordEntityUpdate(newEntityVertex);
+            boolean isCreated = graphHelper.getCreatedTime(ret) == RequestContext.get().getRequestTime();
+            if (isCreated) {
+                // This flow is executed even if edge was only updated, or even the different order in payload
+                // Necessary to call recordEntityUpdate for only new edge creation, hence checking `isCreated`
+                recordEntityUpdate(newEntityVertex, ctx, true);
+            }
         }
 
         return ret;
@@ -4627,7 +4633,7 @@ public class EntityGraphMapper {
                     currentEnd = ((AtlasRelationshipDef) type.getStructDef()).getEndDef2();
                 }
 
-                entity.setTypeName(inverseEnd.getType());
+                entity.setTypeName(getTypeName(vertex));
                 AtlasObjectId objectId = new AtlasObjectId(GraphHelper.getGuid(ctx.getReferringVertex()), currentEnd.getType());
 
                 if (Cardinality.SINGLE == inverseEnd.getCardinality()) {
