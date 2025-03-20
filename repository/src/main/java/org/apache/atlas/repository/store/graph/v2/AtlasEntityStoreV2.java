@@ -128,8 +128,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     static final boolean DEFERRED_ACTION_ENABLED = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
 
-    static final String PROCESS_ENTITY_TYPE = "Process";
-
     private static final String ATTR_MEANINGS = "meanings";
 
     private final AtlasGraph                graph;
@@ -1683,7 +1681,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             ret.setGuidAssignments(context.getGuidAssignments());
 
-
+            for (AtlasEntity entity: context.getCreatedEntities()) {
+                RequestContext.get().cacheDifferentialEntity(entity);
+            }
             // Notify the change listeners
             entityChangeNotifier.onEntitiesMutated(ret, RequestContext.get().isImportInProgress());
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
