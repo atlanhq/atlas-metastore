@@ -45,6 +45,7 @@ public class AuthPolicyValidator {
         add(POLICY_SUB_CATEGORY_METADATA);
         add(POLICY_SUB_CATEGORY_DATA);
         add(POLICY_SUB_CATEGORY_GLOSSARY);
+        add(POLICY_SUB_CATEGORY_AI);
     }};
 
     private static final Set<String> PURPOSE_POLICY_VALID_SUB_CATEGORIES = new HashSet<String>(){{
@@ -67,6 +68,10 @@ public class AuthPolicyValidator {
         add("persona-entity-remove-classification");
         add("persona-add-terms");
         add("persona-remove-terms");
+        add("persona-dq-update");
+        add("persona-dq-read");
+        add("persona-dq-create");
+        add("persona-dq-delete");
     }};
 
     private static final Set<String> DATA_POLICY_ACTIONS = new HashSet<String>(){{
@@ -84,10 +89,33 @@ public class AuthPolicyValidator {
         add("persona-glossary-delete-classifications");
     }};
 
+    private static final Set<String> AI_POLICY_ACTIONS = new HashSet<String>(){{
+        add("persona-ai-application-read");
+        add("persona-ai-application-create");
+        add("persona-ai-application-update");
+        add("persona-ai-application-delete");
+        add("persona-ai-application-business-update-metadata");
+        add("persona-ai-application-add-terms");
+        add("persona-ai-application-remove-terms");
+        add("persona-ai-application-add-classification");
+        add("persona-ai-application-remove-classification"); 
+
+        add("persona-ai-model-read");
+        add("persona-ai-model-create");
+        add("persona-ai-model-update");
+        add("persona-ai-model-delete");
+        add("persona-ai-model-business-update-metadata");
+        add("persona-ai-model-add-terms");
+        add("persona-ai-model-remove-terms");
+        add("persona-ai-model-add-classification");
+        add("persona-ai-model-remove-classification"); 
+    }};
+
     private static final Map<String, Set<String>> PERSONA_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
         put(POLICY_SUB_CATEGORY_METADATA, PERSONA_METADATA_POLICY_ACTIONS);
         put(POLICY_SUB_CATEGORY_DATA, DATA_POLICY_ACTIONS);
         put(POLICY_SUB_CATEGORY_GLOSSARY, PERSONA_GLOSSARY_POLICY_ACTIONS);
+        put(POLICY_SUB_CATEGORY_AI, AI_POLICY_ACTIONS);
     }};
 
     private static final Set<String> PURPOSE_METADATA_POLICY_ACTIONS = new HashSet<String>(){{
@@ -301,6 +329,7 @@ public class AuthPolicyValidator {
                             "Please provide valid values for attribute " + ATTR_POLICY_ACTIONS + ": Invalid actions "+ copyOfActions);
 
                 }
+
             }
 
         } else {
