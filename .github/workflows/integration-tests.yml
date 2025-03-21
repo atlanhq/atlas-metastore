@@ -289,7 +289,7 @@ jobs:
       - name: List integration tests
         id: test-files
         run: |
-          SKIP_PATTERN="SearchTest.java|RequestsTest.java|SSOTest.java|PersonaTest.java|AdminTest.java|DataMeshTest.java|InsightsTest.java|PurposeTest.java"
+          SKIP_PATTERN="/SearchTest.java|RequestsTest.java|SSOTest.java|PersonaTest.java|AdminTest.java|DataMeshTest.java|InsightsTest.java|PurposeTest.java"
 
           # List all *Test.java files, exclude the ones that match SKIP_PATTERN
           tests=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java \
