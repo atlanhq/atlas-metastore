@@ -3021,6 +3021,10 @@ public class EntityGraphMapper {
             currentEntityId = getIdFromBothVertex(currentEdge, parentEntityVertex);
         }
 
+        if (StringUtils.isEmpty(currentEntityId)) {
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ENTITY_ID_NOT_FOUND);
+        }
+
         String    newEntityId = getIdFromVertex(newEntityVertex);
         AtlasEdge ret         = currentEdge;
 

@@ -83,7 +83,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGOR
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PURPOSE;
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsPolicyEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyCategory;
-import static org.apache.atlas.services.tag.RangerServiceTag.TAG_RESOURCE_NAME;
 
 @Component
 public class CachePolicyTransformerImpl {
@@ -554,12 +553,11 @@ public class CachePolicyTransformerImpl {
 
     private List<RangerPolicyItemCondition> getPolicyConditions(AtlasEntityHeader atlasPolicy) {
         List<RangerPolicyItemCondition> ret = new ArrayList<>();
-
-        if (!atlasPolicy.hasAttribute("policyConditions")) {
+        if (!atlasPolicy.hasAttribute(ATTR_POLICY_CONDITIONS) || atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS) == null) {
             return null;
         }
 
-        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute("policyConditions");
+        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
 
         for (AtlasStruct condition : conditions) {
             RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();

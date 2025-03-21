@@ -28,6 +28,7 @@ public enum AtlasConfiguration {
     //web server configuration
     WEBSERVER_MIN_THREADS("atlas.webserver.minthreads", 10),
     WEBSERVER_MAX_THREADS("atlas.webserver.maxthreads", 100),
+    WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 40),
     WEBSERVER_KEEPALIVE_SECONDS("atlas.webserver.keepalivetimesecs", 60),
     WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 100),
     WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 16192),
@@ -126,6 +127,8 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_ENABLE_API_LIMIT("atlas.indexsearch.enable.api.limit", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION("atlas.indexsearch.enable.janus.optimization", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_RELATIONS("atlas.indexsearch.enable.janus.optimization.for.relationship", false),
+
+    ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS("atlas.indexsearch.enable.janus.optimization.for.classifications", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED("atlas.indexsearch.enable.janus.optimization.extended", false),
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
