@@ -2065,9 +2065,11 @@ public final class GraphHelper {
 
         return ret;
     }
+
     public Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeName(AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeName");
 
+        // add a configuration to load the entire edge if number of edges is less than threshold
         try {
             return ((AtlasJanusGraph) graph).getGraph().traversal()
                     .V(vertex.getId())
