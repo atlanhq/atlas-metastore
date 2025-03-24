@@ -1235,7 +1235,7 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:default/ai/aimodel/*",
+        "entity:default/ai/aiapplication/*",
         "entity-type:AIModel",
         "entity-classification:*"
       ],
@@ -1249,7 +1249,7 @@
       "resources": [
         "entity:{entity}",
         "entity:{entity}/*",
-        "entity:default/ai/aimodel/*",
+        "entity:default/ai/aiapplication/*",
         "entity-type:AIModel",
         "entity-classification:*"
       ],
