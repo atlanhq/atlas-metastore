@@ -1048,6 +1048,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-classification:*"
       ],
@@ -1072,6 +1073,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity:default/ai/aiapplication/*",
         "entity-type:AIApplication",
         "entity-classification:*"
@@ -1090,7 +1092,8 @@
 
         "end-two-entity-type:AIApplication",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:{entity}",
+        "end-two-entity:{entity}/*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
     },
@@ -1104,11 +1107,10 @@
         "end-one-entity-type:AIApplication",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
+        "end-one-entity:{entity}/*",
 
         "end-two-entity-type:Resource",
         "end-two-entity-classification:*",
-        "end-two-entity-type:Readme",
-        "end-two-entity-type:Link",
         "end-two-entity:*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
@@ -1120,6 +1122,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-classification:*"
       ],
@@ -1132,6 +1135,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-classification:*",
         "entity-business-metadata:*"
@@ -1153,7 +1157,8 @@
 
         "end-two-entity-type:AIApplication",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:{entity}",
+        "end-two-entity:{entity}/*"
       ],
       "actions": ["add-relationship", "update-relationship"]
     }
@@ -1172,7 +1177,8 @@
 
         "end-two-entity-type:AIApplication",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:{entity}",
+        "end-two-entity:{entity}/*"
       ],
       "actions": ["remove-relationship"]
     }
@@ -1183,6 +1189,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-classification:*",
         "classification:*"
@@ -1199,6 +1206,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIApplication",
         "entity-classification:*",
         "classification:*"
@@ -1215,6 +1223,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIModel",
         "entity-classification:*"
       ],
@@ -1239,6 +1248,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity:default/ai/aimodel/*",
         "entity-type:AIModel",
         "entity-classification:*"
@@ -1254,6 +1264,7 @@
         "end-one-entity-type:AIModel",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
+        "end-one-entity:{entity}/*",
 
         "end-two-entity-type:AIApplication",
         "end-two-entity-classification:*",
@@ -1271,11 +1282,10 @@
         "end-one-entity-type:AIModel",
         "end-one-entity-classification:*",
         "end-one-entity:{entity}",
+        "end-one-entity:{entity}/*",
 
         "end-two-entity-type:Resource",
         "end-two-entity-classification:*",
-        "end-two-entity-type:Readme",
-        "end-two-entity-type:Link",
         "end-two-entity:*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
@@ -1287,6 +1297,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIModel",
         "entity-classification:*"
       ],
@@ -1299,6 +1310,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIModel",
         "entity-classification:*",
         "entity-business-metadata:*"
@@ -1320,7 +1332,8 @@
 
         "end-two-entity-type:AIModel",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:{entity}",
+        "end-two-entity:{entity}/*"
       ],
       "actions": ["add-relationship", "update-relationship"]
     }
@@ -1339,7 +1352,8 @@
 
         "end-two-entity-type:AIModel",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:{entity}",
+        "end-two-entity:{entity}/*"
       ],
       "actions": ["remove-relationship"]
     }
@@ -1350,6 +1364,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIModel",
         "entity-classification:*",
         "classification:*"
@@ -1366,6 +1381,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:AIModel",
         "entity-classification:*",
         "classification:*"
