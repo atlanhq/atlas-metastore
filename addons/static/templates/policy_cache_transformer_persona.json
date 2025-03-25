@@ -1059,7 +1059,7 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:default/ai/aiapplication/*",
+        "entity:*",
         "entity-type:AIApplication",
         "entity-classification:*"
       ],
@@ -1072,7 +1072,6 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:*",
-        "entity:default/ai/aiapplication/*",
         "entity-type:AIApplication",
         "entity-classification:*"
       ],
@@ -1225,8 +1224,6 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:*",
-        "entity:default/ai/aimodel/*",
-        "entity:default/ai/aiapplication/*",
         "entity-type:AIModel",
         "entity-classification:*"
       ],
@@ -1239,8 +1236,6 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:*",
-        "entity:default/ai/aimodel/*",
-        "entity:default/ai/aiapplication/*",
         "entity-type:AIModel",
         "entity-classification:*"
       ],
