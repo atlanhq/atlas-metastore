@@ -1059,7 +1059,6 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:*",
         "entity:default/ai/aiapplication/*",
         "entity-type:AIApplication",
         "entity-classification:*"
