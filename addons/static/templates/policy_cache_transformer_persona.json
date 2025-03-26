@@ -1041,43 +1041,38 @@
       "actions": ["entity-delete"]
     }
   ],
-  "persona-aiasset-read": [
+
+  "persona-ai-application-read": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
+        "entity:*",
         "entity-type:AIApplication",
-        "entity-type:AIModel",
         "entity-classification:*"
       ],
       "actions": ["entity-read"]
     }
   ],
-  "persona-aiasset-create": [
+  "persona-ai-application-create": [
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
+        "entity:*",
         "entity-type:AIApplication",
-        "entity-type:AIModel",
         "entity-classification:*"
       ],
-      "actions": ["entity-create"]
+      "actions": ["entity-create", "entity-update"]
     }
   ],
-  "persona-aiasset-update": [
+  "persona-ai-application-update": [
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
+        "entity:*",
         "entity-type:AIApplication",
-        "entity-type:AIModel",
         "entity-classification:*"
       ],
       "actions": ["entity-update"]
@@ -1088,28 +1083,26 @@
       "description": "Link/unlink AIModel to any AIApplication",
       "resources": [
         "relationship-type:*",
-        "end-one-entity-type:AIApplication",
+        "end-one-entity-type:AIModel",
         "end-one-entity-classification:*",
         "end-one-entity:*",
 
-        "end-two-entity-type:AIModel",
+        "end-two-entity-type:AIApplication",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}",
-        "end-two-entity:{entity}/*"
+        "end-two-entity:*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
-      "description": "Link/unlink resource to AI assets",
+      "description": "Link/unlink resource to this AIApplication",
       "resources": [
         "relationship-type:*",
 
         "end-one-entity-type:AIApplication",
-        "end-one-entity-type:AIModel",
         "end-one-entity-classification:*",
-        "end-one-entity:{entity}",
+        "end-one-entity:*",
 
         "end-two-entity-type:Resource",
         "end-two-entity-classification:*",
@@ -1118,36 +1111,32 @@
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
     }
   ],
-  "persona-aiasset-delete": [
+  "persona-ai-application-delete": [
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
+        "entity:*",
         "entity-type:AIApplication",
-        "entity-type:AIModel",
         "entity-classification:*"
       ],
       "actions": ["entity-delete"]
     }
   ],
-  "persona-aiasset-business-update-metadata": [
+  "persona-ai-application-business-update-metadata": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
+        "entity:*",
         "entity-type:AIApplication",
-        "entity-type:AIModel",
         "entity-classification:*",
         "entity-business-metadata:*"
       ],
       "actions": ["entity-update-business-metadata"]
     }
   ],
-  "persona-aiasset-add-terms": [
+  "persona-ai-application-add-terms": [
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
@@ -1156,39 +1145,17 @@
         "relationship-type:*",
 
         "end-one-entity-type:AtlasGlossaryTerm",
-        "entity-type:AtlasGlossaryTerm",
         "end-one-entity-classification:*",
         "end-one-entity:*",
 
         "end-two-entity-type:AIApplication",
-        "end-two-entity-type:AIModel",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "entity-read"]
+      "actions": ["add-relationship", "update-relationship"]
     }
   ],
-  "persona-aiasset-update-terms": [
-    {
-      "policyResourceCategory": "RELATIONSHIP",
-      "policyType": "ACCESS",
-      "description": "Unlink term to this AI asset",
-      "resources": [
-        "relationship-type:*",
-
-        "end-one-entity-type:AtlasGlossaryTerm",
-        "end-one-entity-classification:*",
-        "end-one-entity:*",
-
-        "end-two-entity-type:AIApplication",
-        "end-two-entity-type:AIModel",
-        "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
-      ],
-      "actions": ["update-relationship"]
-    }
-  ],
-  "persona-aiasset-remove-terms": [
+  "persona-ai-application-remove-terms": [
     {
       "policyResourceCategory": "RELATIONSHIP",
       "policyType": "ACCESS",
@@ -1201,21 +1168,182 @@
         "end-one-entity:*",
 
         "end-two-entity-type:AIApplication",
-        "end-two-entity-type:AIModel",
         "end-two-entity-classification:*",
-        "end-two-entity:{entity}"
+        "end-two-entity:*"
       ],
       "actions": ["remove-relationship"]
     }
   ],
-  "persona-aiasset-add-classification": [
+  "persona-ai-application-add-classification": [
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
+        "entity:*",
         "entity-type:AIApplication",
+        "entity-classification:*",
+        "classification:*"
+      ],
+      "actions": [
+        "entity-add-classification",
+        "entity-update-classification"
+      ]
+    }
+  ],
+  "persona-ai-application-remove-classification": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:*",
+        "entity-type:AIApplication",
+        "entity-classification:*",
+        "classification:*"
+      ],
+      "actions": [
+        "entity-update-classification",
+        "entity-remove-classification"
+      ]
+    }
+  ],
+  "persona-ai-model-read": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModel",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-read"]
+    }
+  ],
+  "persona-ai-model-create": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModel",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create", "entity-update"]
+    }
+  ],
+  "persona-ai-model-update": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModel",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-update"]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink AIModel to any AIApplication",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:AIModel",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIApplication",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink resource to this AIModel",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:AIModel",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:Resource",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    }
+  ],
+  "persona-ai-model-delete": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModel",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-delete"]
+    }
+  ],
+  "persona-ai-model-business-update-metadata": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "resources": [
+        "entity:*",
+        "entity-type:AIModel",
+        "entity-classification:*",
+        "entity-business-metadata:*"
+      ],
+      "actions": ["entity-update-business-metadata"]
+    }
+  ],
+  "persona-ai-model-add-terms": [
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link term to this AI asset",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:AtlasGlossaryTerm",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIModel",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "update-relationship"]
+    }
+  ],
+  "persona-ai-model-remove-terms": [
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink term to this AI asset",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:AtlasGlossaryTerm",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIModel",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["remove-relationship"]
+    }
+  ],
+  "persona-ai-model-add-classification": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:*",
         "entity-type:AIModel",
         "entity-classification:*",
         "classification:*"
@@ -1226,31 +1354,12 @@
       ]
     }
   ],
-  "persona-aiasset-update-classification": [
+  "persona-ai-model-remove-classification": [
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
-        "entity-type:AIApplication",
-        "entity-type:AIModel",
-        "entity-classification:*",
-        "classification:*"
-      ],
-      "actions": [
-        "entity-update-classification"
-      ]
-    }
-  ],
-  "persona-aiasset-remove-classification": [
-    {
-      "policyResourceCategory": "ENTITY",
-      "policyType": "ACCESS",
-      "resources": [
-        "entity:{entity}",
-        "entity:{entity}/*",
-        "entity-type:AIApplication",
+        "entity:*",
         "entity-type:AIModel",
         "entity-classification:*",
         "classification:*"
