@@ -62,8 +62,6 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.AtlasClient.DATA_SET_SUPER_TYPE;
-import static org.apache.atlas.AtlasClient.PROCESS_SUPER_TYPE;
 import static org.apache.atlas.model.TypeCategory.*;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
@@ -1382,7 +1380,7 @@ public abstract class DeleteHandlerV1 {
             return;
         }
 
-        if (edge == null) {
+        if (edge == null ) {
             LOG.warn("Edge is null, can't schedule task now");
             return;
         }

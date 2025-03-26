@@ -19,13 +19,12 @@
 
 package org.apache.atlas.plugin.util;
 
-
-import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.atlas.authorizer.store.PoliciesStore;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
-import com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.atlas.plugin.model.RangerPolicy;
 import org.apache.atlas.plugin.model.RangerPolicyDelta;
 import org.apache.atlas.plugin.model.RangerServiceDef;
@@ -42,7 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 @XmlRootElement
 @XmlAccessorType(XmlAccessType.FIELD)
 public class ServicePolicies implements java.io.Serializable {
@@ -196,7 +195,7 @@ public class ServicePolicies implements java.io.Serializable {
 
 	public void setPolicyDeltas(List<RangerPolicyDelta> policyDeltas) { this.policyDeltas = policyDeltas; }
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class TagPolicies implements java.io.Serializable {
@@ -314,7 +313,7 @@ public class ServicePolicies implements java.io.Serializable {
 		}
 	}
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class AbacPolicies implements java.io.Serializable {

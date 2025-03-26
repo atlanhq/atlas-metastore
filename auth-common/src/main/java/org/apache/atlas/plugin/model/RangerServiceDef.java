@@ -19,7 +19,7 @@
 
 package org.apache.atlas.plugin.model;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
@@ -32,7 +32,7 @@ import java.util.Map;
 import java.util.Set;
 
 
-@JsonInclude(JsonInclude.Include.NON_NULL)
+@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 @XmlRootElement
 @XmlAccessorType(XmlAccessType.FIELD)
 public class RangerServiceDef extends RangerBaseModelObject implements java.io.Serializable {
@@ -528,7 +528,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerEnumDef implements java.io.Serializable {
@@ -694,7 +694,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerEnumElementDef implements java.io.Serializable {
@@ -841,7 +841,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerServiceConfigDef implements java.io.Serializable {
@@ -1227,7 +1227,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerResourceDef implements java.io.Serializable {
@@ -1800,7 +1800,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerAccessTypeDef implements java.io.Serializable {
@@ -2000,7 +2000,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerPolicyConditionDef implements java.io.Serializable {
@@ -2353,7 +2353,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 		}
 	}
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerContextEnricherDef implements java.io.Serializable {
@@ -2502,7 +2502,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 
 
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerDataMaskDef implements java.io.Serializable {
@@ -2677,7 +2677,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 		}
 	}
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerDataMaskTypeDef implements java.io.Serializable {
@@ -2926,7 +2926,7 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 		}
 	}
 
-	@JsonInclude(JsonInclude.Include.NON_NULL)
+	@JsonSerialize(include=JsonSerialize.Inclusion.NON_NULL)
 	@XmlRootElement
 	@XmlAccessorType(XmlAccessType.FIELD)
 	public static class RangerRowFilterDef implements java.io.Serializable {

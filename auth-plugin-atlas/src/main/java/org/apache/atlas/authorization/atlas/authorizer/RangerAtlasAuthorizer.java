@@ -64,7 +64,7 @@ import java.util.Map;
 import java.util.Set;
 
 import static org.apache.atlas.authorization.atlas.authorizer.RangerAtlasAuthorizerUtil.*;
-import static org.apache.atlas.services.atlas.RangerServiceAtlas.*;
+import static org.apache.atlas.authorization.utils.RangerAtlasConstants.*;
 
 
 public class RangerAtlasAuthorizer implements AtlasAuthorizer {
@@ -772,9 +772,9 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         RangerBasePlugin plugin = atlasPlugin;
 
         if (plugin != null) {
-            
+
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            
+
             request.setUserGroups(groupUtil.getContainedGroups(userName));
 
             if (LOG.isDebugEnabled()) {
@@ -795,14 +795,14 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
     private AtlasAccessResult checkAccess(RangerAccessRequestImpl request, RangerAtlasAuditHandler auditHandler) {
         AtlasAccessResult result = null;
-        
+
         RangerBasePlugin plugin = atlasPlugin;
         String userName = request.getUser();
 
         if (plugin != null) {
-            
+
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            
+
             request.setUserGroups(groupUtil.getContainedGroups(userName));
 
             if (LOG.isDebugEnabled()) {
@@ -813,7 +813,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             if (rangerResult != null) {
                 result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
             }
-        
+
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }

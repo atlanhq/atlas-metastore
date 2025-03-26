@@ -9,7 +9,13 @@
         "entity-type:{entity-type}",
         "entity-classification:*"
       ],
-      "actions": ["entity-read"]
+      "actions": ["entity-read"],
+      "policyConditions": [
+        {
+          "policyConditionType": "excludeEntityTypes",
+          "policyConditionValues": ["alpha_DQRule"]
+        }
+      ]
     }
   ],
   "persona-asset-update": [
@@ -22,7 +28,13 @@
         "entity-type:{entity-type}",
         "entity-classification:*"
       ],
-      "actions": ["entity-update"]
+      "actions": ["entity-update"],
+      "policyConditions": [
+        {
+          "policyConditionType": "excludeEntityTypes",
+          "policyConditionValues": ["alpha_DQRule"]
+        }
+      ]
     },
     {
       "policyType": "ACCESS",
@@ -43,7 +55,13 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "remove-relationship"]
+      "actions": ["add-relationship", "remove-relationship"],
+      "policyConditions": [
+        {
+          "policyConditionType": "excludeEntityTypes",
+          "policyConditionValues": ["alpha_DQRule"]
+        }
+      ]
     },
     {
       "policyType": "ACCESS",
@@ -64,7 +82,13 @@
         "end-two-entity:{entity}",
         "end-two-entity:{entity}/*"
       ],
-      "actions": ["add-relationship", "remove-relationship"]
+      "actions": ["add-relationship", "remove-relationship"],
+      "policyConditions": [
+        {
+          "policyConditionType": "excludeEntityTypes",
+          "policyConditionValues": ["alpha_DQRule"]
+        }
+      ]
     }
   ],
   "persona-api-create": [
@@ -77,7 +101,13 @@
         "entity-type:{entity-type}",
         "entity-classification:*"
       ],
-      "actions": ["entity-create"]
+      "actions": ["entity-create"],
+      "policyConditions": [
+        {
+          "policyConditionType": "excludeEntityTypes",
+          "policyConditionValues": ["alpha_DQRule"]
+        }
+      ]
     }
   ],
   "persona-api-delete": [
@@ -90,7 +120,13 @@
         "entity-type:{entity-type}",
         "entity-classification:*"
       ],
-      "actions": ["entity-delete"]
+      "actions": ["entity-delete"],
+      "policyConditions": [
+        {
+          "policyConditionType": "excludeEntityTypes",
+          "policyConditionValues": ["alpha_DQRule"]
+        }
+      ]
     }
   ],
   "persona-business-update-metadata": [
@@ -118,10 +154,7 @@
         "entity-classification:*",
         "classification:*"
       ],
-      "actions": [
-        "entity-add-classification",
-        "entity-update-classification"
-      ]
+      "actions": ["entity-add-classification", "entity-update-classification"]
     }
   ],
   "persona-entity-update-classification": [
@@ -194,8 +227,6 @@
     }
   ],
 
-
-
   "persona-glossary-read": [
     {
       "policyType": "ACCESS",
@@ -227,7 +258,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-glossary-update": [
@@ -259,7 +294,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyType": "ACCESS",
@@ -275,7 +314,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-glossary-create": [
@@ -333,10 +376,7 @@
         "entity-classification:*",
         "classification:*"
       ],
-      "actions": [
-        "entity-add-classification",
-        "entity-update-classification"
-      ]
+      "actions": ["entity-add-classification", "entity-update-classification"]
     }
   ],
   "persona-glossary-update-classifications": [
@@ -436,7 +476,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -454,7 +498,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -475,7 +523,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -495,7 +547,11 @@
         "end-two-entity:{entity}",
         "end-two-entity:{entity}/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -512,7 +568,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -529,7 +589,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:{entity}"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-business-update-metadata": [
@@ -575,18 +639,22 @@
       "description": "Link/unlink this DataProduct to any parent Domain",
       "resources": [
         "relationship-type:*",
-        
+
         "end-one-entity:{entity}/*",
         "end-one-entity:{entity}",
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
-        
+
         "end-two-entity:{entity}/*",
         "end-one-entity:{entity}",
         "end-two-entity-type:DataDomain",
         "end-two-entity-classification:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-sub-domain-update": [
@@ -639,7 +707,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -657,7 +729,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:default/*/{entity}/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -674,7 +750,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -691,7 +771,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:{entity}/*domain/*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-sub-domain-delete": [
@@ -749,17 +833,21 @@
       "description": "Link/unlink this DataProduct to any parent Domain",
       "resources": [
         "relationship-type:*",
-        
+
         "end-one-entity:{entity}/*",
         "end-one-entity:{entity}",
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
-        
+
         "end-two-entity:{entity}/*",
         "end-two-entity-type:DataProduct",
         "end-two-entity-classification:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -778,7 +866,11 @@
         "end-two-entity:{entity}/*product/*"
       ],
 
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-product-update": [
@@ -815,7 +907,11 @@
         "end-two-entity:{entity}/*product/*"
       ],
 
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -834,7 +930,11 @@
         "end-two-entity:*"
       ],
 
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-domain-product-delete": [
@@ -875,7 +975,95 @@
       "actions": ["select"]
     }
   ],
-  
+  "persona-dq-read": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "resources": [
+        "entity:{entity}/*/rule/*",
+        "entity-type:alpha_DQRule",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-read"]
+    }
+  ],
+  "persona-dq-create": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:{entity}/*/rule/*",
+        "entity-type:alpha_DQRule",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create"]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink this DQRule to any Asset",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity:{entity}/*/rule/*",
+        "end-one-entity-type:alpha_DQRule",
+        "end-one-entity-classification:*",
+
+        "end-two-entity:*",
+        "end-two-entity-type:Asset",
+        "end-two-entity-classification:*"
+      ],
+      "actions": [
+        "add-relationship",
+        "remove-relationship",
+        "update-relationship"
+      ]
+    }
+  ],
+  "persona-dq-update": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "resources": [
+        "entity:{entity}/*/rule/*",
+        "entity-type:alpha_DQRule",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-update"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity:{entity}/*/rule/*",
+        "end-one-entity-type:alpha_DQRule",
+        "end-one-entity-classification:*",
+
+        "end-two-entity:*",
+        "end-two-entity-type:Asset",
+        "end-two-entity-classification:*"
+      ],
+      "actions": [
+        "add-relationship",
+        "remove-relationship",
+        "update-relationship"
+      ]
+    }
+  ],
+  "persona-dq-delete": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:{entity}/*/rule/*",
+        "entity-type:alpha_DQRule",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-delete"]
+    }
+  ],
   "persona-ai-application-read": [
     {
       "policyType": "ACCESS",
@@ -925,7 +1113,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -942,7 +1134,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-ai-application-delete": [
@@ -1018,10 +1214,7 @@
         "entity-classification:*",
         "classification:*"
       ],
-      "actions": [
-        "entity-add-classification",
-        "entity-update-classification"
-      ]
+      "actions": ["entity-add-classification", "entity-update-classification"]
     }
   ],
   "persona-ai-application-remove-classification": [
@@ -1089,7 +1282,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     },
     {
       "policyResourceCategory": "RELATIONSHIP",
@@ -1106,7 +1303,11 @@
         "end-two-entity-classification:*",
         "end-two-entity:*"
       ],
-      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+      "actions": [
+        "add-relationship",
+        "update-relationship",
+        "remove-relationship"
+      ]
     }
   ],
   "persona-ai-model-delete": [
@@ -1182,10 +1383,7 @@
         "entity-classification:*",
         "classification:*"
       ],
-      "actions": [
-        "entity-add-classification",
-        "entity-update-classification"
-      ]
+      "actions": ["entity-add-classification", "entity-update-classification"]
     }
   ],
   "persona-ai-model-remove-classification": [
@@ -1204,5 +1402,4 @@
       ]
     }
   ]
-
 }
