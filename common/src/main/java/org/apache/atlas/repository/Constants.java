@@ -373,6 +373,11 @@ public final class Constants {
     public static final String TASK_CLASSIFICATION_ID       = encodePropertyKey(TASK_PREFIX + "classificationId");
     public static final String TASK_ENTITY_GUID             = encodePropertyKey(TASK_PREFIX + "entityGuid");
     public static final String TASK_CLASSIFICATION_TYPENAME = encodePropertyKey(TASK_PREFIX + "classificationTypeName");
+    public static final String TASK_ASSET_COUNT_TO_PROPAGATE = encodePropertyKey(TASK_PREFIX + "assetsCountToPropagate");
+    public static final String TASK_ASSET_COUNT_PROPAGATED = encodePropertyKey(TASK_PREFIX + "assetsCountPropagated");
+    public static final String TASK_ASSET_COUNT_FAILED = encodePropertyKey(TASK_PREFIX + "assetsFailedToPropagate");
+    public static final String TASK_CLEANUP_REQUIRED = encodePropertyKey(TASK_PREFIX + "cleanupRequired");
+    public static final String TASK_CLEANUP_STATUS = encodePropertyKey(TASK_PREFIX + "cleanupStatus");
     public static final String ACTIVE_STATE_VALUE           = "ACTIVE";
     public static final String TASK_HEADER_ATLAN_AGENT      = "x-atlan-agent";
     public static final String TASK_HEADER_ATLAN_AGENT_ID   = "x-atlan-agent-id";
@@ -492,6 +497,9 @@ public final class Constants {
 
     public static final String REQUEST_HEADER_USER_AGENT = "User-Agent";
     public static final String REQUEST_HEADER_HOST       = "Host";
+
+    //kafka partition value for OBJ_PROP_EVENTS
+    public static final String OBJ_PROP_EVENTS_PARTITION_COUNT = "10";
 
     public static final Set<String> SKIP_UPDATE_AUTH_CHECK_TYPES = new HashSet<String>() {{
         add(README_ENTITY_TYPE);

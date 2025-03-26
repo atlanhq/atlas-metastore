@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.authorize.AtlasRelationshipAccessRequest;
@@ -37,6 +38,8 @@ import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
+import org.apache.atlas.notification.NotificationException;
+import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
@@ -58,6 +61,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -78,7 +82,6 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPro
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
-import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getState;
 
 public abstract class DeleteHandlerV1 {
@@ -95,10 +98,13 @@ public abstract class DeleteHandlerV1 {
     private   final TaskManagement       taskManagement;
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
+    private   final KafkaNotification    kafkaNotification;
+    private static final int CHUNK_SIZE            = AtlasConfiguration.TASKS_GRAPH_COMMIT_CHUNK_SIZE.getInt();
 
-    public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
+    public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement, KafkaNotification kafkaNotification) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
+        this.kafkaNotification             = kafkaNotification;
         this.entityRetriever               = new EntityGraphRetriever(graph, typeRegistry);
         this.shouldUpdateInverseReferences = shouldUpdateInverseReference;
         this.softDelete                    = softDelete;
@@ -1235,16 +1241,39 @@ public abstract class DeleteHandlerV1 {
                 }
             }
 
-            for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
-                List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
+            int assetsToPropagate = addPropagationsMap.values().stream().mapToInt(List::size).sum()
+                    + removePropagationsMap.values().stream().mapToInt(List::size).sum();
+            taskManagement.updateTaskVertexProperty(TASK_ASSET_COUNT_TO_PROPAGATE, graph, assetsToPropagate);
 
-                addTagPropagation(classificationVertex, entitiesToAddPropagation);
+            for (AtlasVertex classificationVertex : addPropagationsMap.keySet()) {
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                    try {
+                        kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                        LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
+                    } catch (NotificationException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    List<AtlasVertex> entitiesToAddPropagation = addPropagationsMap.get(classificationVertex);
+                    addTagPropagation(classificationVertex, entitiesToAddPropagation);
+                }
+
             }
 
             for (AtlasVertex classificationVertex : removePropagationsMap.keySet()) {
-                List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
-
-                removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    List<String> kafkaMessage = kafkaNotification.createObjectPropKafkaMessage(classificationVertex, graph, CLASSIFICATION_PROPAGATION_ADD, classificationVertex.getIdForDisplay());
+                    try {
+                        kafkaNotification.sendInternal(NotificationInterface.NotificationType.EMIT_SUB_TASKS, kafkaMessage);
+                        LOG.debug("OBJECT_PROP_EVENTS => {}", kafkaMessage);
+                    } catch (NotificationException e) {
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    List<AtlasVertex> entitiesToRemovePropagation = removePropagationsMap.get(classificationVertex);
+                    removeTagPropagation(classificationVertex, entitiesToRemovePropagation);
+                }
             }
         } else {
             // update blocked propagated classifications only if there is no change is tag propagation (don't update both)

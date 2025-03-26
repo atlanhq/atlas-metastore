@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.tasks.AtlasTask;
@@ -24,6 +25,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.type.AtlasType;
 
 import java.util.Map;
@@ -31,8 +33,8 @@ import java.util.Set;
 
 public class ClassificationPropagationTasks {
     public static class Add extends ClassificationTask {
-        public Add(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public Add(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
@@ -47,54 +49,68 @@ public class ClassificationPropagationTasks {
     }
 
     public static class UpdateText extends ClassificationTask {
-        public UpdateText(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public UpdateText(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            entityGraphMapper.updateClassificationTextPropagation(classificationVertexId);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().updateClassificationTextPropagation(classificationVertexId);
+            } else {
+                entityGraphMapper.updateClassificationTextPropagation(classificationVertexId);
+            }
         }
     }
 
     public static class Delete extends ClassificationTask {
-        public Delete(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public Delete(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-
-            entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().deleteClassificationPropagation(classificationVertexId);
+            } else {
+                entityGraphMapper.deleteClassificationPropagation(classificationVertexId);
+            }
         }
     }
 
     // TODO: Will be deprecated
     public static class DeleteOnlyPropagations extends ClassificationTask {
-        public DeleteOnlyPropagations(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public DeleteOnlyPropagations(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             if (parameters.get(PARAM_DELETED_EDGE_IDS) != null) {
                 Set<String> deletedEdgeIds    =  AtlasType.fromJson((String) parameters.get(PARAM_DELETED_EDGE_IDS), Set.class);
-                entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeIds);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    entityGraphMapper.getTagPropagator().deleteClassificationOnlyPropagation(deletedEdgeIds);
+                } else {
+                    entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeIds);
+                }
             } else {
                 String deletedEdgeId          =  (String) parameters.get(PARAM_DELETED_EDGE_ID);
                 String classificationVertexId =  (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-                entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                    entityGraphMapper.getTagPropagator().deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                } else {
+                    entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                }
             }
         }
     }
 
     // TODO: Will be deprecated
     public static class DeleteOnlyPropagationsOnHardDelete extends ClassificationTask {
-        public DeleteOnlyPropagationsOnHardDelete(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public DeleteOnlyPropagationsOnHardDelete(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
@@ -103,40 +119,46 @@ public class ClassificationPropagationTasks {
             String referencedVertexId = (String) parameters.get(PARAM_REFERENCED_VERTEX_ID);
             boolean isTermEntityEdge = (boolean) parameters.get(PARAM_IS_TERM_ENTITY_EDGE);
 
-            entityGraphMapper.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            } else {
+                entityGraphMapper.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            }
         }
     }
 
     public static class RefreshPropagation extends ClassificationTask {
-        public RefreshPropagation(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public RefreshPropagation(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String            classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-
-            entityGraphMapper.classificationRefreshPropagation(classificationVertexId);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().classificationRefreshPropagation(classificationVertexId);
+            } else {
+                entityGraphMapper.classificationRefreshPropagation(classificationVertexId);
+            }
         }
     }
 
     public static class UpdateRelationship extends ClassificationTask {
-        public UpdateRelationship(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public UpdateRelationship(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String            relationshipEdgeId = (String) parameters.get(PARAM_RELATIONSHIP_EDGE_ID);
             AtlasRelationship relationship       = AtlasType.fromJson((String) parameters.get(PARAM_RELATIONSHIP_OBJECT), AtlasRelationship.class);
-
             entityGraphMapper.updateTagPropagations(relationshipEdgeId, relationship);
         }
     }
 
     public static class CleanUpClassificationPropagation extends ClassificationTask {
-        public CleanUpClassificationPropagation(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
+        public CleanUpClassificationPropagation(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
+            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore, transactionInterceptHelper);
         }
 
         @Override
@@ -146,7 +168,11 @@ public class ClassificationPropagationTasks {
             if(parameters.containsKey(PARAM_BATCH_LIMIT)) {
                 batchLimit = (int) parameters.get(PARAM_BATCH_LIMIT);
             }
-            entityGraphMapper.cleanUpClassificationPropagation(classificationName, batchLimit);
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                entityGraphMapper.getTagPropagator().cleanUpClassificationPropagation(classificationName, batchLimit);
+            } else {
+                entityGraphMapper.cleanUpClassificationPropagation(classificationName, batchLimit);
+            }
         }
     }
 }

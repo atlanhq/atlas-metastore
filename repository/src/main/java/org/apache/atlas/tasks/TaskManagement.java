@@ -21,10 +21,16 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ICuratorFactory;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.ha.HAConfiguration;
+import org.apache.atlas.kafka.KafkaNotification;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.service.Service;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
@@ -36,11 +42,10 @@ import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.apache.atlas.repository.Constants.TASK_GUID;
 
 @Component
 @Order(7)
@@ -55,7 +60,12 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final Map<String, TaskFactory>  taskTypeFactoryMap;
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
+    private final KafkaNotification kafkaNotification;
+    private final TransactionInterceptHelper transactionInterceptHelper;
     private Thread watcherThread = null;
+    private Thread watcherThreadV2 = null;
+    private Thread updaterThread = null;
+    private final AtlasGraph graph;
 
     public enum DeleteType {
         SOFT,
@@ -63,10 +73,13 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     @Inject
-    public TaskManagement(Configuration configuration, TaskRegistry taskRegistry, ICuratorFactory curatorFactory, RedisService redisService, MetricsRegistry metricsRegistry) {
+    public TaskManagement(Configuration configuration, TaskRegistry taskRegistry, ICuratorFactory curatorFactory, RedisService redisService, MetricsRegistry metricsRegistry, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper, AtlasGraph graph) {
         this.configuration      = configuration;
         this.registry           = taskRegistry;
         this.redisService       = redisService;
+        this.kafkaNotification = kafkaNotification;
+        this.transactionInterceptHelper = transactionInterceptHelper;
+        this.graph = graph;
         this.statistics         = new Statistics();
         this.taskTypeFactoryMap = new HashMap<>();
         this.curatorFactory = curatorFactory;
@@ -74,9 +87,12 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     }
 
     @VisibleForTesting
-    TaskManagement(Configuration configuration, TaskRegistry taskRegistry, TaskFactory taskFactory, ICuratorFactory curatorFactory, RedisService redisService) {
+    TaskManagement(Configuration configuration, TaskRegistry taskRegistry, TaskFactory taskFactory, ICuratorFactory curatorFactory, RedisService redisService, KafkaNotification kafkaNotification, TransactionInterceptHelper transactionInterceptHelper, AtlasGraph graph) {
         this.configuration      = configuration;
         this.registry           = taskRegistry;
+        this.kafkaNotification = kafkaNotification;
+        this.transactionInterceptHelper = transactionInterceptHelper;
+        this.graph = graph;
         this.metricRegistry = null;
         this.redisService       = redisService;
         this.statistics         = new Statistics();
@@ -84,6 +100,60 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         this.curatorFactory = curatorFactory;
 
         createTaskTypeFactoryMap(taskTypeFactoryMap, taskFactory);
+    }
+
+    /**
+     * Updates a property of the current task's vertex in the Atlas graph.
+     *
+     * This method retrieves the current task from the request context, fetches its corresponding
+     * vertex from the Atlas graph, and updates the specified property.
+     *
+     * Edge cases handled:
+     * - Ensures `currentTask` is not null before accessing its properties.
+     * - Checks if the vertex exists before attempting updates.
+     * - Handles `null` or unexpected `propertyKey` values safely.
+     *
+     * @param propertyKey The key of the property to update.
+     * @param graph The AtlasGraph instance used for querying and updating.
+     * @param value The value to set for the specified property.
+     * @throws IllegalStateException if no matching vertex is found.
+     * @throws IllegalArgumentException if an invalid propertyKey is provided.
+     */
+    public void updateTaskVertexProperty(String propertyKey, AtlasGraph graph, long value) {
+        // Ensure current task exists
+        AtlasTask currentTask = RequestContext.get().getCurrentTask();
+        if (currentTask == null) {
+            throw new IllegalStateException("No current task found in request context.");
+        }
+
+        // Get the corresponding vertex
+        Iterator vertexIterator = graph.query()
+                .has(TASK_GUID, currentTask.getGuid())
+                .vertices().iterator();
+
+        if (!vertexIterator.hasNext()) {
+            throw new IllegalStateException("No vertex found for task GUID: " + currentTask.getGuid());
+        }
+
+        AtlasVertex currentTaskVertex = (AtlasVertex) vertexIterator.next();
+
+        // Ensure propertyKey is valid and update the corresponding task property
+        if (Constants.TASK_ASSET_COUNT_TO_PROPAGATE.equals(propertyKey)) {
+            if (propertyKey != null) {
+                currentTask.setAssetsCountToPropagate(value);
+                currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountToPropagate());
+            } else if (propertyKey != null && Constants.TASK_ASSET_COUNT_PROPAGATED.equals(propertyKey)) {
+                currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + value);
+                currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountPropagated());
+            } else {
+                throw new IllegalArgumentException("Unexpected or null propertyKey: " + propertyKey);
+            }
+        } else if (propertyKey != null && Constants.TASK_ASSET_COUNT_PROPAGATED.equals(propertyKey)) {
+            currentTask.setAssetsCountPropagated(currentTask.getAssetsCountPropagated() + value);
+            currentTaskVertex.setProperty(propertyKey, currentTask.getAssetsCountPropagated());
+        } else {
+            throw new IllegalArgumentException("Unexpected or null propertyKey: " + propertyKey);
+        }
     }
 
     @Override
@@ -103,9 +173,18 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         return watcherThread != null;
     }
 
+    public boolean isWatcherV2Active() {
+        return watcherThreadV2 != null;
+    }
+
+    public boolean isTaskUpdatorActive() {
+        return updaterThread != null;
+    }
+
     @Override
     public void stop() throws AtlasException {
         stopQueueWatcher();
+        stopTaskUpdater();
         LOG.info("TaskManagement: Stopped!");
     }
 
@@ -125,6 +204,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     @Override
     public void instanceIsPassive() throws AtlasException {
         stopQueueWatcher();
+        stopTaskUpdater();
         LOG.info("TaskManagement.instanceIsPassive(): no action needed");
     }
 
@@ -255,7 +335,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         if (this.taskExecutor == null) {
             final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
             final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
-            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry);
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, graph, transactionInterceptHelper);
         }
 
         if (watcherThread == null) {
@@ -263,6 +343,18 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         }
 
         this.statistics.print();
+    }
+
+    private synchronized void startUpdaterThread() {
+        if (this.taskExecutor == null) {
+            final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
+            final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, graph, transactionInterceptHelper);
+        }
+
+        if (updaterThread == null) {
+            updaterThread = this.taskExecutor.startUpdaterThread();
+        }
     }
 
     private void startInternal() {
@@ -277,11 +369,33 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         }
 
         try {
-            startWatcherThread();
+            if (AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean()) {
+                LOG.info("TaskManagement: Distributed task management is enabled. Starting Kafka based task management!");
+                startUpdaterThread();
+                startWatcherThreadV2();
+            } else {
+                LOG.info("TaskManagement: Distributed task management is disabled. Starting in-mem task management!");
+                startWatcherThread();
+            }
+
         } catch (Exception e) {
             LOG.error("TaskManagement: Error while re queue tasks");
             e.printStackTrace();
         }
+    }
+
+    private void startWatcherThreadV2() {
+        if (this.taskExecutor == null) {
+            final boolean isActiveActiveHAEnabled = HAConfiguration.isActiveActiveHAEnabled(configuration);
+            final String zkRoot = HAConfiguration.getZookeeperProperties(configuration).getZkRoot();
+            this.taskExecutor = new TaskExecutor(registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot,isActiveActiveHAEnabled, metricRegistry, kafkaNotification, graph, transactionInterceptHelper);
+        }
+
+        if (watcherThreadV2 == null) {
+            watcherThreadV2 = this.taskExecutor.startWatcherThreadV2();
+        }
+
+        this.statistics.print();
     }
 
     @VisibleForTesting
@@ -304,6 +418,11 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private void stopQueueWatcher() {
         taskExecutor.stopQueueWatcher();
         watcherThread = null;
+    }
+
+    private void stopTaskUpdater() {
+        taskExecutor.stopUpdaterThread();
+        updaterThread = null;
     }
 
     static class Statistics {

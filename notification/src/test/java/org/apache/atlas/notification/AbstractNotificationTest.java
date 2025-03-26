@@ -123,6 +123,11 @@ public class AbstractNotificationTest {
         }
 
         @Override
+        public void sendInternal(NotificationType notificationType, List<String> messages, Integer partition) throws NotificationException {
+
+        }
+
+        @Override
         public <T> List<NotificationConsumer<T>> createConsumers(NotificationType notificationType, int numConsumers) {
             return null;
         }

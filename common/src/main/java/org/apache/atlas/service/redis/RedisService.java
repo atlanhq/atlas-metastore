@@ -8,6 +8,12 @@ public interface RedisService {
 
   void releaseDistributedLock(String key);
 
+  int getSetSize(String key);
+
+  String getHashValue(String key, String field);
+
+  void expireHash(String key);
+
   String getValue(String key);
 
   String putValue(String key, String value);
@@ -18,4 +24,5 @@ public interface RedisService {
 
   Logger getLogger();
 
+  void expireKey(String key);
 }

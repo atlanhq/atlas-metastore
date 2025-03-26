@@ -80,6 +80,32 @@ public class AtlasTask {
         }
     }
 
+    public enum CleanupStatus {
+        PENDING,
+        SUCCESS,
+        FAILED;
+
+        public static CleanupStatus from(String s) {
+            if(StringUtils.isEmpty(s)) {
+                return PENDING;
+            }
+
+            switch (s.toLowerCase()) {
+                case "pending":
+                    return PENDING;
+
+                case "success":
+                    return SUCCESS;
+
+                case "failed":
+                    return FAILED;
+
+                default:
+                    return PENDING;
+            }
+        }
+    }
+
     private String              type;
     private String              guid;
     private String              createdBy;
@@ -95,6 +121,11 @@ public class AtlasTask {
     private String              classificationId;
     private String              entityGuid;
     private String              classificationTypeName;
+    private Long                assetsCountToPropagate;
+    private Long                assetsCountPropagated;
+    private Long                assetsFailedToPropagate;
+    private boolean             cleanupRequired;
+    private CleanupStatus       cleanupStatus;
 
     public AtlasTask() {
     }
@@ -111,6 +142,11 @@ public class AtlasTask {
         this.attemptCount       = 0;
         this.classificationId   = classificationId;
         this.entityGuid         = entityGuid;
+        this.assetsCountToPropagate = 0L;
+        this.assetsCountPropagated = 0L;
+        this.assetsFailedToPropagate = 0L;
+        this.cleanupRequired    = false;
+        this.cleanupStatus      = CleanupStatus.PENDING;
     }
 
     public String getGuid() {
@@ -173,6 +209,22 @@ public class AtlasTask {
 
     public Status getStatus() {
         return this.status;
+    }
+
+    public void setCleanupRequired(boolean cleanupRequired) {
+        this.cleanupRequired = cleanupRequired;
+    }
+
+    public boolean getCleanupRequired() {
+        return cleanupRequired;
+    }
+
+    public CleanupStatus getCleanupStatus() {
+        return this.cleanupStatus;
+    }
+
+    public void setCleanupStatus(CleanupStatus cleanupStatus) {
+        this.cleanupStatus = cleanupStatus;
     }
 
     public int getAttemptCount() {
@@ -239,9 +291,34 @@ public class AtlasTask {
         return entityGuid;
     }
 
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
+    }
+
+    public Long getAssetsCountPropagated(){
+        return  assetsCountPropagated;
+    }
+
+    public void setAssetsFailedToPropagate(Long assetsFailedToPropagate) {
+        this.assetsFailedToPropagate = assetsFailedToPropagate;
+    }
+
+    public Long getAssetsFailedToPropagate() {
+        return assetsFailedToPropagate;
+    }
+
     @JsonIgnore
     public void start() {
         this.setStatus(Status.IN_PROGRESS);
+        this.setCleanupStatus(CleanupStatus.PENDING);
         this.setStartTime(new Date());
     }
 
@@ -270,6 +347,11 @@ public class AtlasTask {
                 ", attemptCount=" + attemptCount +
                 ", errorMessage='" + errorMessage + '\'' +
                 ", status=" + status +
+                ", assetsCountToPropagate=" + assetsCountToPropagate +
+                ", assetsCountPropagated=" + assetsCountPropagated +
+                ", assetsPropagationFailedCount=" + assetsFailedToPropagate +
+                ", cleanupRequired=" + cleanupRequired +
+                ", cleanupStatus=" + cleanupStatus +
                 '}';
     }
 }

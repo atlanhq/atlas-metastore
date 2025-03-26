@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
@@ -26,6 +27,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
 import org.apache.atlas.tasks.AbstractTask;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -57,6 +59,7 @@ public abstract class ClassificationTask extends AbstractTask {
     public static final String PARAM_IS_TERM_ENTITY_EDGE       = "isTermEntityEdge";
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE = "previousRestrictPropagationThroughLineage";
 
+    private final TransactionInterceptHelper transactionInterceptHelper;
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY = "previousRestrictPropagationThroughHierarchy";
   
     protected final AtlasGraph             graph;
@@ -68,20 +71,21 @@ public abstract class ClassificationTask extends AbstractTask {
                               AtlasGraph graph,
                               EntityGraphMapper entityGraphMapper,
                               DeleteHandlerDelegate deleteDelegate,
-                              AtlasRelationshipStore relationshipStore) {
+                              AtlasRelationshipStore relationshipStore, TransactionInterceptHelper transactionInterceptHelper) {
         super(task);
 
         this.graph             = graph;
         this.entityGraphMapper = entityGraphMapper;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
+        this.transactionInterceptHelper = transactionInterceptHelper;
     }
 
     @Override
     public AtlasTask.Status perform() throws AtlasBaseException {
         Map<String, Object> params = getTaskDef().getParameters();
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord(getTaskGuid());
-
+        long taskStart = System.currentTimeMillis();
         if (MapUtils.isEmpty(params)) {
             LOG.warn("Task: {}: Unable to process task: Parameters is not readable!", getTaskGuid());
 
@@ -103,7 +107,8 @@ public abstract class ClassificationTask extends AbstractTask {
 
             run(params);
 
-            setStatus(COMPLETE);
+            if (!AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_MANAGEMENT_ENABLED.getBoolean())
+                setStatus(COMPLETE);
         } catch (AtlasBaseException e) {
             LOG.error("Task: {}: Error performing task!", getTaskGuid(), e);
 
@@ -112,7 +117,9 @@ public abstract class ClassificationTask extends AbstractTask {
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
-            graph.commit();
+            LOG.info("ObjectPropProducer::perform() [Producer Latency] => completed in {} ms",
+                    (System.currentTimeMillis() - taskStart));
+            transactionInterceptHelper.intercept();
         }
 
         return getStatus();

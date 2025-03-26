@@ -30,6 +30,8 @@ on:
       - mlh-170-create-diff
       - cassaop
       - ixop
+      - makerlogic
+      - tagpropv1master
 
 jobs:
   build:
