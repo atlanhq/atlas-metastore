@@ -145,20 +145,20 @@ public class BulkImporterImpl implements BulkImporter {
             return;
         }
 
-        AtlasVertex v = AtlasGraphUtilsV2.findByGuid(atlasGraph, vertexGuid);
+        AtlasVertex v = AtlasGraphUtilsV3.findByGuid(atlasGraph, vertexGuid);
         if (v == null) {
             return;
         }
 
         addHistoricalGuid(v, vertexGuid);
-        AtlasGraphUtilsV2.setProperty(v, Constants.GUID_PROPERTY_KEY, entityGuid);
+        AtlasGraphUtilsV3.setProperty(v, Constants.GUID_PROPERTY_KEY, entityGuid);
 
         LOG.warn("GUID Updated: Entity: {}: from: {}: to: {}", objectId, vertexGuid, entity.getGuid());
     }
 
     public static void addHistoricalGuid(AtlasVertex v, String vertexGuid) {
-        String existingJson = AtlasGraphUtilsV2.getProperty(v, HISTORICAL_GUID_PROPERTY_KEY, String.class);
+        String existingJson = AtlasGraphUtilsV3.getProperty(v, HISTORICAL_GUID_PROPERTY_KEY, String.class);
 
-        AtlasGraphUtilsV2.setProperty(v, HISTORICAL_GUID_PROPERTY_KEY, getJsonArray(existingJson, vertexGuid));
+        AtlasGraphUtilsV3.setProperty(v, HISTORICAL_GUID_PROPERTY_KEY, getJsonArray(existingJson, vertexGuid));
     }
 }

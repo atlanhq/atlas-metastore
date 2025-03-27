@@ -26,7 +26,6 @@ import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
@@ -34,7 +33,7 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
@@ -127,7 +126,7 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
         Map<String, Object> taskParams = MeaningsTask.toParameters(currentTermName, updatedTermName, termQName, updatedTermQualifiedName, termGuid);
         AtlasTask task = taskManagement.createTask(taskType, currentUser, taskParams);
 
-        AtlasGraphUtilsV2.addEncodedProperty(termVertex, PENDING_TASKS_PROPERTY_KEY, task.getGuid());
+        AtlasGraphUtilsV3.addEncodedProperty(termVertex, PENDING_TASKS_PROPERTY_KEY, task.getGuid());
 
         RequestContext.get().queueTask(task);
     }
@@ -159,7 +158,7 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
                 break;
 
             for (AtlasEntityHeader entityHeader : entityHeaders) {
-                AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(entityHeader.getGuid());
+                AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(entityHeader.getGuid());
 
                 if (!currentTermName.equals(updatedTermName)) {
                     List<AtlasObjectId> meanings = (List<AtlasObjectId>) entityHeader.getAttribute(ATTR_MEANINGS);
@@ -170,18 +169,18 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
                             .map(x -> x.getGuid().equals(termGuid) ? updatedTermName : x.getAttributes().get(NAME).toString())
                             .collect(Collectors.joining(","));
 
-                    AtlasGraphUtilsV2.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, updatedMeaningsText);
+                    AtlasGraphUtilsV3.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, updatedMeaningsText);
                     List<String> meaningsNames = entityVertex.getMultiValuedProperty(MEANING_NAMES_PROPERTY_KEY, String.class);
 
                     if (meaningsNames.contains(currentTermName)) {
-                        AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, currentTermName);
-                        AtlasGraphUtilsV2.addListProperty(entityVertex, MEANING_NAMES_PROPERTY_KEY, updatedTermName, true);
+                        AtlasGraphUtilsV3.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, currentTermName);
+                        AtlasGraphUtilsV3.addListProperty(entityVertex, MEANING_NAMES_PROPERTY_KEY, updatedTermName, true);
                     }
                 }
 
                 if (StringUtils.isNotEmpty(updatedTermQName) && !termQName.equals(updatedTermQName)) {
-                    AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
-                    AtlasGraphUtilsV2.addEncodedProperty(entityVertex, MEANINGS_PROPERTY_KEY, updatedTermQName);
+                    AtlasGraphUtilsV3.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
+                    AtlasGraphUtilsV3.addEncodedProperty(entityVertex, MEANINGS_PROPERTY_KEY, updatedTermQName);
                 }
             }
 

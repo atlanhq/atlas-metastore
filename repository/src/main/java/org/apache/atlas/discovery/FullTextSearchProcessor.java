@@ -22,7 +22,6 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -142,14 +141,14 @@ public class FullTextSearchProcessor extends SearchProcessor {
                         continue;
                     }
                     //skip internalTypes
-                    String entityTypeName = AtlasGraphUtilsV2.getTypeName(vertex);
+                    String entityTypeName = AtlasGraphUtilsV3.getTypeName(vertex);
                     AtlasEntityType entityType = context.getTypeRegistry().getEntityTypeByName(entityTypeName);
                     if (entityType  != null && entityType.isInternalType()) {
                         continue;
                     }
 
 
-                    if (activeOnly && AtlasGraphUtilsV2.getState(vertex) != AtlasEntity.Status.ACTIVE) {
+                    if (activeOnly && AtlasGraphUtilsV3.getState(vertex) != AtlasEntity.Status.ACTIVE) {
                         continue;
                     }
 

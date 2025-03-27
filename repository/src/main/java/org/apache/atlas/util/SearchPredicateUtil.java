@@ -20,7 +20,7 @@ package org.apache.atlas.util;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
@@ -833,7 +833,7 @@ public class SearchPredicateUtil {
                 if (Collection.class.isAssignableFrom(attrClass)) {
                     attrValue = element.getPropertyValues(attrName, attrClass);
                 } else {
-                    attrValue = AtlasGraphUtilsV2.getProperty(element, attrName, attrClass);
+                    attrValue = AtlasGraphUtilsV3.getProperty(element, attrName, attrClass);
                 }
 
                 ret = (isNullValid || attrValue != null) && compareValue(attrValue);
@@ -1526,7 +1526,7 @@ public class SearchPredicateUtil {
             AtlasVertex vertex = (object instanceof AtlasVertex) ? (AtlasVertex) object : null;
 
             if (vertex != null) {
-                String typeName            = AtlasGraphUtilsV2.getTypeName(vertex);
+                String typeName            = AtlasGraphUtilsV3.getTypeName(vertex);
                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
                 ret = entityType != null && !entityType.isInternalType();

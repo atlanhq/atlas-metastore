@@ -26,7 +26,7 @@ import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.NanoIdUtils;
 import org.apache.commons.lang.StringUtils;
@@ -134,34 +134,34 @@ public abstract class GlossaryUtils {
 
     protected void addEntityAttr(AtlasVertex vertex, String propName, String propValue) {
         if (MEANINGS_PROPERTY_KEY.equals(propName) || CATEGORIES_PROPERTY_KEY.equals(propName)) {
-            AtlasGraphUtilsV2.addEncodedProperty(vertex, propName, propValue);
+            AtlasGraphUtilsV3.addEncodedProperty(vertex, propName, propValue);
 
         } else if (GLOSSARY_PROPERTY_KEY.equals(propName) || CATEGORIES_PARENT_PROPERTY_KEY.equals(propName)) {
-            AtlasGraphUtilsV2.setEncodedProperty(vertex, propName, propValue);
+            AtlasGraphUtilsV3.setEncodedProperty(vertex, propName, propValue);
 
         } else if (MEANINGS_TEXT_PROPERTY_KEY.equals(propName)) {
-            String names = AtlasGraphUtilsV2.getProperty(vertex, MEANINGS_TEXT_PROPERTY_KEY, String.class);
+            String names = AtlasGraphUtilsV3.getProperty(vertex, MEANINGS_TEXT_PROPERTY_KEY, String.class);
 
             if (org.apache.commons.lang3.StringUtils.isNotEmpty(names)) {
                 propValue = propValue + "," + names;
             }
 
-            AtlasGraphUtilsV2.setEncodedProperty(vertex, MEANINGS_TEXT_PROPERTY_KEY, propValue);
+            AtlasGraphUtilsV3.setEncodedProperty(vertex, MEANINGS_TEXT_PROPERTY_KEY, propValue);
         } else if (MEANING_NAMES_PROPERTY_KEY.equals(propName)){
 
-            AtlasGraphUtilsV2.addListProperty(vertex, MEANING_NAMES_PROPERTY_KEY, propValue,true);
+            AtlasGraphUtilsV3.addListProperty(vertex, MEANING_NAMES_PROPERTY_KEY, propValue,true);
         }
     }
 
     protected void removeEntityAttr(AtlasVertex vertex, String propName, String propValue) {
         if (MEANINGS_PROPERTY_KEY.equals(propName) || CATEGORIES_PROPERTY_KEY.equals(propName)) {
-            AtlasGraphUtilsV2.removeItemFromListPropertyValue(vertex, propName, propValue);
+            AtlasGraphUtilsV3.removeItemFromListPropertyValue(vertex, propName, propValue);
 
         } else if (GLOSSARY_PROPERTY_KEY.equals(propName) || CATEGORIES_PARENT_PROPERTY_KEY.equals(propName)) {
             vertex.removeProperty(propName);
 
         } else if (MEANINGS_TEXT_PROPERTY_KEY.equals(propName)) {
-            String names = AtlasGraphUtilsV2.getProperty(vertex, propName, String.class);
+            String names = AtlasGraphUtilsV3.getProperty(vertex, propName, String.class);
 
             if (StringUtils.isNotEmpty(names)){
                 List<String> nameList = new ArrayList<>(Arrays.asList(names.split(",")));
@@ -172,16 +172,16 @@ public abstract class GlossaryUtils {
                         break;
                     }
                 }
-                AtlasGraphUtilsV2.setEncodedProperty(vertex, propName, org.apache.commons.lang3.StringUtils.join(nameList, ","));
+                AtlasGraphUtilsV3.setEncodedProperty(vertex, propName, org.apache.commons.lang3.StringUtils.join(nameList, ","));
             }
         } else if (MEANING_NAMES_PROPERTY_KEY.equals(propName)){
-            AtlasGraphUtilsV2.removeItemFromListPropertyValue(vertex, MEANING_NAMES_PROPERTY_KEY, propValue);
+            AtlasGraphUtilsV3.removeItemFromListPropertyValue(vertex, MEANING_NAMES_PROPERTY_KEY, propValue);
 
         }
     }
 
     protected AtlasVertex getVertexById(String guid){
-        return AtlasGraphUtilsV2.findByGuid(guid);
+        return AtlasGraphUtilsV3.findByGuid(guid);
     }
 
     protected static String createQualifiedName() {
