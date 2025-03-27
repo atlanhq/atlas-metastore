@@ -46,6 +46,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.JanusUtils;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -188,11 +189,11 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             if (updatedEnd1Guid == null) {
                 AtlasVertex updatedEnd1Vertex = getVertexFromEndPoint(relationship.getEnd1());
 
-                updatedEnd1Guid = updatedEnd1Vertex == null ? null : AtlasGraphUtilsV2.getIdFromVertex(updatedEnd1Vertex);
+                updatedEnd1Guid = updatedEnd1Vertex == null ? null : AtlasGraphUtilsV3.getIdFromVertex(updatedEnd1Vertex);
             }
 
             if (updatedEnd1Guid != null) {
-                String end1Guid = AtlasGraphUtilsV2.getIdFromVertex(end1Vertex);
+                String end1Guid = AtlasGraphUtilsV3.getIdFromVertex(end1Vertex);
 
                 if (!StringUtils.equalsIgnoreCase(relationship.getEnd1().getGuid(), end1Guid)) {
                     throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_UPDATE_END_CHANGE_NOT_ALLOWED, edgeType, guid, end1Guid, relationship.getEnd1().getGuid());
@@ -207,11 +208,11 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             if (updatedEnd2Guid == null) {
                 AtlasVertex updatedEnd2Vertex = getVertexFromEndPoint(relationship.getEnd2());
 
-                updatedEnd2Guid = updatedEnd2Vertex == null ? null : AtlasGraphUtilsV2.getIdFromVertex(updatedEnd2Vertex);
+                updatedEnd2Guid = updatedEnd2Vertex == null ? null : AtlasGraphUtilsV3.getIdFromVertex(updatedEnd2Vertex);
             }
 
             if (updatedEnd2Guid != null) {
-                String end2Guid = AtlasGraphUtilsV2.getIdFromVertex(end2Vertex);
+                String end2Guid = AtlasGraphUtilsV3.getIdFromVertex(end2Vertex);
 
                 if (!StringUtils.equalsIgnoreCase(relationship.getEnd2().getGuid(), end2Guid)) {
                     throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_UPDATE_END_CHANGE_NOT_ALLOWED, AtlasGraphUtilsV2.getTypeName(edge), guid, end2Guid, relationship.getEnd2().getGuid());
@@ -474,7 +475,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
                 if (ret != null) {
                     throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_ALREADY_EXISTS, relationship.getTypeName(),
-                                                 AtlasGraphUtilsV2.getIdFromVertex(end1Vertex), AtlasGraphUtilsV2.getIdFromVertex(end2Vertex));
+                                                 AtlasGraphUtilsV3.getIdFromVertex(end1Vertex), AtlasGraphUtilsV3.getIdFromVertex(end2Vertex));
                 }
             }
 

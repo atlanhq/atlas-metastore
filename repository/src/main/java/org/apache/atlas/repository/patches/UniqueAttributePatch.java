@@ -42,7 +42,7 @@ import java.util.Collection;
 import java.util.Iterator;
 
 import static org.apache.atlas.model.patches.AtlasPatch.PatchStatus.APPLIED;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getIdFromVertex;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getIdFromVertex;
 
 public class UniqueAttributePatch extends AtlasPatchHandler {
     private static final Logger LOG = LoggerFactory.getLogger(UniqueAttributePatch.class);

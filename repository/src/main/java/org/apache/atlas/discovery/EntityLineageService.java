@@ -47,6 +47,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.AtlasTypeUtil;
@@ -354,7 +355,7 @@ public class EntityLineageService implements AtlasLineageService {
                 traversalOrder.incrementAndGet();
             }
 
-            String inGuid = AtlasGraphUtilsV2.getIdFromVertex(datasetVertex);
+            String inGuid = AtlasGraphUtilsV3.getIdFromVertex(datasetVertex);
             LineageOnDemandConstraints inGuidLineageConstrains = getAndValidateLineageConstraintsByGuid(inGuid, atlasLineageOnDemandContext);
 
             if (!ret.getRelationsOnDemand().containsKey(inGuid)) {
@@ -419,7 +420,7 @@ public class EntityLineageService implements AtlasLineageService {
                         continue;
                     }
                     if (incrementAndCheckIfRelationsLimitReached(outgoingEdge, isInput, atlasLineageOnDemandContext, ret, depth, entitiesTraversed, direction, visitedVertices)) {
-                        String processGuid = AtlasGraphUtilsV2.getIdFromVertex(processVertex);
+                        String processGuid = AtlasGraphUtilsV3.getIdFromVertex(processVertex);
                         LineageInfoOnDemand entityOnDemandInfo = ret.getRelationsOnDemand().get(processGuid);
                         if (entityOnDemandInfo == null)
                             continue;
@@ -436,7 +437,7 @@ public class EntityLineageService implements AtlasLineageService {
                     }
                     if (entityVertex != null && !visitedVertices.contains(getId(entityVertex))) {
                         traverseEdgesOnDemand(entityVertex, isInput, depth - 1, nextLevel, visitedVertices, atlasLineageOnDemandContext, ret, baseGuid, entitiesTraversed, traversalOrder); // execute inner depth
-                        AtlasEntityHeader traversedEntity = ret.getGuidEntityMap().get(AtlasGraphUtilsV2.getIdFromVertex(entityVertex));
+                        AtlasEntityHeader traversedEntity = ret.getGuidEntityMap().get(AtlasGraphUtilsV3.getIdFromVertex(entityVertex));
                         traversedEntity.setFinishTime(traversalOrder.get());
                     }
                 }
@@ -694,11 +695,11 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("incrementAndCheckIfRelationsLimitReached");
 
         AtlasVertex                inVertex                 = isInput ? atlasEdge.getOutVertex() : atlasEdge.getInVertex();
-        String                     inGuid                   = AtlasGraphUtilsV2.getIdFromVertex(inVertex);
+        String                     inGuid                   = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
         LineageOnDemandConstraints inGuidLineageConstraints = getAndValidateLineageConstraintsByGuid(inGuid, atlasLineageOnDemandContext);
 
         AtlasVertex                outVertex                 = isInput ? atlasEdge.getInVertex() : atlasEdge.getOutVertex();
-        String                     outGuid                   = AtlasGraphUtilsV2.getIdFromVertex(outVertex);
+        String                     outGuid                   = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
         LineageOnDemandConstraints outGuidLineageConstraints = getAndValidateLineageConstraintsByGuid(outGuid, atlasLineageOnDemandContext);
 
         LineageInfoOnDemand inLineageInfo = ret.getRelationsOnDemand().containsKey(inGuid) ? ret.getRelationsOnDemand().get(inGuid) : new LineageInfoOnDemand(inGuidLineageConstraints);
@@ -785,7 +786,7 @@ public class EntityLineageService implements AtlasLineageService {
 
         Map<String, Object> lookupAttributes = new HashMap<>();
         lookupAttributes.put("qualifiedName", datasetName);
-        String guid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(hive_table, lookupAttributes);
+        String guid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(hive_table, lookupAttributes);
 
         return getSchemaForHiveTableByGuid(guid);
     }
@@ -1006,8 +1007,8 @@ public class EntityLineageService implements AtlasLineageService {
         try {
             AtlasVertex inVertex     = edge.getInVertex();
             AtlasVertex outVertex    = edge.getOutVertex();
-            String      inGuid       = AtlasGraphUtilsV2.getIdFromVertex(inVertex);
-            String      outGuid      = AtlasGraphUtilsV2.getIdFromVertex(outVertex);
+            String      inGuid       = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
+            String      outGuid      = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
             String      relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
             boolean     isInputEdge  = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
@@ -1448,9 +1449,9 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasVertex inVertex = incomingEdge.getInVertex();
         AtlasVertex outVertex = outgoingEdge.getInVertex();
         AtlasVertex processVertex = outgoingEdge.getOutVertex();
-        String inGuid = AtlasGraphUtilsV2.getIdFromVertex(inVertex);
-        String outGuid = AtlasGraphUtilsV2.getIdFromVertex(outVertex);
-        String processGuid = AtlasGraphUtilsV2.getIdFromVertex(processVertex);
+        String inGuid = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
+        String outGuid = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
+        String processGuid = AtlasGraphUtilsV3.getIdFromVertex(processVertex);
         String relationGuid = null;
         boolean isInputEdge = incomingEdge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
@@ -1491,9 +1492,9 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasVertex processVertex = incomingEdge.getOutVertex();
         AtlasVertex rightVertex = outgoingEdge.getInVertex();
 
-        String leftGuid = AtlasGraphUtilsV2.getIdFromVertex(leftVertex);
-        String rightGuid = AtlasGraphUtilsV2.getIdFromVertex(rightVertex);
-        String processGuid = AtlasGraphUtilsV2.getIdFromVertex(processVertex);
+        String leftGuid = AtlasGraphUtilsV3.getIdFromVertex(leftVertex);
+        String rightGuid = AtlasGraphUtilsV3.getIdFromVertex(rightVertex);
+        String processGuid = AtlasGraphUtilsV3.getIdFromVertex(processVertex);
 
         if (!entities.containsKey(leftGuid)) {
             AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(leftVertex, lineageContext.getAttributes());
@@ -1535,8 +1536,8 @@ public class EntityLineageService implements AtlasLineageService {
 
         AtlasVertex inVertex = edge.getInVertex();
         AtlasVertex outVertex = edge.getOutVertex();
-        String inGuid = AtlasGraphUtilsV2.getIdFromVertex(inVertex);
-        String outGuid = AtlasGraphUtilsV2.getIdFromVertex(outVertex);
+        String inGuid = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
+        String outGuid = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
         String relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         boolean isInputEdge = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
@@ -1563,8 +1564,8 @@ public class EntityLineageService implements AtlasLineageService {
         //Backward compatibility method
         AtlasVertex inVertex = edge.getInVertex();
         AtlasVertex outVertex = edge.getOutVertex();
-        String inGuid = AtlasGraphUtilsV2.getIdFromVertex(inVertex);
-        String outGuid = AtlasGraphUtilsV2.getIdFromVertex(outVertex);
+        String inGuid = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
+        String outGuid = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
         String relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         boolean isInputEdge = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
@@ -1601,8 +1602,8 @@ public class EntityLineageService implements AtlasLineageService {
         }
         boolean inIsProcess = inEntityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
 
-        String      inGuid       = AtlasGraphUtilsV2.getIdFromVertex(inVertex);
-        String      outGuid      = AtlasGraphUtilsV2.getIdFromVertex(outVertex);
+        String      inGuid       = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
+        String      outGuid      = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
         String      relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         boolean     isInputEdge  = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 

@@ -33,6 +33,7 @@ import org.apache.atlas.repository.store.graph.BulkImporter;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.ImportStrategy;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.MigrationImport;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.RegularImport;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.Constants;
@@ -134,7 +135,7 @@ public class BulkImporterImpl implements BulkImporter {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         String vertexGuid = null;
         try {
-            vertexGuid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(atlasGraph, entityType, objectId.getUniqueAttributes());
+            vertexGuid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(atlasGraph, entityType, objectId.getUniqueAttributes());
         } catch (AtlasBaseException e) {
             LOG.warn("Entity: {}: Does not exist!", objectId);
             return;

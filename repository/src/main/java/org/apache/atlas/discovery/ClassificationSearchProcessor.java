@@ -23,6 +23,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.util.SearchPredicateUtil;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -299,7 +300,7 @@ public class ClassificationSearchProcessor extends SearchProcessor {
                             AtlasVertex entityVertex = edge.getOutVertex();
                             resultCount++;
 
-                            String guid = AtlasGraphUtilsV2.getIdFromVertex(entityVertex);
+                            String guid = AtlasGraphUtilsV3.getIdFromVertex(entityVertex);
 
                             if (processedGuids.contains(guid)) {
                                 continue;
@@ -371,7 +372,7 @@ public class ClassificationSearchProcessor extends SearchProcessor {
 
                         AtlasVertex matchVertex = (AtlasVertex) CollectionUtils.find(Collections.singleton(classificationVertex), inMemoryPredicate);
                         if (matchVertex != null) {
-                            String guid = AtlasGraphUtilsV2.getIdFromVertex(entityVertex);
+                            String guid = AtlasGraphUtilsV3.getIdFromVertex(entityVertex);
 
                             if (processedGuids.contains(guid)) {
                                 continue;

@@ -23,6 +23,7 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
@@ -133,7 +134,7 @@ public class FullTextSearchProcessor extends SearchProcessor {
                     resultCount++;
 
                     // skip non-entity vertices
-                    if (!AtlasGraphUtilsV2.isEntityVertex(vertex)) {
+                    if (!AtlasGraphUtilsV3.isEntityVertex(vertex)) {
                         if (LOG.isDebugEnabled()) {
                             LOG.debug("FullTextSearchProcessor.execute(): ignoring non-entity vertex (id={})", vertex.getId());
                         }

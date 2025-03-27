@@ -49,8 +49,8 @@ import static org.apache.atlas.repository.graphdb.AtlasGraphQuery.SortOrder.DESC
 /**
  * Utility methods for Graph.
  */
-public class AtlasGraphUtilsV2 {
-    private static final Logger LOG = LoggerFactory.getLogger(AtlasGraphUtilsV2.class);
+public class AtlasGraphUtilsV3 {
+    private static final Logger LOG = LoggerFactory.getLogger(AtlasGraphUtilsV3.class);
 
     public static final String PROPERTY_PREFIX = Constants.INTERNAL_PROPERTY_KEY_PREFIX + "type.";
     public static final String SUPERTYPE_EDGE_LABEL = PROPERTY_PREFIX + ".supertype";
@@ -423,9 +423,9 @@ public class AtlasGraphUtilsV2 {
         String ret = null;
 
         if (StringUtils.isNotEmpty(guid)) {
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+            AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
-            ret = (vertex != null) ? AtlasGraphUtilsV2.getTypeName(vertex) : null;
+            ret = (vertex != null) ? AtlasGraphUtilsV3.getTypeName(vertex) : null;
         }
 
         return ret;

@@ -40,6 +40,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.BulkImporterImpl;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityImportStream;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.MapUtils;
@@ -170,7 +171,7 @@ public class RegularImport extends ImportStrategy {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         String vertexGuid = null;
         try {
-            vertexGuid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(this.graph, entityType, objectId.getUniqueAttributes());
+            vertexGuid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(this.graph, entityType, objectId.getUniqueAttributes());
         } catch (AtlasBaseException e) {
             LOG.warn("Entity: {}: Does not exist!", objectId);
             return;

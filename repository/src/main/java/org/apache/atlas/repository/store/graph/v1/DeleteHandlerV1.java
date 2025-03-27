@@ -47,6 +47,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.tasks.TaskUtil;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -120,7 +121,7 @@ public abstract class DeleteHandlerV1 {
         final Set<AtlasVertex> deletionCandidateVertices = new HashSet<>();
 
         for (AtlasVertex instanceVertex : instanceVertices) {
-            final String             guid  = AtlasGraphUtilsV2.getIdFromVertex(instanceVertex);
+            final String             guid  = AtlasGraphUtilsV3.getIdFromVertex(instanceVertex);
 
             if (skipVertexForDelete(instanceVertex)) {
                 if (LOG.isDebugEnabled()) {
@@ -1175,7 +1176,7 @@ public abstract class DeleteHandlerV1 {
         if(vertex != null) {
             try {
                 final RequestContext reqContext = RequestContext.get();
-                final String guid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                final String guid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                 if(guid != null && !reqContext.isDeletedEntity(guid)) {
                     final AtlasEntity.Status vertexState = getState(vertex);

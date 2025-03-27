@@ -39,11 +39,9 @@ import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.Collection;
 import java.util.Iterator;
 
 import static org.apache.atlas.model.patches.AtlasPatch.PatchStatus.APPLIED;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getIdFromVertex;
 
 public class ProcessNamePatch extends AtlasPatchHandler {
     private static final Logger LOG = LoggerFactory.getLogger(ProcessNamePatch.class);

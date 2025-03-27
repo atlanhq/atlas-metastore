@@ -31,6 +31,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -159,12 +160,12 @@ public final class EntityStateChecker {
      */
     public AtlasEntityState checkEntityState(AtlasVertex entityVertex, boolean fixIssues, AtlasCheckStateResult result) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> checkEntityState(guid={})", AtlasGraphUtilsV2.getIdFromVertex(entityVertex));
+            LOG.debug("==> checkEntityState(guid={})", AtlasGraphUtilsV3.getIdFromVertex(entityVertex));
         }
 
         AtlasEntityState ret = new AtlasEntityState();
 
-        ret.setGuid(AtlasGraphUtilsV2.getIdFromVertex(entityVertex));
+        ret.setGuid(AtlasGraphUtilsV3.getIdFromVertex(entityVertex));
         ret.setTypeName(AtlasGraphUtilsV2.getTypeName(entityVertex));
         ret.setName(getEntityName(entityVertex));
         ret.setStatus(AtlasGraphUtilsV2.getState(entityVertex));

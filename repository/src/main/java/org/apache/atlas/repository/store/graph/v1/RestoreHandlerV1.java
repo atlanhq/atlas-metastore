@@ -33,6 +33,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.*;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -100,7 +101,7 @@ public class RestoreHandlerV1 {
             final Set<AtlasVertex> restoreCandidateVertices = new HashSet<>();
 
             for (AtlasVertex instanceVertex : instanceVertices) {
-                final String guid = AtlasGraphUtilsV2.getIdFromVertex(instanceVertex);
+                final String guid = AtlasGraphUtilsV3.getIdFromVertex(instanceVertex);
 
                 if (skipVertexForRestore(instanceVertex)) {
                     if (LOG.isDebugEnabled()) {
@@ -328,7 +329,7 @@ public class RestoreHandlerV1 {
         if (vertex != null) {
             try {
                 final RequestContext reqContext = RequestContext.get();
-                final String guid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                final String guid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
                 if (guid != null && !reqContext.isRestoredEntity(guid)) {
                     final AtlasEntity.Status vertexState = AtlasGraphUtilsV2.getState(vertex);
                     ret = vertexState != DELETED;

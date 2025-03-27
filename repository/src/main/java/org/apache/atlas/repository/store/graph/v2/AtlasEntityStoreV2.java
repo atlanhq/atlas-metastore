@@ -75,6 +75,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryCollecti
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryFolderPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -191,7 +192,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.UNKNOWN_TYPENAME);
         }
 
-        List<String> ret = AtlasGraphUtilsV2.findEntityGUIDsByType(graph, typename);
+        List<String> ret = AtlasGraphUtilsV3.findEntityGUIDsByType(graph, typename);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== getEntityGUIDS({})", typename);
@@ -493,7 +494,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 throw new AtlasBaseException(AtlasErrorCode.UNKNOWN_TYPENAME, objectId.getTypeName());
             }
 
-            guid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(graph, typeRegistry.getEntityTypeByName(objectId.getTypeName()), objectId.getUniqueAttributes());
+            guid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(graph, typeRegistry.getEntityTypeByName(objectId.getTypeName()), objectId.getUniqueAttributes());
         }
 
         AtlasEntity entity = updatedEntityInfo.getEntity();
@@ -515,7 +516,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "no entity to update.");
         }
 
-        String      guid   = AtlasGraphUtilsV2.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
+        String      guid   = AtlasGraphUtilsV3.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
         AtlasEntity entity = updatedEntityInfo.getEntity();
 
         entity.setGuid(guid);
@@ -1028,7 +1029,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     @Override
     @GraphTransaction
     public String getGuidByUniqueAttributes(AtlasEntityType entityType, Map<String, Object> uniqAttributes) throws AtlasBaseException{
-        return AtlasGraphUtilsV2.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
+        return AtlasGraphUtilsV3.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
     }
 
     @Override
@@ -1772,7 +1773,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                             graphDiscoverer.validateAndNormalizeForUpdate(entity);
                         }
 
-                        String guidVertex = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                        String guidVertex = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                         if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
                             checkAndCreateProcessRelationshipsCleanupTaskNotification(entityType, vertex);
@@ -1800,7 +1801,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                         discoveryContext.addResolvedIdByUniqAttribs(getAtlasObjectId(entity), vertex);
 
-                        String generatedGuid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                        String generatedGuid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                         entity.setGuid(generatedGuid);
 
