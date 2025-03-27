@@ -30,6 +30,7 @@ on:
       - mlh-170-create-diff
       - cassaop
       - ixop
+      - tagpropEval
 
 jobs:
   build:
