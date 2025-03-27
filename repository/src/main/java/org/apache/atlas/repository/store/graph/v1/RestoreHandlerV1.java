@@ -27,19 +27,16 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
-import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.*;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
-import org.apache.commons.collections.iterators.IteratorChain;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -53,8 +50,8 @@ import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.*;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getIdFromEdge;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.isReference;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getIdFromEdge;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.isReference;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 
 @Singleton
@@ -79,13 +76,13 @@ public class RestoreHandlerV1 {
 
         if (isClassificationEdge(edge)) {
             AtlasVertex classificationVertex = edge.getInVertex();
-            AtlasGraphUtilsV2.setEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_STATUS, ACTIVE.name());
+            AtlasGraphUtilsV3.setEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_STATUS, ACTIVE.name());
         }
 
-        if (AtlasGraphUtilsV2.getState(edge) == DELETED) {
-            AtlasGraphUtilsV2.setEncodedProperty(edge, STATE_PROPERTY_KEY, ACTIVE.name());
-            AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-            AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
+        if (AtlasGraphUtilsV3.getState(edge) == DELETED) {
+            AtlasGraphUtilsV3.setEncodedProperty(edge, STATE_PROPERTY_KEY, ACTIVE.name());
+            AtlasGraphUtilsV3.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+            AtlasGraphUtilsV3.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
         }
 
         if (isRelationshipEdge(edge))
@@ -197,8 +194,8 @@ public class RestoreHandlerV1 {
                 final String outId = getGuid(outVertex);
 
                 if (!requestContext.isUpdatedEntity(outId)) {
-                    AtlasGraphUtilsV2.setEncodedProperty(outVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
-                    AtlasGraphUtilsV2.setEncodedProperty(outVertex, MODIFIED_BY_KEY, requestContext.getUser());
+                    AtlasGraphUtilsV3.setEncodedProperty(outVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
+                    AtlasGraphUtilsV3.setEncodedProperty(outVertex, MODIFIED_BY_KEY, requestContext.getUser());
 
                     requestContext.recordEntityUpdate(entityRetriever.toAtlasEntityHeader(outVertex));
                 }
@@ -217,7 +214,7 @@ public class RestoreHandlerV1 {
 
         while (vertices.size() > 0) {
             AtlasVertex vertex = vertices.pop();
-            AtlasEntity.Status state = AtlasGraphUtilsV2.getState(vertex);
+            AtlasEntity.Status state = AtlasGraphUtilsV3.getState(vertex);
 
             if (state != DELETED) {
                 continue;
@@ -248,7 +245,7 @@ public class RestoreHandlerV1 {
                     if (attributeInfo.getAttributeDef().isSoftReferenced()) {
                         String softRefVal = vertex.getProperty(attributeInfo.getVertexPropertyName(), String.class);
                         AtlasObjectId refObjId = AtlasEntityUtil.parseSoftRefValue(softRefVal);
-                        AtlasVertex refVertex = refObjId != null ? AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid()) : null;
+                        AtlasVertex refVertex = refObjId != null ? AtlasGraphUtilsV3.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid()) : null;
 
                         if (refVertex != null) {
                             vertices.push(refVertex);
@@ -256,7 +253,7 @@ public class RestoreHandlerV1 {
                     } else {
                         AtlasEdge edge = graphHelper.getEdgeForLabel(vertex, edgeLabel);
 
-                        if (edge == null || (AtlasGraphUtilsV2.getState(edge) != DELETED)) {
+                        if (edge == null || (AtlasGraphUtilsV3.getState(edge) != DELETED)) {
                             continue;
                         }
 
@@ -282,7 +279,7 @@ public class RestoreHandlerV1 {
 
                             if (CollectionUtils.isNotEmpty(refObjIds)) {
                                 for (AtlasObjectId refObjId : refObjIds) {
-                                    AtlasVertex refVertex = AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
+                                    AtlasVertex refVertex = AtlasGraphUtilsV3.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
 
                                     if (refVertex != null) {
                                         vertices.push(refVertex);
@@ -295,7 +292,7 @@ public class RestoreHandlerV1 {
 
                             if (MapUtils.isNotEmpty(refObjIds)) {
                                 for (AtlasObjectId refObjId : refObjIds.values()) {
-                                    AtlasVertex refVertex = AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
+                                    AtlasVertex refVertex = AtlasGraphUtilsV3.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
 
                                     if (refVertex != null) {
                                         vertices.push(refVertex);
@@ -309,7 +306,7 @@ public class RestoreHandlerV1 {
 
                         if (CollectionUtils.isNotEmpty(edges)) {
                             for (AtlasEdge edge : edges) {
-                                if (edge == null || (AtlasGraphUtilsV2.getState(edge) != DELETED)) {
+                                if (edge == null || (AtlasGraphUtilsV3.getState(edge) != DELETED)) {
                                     continue;
                                 }
 
@@ -331,7 +328,7 @@ public class RestoreHandlerV1 {
                 final RequestContext reqContext = RequestContext.get();
                 final String guid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
                 if (guid != null && !reqContext.isRestoredEntity(guid)) {
-                    final AtlasEntity.Status vertexState = AtlasGraphUtilsV2.getState(vertex);
+                    final AtlasEntity.Status vertexState = AtlasGraphUtilsV3.getState(vertex);
                     ret = vertexState != DELETED;
                 }
             } catch (IllegalStateException excp) {
@@ -358,7 +355,7 @@ public class RestoreHandlerV1 {
 
     private void restoreRelationships(Collection<AtlasEdge> edges) throws AtlasBaseException {
         for (AtlasEdge edge : edges) {
-            boolean needToSkip = (AtlasGraphUtilsV2.getState(edge) == ACTIVE);
+            boolean needToSkip = (AtlasGraphUtilsV3.getState(edge) == ACTIVE);
 
             if (needToSkip) {
                 if (LOG.isDebugEnabled()) {
@@ -377,7 +374,7 @@ public class RestoreHandlerV1 {
 
     private AtlasStructType.AtlasAttribute getAttributeForEdge(AtlasEdge edge) throws AtlasBaseException {
         String labelWithoutPrefix        = edge.getLabel().substring(EDGE_LABEL_PREFIX.length());
-        AtlasType       parentType       = typeRegistry.getType(AtlasGraphUtilsV2.getTypeName(edge.getOutVertex()));
+        AtlasType       parentType       = typeRegistry.getType(AtlasGraphUtilsV3.getTypeName(edge.getOutVertex()));
         AtlasStructType parentStructType = (AtlasStructType) parentType;
         AtlasStructType.AtlasAttribute attribute = parentStructType.getAttribute(labelWithoutPrefix);
         if (attribute == null) {
@@ -399,11 +396,11 @@ public class RestoreHandlerV1 {
             }
             Iterable<AtlasEdge> incomingEdges;
 
-        // Restore external references to this vertex - incoming edges from lineage or glossary term edges
+            // Restore external references to this vertex - incoming edges from lineage or glossary term edges
             if (RequestContext.get().isSkipProcessEdgeRestoration())
-                    incomingEdges = instanceVertex.getInEdges(PROCESS_EDGE_LABELS);
+                incomingEdges = instanceVertex.getInEdges(PROCESS_EDGE_LABELS);
             else
-                    incomingEdges = instanceVertex.getInEdges(null);
+                incomingEdges = instanceVertex.getInEdges(null);
 
             for (AtlasEdge edge : incomingEdges) {
                 AtlasEntity.Status edgeStatus = getStatus(edge);
@@ -433,12 +430,12 @@ public class RestoreHandlerV1 {
             LOG.debug("==> RestoreHandlerV1._restoreVertex({})", string(instanceVertex));
         }
 
-        AtlasEntity.Status state = AtlasGraphUtilsV2.getState(instanceVertex);
+        AtlasEntity.Status state = AtlasGraphUtilsV3.getState(instanceVertex);
 
         if (state == DELETED) {
-            AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, STATE_PROPERTY_KEY, ACTIVE.name());
-            AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-            AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
+            AtlasGraphUtilsV3.setEncodedProperty(instanceVertex, STATE_PROPERTY_KEY, ACTIVE.name());
+            AtlasGraphUtilsV3.setEncodedProperty(instanceVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+            AtlasGraphUtilsV3.setEncodedProperty(instanceVertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
 
         }
     }
@@ -593,8 +590,8 @@ public class RestoreHandlerV1 {
                     RequestContext requestContext = RequestContext.get();
 
                     if (!requestContext.isUpdatedEntity(getGuid(referencedVertex))) {
-                        AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
-                        AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFIED_BY_KEY, requestContext.getUser());
+                        AtlasGraphUtilsV3.setEncodedProperty(referencedVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
+                        AtlasGraphUtilsV3.setEncodedProperty(referencedVertex, MODIFIED_BY_KEY, requestContext.getUser());
 
                         requestContext.recordEntityUpdate(entityRetriever.toAtlasEntityHeader(referencedVertex));
                     }

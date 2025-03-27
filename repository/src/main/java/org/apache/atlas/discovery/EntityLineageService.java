@@ -45,9 +45,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.AtlasTypeUtil;
@@ -301,7 +300,7 @@ public class EntityLineageService implements AtlasLineageService {
         AtomicInteger outputEntitiesTraversed = new AtomicInteger(0);
         AtomicInteger traversalOrder = new AtomicInteger(1);
         if (isDataSet) {
-            AtlasVertex datasetVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+            AtlasVertex datasetVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
             if (direction == AtlasLineageOnDemandInfo.LineageDirection.INPUT || direction == AtlasLineageOnDemandInfo.LineageDirection.BOTH)
                 traverseEdgesOnDemand(datasetVertex, true, depth, level, new HashSet<>(), atlasLineageOnDemandContext, ret, guid, inputEntitiesTraversed, traversalOrder);
             if (direction == AtlasLineageOnDemandInfo.LineageDirection.OUTPUT || direction == AtlasLineageOnDemandInfo.LineageDirection.BOTH)
@@ -310,7 +309,7 @@ public class EntityLineageService implements AtlasLineageService {
             setGraphTraversalMetadata(level, traversalOrder, baseEntityHeader);
             ret.getGuidEntityMap().put(guid, baseEntityHeader);
         } else  {
-            AtlasVertex processVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+            AtlasVertex processVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
             // make one hop to the next dataset vertices from process vertex and traverse with 'depth = depth - 1'
             if (direction == AtlasLineageOnDemandInfo.LineageDirection.INPUT || direction == AtlasLineageOnDemandInfo.LineageDirection.BOTH) {
                 Iterator<AtlasEdge> processEdges = processVertex.getEdges(AtlasEdgeDirection.OUT, PROCESS_INPUTS_EDGE).iterator();
@@ -466,7 +465,7 @@ public class EntityLineageService implements AtlasLineageService {
         Map<String, List<String>> lineageChildrenForEntityMap = new HashMap<>();  // New map to track parent nodes
 
 
-        AtlasVertex baseVertex = AtlasGraphUtilsV2.findByGuid(this.graph, baseGuid);
+        AtlasVertex baseVertex = AtlasGraphUtilsV3.findByGuid(this.graph, baseGuid);
         boolean isBaseNodeDataset = validateEntityTypeAndCheckIfDataSet(baseGuid);
         // Get the neighbors for the current node
         enqueueNeighbours(baseVertex, isBaseNodeDataset, lineageListContext, traversalQueue, visitedVertices, skippedVertices, lineageParentsForEntityMap, lineageChildrenForEntityMap);
@@ -491,7 +490,7 @@ public class EntityLineageService implements AtlasLineageService {
                     break;
 
                 String currentGUID = traversalQueue.poll();
-                AtlasVertex currentVertex = AtlasGraphUtilsV2.findByGuid(this.graph, currentGUID);
+                AtlasVertex currentVertex = AtlasGraphUtilsV3.findByGuid(this.graph, currentGUID);
                 if (Objects.isNull(currentVertex))
                     throw new AtlasBaseException("Found null vertex during lineage graph traversal for guid: " + currentGUID);
 
@@ -604,7 +603,7 @@ public class EntityLineageService implements AtlasLineageService {
             if (subNodes == null) continue;
 
             for (String subNode : subNodes) {
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(this.graph, subNode);
+                AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(this.graph, subNode);
                 if (vertex != null && seenGuids.add(subNode)) {
                     Map<String, String> details = fetchAttributes(vertex, FETCH_ENTITY_ATTRIBUTES);
                     relatedDatasetNodes.add(details);
@@ -923,7 +922,7 @@ public class EntityLineageService implements AtlasLineageService {
         }
 
         if (lineageContext.isDataset()) {
-            AtlasVertex datasetVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+            AtlasVertex datasetVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
             lineageContext.setStartDatasetVertex(datasetVertex);
 
             if (direction == INPUT || direction == BOTH) {
@@ -934,7 +933,7 @@ public class EntityLineageService implements AtlasLineageService {
                 traverseEdges(datasetVertex, false, depth, new HashSet<>(), ret, lineageContext);
             }
         } else {
-            AtlasVertex processVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+            AtlasVertex processVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
 
             // make one hop to the next dataset vertices from process vertex and traverse with 'depth = depth - 1'
             if (direction == INPUT || direction == BOTH) {
@@ -1009,7 +1008,7 @@ public class EntityLineageService implements AtlasLineageService {
             AtlasVertex outVertex    = edge.getOutVertex();
             String      inGuid       = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
             String      outGuid      = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
-            String      relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+            String      relationGuid = AtlasGraphUtilsV3.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
             boolean     isInputEdge  = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
             if (isLineageOnDemandEnabled()) {
@@ -1365,7 +1364,7 @@ public class EntityLineageService implements AtlasLineageService {
         boolean ret = false;
 
         if (lineageInfo != null && CollectionUtils.isNotEmpty(lineageInfo.getRelations()) && edge != null) {
-            String relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+            String relationGuid = AtlasGraphUtilsV3.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
             Set<LineageRelation> relations = lineageInfo.getRelations();
             for (LineageRelation relation : relations) {
                 if (relation.getRelationshipId().equals(relationGuid)) {
@@ -1511,14 +1510,14 @@ public class EntityLineageService implements AtlasLineageService {
             entities.put(rightGuid, entityHeader);
         }
 
-        String relationGuid = AtlasGraphUtilsV2.getEncodedProperty(incomingEdge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+        String relationGuid = AtlasGraphUtilsV3.getEncodedProperty(incomingEdge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         if (incomingEdge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE)) {
             relations.add(new LineageRelation(leftGuid, processGuid, relationGuid));
         } else {
             relations.add(new LineageRelation(processGuid, leftGuid, relationGuid));
         }
 
-        relationGuid = AtlasGraphUtilsV2.getEncodedProperty(outgoingEdge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+        relationGuid = AtlasGraphUtilsV3.getEncodedProperty(outgoingEdge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         if (outgoingEdge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE)) {
             relations.add(new LineageRelation(rightGuid, processGuid, relationGuid));
         } else {
@@ -1538,7 +1537,7 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasVertex outVertex = edge.getOutVertex();
         String inGuid = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
         String outGuid = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
-        String relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+        String relationGuid = AtlasGraphUtilsV3.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         boolean isInputEdge = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
         if (!entities.containsKey(inGuid)) {
@@ -1566,7 +1565,7 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasVertex outVertex = edge.getOutVertex();
         String inGuid = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
         String outGuid = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
-        String relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+        String relationGuid = AtlasGraphUtilsV3.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         boolean isInputEdge = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
         if (!entities.containsKey(inGuid)) {
@@ -1595,7 +1594,7 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasVertex inVertex     = edge.getInVertex();
         AtlasVertex outVertex    = edge.getOutVertex();
 
-        String inTypeName = AtlasGraphUtilsV2.getTypeName(inVertex);
+        String inTypeName = AtlasGraphUtilsV3.getTypeName(inVertex);
         AtlasEntityType inEntityType = atlasTypeRegistry.getEntityTypeByName(inTypeName);
         if (inEntityType == null) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, inTypeName);
@@ -1604,7 +1603,7 @@ public class EntityLineageService implements AtlasLineageService {
 
         String      inGuid       = AtlasGraphUtilsV3.getIdFromVertex(inVertex);
         String      outGuid      = AtlasGraphUtilsV3.getIdFromVertex(outVertex);
-        String      relationGuid = AtlasGraphUtilsV2.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+        String      relationGuid = AtlasGraphUtilsV3.getEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
         boolean     isInputEdge  = edge.getLabel().equalsIgnoreCase(PROCESS_INPUTS_EDGE);
 
         if (!entities.containsKey(inGuid)) {
