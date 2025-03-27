@@ -337,6 +337,7 @@ public class AuthPolicyValidator {
                             "Please provide valid values for attribute " + ATTR_POLICY_ACTIONS + ": Invalid actions "+ copyOfActions);
 
                 }
+
             }
 
         } else {
