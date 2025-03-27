@@ -86,9 +86,13 @@ import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
 import static org.apache.atlas.model.TypeCategory.CLASSIFICATION;
+import static org.apache.atlas.model.instance.AtlasEntity.KEY_GUID;
+import static org.apache.atlas.model.instance.AtlasEntity.KEY_UPDATE_TIME;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.instance.AtlasRelatedObjectId.KEY_RELATIONSHIP_ATTRIBUTES;
+import static org.apache.atlas.model.instance.AtlasStruct.KEY_ATTRIBUTES;
+import static org.apache.atlas.model.instance.AtlasStruct.KEY_TYPENAME;
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.CREATE;
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.DELETE;
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.PARTIAL_UPDATE;
@@ -3515,7 +3519,11 @@ public class EntityGraphMapper {
                 throw new AtlasBaseException(String.format("propagateClassification(entityGuid=%s, classificationVertexId=%s): entityGuid and/or classification vertex id is empty", entityGuid, classificationVertexId));
             }
 
-            AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
+            Map<String, Object> sourceAsset = CassandraConnector.getVertexPropertiesByGuid(entityGuid);
+            AtlasVertex entityVertex = graph.getVertex(String.valueOf(sourceAsset.get("id")));
+
+            //AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
+
             if (entityVertex == null) {
                 LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): entity vertex not found", entityGuid, classificationVertexId);
 
@@ -3529,15 +3537,21 @@ public class EntityGraphMapper {
                 throw new AtlasBaseException(String.format("propagateClassification(entityGuid=%s, classificationVertexId=%s): classification vertex not found", entityGuid, classificationVertexId));
             }
 
+            // since every tag add creates new tag vertex, we must create new tag vertex in Cassandra
+            Map<String, Object> tagAsMap = CassandraConnector.tempPutTagMap(classificationVertex.getIdForDisplay(),
+                    classificationVertex.getProperty("__typeName", String.class),
+                    entityGuid);
+
             /*
                 If restrictPropagateThroughLineage was false at past
                  then updated to true we need to delete the propagated
                  classifications and then put the classifications as intended
              */
 
-            Boolean currentRestrictPropagationThroughLineage = AtlasGraphUtilsV2.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE, Boolean.class);
 
-            Boolean currentRestrictPropagationThroughHierarchy = AtlasGraphUtilsV2.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY, Boolean.class);
+            Boolean currentRestrictPropagationThroughLineage = (Boolean) tagAsMap.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
+            Boolean currentRestrictPropagationThroughHierarchy = (Boolean) tagAsMap.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
+
             if (previousRestrictPropagationThroughLineage != null && currentRestrictPropagationThroughLineage != null && !previousRestrictPropagationThroughLineage && currentRestrictPropagationThroughLineage) {
                 deleteDelegate.getHandler().removeTagPropagation(classificationVertex);
             }
@@ -3558,7 +3572,7 @@ public class EntityGraphMapper {
                 return null;
             }
 
-            return processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            return processClassificationPropagationAdditionNew(impactedVertices, classificationVertex, tagAsMap);
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
 
@@ -3610,6 +3624,66 @@ public class EntityGraphMapper {
         }
 
     return propagatedEntitiesGuids;
+
+    }
+
+    public List<String> processClassificationPropagationAdditionNew(List<AtlasVertex> verticesToPropagate,
+                                                                    AtlasVertex classificationVertex,
+                                                                    Map<String, Object> tagAsMap) throws AtlasBaseException{
+        AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
+        List<String> propagatedEntitiesGuids = new ArrayList<>();
+        int impactedVerticesSize = verticesToPropagate.size();
+        int offset = 0;
+        int toIndex;
+        LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
+
+        try {
+            do {
+                toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
+                List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
+
+                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
+
+                Map<String, Map<String, Object>> allChunkedMaps = new HashMap<>();
+                chunkedVerticesToPropagate.forEach(x -> {
+                    Map<String, Object> assetAsMap = CassandraConnector.getVertexProperties(x.getIdForDisplay());
+                    allChunkedMaps.put((String) assetAsMap.get("__guid"), assetAsMap);
+                });
+
+                List<String> impactedVerticesGuidsToLock        = new ArrayList<>(allChunkedMaps.keySet());
+                GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedVerticesGuidsToLock);
+                RequestContext.get().endMetricRecord(metricRecorder);
+
+
+                AtlasClassification classification       = entityRetriever.toAtlasClassification(tagAsMap); // done
+                List<AtlasVertex>   entitiesPropagatedTo = deleteDelegate.getHandler().addTagPropagationNew(classificationVertex, classification, allChunkedMaps); //done
+
+                if (CollectionUtils.isEmpty(entitiesPropagatedTo)) {
+                    return null;
+                }
+
+                List<AtlasEntity>   propagatedEntitiesChunked       = updateClassificationTextNew(allChunkedMaps, classification);
+                Set<String>        chunkedPropagatedEntitiesGuids   = allChunkedMaps.keySet();
+                entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntitiesChunked, Collections.singletonList(classification), false);
+
+                propagatedEntitiesGuids.addAll(chunkedPropagatedEntitiesGuids);
+
+                offset += CHUNK_SIZE;
+
+                transactionInterceptHelper.intercept();
+                CassandraConnector.putEntities(allChunkedMaps.values());
+
+            } while (offset < impactedVerticesSize);
+
+            LOG.info(String.format("Total number of vertices propagated: %d", impactedVerticesSize));
+        } catch (Exception exception) {
+            LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
+            throw exception;
+        } finally {
+            RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
+        }
+
+        return propagatedEntitiesGuids;
 
     }
 
@@ -4746,7 +4820,37 @@ public class EntityGraphMapper {
         return propagatedEntities;
     }
 
+    List<AtlasEntity> updateClassificationTextNew(Map<String, Map<String, Object>> chunkedPropagatedEntities, AtlasClassification currentTag) throws AtlasBaseException {
+        List<AtlasEntity> propagatedEntities = new ArrayList<>();
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationText");
 
+        if(MapUtils.isNotEmpty(chunkedPropagatedEntities)) {
+            for(String assetGuid : chunkedPropagatedEntities.keySet()) {
+
+                Map<String, Object> assetMap = chunkedPropagatedEntities.get(assetGuid);
+
+                Map<String , Object> assetCopy = new HashMap<>(assetMap);
+                assetCopy.put(KEY_TYPENAME, assetMap.get("__typeName"));
+                assetCopy.put(KEY_GUID, assetMap.get("__guid"));
+                assetCopy.put(KEY_ATTRIBUTES, assetMap);
+                assetCopy.put(KEY_UPDATE_TIME, assetMap.get("__modificationTimestamp"));
+                AtlasEntity entity = new AtlasEntity(assetCopy);
+
+                List<AtlasClassification> tags = new ArrayList<>();
+                tags.add(currentTag);
+                entity.setClassifications(tags);
+
+                if (entity != null) {
+                    String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
+                    chunkedPropagatedEntities.get(assetGuid).put(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
+                    propagatedEntities.add(entity);
+                }
+            }
+        }
+
+        RequestContext.get().endMetricRecord(metricRecorder);
+        return propagatedEntities;
+    }
 
     private void updateLabels(AtlasVertex vertex, Set<String> labels) {
         if (CollectionUtils.isNotEmpty(labels)) {

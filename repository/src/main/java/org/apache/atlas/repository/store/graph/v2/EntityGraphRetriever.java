@@ -412,6 +412,31 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    public AtlasClassification toAtlasClassification(Map<String, Object> classification) throws AtlasBaseException {
+        AtlasClassification ret                = null;
+        String              classificationName = (String) classification.get("__typeName");
+
+        ret = new AtlasClassification(classificationName);
+        Map<String, Object> referenceProperties = Collections.emptyMap();
+        boolean enableJanusOptimisation = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean()
+                && RequestContext.get().isInvokedByIndexSearch();
+        String strValidityPeriods;
+
+        ret.setEntityGuid((String) classification.get(CLASSIFICATION_ENTITY_GUID));
+        ret.setEntityStatus(AtlasEntity.Status.valueOf((String) classification.get(CLASSIFICATION_ENTITY_STATUS)));
+        ret.setPropagate(isPropagationEnabled(classification));
+        ret.setRemovePropagationsOnEntityDelete(getRemovePropagations(classification));
+        ret.setRestrictPropagationThroughLineage(getRestrictPropagationThroughLineage(classification));
+        ret.setRestrictPropagationThroughHierarchy(getRestrictPropagationThroughHierarchy(classification));
+
+        //strValidityPeriods = AtlasGraphUtilsV2.getEncodedProperty(classificationVertex, CLASSIFICATION_VALIDITY_PERIODS_KEY, String.class);
+        //ret.setValidityPeriods( AtlasJson.fromJson(strValidityPeriods, TIME_BOUNDARIES_LIST_TYPE));
+
+        //mapAttributes(classificationVertex, ret, null);
+
+        return ret;
+    }
+
     public AtlasVertex getReferencedEntityVertex(AtlasEdge edge, AtlasRelationshipEdgeDirection relationshipDirection, AtlasVertex parentVertex) throws AtlasBaseException {
         AtlasVertex entityVertex = null;
 
