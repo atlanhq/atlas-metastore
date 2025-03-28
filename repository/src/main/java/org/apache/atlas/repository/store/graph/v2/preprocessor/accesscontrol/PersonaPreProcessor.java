@@ -19,7 +19,6 @@ package org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol;
 
 
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.auth.client.keycloak.AtlasKeycloakClient;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -33,10 +32,9 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.users.KeycloakStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -200,7 +198,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
                 if (policy.getRelationshipStatus() == AtlasRelationship.Status.ACTIVE) {
                     AtlasVertex policyVertex = entityRetriever.getEntityVertex(policy.getGuid());
 
-                    if (AtlasGraphUtilsV2.getState(policyVertex) == AtlasEntity.Status.ACTIVE) {
+                    if (AtlasGraphUtilsV3.getState(policyVertex) == AtlasEntity.Status.ACTIVE) {
                         AtlasEntity policyToBeUpdated = entityRetriever.toAtlasEntity(policyVertex);
                         policyToBeUpdated.setAttribute(ATTR_POLICY_IS_ENABLED, enable);
 

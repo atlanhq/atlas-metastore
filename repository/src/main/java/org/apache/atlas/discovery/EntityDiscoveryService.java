@@ -41,7 +41,7 @@ import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.userprofile.UserProfileService;
 import org.apache.atlas.repository.util.AccessControlUtils;
@@ -102,11 +102,11 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
-                           AtlasGraph graph,
-                           GraphBackedSearchIndexer indexer,
-                           SearchTracker searchTracker,
-                           UserProfileService userProfileService,
-                           StatsClient statsClient) throws AtlasException {
+                                  AtlasGraph graph,
+                                  GraphBackedSearchIndexer indexer,
+                                  SearchTracker searchTracker,
+                                  UserProfileService userProfileService,
+                                  StatsClient statsClient) throws AtlasException {
         this.graph                    = graph;
         this.entityRetriever          = new EntityGraphRetriever(this.graph, typeRegistry);
         this.indexer                  = indexer;
@@ -116,13 +116,13 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.maxResultSetSize         = ApplicationProperties.get().getInt(Constants.INDEX_SEARCH_MAX_RESULT_SET_SIZE, 150);
         this.maxTypesLengthInIdxQuery = ApplicationProperties.get().getInt(Constants.INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH, 512);
         this.maxTagsLengthInIdxQuery  = ApplicationProperties.get().getInt(Constants.INDEX_SEARCH_TAGS_MAX_QUERY_STR_LENGTH, 512);
-        this.indexSearchPrefix        = AtlasGraphUtilsV2.getIndexSearchPrefix();
+        this.indexSearchPrefix        = AtlasGraphUtilsV3.getIndexSearchPrefix();
         this.userProfileService       = userProfileService;
         this.suggestionsProvider      = new SuggestionsProviderImpl(graph, typeRegistry);
         this.statsClient              = statsClient;
         this.dslQueryExecutor         = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
-                                            ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
-                                            : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
+                ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
+                : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
     }
 
     @Override
@@ -138,7 +138,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     @Override
     @GraphTransaction
     public AtlasSearchResult searchUsingFullTextQuery(String fullTextQuery, boolean excludeDeletedEntities, int limit, int offset)
-                                                      throws AtlasBaseException {
+            throws AtlasBaseException {
         AtlasSearchResult ret      = new AtlasSearchResult(fullTextQuery, AtlasQueryType.FULL_TEXT);
         QueryParams       params   = QueryParams.getNormalizedParams(limit, offset);
         AtlasIndexQuery   idxQuery = toAtlasIndexQuery(fullTextQuery);
@@ -390,15 +390,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     public AtlasQuickSearchResult quickSearch(QuickSearchParameters quickSearchParameters) throws AtlasBaseException {
         String query = quickSearchParameters.getQuery();
         if (StringUtils.isNotEmpty(query) && !AtlasStructType.AtlasAttribute.hastokenizeChar(query)) {
-                query = query + "*";
+            query = query + "*";
         }
         quickSearchParameters.setQuery(query);
 
         SearchContext searchContext = new SearchContext(createSearchParameters(quickSearchParameters),
-                                                        typeRegistry,
-                                                        graph,
-                                                        indexer.getVertexIndexKeys(),
-                                                        statsClient);
+                typeRegistry,
+                graph,
+                indexer.getVertexIndexKeys(),
+                statsClient);
 
         if(LOG.isDebugEnabled()) {
             LOG.debug("Generating the search results for the query {} .", searchContext.getSearchParameters().getQuery());
@@ -469,7 +469,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
                 AtlasEntityType entityType = searchContext.getEntityTypes().iterator().next();
 
-               for (String resultAttribute : resultAttributes) {
+                for (String resultAttribute : resultAttributes) {
                     AtlasAttribute  attribute  = entityType.getAttribute(resultAttribute);
 
                     if (attribute == null) {
@@ -638,7 +638,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
         }
 
-         gt.range(offset, offset + limit);
+        gt.range(offset, offset + limit);
 
         List<AtlasEntityHeader> resultList = new ArrayList<>();
         while (gt.hasNext()) {
@@ -1140,7 +1140,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 ret.addEntity(header);
             }
         } catch (Exception e) {
-                throw e;
+            throw e;
         }
         scrubSearchResults(ret, searchParams.getSuppressLogs());
     }
@@ -1152,7 +1152,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     public List<AtlasEntityHeader> searchUsingTermQualifiedName(int from, int size, String termQName,
-                                                        Set<String> attributes, Set<String>relationAttributes) throws AtlasBaseException {
+                                                                Set<String> attributes, Set<String>relationAttributes) throws AtlasBaseException {
         IndexSearchParams indexSearchParams = new IndexSearchParams();
         Map<String, Object> dsl = getMap("from", from);
         dsl.put("size", size);

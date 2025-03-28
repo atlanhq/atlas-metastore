@@ -40,7 +40,7 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.IndexException;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graphdb.*;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.commons.collections.CollectionUtils;
@@ -62,7 +62,7 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graphdb.AtlasCardinality.LIST;
 import static org.apache.atlas.repository.graphdb.AtlasCardinality.SET;
 import static org.apache.atlas.repository.graphdb.AtlasCardinality.SINGLE;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.isReference;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.isReference;
 import static org.apache.atlas.type.AtlasStructType.UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX;
 import static org.apache.atlas.type.AtlasTypeUtil.isArrayType;
 import static org.apache.atlas.type.AtlasTypeUtil.isMapType;
@@ -128,7 +128,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             throws IndexException, RepositoryException {
         this.provider     = provider;
         this.typeRegistry = typeRegistry;
-        
+
 
         if (!HAConfiguration.isHAEnabled(configuration)) {
             initialize(provider.get());
@@ -290,7 +290,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     private void initialize() throws RepositoryException, IndexException {
         initialize(provider.get());
     }
-    
+
     /**
      * Initializes the indices for the graph - create indices for Global AtlasVertex and AtlasEdge Keys
      */
@@ -420,7 +420,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             createCommonVertexIndex(management, TASK_HEADER_ATLAN_REQUEST_ID, UniqueKind.NONE, String.class, SINGLE, false, false, true);
             createCommonVertexIndex(management, TASK_HEADER_ATLAN_GOOGLE_SHEETS_ID, UniqueKind.NONE, String.class, SINGLE, false, false, true);
             createCommonVertexIndex(management, TASK_HEADER_ATLAN_MS_EXCEL_ID, UniqueKind.NONE, String.class, SINGLE, false, false, true);
-            
+
             // index recovery
             createCommonVertexIndex(management, PROPERTY_KEY_INDEX_RECOVERY_NAME, UniqueKind.GLOBAL_UNIQUE, String.class, SINGLE, true, false);
 
@@ -558,12 +558,12 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
 
         final String indexFieldName = createVertexIndex(management,
-                                                        propertyName,
-                                                        uniqueKind,
-                                                        propertyClass,
-                                                        cardinality,
-                                                        createCompositeIndex,
-                                                        createCompositeIndexWithTypeAndSuperTypes, isStringField, indexTypeESConfig, indexTypeESFields);
+                propertyName,
+                uniqueKind,
+                propertyClass,
+                cardinality,
+                createCompositeIndex,
+                createCompositeIndexWithTypeAndSuperTypes, isStringField, indexTypeESConfig, indexTypeESFields);
         if(indexFieldName != null) {
             typeRegistry.addIndexFieldName(propertyName, indexFieldName);
         }
@@ -620,7 +620,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         boolean          isArrayOfEnum             = false;
         AtlasType        arrayElementType    = null;
         boolean          isMapType      = isMapType(attribTypeName);
-        final String     uniqPropName   = isUnique ? AtlasGraphUtilsV2.encodePropertyKey(UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX + attributeDef.getName()) : null;
+        final String     uniqPropName   = isUnique ? AtlasGraphUtilsV3.encodePropertyKey(UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX + attributeDef.getName()) : null;
         final AtlasAttributeDef.IndexType indexType      = attributeDef.getIndexType();
         HashMap<String, Object> indexTypeESConfig = attributeDef.getIndexTypeESConfig();
         HashMap<String, HashMap<String, Object>> indexTypeESFields = attributeDef.getIndexTypeESFields();
@@ -707,7 +707,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     }
 
     private void deleteIndexForAttribute(AtlasGraphManagement management, String typeName, AtlasAttributeDef attributeDef) {
-        final String propertyName = AtlasGraphUtilsV2.encodePropertyKey(typeName + "." + attributeDef.getName());
+        final String propertyName = AtlasGraphUtilsV3.encodePropertyKey(typeName + "." + attributeDef.getName());
 
         try {
             if (management.containsPropertyKey(propertyName)) {
@@ -834,7 +834,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
     }
 
     public String createVertexIndex(AtlasGraphManagement management, String propertyName, UniqueKind uniqueKind, Class propertyClass,
-                                  AtlasCardinality cardinality, boolean createCompositeIndex, boolean createCompositeIndexWithTypeAndSuperTypes, boolean isStringField, HashMap<String, Object> indexTypeESConfig, HashMap<String, HashMap<String, Object>> indexTypeESFields) {
+                                    AtlasCardinality cardinality, boolean createCompositeIndex, boolean createCompositeIndexWithTypeAndSuperTypes, boolean isStringField, HashMap<String, Object> indexTypeESConfig, HashMap<String, HashMap<String, Object>> indexTypeESFields) {
         String indexFieldName = null;
 
         if (propertyName != null) {
@@ -985,7 +985,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         return propertyKey;
     }
-    
+
     private void createVertexCompositeIndex(AtlasGraphManagement management, Class propertyClass, AtlasPropertyKey propertyKey,
                                             boolean enforceUniqueness) {
         String propertyName = propertyKey.getName();
@@ -1066,7 +1066,7 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
 
         return !(INDEX_EXCLUSION_CLASSES.contains(propertyClass) || cardinality.isMany());
     }
-    
+
     public void commit(AtlasGraphManagement management) throws IndexException {
         try {
             management.commit();

@@ -23,13 +23,13 @@ import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasTypesDefFilterRequest;
 import org.apache.atlas.model.instance.AtlasEntity.Status;
 import org.apache.atlas.model.metrics.AtlasMetrics;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.stats.StatsClient;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.AtlasMetricJVMUtil;
@@ -83,7 +83,7 @@ public class MetricsService {
     private final AtlasGraph        atlasGraph;
     private final AtlasTypeRegistry typeRegistry;
     private final AtlasMetricsUtil  metricsUtil;
-    private final String            indexSearchPrefix = AtlasGraphUtilsV2.getIndexSearchPrefix();
+    private final String            indexSearchPrefix = AtlasGraphUtilsV3.getIndexSearchPrefix();
 
     @Autowired
     private StatsClient statsClient;

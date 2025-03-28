@@ -25,7 +25,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -122,7 +122,7 @@ public class ClassificationTextPatch extends AtlasPatchHandler {
                 LOG.debug("processItem(typeName={}, vertexId={})", typeName, vertexId);
             }
 
-            if (AtlasGraphUtilsV2.getState(vertex) != AtlasEntity.Status.ACTIVE) {
+            if (AtlasGraphUtilsV3.getState(vertex) != AtlasEntity.Status.ACTIVE) {
                 return;
             }
 

@@ -32,7 +32,6 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -71,7 +70,7 @@ public abstract class SearchProcessor {
     public static final int     MAX_RESULT_SIZE            = getApplicationProperty(Constants.INDEX_SEARCH_MAX_RESULT_SET_SIZE, 150);
     public static final int     MAX_QUERY_STR_LENGTH_TYPES = getApplicationProperty(Constants.INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH, 512);
     public static final int     MAX_QUERY_STR_LENGTH_TAGS  = getApplicationProperty(Constants.INDEX_SEARCH_TAGS_MAX_QUERY_STR_LENGTH, 512);
-    public static final String  INDEX_SEARCH_PREFIX        = AtlasGraphUtilsV2.getIndexSearchPrefix();
+    public static final String  INDEX_SEARCH_PREFIX        = AtlasGraphUtilsV3.getIndexSearchPrefix();
     public static final String  AND_STR                    = " AND ";
     public static final String  EMPTY_STRING               = "";
     public static final String  SPACE_STRING               = " ";
@@ -389,7 +388,7 @@ public abstract class SearchProcessor {
 
             while (it.hasNext()) {
                 AtlasVertex  entityVertex        = it.next().getValue();
-                List<String> classificationNames = AtlasGraphUtilsV2.getClassificationNames(entityVertex);
+                List<String> classificationNames = AtlasGraphUtilsV3.getClassificationNames(entityVertex);
 
                 if (CollectionUtils.isNotEmpty(classificationNames)) {
                     if (typeAndSubTypes.isEmpty() || CollectionUtils.containsAny(classificationNames, typeAndSubTypes)) {
@@ -397,7 +396,7 @@ public abstract class SearchProcessor {
                     }
                 }
 
-                List<String> propagatedClassificationNames = AtlasGraphUtilsV2.getPropagatedClassificationNames(entityVertex);
+                List<String> propagatedClassificationNames = AtlasGraphUtilsV3.getPropagatedClassificationNames(entityVertex);
 
                 if (CollectionUtils.isNotEmpty(propagatedClassificationNames)) {
                     if (typeAndSubTypes.isEmpty() || CollectionUtils.containsAny(propagatedClassificationNames, typeAndSubTypes)) {
