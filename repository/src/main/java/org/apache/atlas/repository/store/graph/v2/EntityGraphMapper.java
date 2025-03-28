@@ -3672,6 +3672,7 @@ public class EntityGraphMapper {
 
                 transactionInterceptHelper.intercept();
                 CassandraConnector.putEntities(allChunkedMaps.values());
+                ESConnector.writeTagProperties(allChunkedMaps.values());
 
             } while (offset < impactedVerticesSize);
 

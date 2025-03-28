@@ -1155,6 +1155,15 @@ public abstract class DeleteHandlerV1 {
     }
 
     private void addToPropagatedClassificationNamesNew(Map<String, Object> entityPropertiesMap, String classificationName) {
+
+        List<String> traits = (List<String>) entityPropertiesMap.get(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
+        if (traits == null) {
+            traits = new ArrayList<>();
+        }
+        traits.add(classificationName);
+        entityPropertiesMap.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, traits);
+
+
         String tagNames = (String) entityPropertiesMap.get(PROPAGATED_CLASSIFICATION_NAMES_KEY);
 
         if (StringUtils.isEmpty(tagNames)) {
@@ -1163,14 +1172,7 @@ public abstract class DeleteHandlerV1 {
             tagNames = tagNames + classificationName + CLASSIFICATION_NAME_DELIMITER;
         }
 
-        List<String> traits = (List<String>) entityPropertiesMap.get(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
-        if (traits == null) {
-            traits = new ArrayList<>();
-        }
-        traits.add(classificationName);
-
-        entityPropertiesMap.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, tagNames);
-        entityPropertiesMap.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, classificationName);
+        entityPropertiesMap.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, tagNames);
     }
 
     public void removeFromPropagatedClassificationNames(AtlasVertex entityVertex, String classificationName) {

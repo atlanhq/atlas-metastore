@@ -36,66 +36,16 @@ public class CassandraConnector {
             String clusterName = ApplicationProperties.get().getString(CASSANDRA_CLUSTERNAME_PROPERTY, DEFAULT_CLUSTER_NAME);
             int port = 9042;
 
-            /*cassSession = CqlSession.builder()
-                    .addContactPoint(new InetSocketAddress("127.0.0.1", 9042))
-                    .withLocalDatacenter("datacenter1")
-                    .build();
-
-            String createKeyspaceQuery = "CREATE KEYSPACE " + keyspace + " WITH  "
-                    + "= {'class':'SimpleStrategy', 'replication_factor':" + 1 + "}; ";
-            cassSession.execute(SimpleStatement.newInstance(createKeyspaceQuery));
-            cassSession.close();*/
-
-
             cassSession = CqlSession.builder()
-                    .addContactPoint(new InetSocketAddress("127.0.0.1", 9042))
+                    .addContactPoint(new InetSocketAddress(hostname, 9042))
                     .withLocalDatacenter("datacenter1")
-                    .withKeyspace(keyspace) // Connect to keyspace
+                    .withKeyspace(keyspace)
                     .build();
-
-            /*String createvetr = " CREATE TABLE IF NOT EXISTS vertices ( id text PRIMARY KEY, name text, created_at bigint, json_data text)";
-            String createedge = " CREATE TABLE IF NOT EXISTS edges ( id text PRIMARY KEY, name text, created_at bigint, json_data text)";
-            cassSession.execute(createvetr);
-            cassSession.execute(createedge);*/
-
-            /*String insert = "INSERT INTO vertices (id, name, created_at, json_data) VALUES (?, ?, ?, ?)";
-            PreparedStatement preparedStmt = cassSession.prepare(insert);
-            BoundStatement boundStmt  = preparedStmt.bind("1234", "table_0", System.currentTimeMillis(), "{\"id\":1234,\"popularityScore\":1.17549435E-38,\"lastSyncRunAt\":0}");
-            cassSession.execute(boundStmt);*/
 
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
-
-    /*public static void main(String[] args) {
-
-        String hostname = "localhost";
-        String clusterName =  DEFAULT_CLUSTER_NAME;
-        int port = 9042;
-
-        Cluster.Builder cassandraClusterBuilder = Cluster.builder();
-        Cluster cluster = cassandraClusterBuilder.addContactPoint(hostname).withClusterName(clusterName).withPort(port).build();
-
-        cassSession = cluster.connect();
-
-        String query = "CREATE KEYSPACE " + keyspace + " WITH replication "
-                    + "= {'class':'SimpleStrategy', 'replication_factor':" + 1 + "}; ";
-        cassSession.execute(query);
-
-        String createvetr = " CREATE TABLE IF NOT EXISTS vertices ( id text PRIMARY KEY, name text, created_at bigint, json_data text)";
-        String createedge = " CREATE TABLE IF NOT EXISTS edges ( id text PRIMARY KEY, name text, created_at bigint, json_data text)";
-        cassSession.execute(createvetr);
-        cassSession.execute(createedge);
-
-        String insert = "INSERT INTO vertices (id, name, created_at, json_data) VALUES ((1234, table_0, " + System.currentTimeMillis() + " , ) VALUES (?, ?, ?, ?))";
-        PreparedStatement preparedStmt = cassSession.prepare(query);
-        BoundStatement boundStmt  = preparedStmt.bind(1234, "table_0", System.currentTimeMillis(), "{\"id\":1234,\"popularityScore\":1.17549435E-38,\"lastSyncRunAt\":0}");
-        cassSession.execute(boundStmt);
-
-        cassSession.close();
-
-    }*/
 
     public static Map<String, Object> getVertexProperties(String vertexId) {
         String query = "SELECT * FROM vertices where id = '" + vertexId + "'";
@@ -106,7 +56,7 @@ public class CassandraConnector {
             System.out.println("Vertex: " + AtlasType.toJson(row));
             return convertRowToMap(row);
         }
-        LOG.info("Returning null for {}", vertexId);
+        LOG.info("Returning null for vertex {}", vertexId);
         return null;
     }
 
@@ -114,7 +64,6 @@ public class CassandraConnector {
         String query = "SELECT * FROM vertices where guid = '" + guid + "'";
         ResultSet resultSet = cassSession.execute(query);
 
-        Map<String, Object> ret = new HashMap<>();
         for (Row row : resultSet) {
             System.out.println("Vertex: " + AtlasType.toJson(row));
             return convertRowToMap(row);
@@ -131,7 +80,7 @@ public class CassandraConnector {
             System.out.println("Edge: " + AtlasType.toJson(row));
             return convertRowToMap(row);
         }
-        LOG.info("Returning null for {}", edgeId);
+        LOG.info("Returning null for edge {}", edgeId);
         return null;
     }
 
