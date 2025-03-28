@@ -32,8 +32,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.*;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.util.AtlasGremlinQueryProvider;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -161,8 +161,8 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
 
     public void processProductAssetInputRelation(String assetGuid, String productGuid, BusinessLineageRequest.OperationType operation, String edgeLabel) throws AtlasBaseException, RepositoryException {
         try {
-             AtlasVertex assetVertex = entityRetriever.getEntityVertex(assetGuid);
-             AtlasVertex productVertex = entityRetriever.getEntityVertex(productGuid);
+            AtlasVertex assetVertex = entityRetriever.getEntityVertex(assetGuid);
+            AtlasVertex productVertex = entityRetriever.getEntityVertex(productGuid);
 
             if (assetVertex == null || productVertex == null) {
                 throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, assetGuid + " or " + productGuid);
@@ -266,13 +266,13 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
 
             if (operation == BusinessLineageRequest.OperationType.ADD) {
                 if (!inputPortGuidsAttr.contains(assetGuid)) {
-                    AtlasGraphUtilsV2.addEncodedProperty(productVertex, INPUT_PORT_GUIDS_ATTR , assetGuid);
+                    AtlasGraphUtilsV3.addEncodedProperty(productVertex, INPUT_PORT_GUIDS_ATTR , assetGuid);
                 }
             }
 
             if (operation == BusinessLineageRequest.OperationType.REMOVE) {
                 if (inputPortGuidsAttr.contains(assetGuid)) {
-                    AtlasGraphUtilsV2.removeItemFromListPropertyValue(productVertex, INPUT_PORT_GUIDS_ATTR, assetGuid);
+                    AtlasGraphUtilsV3.removeItemFromListPropertyValue(productVertex, INPUT_PORT_GUIDS_ATTR, assetGuid);
                 }
             }
 

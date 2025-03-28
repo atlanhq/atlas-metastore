@@ -3,6 +3,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,9 +59,9 @@ public class DataProductInputsOutputsMigrationService {
         List<String> inputPortGuidsAttr = vertex.getMultiValuedProperty(INPUT_PORT_GUIDS_ATTR, String.class);
 
         if(!CollectionUtils.isEqualCollection(outputPortsRelationGuids, outputPortGuidsAttr)) {
-           LOG.info("Migrating outputPort guid attribute: {} for Product: {}", OUTPUT_PORT_GUIDS_ATTR, this.productGuid);
-           addInternalAttr(vertex, OUTPUT_PORT_GUIDS_ATTR, outputPortsRelationGuids);
-           isCommitRequired = true;
+            LOG.info("Migrating outputPort guid attribute: {} for Product: {}", OUTPUT_PORT_GUIDS_ATTR, this.productGuid);
+            addInternalAttr(vertex, OUTPUT_PORT_GUIDS_ATTR, outputPortsRelationGuids);
+            isCommitRequired = true;
         }
 
         if(!CollectionUtils.isEqualCollection(inputPortsRelationGuids, inputPortGuidsAttr)) {
@@ -95,7 +96,7 @@ public class DataProductInputsOutputsMigrationService {
     private void addInternalAttr(AtlasVertex productVertex, String internalAttr, List<String> currentGuids){
         productVertex.removeProperty(internalAttr);
         if (CollectionUtils.isNotEmpty(currentGuids)) {
-            currentGuids.forEach(guid -> AtlasGraphUtilsV2.addEncodedProperty(productVertex, internalAttr , guid));
+            currentGuids.forEach(guid -> AtlasGraphUtilsV3.addEncodedProperty(productVertex, internalAttr , guid));
         }
     }
 }

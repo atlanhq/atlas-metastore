@@ -23,7 +23,7 @@ import org.apache.atlas.model.discovery.SearchParameters;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
@@ -148,10 +148,10 @@ public class FreeTextSearchProcessor extends SearchProcessor {
 
                         resultCount++;
 
-                        String entityTypeName = AtlasGraphUtilsV2.getTypeName(vertex);
+                        String entityTypeName = AtlasGraphUtilsV3.getTypeName(vertex);
 
                         // skip non-entity vertices
-                        if (StringUtils.isEmpty(entityTypeName) || StringUtils.isEmpty(AtlasGraphUtilsV2.getIdFromVertex(vertex))) {
+                        if (StringUtils.isEmpty(entityTypeName) || StringUtils.isEmpty(AtlasGraphUtilsV3.getIdFromVertex(vertex))) {
                             if (LOG.isDebugEnabled()) {
                                 LOG.debug("FreeTextSearchProcessor.execute(): ignoring non-entity vertex (id={})", vertex.getId());
                             }

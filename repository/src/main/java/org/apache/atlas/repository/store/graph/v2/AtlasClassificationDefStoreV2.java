@@ -28,6 +28,7 @@ import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -88,7 +89,7 @@ class AtlasClassificationDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasClassif
                 throw new AtlasBaseException(AtlasErrorCode.TYPE_WITH_DISPLAY_NAME_ALREADY_EXISTS, classificationDef.getDisplayName());
             }
         }
-            ret = typeDefStore.createTypeVertex(classificationDef);
+        ret = typeDefStore.createTypeVertex(classificationDef);
 
         updateVertexPreCreate(classificationDef, (AtlasClassificationType)type, ret);
 
@@ -212,7 +213,7 @@ class AtlasClassificationDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasClassif
         validateType(classifiDef);
 
         AtlasClassificationDef ret = StringUtils.isNotBlank(classifiDef.getGuid())
-                  ? updateByGuid(classifiDef.getGuid(), classifiDef) : updateByName(classifiDef.getName(), classifiDef);
+                ? updateByGuid(classifiDef.getGuid(), classifiDef) : updateByName(classifiDef.getName(), classifiDef);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AtlasClassificationDefStoreV1.update({}): {}", classifiDef, ret);
@@ -223,7 +224,7 @@ class AtlasClassificationDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasClassif
 
     @Override
     public AtlasClassificationDef updateByName(String name, AtlasClassificationDef classificationDef)
-        throws AtlasBaseException {
+            throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> AtlasClassificationDefStoreV1.updateByName({}, {})", name, classificationDef);
         }
@@ -306,7 +307,7 @@ class AtlasClassificationDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasClassif
 
         AtlasVertex ret = typeDefStore.findTypeVertexByNameAndCategory(name, TypeCategory.TRAIT);
 
-        if (AtlasGraphUtilsV2.typeHasInstanceVertex(name)) {
+        if (AtlasGraphUtilsV3.typeHasInstanceVertex(name)) {
             String displayName = "";
             if (existingDef != null) {
                 displayName = existingDef.getDisplayName() != null ? existingDef.getDisplayName() : "";
@@ -339,9 +340,9 @@ class AtlasClassificationDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasClassif
 
         AtlasVertex ret = typeDefStore.findTypeVertexByGuidAndCategory(guid, TypeCategory.TRAIT);
 
-        String typeName = AtlasGraphUtilsV2.getEncodedProperty(ret, TYPENAME_PROPERTY_KEY, String.class);
+        String typeName = AtlasGraphUtilsV3.getEncodedProperty(ret, TYPENAME_PROPERTY_KEY, String.class);
 
-        if (AtlasGraphUtilsV2.typeHasInstanceVertex(typeName)) {
+        if (AtlasGraphUtilsV3.typeHasInstanceVertex(typeName)) {
             String displayName = "";
             if (existingDef != null) {
                 displayName = existingDef.getDisplayName() != null ? existingDef.getDisplayName() : "";

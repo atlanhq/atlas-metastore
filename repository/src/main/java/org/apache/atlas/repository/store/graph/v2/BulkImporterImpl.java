@@ -33,6 +33,7 @@ import org.apache.atlas.repository.store.graph.BulkImporter;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.ImportStrategy;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.MigrationImport;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.RegularImport;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.Constants;
@@ -134,7 +135,7 @@ public class BulkImporterImpl implements BulkImporter {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         String vertexGuid = null;
         try {
-            vertexGuid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(atlasGraph, entityType, objectId.getUniqueAttributes());
+            vertexGuid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(atlasGraph, entityType, objectId.getUniqueAttributes());
         } catch (AtlasBaseException e) {
             LOG.warn("Entity: {}: Does not exist!", objectId);
             return;
@@ -144,20 +145,20 @@ public class BulkImporterImpl implements BulkImporter {
             return;
         }
 
-        AtlasVertex v = AtlasGraphUtilsV2.findByGuid(atlasGraph, vertexGuid);
+        AtlasVertex v = AtlasGraphUtilsV3.findByGuid(atlasGraph, vertexGuid);
         if (v == null) {
             return;
         }
 
         addHistoricalGuid(v, vertexGuid);
-        AtlasGraphUtilsV2.setProperty(v, Constants.GUID_PROPERTY_KEY, entityGuid);
+        AtlasGraphUtilsV3.setProperty(v, Constants.GUID_PROPERTY_KEY, entityGuid);
 
         LOG.warn("GUID Updated: Entity: {}: from: {}: to: {}", objectId, vertexGuid, entity.getGuid());
     }
 
     public static void addHistoricalGuid(AtlasVertex v, String vertexGuid) {
-        String existingJson = AtlasGraphUtilsV2.getProperty(v, HISTORICAL_GUID_PROPERTY_KEY, String.class);
+        String existingJson = AtlasGraphUtilsV3.getProperty(v, HISTORICAL_GUID_PROPERTY_KEY, String.class);
 
-        AtlasGraphUtilsV2.setProperty(v, HISTORICAL_GUID_PROPERTY_KEY, getJsonArray(existingJson, vertexGuid));
+        AtlasGraphUtilsV3.setProperty(v, HISTORICAL_GUID_PROPERTY_KEY, getJsonArray(existingJson, vertexGuid));
     }
 }

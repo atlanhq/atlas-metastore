@@ -39,6 +39,7 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityChangeNotifier;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.FileUtils;
@@ -108,7 +109,7 @@ public class GlossaryService {
             LOG.debug("==> GlossaryService.getGlossaries({}, {}, {})", limit, offset, sortOrder);
         }
 
-        List<String> glossaryGuids = AtlasGraphUtilsV2.findEntityGUIDsByType(GlossaryUtils.ATLAS_GLOSSARY_TYPENAME, sortOrder);
+        List<String> glossaryGuids = AtlasGraphUtilsV3.findEntityGUIDsByType(GlossaryUtils.ATLAS_GLOSSARY_TYPENAME, sortOrder);
         PaginationHelper paginationHelper = new PaginationHelper<>(glossaryGuids, offset, limit);
 
         List<AtlasGlossary> ret;

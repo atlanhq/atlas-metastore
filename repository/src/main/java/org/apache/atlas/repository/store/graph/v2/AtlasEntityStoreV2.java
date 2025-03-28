@@ -75,6 +75,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryCollecti
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryFolderPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -191,7 +192,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.UNKNOWN_TYPENAME);
         }
 
-        List<String> ret = AtlasGraphUtilsV2.findEntityGUIDsByType(graph, typename);
+        List<String> ret = AtlasGraphUtilsV3.findEntityGUIDsByType(graph, typename);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== getEntityGUIDS({})", typename);
@@ -362,7 +363,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getByUniqueAttribute({}, {})", entityType.getTypeName(), uniqAttributes);
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
 
         EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry, ignoreRelationships);
 
@@ -395,7 +396,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getEntityHeaderByUniqueAttributes({}, {})", entityType.getTypeName(), uniqAttributes);
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
 
         EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
 
@@ -493,7 +494,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 throw new AtlasBaseException(AtlasErrorCode.UNKNOWN_TYPENAME, objectId.getTypeName());
             }
 
-            guid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(graph, typeRegistry.getEntityTypeByName(objectId.getTypeName()), objectId.getUniqueAttributes());
+            guid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(graph, typeRegistry.getEntityTypeByName(objectId.getTypeName()), objectId.getUniqueAttributes());
         }
 
         AtlasEntity entity = updatedEntityInfo.getEntity();
@@ -515,7 +516,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "no entity to update.");
         }
 
-        String      guid   = AtlasGraphUtilsV2.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
+        String      guid   = AtlasGraphUtilsV3.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
         AtlasEntity entity = updatedEntityInfo.getEntity();
 
         entity.setGuid(guid);
@@ -587,7 +588,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();
-        AtlasVertex             vertex             = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex             vertex             = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (vertex != null) {
             AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
@@ -624,7 +625,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();
 
         for (String guid : guids) {
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+            AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
             if (vertex == null) {
                 if (LOG.isDebugEnabled()) {
@@ -669,7 +670,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         Collection<AtlasVertex> restoreCandidates = new ArrayList<>();
 
         for (String guid : guids) {
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+            AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
             if (vertex == null) {
                 if (LOG.isDebugEnabled()) {
@@ -709,7 +710,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         Collection<AtlasVertex> purgeCandidates = new ArrayList<>();
 
         for (String guid : guids) {
-            AtlasVertex vertex = AtlasGraphUtilsV2.findDeletedByGuid(graph, guid);
+            AtlasVertex vertex = AtlasGraphUtilsV3.findDeletedByGuid(graph, guid);
 
             if (vertex == null) {
                 // Entity does not exist - treat as non-error, since the caller
@@ -742,7 +743,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();
-        AtlasVertex             vertex             = AtlasGraphUtilsV2.findByUniqueAttributes(graph, entityType, uniqAttributes);
+        AtlasVertex             vertex             = AtlasGraphUtilsV3.findByUniqueAttributes(graph, entityType, uniqAttributes);
 
         if (vertex != null) {
             AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
@@ -903,7 +904,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), objectId.getTypeName());
                 }
 
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByUniqueAttributes(graph, entityType, objectId.getUniqueAttributes());
+                AtlasVertex vertex = AtlasGraphUtilsV3.findByUniqueAttributes(graph, entityType, objectId.getUniqueAttributes());
 
                 if (vertex != null) {
                     AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
@@ -997,10 +998,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         .collect(Collectors.joining(","));
 
 
-                AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(entityHeader.getGuid());
-                AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
-                AtlasGraphUtilsV2.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, updatedMeaningsText);
-                AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, termName);
+                AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(entityHeader.getGuid());
+                AtlasGraphUtilsV3.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
+                AtlasGraphUtilsV3.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, updatedMeaningsText);
+                AtlasGraphUtilsV3.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, termName);
             }
             from += ELASTICSEARCH_PAGINATION_SIZE;
 
@@ -1017,8 +1018,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         AtlasTask task = taskManagement.createTask(taskType, currentUser, taskParams);
 
         if(!isHardDelete){
-            AtlasVertex termVertex = AtlasGraphUtilsV2.findByGuid(termGuid);
-            AtlasGraphUtilsV2.addEncodedProperty(termVertex, PENDING_TASKS_PROPERTY_KEY, task.getGuid());
+            AtlasVertex termVertex = AtlasGraphUtilsV3.findByGuid(termGuid);
+            AtlasGraphUtilsV3.addEncodedProperty(termVertex, PENDING_TASKS_PROPERTY_KEY, task.getGuid());
         }
 
         RequestContext.get().queueTask(task);
@@ -1028,7 +1029,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     @Override
     @GraphTransaction
     public String getGuidByUniqueAttributes(AtlasEntityType entityType, Map<String, Object> uniqAttributes) throws AtlasBaseException{
-        return AtlasGraphUtilsV2.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
+        return AtlasGraphUtilsV3.getGuidByUniqueAttributes(graph, entityType, uniqAttributes);
     }
 
     @Override
@@ -1042,7 +1043,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1072,7 +1073,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         GraphTransactionInterceptor.lockObjectAndReleasePostCommit(guid);
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1082,7 +1083,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         for (AtlasClassification classification : classifications) {
             AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_ADD_CLASSIFICATION, entityHeader, classification),
-                                                 "add classification: guid=", guid, ", classification=", classification.getTypeName());
+                    "add classification: guid=", guid, ", classification=", classification.getTypeName());
         }
 
         EntityMutationContext context = new EntityMutationContext();
@@ -1123,7 +1124,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         GraphTransactionInterceptor.lockObjectAndReleasePostCommit(guid);
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1174,7 +1175,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         for (String guid : guids) {
             try {
-                AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+                AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
                 if (entityVertex == null) {
                     throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1318,7 +1319,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "businessAttributes is null/empty");
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1398,7 +1399,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "businessAttributes is null/empty");
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1425,7 +1426,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "guid is null/empty");
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1488,7 +1489,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "labels is null/empty");
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1527,7 +1528,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "labels is null/empty");
         }
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -1772,7 +1773,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                             graphDiscoverer.validateAndNormalizeForUpdate(entity);
                         }
 
-                        String guidVertex = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                        String guidVertex = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                         if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
                             checkAndCreateProcessRelationshipsCleanupTaskNotification(entityType, vertex);
@@ -1800,7 +1801,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                         discoveryContext.addResolvedIdByUniqAttribs(getAtlasObjectId(entity), vertex);
 
-                        String generatedGuid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                        String generatedGuid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                         entity.setGuid(generatedGuid);
 
@@ -1829,7 +1830,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 }
 
                 if (isRestoreRequested) {
-                    Status currStatus = AtlasGraphUtilsV2.getState(vertex);
+                    Status currStatus = AtlasGraphUtilsV3.getState(vertex);
                     if (currStatus == Status.DELETED) {
                         context.addEntityToRestore(vertex);
                     }
@@ -1840,7 +1841,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     Status newStatus = entity.getStatus();
 
                     if (newStatus != null) {
-                        Status currStatus = AtlasGraphUtilsV2.getState(vertex);
+                        Status currStatus = AtlasGraphUtilsV3.getState(vertex);
 
                         if (currStatus == Status.ACTIVE && newStatus == Status.DELETED) {
                             if (LOG.isDebugEnabled()) {
@@ -1967,7 +1968,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         int qualifiedNameOffset = isDataMeshType ? 2 : 1;
         try {
             if (vertex == null) {
-                vertex = AtlasGraphUtilsV2.findByGuid(graph, entity.getGuid());
+                vertex = AtlasGraphUtilsV3.findByGuid(graph, entity.getGuid());
             }
             if (entity.hasAttribute(QUALIFIED_NAME)) {
                 String qualifiedName = (String) entity.getAttribute(QUALIFIED_NAME);
@@ -1989,7 +1990,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                                 if (isDataMeshType && (part.equals("domain") || part.equals("product"))) {
                                     continue;
                                 }
-                                AtlasGraphUtilsV2.addEncodedProperty(vertex, QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, currentPath.toString());
+                                AtlasGraphUtilsV3.addEncodedProperty(vertex, QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, currentPath.toString());
                             }
                         }
                     }
@@ -2232,7 +2233,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
      */
     private void validateEntityAssociations(String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
         List<String>    entityClassifications = getClassificationNames(guid);
-        String          entityTypeName        = AtlasGraphUtilsV2.getTypeNameFromGuid(graph, guid);
+        String          entityTypeName        = AtlasGraphUtilsV3.getTypeNameFromGuid(graph, guid);
         AtlasEntityType entityType            = typeRegistry.getEntityTypeByName(entityTypeName);
         Set<String> processedTagTypeNames = new HashSet<>();
 
@@ -2465,7 +2466,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     Map<String, Object> uniqueAttrs = new HashMap<>();
                     uniqueAttrs.put(QUALIFIED_NAME, qualifiedName);
 
-                    AtlasVertex vertex = AtlasGraphUtilsV2.getVertexByUniqueAttributes(this.graph, entityType, uniqueAttrs);
+                    AtlasVertex vertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(this.graph, entityType, uniqueAttrs);
                     entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
 
                 } catch (AtlasBaseException abe) {
@@ -2543,7 +2544,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             AtlasVertex vertex    = vertexCache.get(vertexKey);
 
             if (vertex == null) {
-                vertex = AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(graph, typeName, uniqueAttribute.getVertexUniquePropertyName(), uniqueAttrValue);
+                vertex = AtlasGraphUtilsV3.findByTypeAndUniquePropertyName(graph, typeName, uniqueAttribute.getVertexUniquePropertyName(), uniqueAttrValue);
 
                 if (vertex == null) {
                     failedMsgList.add("Line #" + lineIndexToLog + ": no " + typeName + " entity found with " + uniqueAttrName + "=" + uniqueAttrValue);
@@ -2569,7 +2570,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 List           arrayValue;
 
                 if (arrayType.getElementType() instanceof AtlasEnumType) {
-                    arrayValue = AtlasGraphUtilsV2.assignEnumValues(bmAttributeValue, (AtlasEnumType) arrayType.getElementType(), failedMsgList, lineIndex+1);
+                    arrayValue = AtlasGraphUtilsV3.assignEnumValues(bmAttributeValue, (AtlasEnumType) arrayType.getElementType(), failedMsgList, lineIndex+1);
                 } else {
                     arrayValue = assignMultipleValues(bmAttributeValue, arrayType.getElementTypeName(), failedMsgList, lineIndex+1);
                 }
@@ -2620,25 +2621,25 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             switch (elementTypeName) {
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_FLOAT:
-                    return AtlasGraphUtilsV2.floatParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.floatParser(arr, failedTermMsgList, lineIndex);
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_INT:
-                    return AtlasGraphUtilsV2.intParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.intParser(arr, failedTermMsgList, lineIndex);
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_LONG:
-                    return AtlasGraphUtilsV2.longParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.longParser(arr, failedTermMsgList, lineIndex);
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_SHORT:
-                    return AtlasGraphUtilsV2.shortParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.shortParser(arr, failedTermMsgList, lineIndex);
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_DOUBLE:
-                    return AtlasGraphUtilsV2.doubleParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.doubleParser(arr, failedTermMsgList, lineIndex);
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_DATE:
-                    return AtlasGraphUtilsV2.longParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.longParser(arr, failedTermMsgList, lineIndex);
 
                 case AtlasBaseTypeDef.ATLAS_TYPE_BOOLEAN:
-                    return AtlasGraphUtilsV2.booleanParser(arr, failedTermMsgList, lineIndex);
+                    return AtlasGraphUtilsV3.booleanParser(arr, failedTermMsgList, lineIndex);
 
                 default:
                     return Arrays.asList(arr);
@@ -2695,8 +2696,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 repairHasLineageForAsset(request);
 
             } else {
-                AtlasVertex processVertex = AtlasGraphUtilsV2.findByGuid(this.graph, request.getProcessGuid());
-                AtlasVertex assetVertex = AtlasGraphUtilsV2.findByGuid(this.graph, request.getEndGuid());
+                AtlasVertex processVertex = AtlasGraphUtilsV3.findByGuid(this.graph, request.getProcessGuid());
+                AtlasVertex assetVertex = AtlasGraphUtilsV3.findByGuid(this.graph, request.getEndGuid());
                 AtlasEdge edge = null;
                 try {
                     if (processVertex != null && assetVertex != null) {
@@ -2726,7 +2727,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         //only supports repairing scenario mentioned here - https://atlanhq.atlassian.net/browse/DG-128?focusedCommentId=20652
 
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("repairHasLineageForAssetGetById");
-        AtlasVertex assetVertex = AtlasGraphUtilsV2.findByGuid(this.graph, request.getAssetGuid());
+        AtlasVertex assetVertex = AtlasGraphUtilsV3.findByGuid(this.graph, request.getAssetGuid());
         RequestContext.get().endMetricRecord(metricRecorder);
 
         if (getEntityHasLineage(assetVertex)) {
@@ -2752,7 +2753,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             if (!foundActiveRel) {
                 metricRecorder = RequestContext.get().startMetricRecord("repairHasLineageForRequiredAsset");
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
+                AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
                 LOG.info("repairHasLineage: repairHasLineageForAsset: Repaired {}", request.getAssetGuid());
                 RequestContext.get().endMetricRecord(metricRecorder);
             }
@@ -2775,8 +2776,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             AtlasVertex assetVertex = atlasEdge.getInVertex();
 
             if (getEntityHasLineageValid(processVertex) && getEntityHasLineage(processVertex)) {
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE_VALID, true);
+                AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
+                AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE_VALID, true);
                 continue;
             }
 
@@ -2790,11 +2791,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                 if (getStatus(oppositeEdge) == ACTIVE && getStatus(oppositeEdgeAssetVertex) == ACTIVE) {
                     if (!isHasLineageSet) {
-                        AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
-                        AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE, true);
+                        AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
+                        AtlasGraphUtilsV3.setEncodedProperty(processVertex, HAS_LINEAGE, true);
 
-                        AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE_VALID, true);
-                        AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE_VALID, true);
+                        AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE_VALID, true);
+                        AtlasGraphUtilsV3.setEncodedProperty(processVertex, HAS_LINEAGE_VALID, true);
 
                         isHasLineageSet = true;
                     }
@@ -2803,10 +2804,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
             if (!isHasLineageSet) {
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
-                AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE, false);
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE_VALID, true);
-                AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE_VALID, true);
+                AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
+                AtlasGraphUtilsV3.setEncodedProperty(processVertex, HAS_LINEAGE, false);
+                AtlasGraphUtilsV3.setEncodedProperty(assetVertex, HAS_LINEAGE_VALID, true);
+                AtlasGraphUtilsV3.setEncodedProperty(processVertex, HAS_LINEAGE_VALID, true);
             }
 
         }
@@ -2842,7 +2843,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         for (String guid : termGuid) {
             LOG.info(" term guid " + guid);
 
-            AtlasVertex termVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+            AtlasVertex termVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
 
             if(termVertex!= null && ATLAS_GLOSSARY_TERM_ENTITY_TYPE.equals(getTypeName(termVertex)) &&
                     GraphHelper.getStatus(termVertex) == AtlasEntity.Status.ACTIVE) {
@@ -2892,15 +2893,15 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             assetVertex.removeProperty(MEANING_NAMES_PROPERTY_KEY);
 
             if (CollectionUtils.isNotEmpty(termQNList)) {
-                termQNList.forEach(q -> AtlasGraphUtilsV2.addEncodedProperty(assetVertex, MEANINGS_PROPERTY_KEY, q));
+                termQNList.forEach(q -> AtlasGraphUtilsV3.addEncodedProperty(assetVertex, MEANINGS_PROPERTY_KEY, q));
             }
 
             if (CollectionUtils.isNotEmpty(termNameList)) {
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, MEANINGS_TEXT_PROPERTY_KEY, StringUtils.join(termNameList, ","));
+                AtlasGraphUtilsV3.setEncodedProperty(assetVertex, MEANINGS_TEXT_PROPERTY_KEY, StringUtils.join(termNameList, ","));
             }
 
             if (CollectionUtils.isNotEmpty(termNameList)) {
-                termNameList.forEach(q -> AtlasGraphUtilsV2.addListProperty(assetVertex, MEANING_NAMES_PROPERTY_KEY, q, true));
+                termNameList.forEach(q -> AtlasGraphUtilsV3.addListProperty(assetVertex, MEANING_NAMES_PROPERTY_KEY, q, true));
             }
 
             RequestContext.get().addProcessGuidIds(getGuid(assetVertex));

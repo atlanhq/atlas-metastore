@@ -41,6 +41,7 @@ import org.apache.atlas.notification.preprocessor.EntityPreprocessor;
 import org.apache.atlas.notification.preprocessor.PreprocessorContext;
 import org.apache.atlas.notification.preprocessor.PreprocessorContext.PreprocessAction;
 import org.apache.atlas.repository.store.graph.EntityCorrelationStore;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.util.AtlasMetricsCounter;
 import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.LruCache;
@@ -672,7 +673,7 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
                                 }
 
                                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(partialUpdateRequest.getTypeName());
-                                String          guid       = AtlasGraphUtilsV2.getGuidByUniqueAttributes(entityType, Collections.singletonMap(partialUpdateRequest.getAttribute(), (Object)partialUpdateRequest.getAttributeValue()));
+                                String          guid       = AtlasGraphUtilsV3.getGuidByUniqueAttributes(entityType, Collections.singletonMap(partialUpdateRequest.getAttribute(), (Object)partialUpdateRequest.getAttributeValue()));
 
                                 // There should only be one root entity
                                 entities.getEntities().get(0).setGuid(guid);

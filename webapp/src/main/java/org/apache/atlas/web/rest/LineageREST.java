@@ -29,6 +29,7 @@ import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.lineage.*;
 import org.apache.atlas.model.lineage.AtlasLineageInfo.LineageDirection;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -246,7 +247,7 @@ public class LineageREST {
         try {
             AtlasEntityType entityType = ensureEntityType(typeName);
             Map<String, Object> attributes = getAttributes(servletRequest);
-            String guid = AtlasGraphUtilsV2.getGuidByUniqueAttributes(entityType, attributes);
+            String guid = AtlasGraphUtilsV3.getGuidByUniqueAttributes(entityType, attributes);
 
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getLineageByUniqueAttribute(" + typeName + "," + attributes + "," + direction +

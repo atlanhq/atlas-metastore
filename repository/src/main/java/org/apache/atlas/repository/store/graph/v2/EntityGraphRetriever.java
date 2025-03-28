@@ -50,11 +50,11 @@ import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.*;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
-import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasMapType;
 import org.apache.atlas.type.AtlasRelationshipType;
@@ -114,8 +114,8 @@ import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.
 import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.TWO_TO_ONE;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.*;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getIdFromVertex;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.isReference;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getIdFromVertex;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.isReference;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.BOTH;
@@ -289,7 +289,7 @@ public class EntityGraphRetriever {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
         boolean enableJanusOptimisation =
                 AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_RELATIONS.getBoolean()
-                         && RequestContext.get().isInvokedByIndexSearch();
+                        && RequestContext.get().isInvokedByIndexSearch();
         Map<String, Object> referenceVertexProperties  = null;
         if (entityType != null) {
             Map<String, Object> uniqueAttributes = new HashMap<>();
@@ -379,7 +379,7 @@ public class EntityGraphRetriever {
         String              classificationName = getTypeName(classificationVertex);
 
         if (StringUtils.isEmpty(classificationName)) {
-            LOG.warn("Ignoring invalid classification vertex: {}", AtlasGraphUtilsV2.toString(classificationVertex));
+            LOG.warn("Ignoring invalid classification vertex: {}", AtlasGraphUtilsV3.toString(classificationVertex));
         } else {
             ret = new AtlasClassification(classificationName);
             Map<String, Object> referenceProperties = Collections.emptyMap();
@@ -398,13 +398,13 @@ public class EntityGraphRetriever {
                 ret.setRestrictPropagationThroughHierarchy(referenceProperties.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) != null ? (Boolean) referenceProperties.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) : false);
                 strValidityPeriods = referenceProperties.get(CLASSIFICATION_VALIDITY_PERIODS_KEY)!=null ? (String) referenceProperties.get(CLASSIFICATION_VALIDITY_PERIODS_KEY) : null;
             } else {
-                ret.setEntityGuid(AtlasGraphUtilsV2.getEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_GUID, String.class));
+                ret.setEntityGuid(AtlasGraphUtilsV3.getEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_GUID, String.class));
                 ret.setEntityStatus(getClassificationEntityStatus(classificationVertex));
                 ret.setPropagate(isPropagationEnabled(classificationVertex));
                 ret.setRemovePropagationsOnEntityDelete(getRemovePropagations(classificationVertex));
                 ret.setRestrictPropagationThroughLineage(getRestrictPropagationThroughLineage(classificationVertex));
                 ret.setRestrictPropagationThroughHierarchy(getRestrictPropagationThroughHierarchy(classificationVertex));
-                strValidityPeriods = AtlasGraphUtilsV2.getEncodedProperty(classificationVertex, CLASSIFICATION_VALIDITY_PERIODS_KEY, String.class);
+                strValidityPeriods = AtlasGraphUtilsV3.getEncodedProperty(classificationVertex, CLASSIFICATION_VALIDITY_PERIODS_KEY, String.class);
             }
 
             ret.setValidityPeriods(AtlasJson.fromJson(strValidityPeriods, TIME_BOUNDARIES_LIST_TYPE));
@@ -435,7 +435,7 @@ public class EntityGraphRetriever {
     }
 
     public AtlasVertex getEntityVertex(String guid) throws AtlasBaseException {
-        AtlasVertex ret = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+        AtlasVertex ret = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
 
         if (ret == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -466,7 +466,7 @@ public class EntityGraphRetriever {
 
     public Map<String, Object> getEntityUniqueAttribute(AtlasVertex entityVertex) throws AtlasBaseException {
         Map<String, Object> ret        = null;
-        String              typeName   = AtlasGraphUtilsV2.getTypeName(entityVertex);
+        String              typeName   = AtlasGraphUtilsV3.getTypeName(entityVertex);
         AtlasEntityType     entityType = typeRegistry.getEntityTypeByName(typeName);
 
         if (entityType != null && MapUtils.isNotEmpty(entityType.getUniqAttributes())) {
@@ -493,7 +493,7 @@ public class EntityGraphRetriever {
         if (entityType != null) {
             for (Map<String, Object> uniqAttributes : uniqueAttributesList) {
                 try {
-                    AtlasVertex vertex = AtlasGraphUtilsV2.getVertexByUniqueAttributes(this.graph, entityType, uniqAttributes);
+                    AtlasVertex vertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(this.graph, entityType, uniqAttributes);
 
                     if (vertex != null) {
                         AtlasEntity entity = mapVertexToAtlasEntity(vertex, ret, isMinExtInfo);
@@ -516,7 +516,7 @@ public class EntityGraphRetriever {
     public void evaluateClassificationPropagation(AtlasVertex classificationVertex, List<AtlasVertex> entitiesToAddPropagation, List<AtlasVertex> entitiesToRemovePropagation) {
         if (classificationVertex != null) {
             String            entityGuid         = getClassificationEntityGuid(classificationVertex);
-            AtlasVertex       entityVertex       = AtlasGraphUtilsV2.findByGuid(this.graph, entityGuid);
+            AtlasVertex       entityVertex       = AtlasGraphUtilsV3.findByGuid(this.graph, entityGuid);
             String            classificationId   = classificationVertex.getIdForDisplay();
             List<AtlasVertex> propagatedEntities = getAllPropagatedEntityVertices(classificationVertex);
             List<AtlasVertex> impactedEntities   = getImpactedVerticesV2(entityVertex, null, classificationId);
@@ -547,11 +547,11 @@ public class EntityGraphRetriever {
             for (AtlasVertex classificationVertex : classificationVertices) {
                 String            classificationId      = classificationVertex.getIdForDisplay();
                 String            sourceEntityId        = getClassificationEntityGuid(classificationVertex);
-                AtlasVertex       sourceEntityVertex    = AtlasGraphUtilsV2.findByGuid(this.graph, sourceEntityId);
+                AtlasVertex       sourceEntityVertex    = AtlasGraphUtilsV3.findByGuid(this.graph, sourceEntityId);
                 String propagationMode;
 
-                Boolean restrictPropagationThroughLineage = AtlasGraphUtilsV2.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE, Boolean.class);
-                Boolean restrictPropagationThroughHierarchy = AtlasGraphUtilsV2.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY, Boolean.class);
+                Boolean restrictPropagationThroughLineage = AtlasGraphUtilsV3.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE, Boolean.class);
+                Boolean restrictPropagationThroughHierarchy = AtlasGraphUtilsV3.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY, Boolean.class);
                 propagationMode = determinePropagationMode(restrictPropagationThroughLineage,restrictPropagationThroughHierarchy);
                 Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true : false;
                 List<AtlasVertex> entitiesPropagatingTo = getImpactedVerticesV2(sourceEntityVertex, relationshipGuidToExclude,
@@ -771,7 +771,7 @@ public class EntityGraphRetriever {
     }
 
     private void traverseImpactedVerticesByLevel(final AtlasVertex entityVertexStart, final String relationshipGuidToExclude,
-                                          final String classificationId, final List<String> result, List<String> edgeLabelsToCheck,Boolean toExclude, List<String> verticesWithoutClassification) {
+                                                 final String classificationId, final List<String> result, List<String> edgeLabelsToCheck,Boolean toExclude, List<String> verticesWithoutClassification) {
         AtlasPerfMetrics.MetricRecorder metricRecorder                          = RequestContext.get().startMetricRecord("traverseImpactedVerticesByLevel");
         Set<String>                 visitedVerticesIds                          = new HashSet<>();
         Set<String>                 verticesAtCurrentLevel                      = new HashSet<>();
@@ -935,12 +935,12 @@ public class EntityGraphRetriever {
         }
 
         if (AtlasTypeUtil.isAssignedGuid(objId)) {
-            ret = AtlasGraphUtilsV2.findByGuid(this.graph, objId.getGuid());
+            ret = AtlasGraphUtilsV3.findByGuid(this.graph, objId.getGuid());
         } else {
             AtlasEntityType     entityType     = typeRegistry.getEntityTypeByName(objId.getTypeName());
             Map<String, Object> uniqAttributes = objId.getUniqueAttributes();
 
-            ret = AtlasGraphUtilsV2.getVertexByUniqueAttributes(this.graph, entityType, uniqAttributes);
+            ret = AtlasGraphUtilsV3.getVertexByUniqueAttributes(this.graph, entityType, uniqAttributes);
         }
 
         if (ret == null) {
@@ -1496,7 +1496,7 @@ public class EntityGraphRetriever {
             if (enableJanusOptimisation){
                 attrValue = getVertexAttributePreFetchCache(entityVertex, attribute,referenceProperties);
             }else {
-               attrValue = mapVertexToAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo, includeReferences);
+                attrValue = mapVertexToAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo, includeReferences);
             }
 
             struct.setAttribute(attribute.getName(), attrValue);
@@ -1598,7 +1598,7 @@ public class EntityGraphRetriever {
             ret.setRelationGuid(relationGuid);
         }
 
-        Object displayName = AtlasGraphUtilsV2.getEncodedProperty(termVertex, GLOSSARY_TERM_DISPLAY_NAME_ATTR, Object.class);
+        Object displayName = AtlasGraphUtilsV3.getEncodedProperty(termVertex, GLOSSARY_TERM_DISPLAY_NAME_ATTR, Object.class);
         if (displayName instanceof String) {
             ret.setDisplayText((String) displayName);
         }
@@ -1689,17 +1689,17 @@ public class EntityGraphRetriever {
                     ret = mapVertexToPrimitive(entityVertex, attribute.getVertexPropertyName(), attribute.getAttributeDef());
                     break;
                 case ENUM:
-                    ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
+                    ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
                     break;
                 case STRUCT:
-                    edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(attribute.getName());
+                    edgeLabel = AtlasGraphUtilsV3.getEdgeLabel(attribute.getName());
                     ret = mapVertexToStruct(entityVertex, edgeLabel, null, entityExtInfo, isMinExtInfo);
                     break;
                 case OBJECT_ID_TYPE:
                     if (includeReferences) {
                         if (attribute.getDefinedInType().getTypeCategory() == TypeCategory.STRUCT) {
                             //Struct attribute having ObjectId as type
-                            edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(attribute.getName());
+                            edgeLabel = AtlasGraphUtilsV3.getEdgeLabel(attribute.getName());
                         }
                         ret = attribute.getAttributeDef().isSoftReferenced() ? mapVertexToObjectIdForSoftRef(entityVertex, attribute, entityExtInfo, isMinExtInfo) :
                                 mapVertexToObjectId(entityVertex, edgeLabel, null, entityExtInfo, isOwnedAttribute, edgeDirection, isMinExtInfo);
@@ -1804,7 +1804,7 @@ public class EntityGraphRetriever {
     }
 
     private AtlasObjectId mapVertexToObjectIdForSoftRef(AtlasVertex entityVertex, AtlasAttribute attribute, AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo) {
-        String softRefVal = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), String.class);
+        String softRefVal = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), String.class);
 
         return StringUtils.isNotEmpty(softRefVal) ? getAtlasObjectIdFromSoftRefFormat(softRefVal, attribute, entityExtInfo, isMinExtInfo) : null;
     }
@@ -1860,7 +1860,7 @@ public class EntityGraphRetriever {
                     String mapKey    = entry.getKey();
                     Object keyValue  = entry.getValue();
                     Object mapValue  = mapVertexToCollectionEntry(entityVertex, mapValueType, keyValue, attribute.getRelationshipEdgeLabel(),
-                                                                  entityExtInfo, isOwnedAttribute, attribute.getRelationshipEdgeDirection(), isMinExtInfo, includeReferences);
+                            entityExtInfo, isOwnedAttribute, attribute.getRelationshipEdgeDirection(), isMinExtInfo, includeReferences);
                     if (mapValue != null) {
                         ret.put(mapKey, mapValue);
                     }
@@ -1906,7 +1906,7 @@ public class EntityGraphRetriever {
             }
 
             Object arrValue = mapVertexToCollectionEntry(entityVertex, arrayElementType, element, edgeLabel,
-                                                         entityExtInfo, isOwnedAttribute, edgeDirection, isMinExtInfo, includeReferences);
+                    entityExtInfo, isOwnedAttribute, edgeDirection, isMinExtInfo, includeReferences);
 
             if (arrValue != null) {
                 arrValues.add(arrValue);
@@ -1950,43 +1950,43 @@ public class EntityGraphRetriever {
     public static Object mapVertexToPrimitive(AtlasElement entityVertex, final String vertexPropertyName, AtlasAttributeDef attrDef) {
         Object ret = null;
 
-        if (AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Object.class) == null) {
+        if (AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Object.class) == null) {
             return null;
         }
 
         switch (attrDef.getTypeName().toLowerCase()) {
             case ATLAS_TYPE_STRING:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, String.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, String.class);
                 break;
             case ATLAS_TYPE_SHORT:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Short.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Short.class);
                 break;
             case ATLAS_TYPE_INT:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Integer.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Integer.class);
                 break;
             case ATLAS_TYPE_BIGINTEGER:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, BigInteger.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, BigInteger.class);
                 break;
             case ATLAS_TYPE_BOOLEAN:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Boolean.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Boolean.class);
                 break;
             case ATLAS_TYPE_BYTE:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Byte.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Byte.class);
                 break;
             case ATLAS_TYPE_LONG:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Long.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Long.class);
                 break;
             case ATLAS_TYPE_FLOAT:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Float.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Float.class);
                 break;
             case ATLAS_TYPE_DOUBLE:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Double.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Double.class);
                 break;
             case ATLAS_TYPE_BIGDECIMAL:
-                ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, BigDecimal.class);
+                ret = AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, BigDecimal.class);
                 break;
             case ATLAS_TYPE_DATE:
-                ret = new Date(AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Long.class));
+                ret = new Date(AtlasGraphUtilsV3.getEncodedProperty(entityVertex, vertexPropertyName, Long.class));
                 break;
             default:
                 break;
@@ -2318,8 +2318,8 @@ public class EntityGraphRetriever {
                 AtlasRelationship  relationship   = mapEdgeToAtlasRelationship(edge);
 
                 ret = new AtlasRelatedObjectId(entityGuid, entityTypeName, entityStatus,
-                                               relationship.getGuid(), relationship.getStatus(),
-                                               new AtlasStruct(relationship.getTypeName(), relationship.getAttributes()));
+                        relationship.getGuid(), relationship.getStatus(),
+                        new AtlasStruct(relationship.getTypeName(), relationship.getAttributes()));
 
                 Object displayText = getDisplayText(referenceVertex, entityTypeName);
 

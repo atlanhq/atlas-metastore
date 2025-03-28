@@ -19,13 +19,12 @@ package org.apache.atlas.repository.patches;
 
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.pc.WorkItemBuilder;
 import org.apache.atlas.pc.WorkItemConsumer;
 import org.apache.atlas.pc.WorkItemManager;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graphdb.*;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -104,7 +103,7 @@ public abstract class ConcurrentPatchProcessor {
 
     private void execute() {
         WorkItemManager manager = new WorkItemManager(new ConsumerBuilder(graph, typeRegistry, this),
-                                                      WORKER_NAME_PREFIX, BATCH_SIZE, NUM_WORKERS, false);
+                WORKER_NAME_PREFIX, BATCH_SIZE, NUM_WORKERS, false);
 
         try {
             submitVerticesToUpdate(manager);
@@ -200,11 +199,11 @@ public abstract class ConcurrentPatchProcessor {
                 return;
             }
 
-            if (AtlasGraphUtilsV2.isTypeVertex(vertex)) {
+            if (AtlasGraphUtilsV3.isTypeVertex(vertex)) {
                 return;
             }
 
-            String          typeName   = AtlasGraphUtilsV2.getTypeName(vertex);
+            String          typeName   = AtlasGraphUtilsV3.getTypeName(vertex);
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
             if (entityType == null) {
                 return;

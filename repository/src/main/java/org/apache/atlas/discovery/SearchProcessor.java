@@ -33,6 +33,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.util.AtlasGremlinQueryProvider;
@@ -1267,7 +1268,7 @@ public abstract class SearchProcessor {
 
         if (vertices != null) {
             for(AtlasVertex vertex : vertices) {
-                String guid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                String guid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                 if (StringUtils.isNotEmpty(guid)) {
                     ret.add(guid);

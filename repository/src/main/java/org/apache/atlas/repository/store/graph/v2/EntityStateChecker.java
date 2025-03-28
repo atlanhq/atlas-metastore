@@ -31,6 +31,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -142,7 +143,7 @@ public final class EntityStateChecker {
      * @throws AtlasBaseException
      */
     public AtlasEntityState checkEntityState(String guid, boolean fixIssues, AtlasCheckStateResult result) throws AtlasBaseException {
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
 
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
@@ -159,15 +160,15 @@ public final class EntityStateChecker {
      */
     public AtlasEntityState checkEntityState(AtlasVertex entityVertex, boolean fixIssues, AtlasCheckStateResult result) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> checkEntityState(guid={})", AtlasGraphUtilsV2.getIdFromVertex(entityVertex));
+            LOG.debug("==> checkEntityState(guid={})", AtlasGraphUtilsV3.getIdFromVertex(entityVertex));
         }
 
         AtlasEntityState ret = new AtlasEntityState();
 
-        ret.setGuid(AtlasGraphUtilsV2.getIdFromVertex(entityVertex));
-        ret.setTypeName(AtlasGraphUtilsV2.getTypeName(entityVertex));
+        ret.setGuid(AtlasGraphUtilsV3.getIdFromVertex(entityVertex));
+        ret.setTypeName(AtlasGraphUtilsV3.getTypeName(entityVertex));
         ret.setName(getEntityName(entityVertex));
-        ret.setStatus(AtlasGraphUtilsV2.getState(entityVertex));
+        ret.setStatus(AtlasGraphUtilsV3.getState(entityVertex));
         ret.setState(AtlasCheckStateResult.State.OK);
 
         checkEntityState_Classifications(entityVertex, ret, fixIssues);
@@ -223,7 +224,7 @@ public final class EntityStateChecker {
         if (edges != null) {
             for (Iterator<AtlasEdge> iter = edges.iterator(); iter.hasNext(); ) {
                 AtlasEdge               edge               = iter.next();
-                Boolean                 isPropagated       = AtlasGraphUtilsV2.getEncodedProperty(edge, CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
+                Boolean                 isPropagated       = AtlasGraphUtilsV3.getEncodedProperty(edge, CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
                 String                  classificationName = GraphHelper.getTypeName(edge.getInVertex());
                 AtlasClassificationType classification     = typeRegistry.getClassificationTypeByName(classificationName);
 
@@ -273,7 +274,7 @@ public final class EntityStateChecker {
                     entityVertex.removeProperty(Constants.CLASSIFICATION_NAMES_KEY);
 
                     for (String classificationName : traitVertexNames) {
-                        AtlasGraphUtilsV2.addEncodedProperty(entityVertex, Constants.TRAIT_NAMES_PROPERTY_KEY, classificationName);
+                        AtlasGraphUtilsV3.addEncodedProperty(entityVertex, Constants.TRAIT_NAMES_PROPERTY_KEY, classificationName);
                     }
 
                     entityVertex.setProperty(Constants.CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(traitVertexNames));
@@ -292,13 +293,13 @@ public final class EntityStateChecker {
                     entityVertex.removeProperty(Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY);
 
                     for (String classificationName : propagatedTraitVertexNames) {
-                        AtlasGraphUtilsV2.addEncodedProperty(entityVertex, Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, classificationName);
+                        AtlasGraphUtilsV3.addEncodedProperty(entityVertex, Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, classificationName);
                     }
 
                     entityVertex.setProperty(Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY,getDelimitedClassificationNames(propagatedTraitVertexNames));
                 }
 
-                AtlasGraphUtilsV2.setEncodedProperty(entityVertex, Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+                AtlasGraphUtilsV3.setEncodedProperty(entityVertex, Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
 
                 result.setState(AtlasCheckStateResult.State.FIXED);
             } else {

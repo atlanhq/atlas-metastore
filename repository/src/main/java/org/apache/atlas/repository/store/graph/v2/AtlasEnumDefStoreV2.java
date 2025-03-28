@@ -23,6 +23,7 @@ import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef.AtlasEnumElementDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
 import org.apache.commons.collections.CollectionUtils;
@@ -49,7 +50,7 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
     @Override
     public AtlasVertex preCreate(AtlasEnumDef enumDef) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-          LOG.debug("==> AtlasEnumDefStoreV2.preCreate({})", enumDef);
+            LOG.debug("==> AtlasEnumDefStoreV2.preCreate({})", enumDef);
         }
 
         validateType(enumDef);
@@ -76,7 +77,7 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
     @Override
     public AtlasEnumDef create(AtlasEnumDef enumDef, AtlasVertex preCreateResult) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-          LOG.debug("==> AtlasEnumDefStoreV2.create({}, {})", enumDef, preCreateResult);
+            LOG.debug("==> AtlasEnumDefStoreV2.create({}, {})", enumDef, preCreateResult);
         }
 
 
@@ -164,7 +165,7 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
         validateType(enumDef);
 
         AtlasEnumDef ret = StringUtils.isNotBlank(enumDef.getGuid()) ? updateByGuid(enumDef.getGuid(), enumDef)
-                                                                     : updateByName(enumDef.getName(), enumDef);
+                : updateByName(enumDef.getName(), enumDef);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AtlasEnumDefStoreV2.update({}): {}", enumDef, ret);
@@ -278,22 +279,22 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
                 throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, enumDef.getName(), "elementValue");
             }
 
-            String elemKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(enumDef, element.getValue());
+            String elemKey = AtlasGraphUtilsV3.getTypeDefPropertyKey(enumDef, element.getValue());
 
-            AtlasGraphUtilsV2.setProperty(vertex, elemKey, element.getOrdinal());
+            AtlasGraphUtilsV3.setProperty(vertex, elemKey, element.getOrdinal());
 
             if (StringUtils.isNotBlank(element.getDescription())) {
-                String descKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(elemKey, "description");
+                String descKey = AtlasGraphUtilsV3.getTypeDefPropertyKey(elemKey, "description");
 
-                AtlasGraphUtilsV2.setProperty(vertex, descKey, element.getDescription());
+                AtlasGraphUtilsV3.setProperty(vertex, descKey, element.getDescription());
             }
 
             values.add(element.getValue());
         }
-        AtlasGraphUtilsV2.setProperty(vertex, AtlasGraphUtilsV2.getTypeDefPropertyKey(enumDef), values);
+        AtlasGraphUtilsV3.setProperty(vertex, AtlasGraphUtilsV3.getTypeDefPropertyKey(enumDef), values);
 
-        String defaultValueKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(enumDef, "defaultValue");
-        AtlasGraphUtilsV2.setProperty(vertex, defaultValueKey, enumDef.getDefaultValue());
+        String defaultValueKey = AtlasGraphUtilsV3.getTypeDefPropertyKey(enumDef, "defaultValue");
+        AtlasGraphUtilsV3.setProperty(vertex, defaultValueKey, enumDef.getDefaultValue());
 
     }
 
@@ -313,20 +314,20 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
         typeDefStore.vertexToTypeDef(vertex, ret);
 
         List<AtlasEnumElementDef> elements = new ArrayList<>();
-        List<String> elemValues = vertex.getProperty(AtlasGraphUtilsV2.getTypeDefPropertyKey(ret), List.class);
+        List<String> elemValues = vertex.getProperty(AtlasGraphUtilsV3.getTypeDefPropertyKey(ret), List.class);
         for (String elemValue : elemValues) {
-            String elemKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret, elemValue);
-            String descKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(elemKey, "description");
+            String elemKey = AtlasGraphUtilsV3.getTypeDefPropertyKey(ret, elemValue);
+            String descKey = AtlasGraphUtilsV3.getTypeDefPropertyKey(elemKey, "description");
 
-            Integer ordinal = AtlasGraphUtilsV2.getProperty(vertex, elemKey, Integer.class);
-            String  desc    = AtlasGraphUtilsV2.getProperty(vertex, descKey, String.class);
+            Integer ordinal = AtlasGraphUtilsV3.getProperty(vertex, elemKey, Integer.class);
+            String  desc    = AtlasGraphUtilsV3.getProperty(vertex, descKey, String.class);
 
             elements.add(new AtlasEnumElementDef(elemValue, desc, ordinal));
         }
         ret.setElementDefs(elements);
 
-        String defaultValueKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret, "defaultValue");
-        String defaultValue = AtlasGraphUtilsV2.getProperty(vertex, defaultValueKey, String.class);
+        String defaultValueKey = AtlasGraphUtilsV3.getTypeDefPropertyKey(ret, "defaultValue");
+        String defaultValue = AtlasGraphUtilsV3.getProperty(vertex, defaultValueKey, String.class);
         ret.setDefaultValue(defaultValue);
 
         return ret;

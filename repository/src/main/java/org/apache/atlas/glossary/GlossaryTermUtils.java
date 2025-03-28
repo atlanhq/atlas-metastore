@@ -34,6 +34,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.FileUtils;
@@ -780,7 +781,7 @@ public class GlossaryTermUtils extends GlossaryUtils {
                                 GlossaryUtils.ATLAS_GLOSSARY_TERM_TYPENAME + invalidNameChars[1] + QUALIFIED_NAME, relatedTermQualifiedName);
 
                         if (vertex != null) {
-                            String glossaryTermGuid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                            String glossaryTermGuid = AtlasGraphUtilsV3.getIdFromVertex(vertex);
 
                             relatedTermHeader = new AtlasRelatedTermHeader();
                             relatedTermHeader.setTermGuid(glossaryTermGuid);
@@ -869,7 +870,7 @@ public class GlossaryTermUtils extends GlossaryUtils {
     private String getGlossaryGUIDFromGraphDB(String glossaryName) {
         AtlasVertex vertex = AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(GlossaryUtils.ATLAS_GLOSSARY_TYPENAME, GlossaryUtils.ATLAS_GLOSSARY_TYPENAME + "." + QUALIFIED_NAME, glossaryName);
 
-        return (vertex != null) ? AtlasGraphUtilsV2.getIdFromVertex(vertex) : null;
+        return (vertex != null) ? AtlasGraphUtilsV3.getIdFromVertex(vertex) : null;
     }
 
     private String createGlossary(String glossaryName, List<String> failedTermMsgs) throws AtlasBaseException {

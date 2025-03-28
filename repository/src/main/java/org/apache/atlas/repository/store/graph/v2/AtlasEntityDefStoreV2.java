@@ -25,6 +25,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -178,7 +179,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
         validateType(entityDef);
 
         AtlasEntityDef ret = StringUtils.isNotBlank(entityDef.getGuid()) ? updateByGuid(entityDef.getGuid(), entityDef)
-                                                                         : updateByName(entityDef.getName(), entityDef);
+                : updateByName(entityDef.getName(), entityDef);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AtlasEntityDefStoreV1.update({}): {}", entityDef, ret);
@@ -271,7 +272,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
 
         AtlasVertex ret = typeDefStore.findTypeVertexByNameAndCategory(name, TypeCategory.CLASS);
 
-        if (AtlasGraphUtilsV2.typeHasInstanceVertex(name)) {
+        if (AtlasGraphUtilsV3.typeHasInstanceVertex(name)) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, name);
         }
 
@@ -280,7 +281,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
         }
 
         // error if we are trying to delete an entityDef that has a relationshipDef
-        if (typeDefStore.hasIncomingEdgesWithLabel(ret, AtlasGraphUtilsV2.RELATIONSHIPTYPE_EDGE_LABEL)){
+        if (typeDefStore.hasIncomingEdgesWithLabel(ret, AtlasGraphUtilsV3.RELATIONSHIPTYPE_EDGE_LABEL)){
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_RELATIONSHIPS, name);
         }
 
@@ -305,9 +306,9 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
 
         AtlasVertex ret = typeDefStore.findTypeVertexByGuidAndCategory(guid, TypeCategory.CLASS);
 
-        String typeName = AtlasGraphUtilsV2.getEncodedProperty(ret, Constants.TYPENAME_PROPERTY_KEY, String.class);
+        String typeName = AtlasGraphUtilsV3.getEncodedProperty(ret, Constants.TYPENAME_PROPERTY_KEY, String.class);
 
-        if (AtlasGraphUtilsV2.typeHasInstanceVertex(typeName)) {
+        if (AtlasGraphUtilsV3.typeHasInstanceVertex(typeName)) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, typeName);
         }
 
@@ -316,7 +317,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
         }
 
         // error if we are trying to delete an entityDef that has a relationshipDef
-        if (typeDefStore.hasIncomingEdgesWithLabel(ret, AtlasGraphUtilsV2.RELATIONSHIPTYPE_EDGE_LABEL)){
+        if (typeDefStore.hasIncomingEdgesWithLabel(ret, AtlasGraphUtilsV3.RELATIONSHIPTYPE_EDGE_LABEL)){
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_RELATIONSHIPS, typeName);
         }
 
@@ -334,7 +335,7 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
     }
 
     private void updateVertexPreUpdate(AtlasEntityDef entityDef, AtlasEntityType entityType, AtlasVertex vertex)
-        throws AtlasBaseException {
+            throws AtlasBaseException {
         AtlasStructDefStoreV2.updateVertexPreUpdate(entityDef, entityType, vertex, typeDefStore);
     }
 

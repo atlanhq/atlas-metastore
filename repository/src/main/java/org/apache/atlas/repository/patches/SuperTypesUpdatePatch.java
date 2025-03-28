@@ -21,7 +21,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.pc.WorkItemManager;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
@@ -112,7 +112,7 @@ public class SuperTypesUpdatePatch extends AtlasPatchHandler {
                 vertex.removeProperty(SUPER_TYPES_PROPERTY_KEY);
 
                 for (String superType : allSuperTypes) {
-                    AtlasGraphUtilsV2.addEncodedProperty(vertex, SUPER_TYPES_PROPERTY_KEY, superType);
+                    AtlasGraphUtilsV3.addEncodedProperty(vertex, SUPER_TYPES_PROPERTY_KEY, superType);
                 }
 
                 if (LOG.isDebugEnabled()) {

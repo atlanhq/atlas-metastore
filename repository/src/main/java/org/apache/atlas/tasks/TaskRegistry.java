@@ -61,7 +61,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.repository.Constants.TASK_GUID;
 import static org.apache.atlas.repository.Constants.TASK_STATUS;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.setEncodedProperty;
 
 @Component
 public class TaskRegistry {
@@ -99,9 +99,9 @@ public class TaskRegistry {
 
         try {
             AtlasGraphQuery query = graph.query()
-                                         .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
-                                         .has(Constants.TASK_STATUS, AtlasTask.Status.PENDING)
-                                         .orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
+                    .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
+                    .has(Constants.TASK_STATUS, AtlasTask.Status.PENDING)
+                    .orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
 
             Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -151,24 +151,24 @@ public class TaskRegistry {
         dsl.put("sort", SORT_ARRAY);
         dsl.put("size", TASK_FETCH_BATCH_SIZE);
         int from = 0;
-            while(true) {
-                dsl.put("from", from);
-                TaskSearchParams taskSearchParams = new TaskSearchParams();
-                taskSearchParams.setDsl(dsl);
-                try {
-                    List<AtlasTask> results = taskService.getTasks(taskSearchParams).getTasks();
-                    if (results.isEmpty()){
-                        break;
-                    }
-                    ret.addAll(results);
-                    from += TASK_FETCH_BATCH_SIZE;
-                } catch (AtlasBaseException exception) {
-                    LOG.error("Error fetching in progress tasks from ES, redirecting to GraphQuery", exception);
-                    exception.printStackTrace();
-                    ret = getInProgressTasks();
-                    return ret;
+        while(true) {
+            dsl.put("from", from);
+            TaskSearchParams taskSearchParams = new TaskSearchParams();
+            taskSearchParams.setDsl(dsl);
+            try {
+                List<AtlasTask> results = taskService.getTasks(taskSearchParams).getTasks();
+                if (results.isEmpty()){
+                    break;
                 }
+                ret.addAll(results);
+                from += TASK_FETCH_BATCH_SIZE;
+            } catch (AtlasBaseException exception) {
+                LOG.error("Error fetching in progress tasks from ES, redirecting to GraphQuery", exception);
+                exception.printStackTrace();
+                ret = getInProgressTasks();
+                return ret;
             }
+        }
         RequestContext.get().endMetricRecord(metric);
         return ret;
     }
@@ -281,8 +281,8 @@ public class TaskRegistry {
     @GraphTransaction
     public AtlasTask getById(String guid) {
         AtlasGraphQuery query = graph.query()
-                                     .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
-                                     .has(TASK_GUID, guid);
+                .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
+                .has(TASK_GUID, guid);
 
         Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -302,8 +302,8 @@ public class TaskRegistry {
     public List<AtlasTask> getAll() {
         List<AtlasTask> ret = new ArrayList<>();
         AtlasGraphQuery query = graph.query()
-                                     .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
-                                     .orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
+                .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
+                .orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
 
         Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -315,14 +315,14 @@ public class TaskRegistry {
     }
 
     /*
-    * This returns tasks which has status IN statusList
-    * If not specified, return all tasks
-    * */
+     * This returns tasks which has status IN statusList
+     * If not specified, return all tasks
+     * */
     @GraphTransaction
     public List<AtlasTask> getAll(List<String> statusList, int offset, int limit) {
         List<AtlasTask> ret = new ArrayList<>();
         AtlasGraphQuery query = graph.query()
-                                     .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME);
+                .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME);
 
         if (CollectionUtils.isNotEmpty(statusList)) {
             List<AtlasGraphQuery> orConditions = new LinkedList<>();
@@ -523,9 +523,9 @@ public class TaskRegistry {
         } catch (JsonProcessingException e) {
             LOG.error("Error converting fieldsToUpdate to JSON for task with guid: {} and docId: {}. Error: {}", atlasTask.getGuid(), docId, e.getMessage(), e);
         }
-         catch (AtlasBaseException e) {
-             LOG.error("Error executing Elasticsearch query for task with guid: {} and docId: {}. Error: {}", atlasTask.getGuid(), docId, e.getMessage(), e);
-         }
+        catch (AtlasBaseException e) {
+            LOG.error("Error executing Elasticsearch query for task with guid: {} and docId: {}. Error: {}", atlasTask.getGuid(), docId, e.getMessage(), e);
+        }
     }
 
     public void commit() {
