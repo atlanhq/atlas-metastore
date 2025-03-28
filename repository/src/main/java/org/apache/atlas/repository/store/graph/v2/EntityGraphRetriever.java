@@ -71,8 +71,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.tinkerpop.gremlin.structure.*;
-import org.janusgraph.core.Cardinality;
-import org.janusgraph.graphdb.relations.CacheVertexProperty;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -81,12 +79,11 @@ import javax.inject.Inject;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.*;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
+import org.janusgraph.core.Cardinality;
+import org.janusgraph.graphdb.relations.CacheVertexProperty;
 
 import static org.apache.atlas.AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS;
 import static org.apache.atlas.glossary.GlossaryUtils.TERM_ASSIGNMENT_ATTR_CONFIDENCE;
@@ -121,6 +118,7 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.BOTH;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.IN;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
+import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 
 @Component
@@ -557,7 +555,7 @@ public class EntityGraphRetriever {
                 List<AtlasVertex> entitiesPropagatingTo = getImpactedVerticesV2(sourceEntityVertex, relationshipGuidToExclude,
                         classificationId, CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode),toExclude);
 
-                LOG.info("Traversed {} vertices for Classification vertex id {} excluding RelationShip GUID {}", entitiesPropagatingTo.size(), classificationId, relationshipGuidToExclude);
+                LOG.debug("Traversed {} vertices for Classification vertex id {} excluding RelationShip GUID {}", entitiesPropagatingTo.size(), classificationId, relationshipGuidToExclude);
 
                 ret.put(classificationVertex, entitiesPropagatingTo);
             }
@@ -691,7 +689,7 @@ public class EntityGraphRetriever {
             String      entityVertexId = entityVertex.getIdForDisplay();
 
             if (visitedVertices.contains(entityVertexId)) {
-                LOG.info("Already visited: {}", entityVertexId);
+                LOG.debug("Already visited: {}", entityVertexId);
 
                 continue;
             }
@@ -1049,14 +1047,6 @@ public class EntityGraphRetriever {
                 retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, propertiesMap);
             }
 
-            // for attributes that are complexType and passed by BE, set them to empty string
-            if (!fetchEdgeLabels){
-                attributes.forEach(attribute -> {
-                    propertiesMap.putIfAbsent(attribute, StringUtils.SPACE);
-                });
-
-            }
-
             // Iterate through the resulting VertexProperty objects
             while (traversal.hasNext()) {
                 try {
@@ -1089,7 +1079,6 @@ public class EntityGraphRetriever {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
-
     private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
         Map<String, Map<String, AtlasAttribute>> relationships = entityType.getRelationshipAttributes();
         Map<String, Set<String>> edgeNames = new HashMap<>();
@@ -1156,8 +1145,7 @@ public class EntityGraphRetriever {
                 AccessControlUtils.ATTR_SERVICE_SERVICE_TYPE,
                 AccessControlUtils.ATTR_SERVICE_TAG_SERVICE,
                 AccessControlUtils.ATTR_SERVICE_IS_ENABLED,
-                AccessControlUtils.ATTR_SERVICE_LAST_SYNC)
-        );
+                AccessControlUtils.ATTR_SERVICE_LAST_SYNC));
 
         return exclusionSet.stream().anyMatch(attributes::contains);
     }
@@ -1307,7 +1295,7 @@ public class EntityGraphRetriever {
                 ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
             }
             ret.setIsIncomplete(isIncomplete);
-            ret.setLabels(getLabels(entityVertex));
+            ret.setLabels(getLabels((String)properties.get(Constants.LABELS_PROPERTY_KEY)));
 
             ret.setCreatedBy(properties.get(CREATED_BY_KEY) != null ? (String) properties.get(CREATED_BY_KEY) : null);
             ret.setUpdatedBy(properties.get(MODIFIED_BY_KEY) != null ? (String) properties.get(MODIFIED_BY_KEY) : null);
@@ -1484,21 +1472,9 @@ public class EntityGraphRetriever {
         }
 
         AtlasStructType structType = (AtlasStructType) objType;
-        Map<String,Object> referenceProperties = Collections.emptyMap();
-        boolean enableJanusOptimisation = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean() && RequestContext.get().isInvokedByIndexSearch();
-
-        if (enableJanusOptimisation){
-            referenceProperties = preloadProperties(entityVertex, structType, structType.getAllAttributes().keySet(), false);
-        }
 
         for (AtlasAttribute attribute : structType.getAllAttributes().values()) {
-            Object attrValue;
-            if (enableJanusOptimisation) {
-                attrValue = getVertexAttributePreFetchCache(entityVertex, attribute, referenceProperties, entityExtInfo, isMinExtInfo, includeReferences);
-            } else {
-                attrValue = mapVertexToAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo, includeReferences);
-            }
-
+            Object attrValue = mapVertexToAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo, includeReferences);
             struct.setAttribute(attribute.getName(), attrValue);
         }
         RequestContext.get().endMetricRecord(metricRecorder);

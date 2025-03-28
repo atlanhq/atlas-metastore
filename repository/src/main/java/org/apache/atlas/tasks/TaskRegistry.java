@@ -17,8 +17,8 @@
  */
 package org.apache.atlas.tasks;
 
-import com.datastax.oss.driver.shaded.fasterxml.jackson.core.JsonProcessingException;
-import com.datastax.oss.driver.shaded.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.GraphTransaction;
@@ -58,6 +58,7 @@ import java.util.Objects;
 import java.util.LinkedHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
 
 import static org.apache.atlas.repository.Constants.TASK_GUID;
 import static org.apache.atlas.repository.Constants.TASK_STATUS;
@@ -100,7 +101,7 @@ public class TaskRegistry {
         try {
             AtlasGraphQuery query = graph.query()
                                          .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
-                                         .has(Constants.TASK_STATUS, AtlasTask.Status.PENDING)
+                                         .has(TASK_STATUS, AtlasTask.Status.PENDING)
                                          .orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
 
             Iterator<AtlasVertex> results = query.vertices().iterator();
@@ -125,7 +126,7 @@ public class TaskRegistry {
         try {
             AtlasGraphQuery query = graph.query()
                     .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME)
-                    .has(Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS)
+                    .has(TASK_STATUS, AtlasTask.Status.IN_PROGRESS)
                     .orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
 
             Iterator<AtlasVertex> results = query.vertices().iterator();
@@ -180,7 +181,7 @@ public class TaskRegistry {
         }
 
         setEncodedProperty(taskVertex, Constants.TASK_ATTEMPT_COUNT, task.getAttemptCount());
-        setEncodedProperty(taskVertex, Constants.TASK_STATUS, task.getStatus().toString());
+        setEncodedProperty(taskVertex, TASK_STATUS, task.getStatus().toString());
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
         setEncodedProperty(taskVertex, Constants.TASK_ERROR_MESSAGE, task.getErrorMessage());
     }
@@ -248,14 +249,15 @@ public class TaskRegistry {
         deleteVertex(taskVertex);
     }
 
-    public void inProgress(AtlasVertex taskVertex, AtlasTask task) {
+    public void inProgress(AtlasVertex taskVertex, AtlasTask task, AbstractTask runnableTask) {
         RequestContext.get().setCurrentTask(task);
 
         task.setStartTime(new Date());
-
+        task.setAssetsCountToPropagate(runnableTask.getAssetsCountToPropagate());
         setEncodedProperty(taskVertex, Constants.TASK_START_TIME, task.getStartTime());
-        setEncodedProperty(taskVertex, Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS);
+        setEncodedProperty(taskVertex, TASK_STATUS, AtlasTask.Status.IN_PROGRESS);
         setEncodedProperty(taskVertex, Constants.TASK_UPDATED_TIME, System.currentTimeMillis());
+        setEncodedProperty(taskVertex, Constants.TASK_ASSET_COUNT_TO_PROPAGATE, task.getAssetsCountToPropagate());
         graph.commit();
     }
 
@@ -291,7 +293,7 @@ public class TaskRegistry {
 
     @GraphTransaction
     public AtlasVertex getVertex(String taskGuid) {
-        AtlasGraphQuery query = graph.query().has(Constants.TASK_GUID, taskGuid);
+        AtlasGraphQuery query = graph.query().has(TASK_GUID, taskGuid);
 
         Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -328,7 +330,7 @@ public class TaskRegistry {
             List<AtlasGraphQuery> orConditions = new LinkedList<>();
 
             for (String status : statusList) {
-                orConditions.add(query.createChildQuery().has(Constants.TASK_STATUS, AtlasTask.Status.from(status)));
+                orConditions.add(query.createChildQuery().has(TASK_STATUS, AtlasTask.Status.from(status)));
             }
 
             query.or(orConditions);
@@ -364,8 +366,8 @@ public class TaskRegistry {
                 .has(Constants.TASK_TYPE_PROPERTY_KEY, Constants.TASK_TYPE_NAME);
 
         List<AtlasGraphQuery> orConditions = new LinkedList<>();
-        orConditions.add(query.createChildQuery().has(Constants.TASK_STATUS, AtlasTask.Status.IN_PROGRESS));
-        orConditions.add(query.createChildQuery().has(Constants.TASK_STATUS, AtlasTask.Status.PENDING));
+        orConditions.add(query.createChildQuery().has(TASK_STATUS, AtlasTask.Status.IN_PROGRESS));
+        orConditions.add(query.createChildQuery().has(TASK_STATUS, AtlasTask.Status.PENDING));
         query.or(orConditions);
 
         query.orderBy(Constants.TASK_CREATED_TIME, AtlasGraphQuery.SortOrder.ASC);
@@ -407,21 +409,24 @@ public class TaskRegistry {
             int fetched = 0;
             try {
                 if (totalFetched + size > queueSize) {
-                    size = queueSize - totalFetched;
+                    size = queueSize - totalFetched; // Adjust size to not exceed queue size
+                    LOG.info("Adjusting fetch size to {} based on queue size constraint.", size);
                 }
 
                 dsl.put("from", from);
                 dsl.put("size", size);
 
+                LOG.info("DSL Query for iteration: {}", dsl);
                 indexSearchParams.setDsl(dsl);
 
+                LOG.info("Executing Elasticsearch query with from: {} and size: {}", from, size);
                 AtlasIndexQuery indexQuery = graph.elasticsearchQuery(Constants.VERTEX_INDEX, indexSearchParams);
 
                 try {
                     indexQueryResult = indexQuery.vertices(indexSearchParams);
+                    LOG.info("Query executed successfully for from: {} with size: {}", from, size);
                 } catch (AtlasBaseException e) {
-                    LOG.error("Failed to fetch pending/in-progress task vertices to re-que");
-                    e.printStackTrace();
+                    LOG.error("Failed to fetch PENDING/IN_PROGRESS task vertices. Exiting loop.", e);
                     break;
                 }
 
@@ -433,9 +438,11 @@ public class TaskRegistry {
 
                         if (vertex != null) {
                             AtlasTask atlasTask = toAtlasTask(vertex);
+
+                            LOG.info("Processing fetched task: {}", atlasTask);
                             if (atlasTask.getStatus().equals(AtlasTask.Status.PENDING) ||
-                                    atlasTask.getStatus().equals(AtlasTask.Status.IN_PROGRESS) ){
-                                LOG.info(String.format("Fetched task from index search: %s", atlasTask.toString()));
+                                    atlasTask.getStatus().equals(AtlasTask.Status.IN_PROGRESS)) {
+                                LOG.info("Adding task to the result list: {}", atlasTask);
                                 ret.add(atlasTask);
                             } else {
                                 LOG.warn("Status mismatch for task with guid: {}. Expected PENDING/IN_PROGRESS but found: {}",
@@ -450,19 +457,26 @@ public class TaskRegistry {
                                 }
                             }
                         } else {
-                            LOG.warn("Null vertex while re-queuing tasks at index {}", fetched);
+                            LOG.warn("Null vertex encountered while re-queuing tasks at index {}", fetched);
                         }
 
                         fetched++;
                     }
+                    LOG.info("Fetched {} tasks in this iteration.", fetched);
+                } else {
+                    LOG.warn("Index query result is null for from: {} and size: {}", from, size);
                 }
 
                 totalFetched += fetched;
+                LOG.info("Total tasks fetched so far: {}. Incrementing offset by {}.", totalFetched, size);
+
                 from += size;
                 if (fetched < size || totalFetched >= queueSize) {
+                    LOG.info("Breaking loop. Fetched fewer tasks ({}) than requested size ({}) or reached queue size limit ({}).", fetched, size, queueSize);
                     break;
                 }
-            } catch (Exception e){
+            } catch (Exception e) {
+                LOG.error("Exception occurred during task fetching process. Exiting loop.", e);
                 break;
             }
         }
@@ -474,6 +488,8 @@ public class TaskRegistry {
             mismatchMetrics.setTotalTimeMSecs(0);
             RequestContext.get().addApplicationMetrics(mismatchMetrics);
         }
+
+        LOG.info("Fetch process completed. Total tasks fetched: {}.", totalFetched);
         return ret;
     }
 
@@ -516,7 +532,7 @@ public class TaskRegistry {
             Map<String, LinkedHashMap> result = indexQuery.directUpdateByQuery(queryDsl);
 
             if (result != null) {
-                LOG.info("Elasticsearch UpdateByQuery Result: " + result);
+                LOG.info("Elasticsearch UpdateByQuery Result: " + result + "\nfor task : " + atlasTask.getGuid());
             } else {
                 LOG.info("No documents updated in Elasticsearch for guid: " + atlasTask.getGuid());
             }
@@ -559,7 +575,7 @@ public class TaskRegistry {
     public static AtlasTask toAtlasTask(AtlasVertex v) {
         AtlasTask ret = new AtlasTask();
 
-        String guid = v.getProperty(Constants.TASK_GUID, String.class);
+        String guid = v.getProperty(TASK_GUID, String.class);
         if (guid != null) {
             ret.setGuid(guid);
         }
@@ -569,7 +585,7 @@ public class TaskRegistry {
             ret.setType(type);
         }
 
-        String status = v.getProperty(Constants.TASK_STATUS, String.class);
+        String status = v.getProperty(TASK_STATUS, String.class);
         if (status != null) {
             ret.setStatus(status);
         }
@@ -634,7 +650,15 @@ public class TaskRegistry {
             ret.setErrorMessage(errorMessage);
         }
 
+        Long assetsCountToPropagate = v.getProperty(Constants.TASK_ASSET_COUNT_TO_PROPAGATE, Long.class);
+        if (assetsCountToPropagate != null){
+            ret.setAssetsCountToPropagate(assetsCountToPropagate);
+        }
 
+        Long assetsCountPropagated = v.getProperty(Constants.TASK_ASSET_COUNT_PROPAGATED, Long.class);
+        if (assetsCountPropagated != null){
+            ret.setAssetsCountPropagated(assetsCountPropagated);
+        }
         return ret;
     }
 

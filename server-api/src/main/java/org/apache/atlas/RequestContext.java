@@ -86,6 +86,8 @@ public class RequestContext {
     private boolean isPurgeRequested = false;
     private int maxAttempts = 1;
     private int attemptCount = 1;
+    private Long assetsCountToPropagate = 0L;
+    private Long assetsCountPropagated = 0L;
     private boolean isImportInProgress = false;
     private boolean     isInNotificationProcessing = false;
 
@@ -101,6 +103,11 @@ public class RequestContext {
 
     private boolean     includeClassificationNames = false;
     private boolean     skipProcessEdgeRestoration = false;
+
+
+
+    private String     lineageInputLabel = "";
+    private String     lineageOutputLabel = "";
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
     private String traceId;
@@ -241,6 +248,21 @@ public class RequestContext {
         return removedElementsMap;
     }
 
+    public String getLineageInputLabel() {
+        return lineageInputLabel;
+    }
+
+    public void setLineageInputLabel(String lineageInputLabel) {
+        this.lineageInputLabel = lineageInputLabel;
+    }
+
+    public String getLineageOutputLabel() {
+        return lineageOutputLabel;
+    }
+
+    public void setLineageOutputLabel(String lineageOutputLabel) {
+        this.lineageOutputLabel = lineageOutputLabel;
+    }
     public Map<String, List<Object>> getNewElementsCreatedMap() {
         return newElementsCreatedMap;
     }
@@ -313,6 +335,23 @@ public class RequestContext {
 
     public void setAttemptCount(int attemptCount) {
         this.attemptCount = attemptCount;
+    }
+
+    public Long getAssetsCountToPropagate() {
+        return assetsCountToPropagate;
+    }
+
+    public Long getAssetsCountPropagated() {
+        return assetsCountPropagated;
+    }
+
+
+    public void setAssetsCountToPropagate(Long assetsCount) {
+        this.assetsCountToPropagate = assetsCount ;
+    }
+
+    public void setAssetsCountPropagated(Long assetsCountPropagated) {
+        this.assetsCountPropagated = assetsCountPropagated;
     }
 
     public boolean isImportInProgress() {

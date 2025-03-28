@@ -57,6 +57,10 @@ public class AuthPolicyValidator {
         add(POLICY_SUB_CATEGORY_PRODUCT);
     }};
 
+    private static final Set<String> AI_POLICY_VALID_SUB_CATEGORIES = new HashSet<String>(){{
+        add(POLICY_SUB_CATEGORY_AI);
+    }};
+
     private static final Set<String> PERSONA_METADATA_POLICY_ACTIONS = new HashSet<String>(){{
         add("persona-asset-read");
         add("persona-asset-update");
@@ -68,6 +72,10 @@ public class AuthPolicyValidator {
         add("persona-entity-remove-classification");
         add("persona-add-terms");
         add("persona-remove-terms");
+        add("persona-dq-update");
+        add("persona-dq-read");
+        add("persona-dq-create");
+        add("persona-dq-delete");
     }};
 
     private static final Set<String> DATA_POLICY_ACTIONS = new HashSet<String>(){{
@@ -139,6 +147,10 @@ public class AuthPolicyValidator {
 
     private static final Map<String, Set<String>> DATAMESH_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
         put(POLICY_SUB_CATEGORY_PRODUCT, DATAMESH_POLICY_ACTIONS);
+    }};
+
+    private static final Map<String, Set<String>> AI_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
+        put(POLICY_SUB_CATEGORY_AI, AI_POLICY_ACTIONS);
     }};
 
     private static final Set<String> PERSONA_POLICY_VALID_RESOURCE_KEYS = new HashSet<String>() {{

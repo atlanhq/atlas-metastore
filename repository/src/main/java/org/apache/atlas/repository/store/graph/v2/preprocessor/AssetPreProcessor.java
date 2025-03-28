@@ -2,7 +2,7 @@ package org.apache.atlas.repository.store.graph.v2.preprocessor ;
 
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -61,6 +61,9 @@ public class AssetPreProcessor implements PreProcessor {
             case UPDATE:
                 processUpdateAsset(entity, vertex, operation);
                 break;
+            case DELETE:
+                processDelete(vertex);
+                break;
         }
     }
 
@@ -113,6 +116,14 @@ public class AssetPreProcessor implements PreProcessor {
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Asset can be linked to only domain");
                 }
             }
+        }
+    }
+
+    @Override
+    public void processDelete(AtlasVertex vertex) throws AtlasBaseException {
+        //remove the domain link
+        if (vertex != null) {
+            vertex.removeProperty(DOMAIN_GUIDS);
         }
     }
 
