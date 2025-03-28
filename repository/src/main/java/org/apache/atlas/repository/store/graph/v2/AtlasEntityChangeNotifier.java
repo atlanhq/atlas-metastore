@@ -37,6 +37,7 @@ import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.instance.EntityMutations.EntityOperation;
 import org.apache.atlas.model.notification.EntityNotification;
 import org.apache.atlas.repository.audit.AtlasAuditService;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
@@ -634,7 +635,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
             }
 
             String      guid   = entityHeader.getGuid();
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(guid);
+            AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(guid);
 
             if(vertex == null) {
                 continue;
@@ -643,7 +644,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
             try {
                 String fullText = fullTextMapperV2.getIndexTextForEntity(guid);
 
-                AtlasGraphUtilsV2.setEncodedProperty(vertex, ENTITY_TEXT_PROPERTY_KEY, fullText);
+                AtlasGraphUtilsV3.setEncodedProperty(vertex, ENTITY_TEXT_PROPERTY_KEY, fullText);
             } catch (AtlasBaseException e) {
                 LOG.error("FullText mapping failed for Vertex[ guid = {} ]", guid, e);
             }
@@ -661,7 +662,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
             return;
         }
 
-        AtlasVertex atlasVertex = AtlasGraphUtilsV2.findByGuid(entityId);
+        AtlasVertex atlasVertex = AtlasGraphUtilsV3.findByGuid(entityId);
         if(atlasVertex == null || GraphHelper.isInternalType(atlasVertex)) {
             return;
         }
@@ -670,10 +671,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
         try {
             String classificationFullText = fullTextMapperV2.getIndexTextForClassifications(entityId, classifications);
-            String existingFullText       = AtlasGraphUtilsV2.getEncodedProperty(atlasVertex, ENTITY_TEXT_PROPERTY_KEY, String.class);
+            String existingFullText       = AtlasGraphUtilsV3.getEncodedProperty(atlasVertex, ENTITY_TEXT_PROPERTY_KEY, String.class);
             String newFullText            = existingFullText + " " + classificationFullText;
 
-            AtlasGraphUtilsV2.setEncodedProperty(atlasVertex, ENTITY_TEXT_PROPERTY_KEY, newFullText);
+            AtlasGraphUtilsV3.setEncodedProperty(atlasVertex, ENTITY_TEXT_PROPERTY_KEY, newFullText);
         } catch (AtlasBaseException e) {
             LOG.error("FullText mapping failed for Vertex[ guid = {} ]", entityId, e);
         }

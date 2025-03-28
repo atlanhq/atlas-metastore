@@ -26,7 +26,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -56,12 +56,12 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
         if (force) {
             graphHelper.removeVertex(instanceVertex);
         } else {
-            Status state = AtlasGraphUtilsV2.getState(instanceVertex);
+            Status state = AtlasGraphUtilsV3.getState(instanceVertex);
 
             if (state != DELETED) {
-                AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, STATE_PROPERTY_KEY, DELETED.name());
-                AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-                AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
+                AtlasGraphUtilsV3.setEncodedProperty(instanceVertex, STATE_PROPERTY_KEY, DELETED.name());
+                AtlasGraphUtilsV3.setEncodedProperty(instanceVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+                AtlasGraphUtilsV3.setEncodedProperty(instanceVertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
             }
         }
     }
@@ -87,12 +87,12 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
             if (force) {
                 graphHelper.removeEdge(edge);
             } else {
-                Status state = AtlasGraphUtilsV2.getState(edge);
+                Status state = AtlasGraphUtilsV3.getState(edge);
 
                 if (state != DELETED) {
-                    AtlasGraphUtilsV2.setEncodedProperty(edge, STATE_PROPERTY_KEY, DELETED.name());
-                    AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-                    AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
+                    AtlasGraphUtilsV3.setEncodedProperty(edge, STATE_PROPERTY_KEY, DELETED.name());
+                    AtlasGraphUtilsV3.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+                    AtlasGraphUtilsV3.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
                 }
             }
             if (isRelationshipEdge)

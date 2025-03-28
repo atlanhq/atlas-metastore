@@ -26,7 +26,7 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasTypeDefGraphStoreV2;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -48,8 +48,8 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graphdb.AtlasGraphQuery.ComparisionOperator.EQUAL;
 import static org.apache.atlas.repository.patches.AtlasPatchHandler.JAVA_PATCH_TYPE;
 import static org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer.TYPEDEF_PATCH_TYPE;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getEncodedProperty;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.setEncodedProperty;
 import static org.apache.atlas.repository.store.graph.v2.AtlasTypeDefGraphStoreV2.getCurrentUser;
 
 public class AtlasPatchRegistry {
@@ -223,7 +223,7 @@ public class AtlasPatchRegistry {
     }
 
     private static PatchStatus getPatchStatus(AtlasVertex vertex) {
-        String patchStatus = AtlasGraphUtilsV2.getEncodedProperty(vertex, PATCH_STATE_PROPERTY_KEY, String.class);
+        String patchStatus = AtlasGraphUtilsV3.getEncodedProperty(vertex, PATCH_STATE_PROPERTY_KEY, String.class);
 
         return patchStatus != null ? PatchStatus.valueOf(patchStatus) : UNKNOWN;
     }

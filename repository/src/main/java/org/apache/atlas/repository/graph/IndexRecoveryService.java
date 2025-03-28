@@ -21,7 +21,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.ha.HAConfiguration;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -44,7 +43,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.atlas.ApplicationProperties.DEFAULT_INDEX_RECOVERY;
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.setEncodedProperty;
 
 @Component
 @Order(8)

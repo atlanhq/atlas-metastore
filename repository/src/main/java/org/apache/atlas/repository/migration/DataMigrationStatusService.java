@@ -25,20 +25,17 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
-import org.apache.atlas.repository.util.FilterUtil;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.FileInputStream;
 import java.io.IOException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Date;
 
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getEncodedProperty;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.setEncodedProperty;
 import static org.apache.atlas.repository.util.FilterUtil.validateFilePath;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.Constants.INTERNAL_PROPERTY_KEY_PREFIX;
@@ -188,7 +185,7 @@ public class DataMigrationStatusService {
 
         private AtlasVertex findByNameInternal(String name) {
             try {
-                return AtlasGraphUtilsV2.findByGuid(graph, name);
+                return AtlasGraphUtilsV3.findByGuid(graph, name);
             } catch (Exception e) {
                 LOG.error("MigrationStatusVertexManagement.findByNameInternal: Failed!", e);
             } finally {

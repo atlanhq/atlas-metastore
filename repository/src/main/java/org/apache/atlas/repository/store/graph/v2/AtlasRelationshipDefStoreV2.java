@@ -30,6 +30,7 @@ import org.apache.atlas.query.AtlasDSL;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -103,7 +104,7 @@ public class AtlasRelationshipDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasRe
         }
 
         // create an edge between the relationshipDef and each of the entityDef vertices.
-        AtlasEdge edge1 = typeDefStore.getOrCreateEdge(relationshipDefVertex, end1TypeVertex, AtlasGraphUtilsV2.RELATIONSHIPTYPE_EDGE_LABEL);
+        AtlasEdge edge1 = typeDefStore.getOrCreateEdge(relationshipDefVertex, end1TypeVertex, AtlasGraphUtilsV3.RELATIONSHIPTYPE_EDGE_LABEL);
 
         /*
         Where edge1 and edge2 have the same names and types we do not need a second edge.
@@ -117,7 +118,7 @@ public class AtlasRelationshipDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasRe
             }
 
         } else {
-            AtlasEdge edge2 = typeDefStore.getOrCreateEdge(relationshipDefVertex, end2TypeVertex, AtlasGraphUtilsV2.RELATIONSHIPTYPE_EDGE_LABEL);
+            AtlasEdge edge2 = typeDefStore.getOrCreateEdge(relationshipDefVertex, end2TypeVertex, AtlasGraphUtilsV3.RELATIONSHIPTYPE_EDGE_LABEL);
             if (LOG.isDebugEnabled()) {
                 LOG.debug("AtlasRelationshipDefStoreV1.preCreate({}): created relationshipDef vertex {}," +
                         " edge1 as {}, edge2 as {} ", relationshipDef, relationshipDefVertex, edge1, edge2);
@@ -322,7 +323,7 @@ public class AtlasRelationshipDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasRe
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, name);
         }
 
-        if (AtlasGraphUtilsV2.relationshipTypeHasInstanceEdges(name)) {
+        if (AtlasGraphUtilsV3.relationshipTypeHasInstanceEdges(name)) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, name);
         }
 
@@ -351,9 +352,9 @@ public class AtlasRelationshipDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasRe
             throw new AtlasBaseException(AtlasErrorCode.TYPE_GUID_NOT_FOUND, guid);
         }
 
-        String typeName = AtlasGraphUtilsV2.getEncodedProperty(ret, Constants.TYPENAME_PROPERTY_KEY, String.class);
+        String typeName = AtlasGraphUtilsV3.getEncodedProperty(ret, Constants.TYPENAME_PROPERTY_KEY, String.class);
 
-        if (AtlasGraphUtilsV2.relationshipTypeHasInstanceEdges(typeName)) {
+        if (AtlasGraphUtilsV3.relationshipTypeHasInstanceEdges(typeName)) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_HAS_REFERENCES, typeName);
         }
 
@@ -450,15 +451,15 @@ public class AtlasRelationshipDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasRe
                 endsSwaped = true;
             } else {
                 throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID_END1_UPDATE,
-                                             newRelationshipDef.getName(), newEnd1.toString(), existingEnd1.toString());
+                        newRelationshipDef.getName(), newEnd1.toString(), existingEnd1.toString());
             }
         }
 
         AtlasRelationshipEndDef newEndToCompareWith = endsSwaped ? newEnd1 : newEnd2;
 
         if ( !isValidUpdate(existingEnd2, newEndToCompareWith) ) {
-                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID_END2_UPDATE,
-                                             newRelationshipDef.getName(), newEndToCompareWith.toString(), existingEnd2.toString());
+            throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID_END2_UPDATE,
+                    newRelationshipDef.getName(), newEndToCompareWith.toString(), existingEnd2.toString());
         }
     }
 

@@ -26,6 +26,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.EntityResolver;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.slf4j.Logger;
@@ -67,7 +68,7 @@ public class UniqAttrBasedEntityResolver implements EntityResolver {
                 throw new AtlasBaseException(element.getValue(), AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), objId.getTypeName());
             }
 
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByUniqueAttributes(this.graph, entityType, objId.getUniqueAttributes());
+            AtlasVertex vertex = AtlasGraphUtilsV3.findByUniqueAttributes(this.graph, entityType, objId.getUniqueAttributes());
 
             if (vertex == null && RequestContext.get().isCreateShellEntityForNonExistingReference()) {
                 vertex = entityGraphMapper.createShellEntityVertex(objId, context);

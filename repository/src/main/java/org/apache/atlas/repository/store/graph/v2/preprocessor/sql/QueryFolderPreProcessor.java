@@ -26,7 +26,7 @@ import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -151,7 +151,7 @@ public class QueryFolderPreProcessor implements PreProcessor {
      * @throws AtlasBaseException
      */
     private void moveQueriesToDifferentCollection(AtlasVertex folderVertex, String currentCollectionQualifiedName,
-                                                          String newCollectionQualifiedName, String folderQualifiedName) throws AtlasBaseException {
+                                                  String newCollectionQualifiedName, String folderQualifiedName) throws AtlasBaseException {
 
         AtlasPerfMetrics.MetricRecorder queryProcessMetric = RequestContext.get().startMetricRecord("moveQueriesToDifferentCollection");
         Iterator<AtlasVertex> childrenQueriesIterator = getActiveChildren(folderVertex, CHILDREN_QUERIES);
@@ -201,23 +201,23 @@ public class QueryFolderPreProcessor implements PreProcessor {
      * @param folderQualifiedName Qualified name of parent folder
      */
     private void updateChildAttributesOnUpdatingCollection(AtlasVertex childVertex,  String currentCollectionQualifiedName, String newCollectionQualifiedName,
-                                                          String folderQualifiedName) {
+                                                           String folderQualifiedName) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateChildAttributesOnUpdatingCollection");
         Map<String, Object> updatedAttributes = new HashMap<>();
         String qualifiedName            =   childVertex.getProperty(QUALIFIED_NAME, String.class);
         String updatedQualifiedName     =   qualifiedName.replaceAll(currentCollectionQualifiedName, newCollectionQualifiedName);
 
         if (!qualifiedName.equals(updatedQualifiedName)) {
-            AtlasGraphUtilsV2.setEncodedProperty(childVertex, QUALIFIED_NAME, updatedQualifiedName);
+            AtlasGraphUtilsV3.setEncodedProperty(childVertex, QUALIFIED_NAME, updatedQualifiedName);
             updatedAttributes.put(QUALIFIED_NAME, updatedQualifiedName);
         }
 
         if(!currentCollectionQualifiedName.equals(newCollectionQualifiedName)) {
-            AtlasGraphUtilsV2.setEncodedProperty(childVertex, COLLECTION_QUALIFIED_NAME, newCollectionQualifiedName);
+            AtlasGraphUtilsV3.setEncodedProperty(childVertex, COLLECTION_QUALIFIED_NAME, newCollectionQualifiedName);
             updatedAttributes.put(COLLECTION_QUALIFIED_NAME, newCollectionQualifiedName);
         }
 
-        AtlasGraphUtilsV2.setEncodedProperty(childVertex, PARENT_QUALIFIED_NAME, folderQualifiedName);
+        AtlasGraphUtilsV3.setEncodedProperty(childVertex, PARENT_QUALIFIED_NAME, folderQualifiedName);
 
         //update system properties
         GraphHelper.setModifiedByAsString(childVertex, RequestContext.get().getUser());

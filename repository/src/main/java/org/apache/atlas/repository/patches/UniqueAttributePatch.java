@@ -29,7 +29,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphManagement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -143,13 +143,13 @@ public class UniqueAttributePatch extends AtlasPatchHandler {
                     AtlasCardinality  cardinality    = getIndexer().toAtlasCardinality(attributeDef.getCardinality());
 
                     getIndexer().createVertexIndex(management,
-                                                   uniquePropertyName,
-                                                   UniqueKind.PER_TYPE_UNIQUE,
-                                                   propertyClass,
-                                                   cardinality,
-                                                   isIndexable,
-                                                   true,
-                                                   AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType()));
+                            uniquePropertyName,
+                            UniqueKind.PER_TYPE_UNIQUE,
+                            propertyClass,
+                            cardinality,
+                            isIndexable,
+                            true,
+                            AtlasAttributeDef.IndexType.STRING.equals(attribute.getIndexType()));
                 }
 
                 getIndexer().commit(management);
@@ -165,7 +165,7 @@ public class UniqueAttributePatch extends AtlasPatchHandler {
             LOG.debug("processItem(typeName={}, vertexId={})", typeName, vertexId);
 
             processIndexStringAttribute(vertexId, vertex, typeName, entityType);
-            if (AtlasGraphUtilsV2.getState(vertex) == AtlasEntity.Status.ACTIVE) {
+            if (AtlasGraphUtilsV3.getState(vertex) == AtlasEntity.Status.ACTIVE) {
                 processUniqueAttribute(vertexId, vertex, typeName, entityType);
             }
 
@@ -182,9 +182,9 @@ public class UniqueAttributePatch extends AtlasPatchHandler {
                         continue;
                     }
 
-                    Object attrVal = AtlasGraphUtilsV2.getEncodedProperty(vertex, attribute.getQualifiedName(), String.class);
+                    Object attrVal = AtlasGraphUtilsV3.getEncodedProperty(vertex, attribute.getQualifiedName(), String.class);
                     if (attrVal != null) {
-                        AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, attrVal);
+                        AtlasGraphUtilsV3.setEncodedProperty(vertex, vertexPropertyName, attrVal);
                     }
                 }
             }
@@ -204,7 +204,7 @@ public class UniqueAttributePatch extends AtlasPatchHandler {
 
                         uniqAttrValue = EntityGraphRetriever.mapVertexToPrimitive(vertex, propertyKey, attribute.getAttributeDef());
 
-                        AtlasGraphUtilsV2.setEncodedProperty(vertex, uniquePropertyKey, uniqAttrValue);
+                        AtlasGraphUtilsV3.setEncodedProperty(vertex, uniquePropertyKey, uniqAttrValue);
                     } catch (AtlasSchemaViolationException ex) {
                         LOG.error("Duplicates detected: {}:{}:{}", typeName, uniqAttrValue, getIdFromVertex(vertex));
                         vertex.removeProperty(uniquePropertyKey);

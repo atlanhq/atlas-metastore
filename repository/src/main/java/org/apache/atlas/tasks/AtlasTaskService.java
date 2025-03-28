@@ -9,9 +9,8 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.tasks.TaskSearchParams;
 import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory;
 import org.apache.atlas.utils.AtlasJson;
@@ -28,7 +27,7 @@ import java.util.*;
 
 import static org.apache.atlas.repository.Constants.TASK_GUID;
 import static org.apache.atlas.repository.graph.GraphHelper.getClassificationVertex;
-import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.setEncodedProperty;
+import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.setEncodedProperty;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_CLASSIFICATION_VERTEX_ID;
 import static org.apache.atlas.tasks.TaskRegistry.toAtlasTask;
 
@@ -176,12 +175,12 @@ public class AtlasTaskService implements TaskService {
     }
 
     private boolean isClassificationTaskType(String taskType) {
-         return ClassificationPropagateTaskFactory.supportedTypes.contains(taskType);
+        return ClassificationPropagateTaskFactory.supportedTypes.contains(taskType);
     }
 
     private String resolveAndReturnClassificationId(String classificationName, String entityGuid) throws AtlasBaseException {
         String ret = null;
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
+        AtlasVertex entityVertex = AtlasGraphUtilsV3.findByGuid(entityGuid);
         if (entityVertex == null) {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, entityGuid);
         }

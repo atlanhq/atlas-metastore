@@ -33,6 +33,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -377,7 +378,7 @@ public class ClassificationAssociator {
 
         AtlasEntityHeader getByUniqueAttributes(AtlasEntityType entityType, String qualifiedName, Map<String, Object> attrValues) {
             try {
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByUniqueAttributes(this.graph, entityType, attrValues);
+                AtlasVertex vertex = AtlasGraphUtilsV3.findByUniqueAttributes(this.graph, entityType, attrValues);
                 if (vertex == null) {
                     return null;
                 }
@@ -393,7 +394,7 @@ public class ClassificationAssociator {
         }
 
         AtlasEntityHeader getByGuid(String guid) throws AtlasBaseException {
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
+            AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
             if (vertex == null) {
                 return null;
             }
@@ -488,8 +489,8 @@ public class ClassificationAssociator {
             }
 
             return list.stream().filter(x -> x != null &&
-                                    (StringUtils.isEmpty(guid) || StringUtils.isEmpty(x.getEntityGuid()))
-                                    || x.getEntityGuid().equals(guid)).collect(Collectors.toList());
+                    (StringUtils.isEmpty(guid) || StringUtils.isEmpty(x.getEntityGuid()))
+                    || x.getEntityGuid().equals(guid)).collect(Collectors.toList());
         }
     }
 }

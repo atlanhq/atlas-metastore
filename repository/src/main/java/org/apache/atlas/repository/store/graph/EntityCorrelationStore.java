@@ -20,7 +20,7 @@ package org.apache.atlas.repository.store.graph;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -34,18 +34,18 @@ public class EntityCorrelationStore {
 
     @GraphTransaction
     public void add(String entityGuid, long messageTimestamp) {
-        AtlasVertex v = AtlasGraphUtilsV2.findByGuid(entityGuid);
+        AtlasVertex v = AtlasGraphUtilsV3.findByGuid(entityGuid);
         if (v == null) {
             LOG.warn("Fetching: {} did not yield result!", entityGuid);
             return;
         }
 
-        AtlasGraphUtilsV2.setEncodedProperty(v, Constants.ENTITY_DELETED_TIMESTAMP_PROPERTY_KEY, messageTimestamp);
+        AtlasGraphUtilsV3.setEncodedProperty(v, Constants.ENTITY_DELETED_TIMESTAMP_PROPERTY_KEY, messageTimestamp);
         LOG.info("Updating: {}: {}", entityGuid, messageTimestamp);
     }
 
     public String findCorrelatedGuid(String qualifiedName, long messageTimestamp) {
-        String guid = AtlasGraphUtilsV2.findFirstDeletedDuringSpooledByQualifiedName(qualifiedName, messageTimestamp);
+        String guid = AtlasGraphUtilsV3.findFirstDeletedDuringSpooledByQualifiedName(qualifiedName, messageTimestamp);
 
         LOG.info("findCorrelatedGuid: {} - {} -> {}", qualifiedName, messageTimestamp, guid);
         return guid;
