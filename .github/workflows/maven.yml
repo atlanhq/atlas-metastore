@@ -30,6 +30,7 @@ on:
       - mlh-170-create-diff
       - cassaop
       - ixop
+      - codeop
 
 jobs:
   build:
