@@ -19,7 +19,7 @@
 
 package org.apache.atlas.plugin.model;
 
-import org.apache.htrace.shaded.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.atlas.plugin.util.RangerUserStoreUtil;
 
 import javax.xml.bind.annotation.XmlAccessType;
@@ -27,22 +27,24 @@ import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @XmlRootElement
 @XmlAccessorType(XmlAccessType.FIELD)
-public class GroupInfo extends RangerBaseModelObject implements java.io.Serializable {
+public class UserInfo extends RangerBaseModelObject implements java.io.Serializable {
 
     private static final long serialVersionUID = 1L;
     private String                  name;
     private String                  description;
     private Map<String, String>     otherAttributes;
+    private Set<String>             groups;
 
-    public GroupInfo() {
+    public UserInfo() {
         this(null, null, null);
     }
 
-    public GroupInfo(String name, String description, Map<String, String> otherAttributes) {
+    public UserInfo(String name, String description, Map<String, String> otherAttributes) {
         setName(name);
         setDescription(description);
         setOtherAttributes(otherAttributes);
@@ -72,12 +74,20 @@ public class GroupInfo extends RangerBaseModelObject implements java.io.Serializ
         this.otherAttributes = otherAttributes == null ? new HashMap<>() : otherAttributes;
     }
 
+    public Set<String> getGroups(){
+        return this.groups;
+    }
+
+    public void setGroups(Set<String> groups){
+        this.groups = groups;
+    }
+
     @Override
     public String toString() {
         return "{name=" + name
                 + ", description=" + description
                 + ", otherAttributes=" + RangerUserStoreUtil.getPrintableOptions(otherAttributes)
+                + ", groups=" + groups
                 + "}";
     }
-
 }
