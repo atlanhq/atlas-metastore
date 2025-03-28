@@ -24,12 +24,11 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.SearchParameters;
 import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.model.metrics.AtlasMetrics;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.stats.StatsClient;
 import org.apache.atlas.type.AtlasClassificationType;
@@ -362,7 +361,7 @@ public class SearchContext {
 
     public boolean hasAttributeFilter(FilterCriteria filterCriteria) {
         return filterCriteria != null &&
-               (CollectionUtils.isNotEmpty(filterCriteria.getCriterion()) || StringUtils.isNotEmpty(filterCriteria.getAttributeName()));
+                (CollectionUtils.isNotEmpty(filterCriteria.getCriterion()) || StringUtils.isNotEmpty(filterCriteria.getAttributeName()));
     }
 
     private void addProcessor(SearchProcessor processor) {
@@ -430,7 +429,7 @@ public class SearchContext {
 
     private AtlasEntityType getEntityType(String entityName) {
         return StringUtils.equals(entityName, ALL_ENTITY_TYPES) ? MATCH_ALL_ENTITY_TYPES :
-                                                                  typeRegistry.getEntityTypeByName(entityName);
+                typeRegistry.getEntityTypeByName(entityName);
     }
 
     private Set<AtlasEntityType> getEntityTypes(String typeName) throws AtlasBaseException {
@@ -442,7 +441,7 @@ public class SearchContext {
             String[] types        = typeName.split(TYPENAME_DELIMITER);
             Set<String> typeNames = new HashSet<>(Arrays.asList(types));
             entityTypes           = typeNames.stream().map(n ->
-                                    getEntityType(n)).filter(Objects::nonNull).collect(Collectors.toSet());
+                    getEntityType(n)).filter(Objects::nonNull).collect(Collectors.toSet());
 
             // Validate if the type name is incorrect
             if (CollectionUtils.isEmpty(entityTypes)) {
@@ -512,12 +511,12 @@ public class SearchContext {
             AtlasEntityType termType = getTermEntityType();
 
             AtlasEntityType glossaryType = typeRegistry.getEntityTypeByName(Constants.ATLAS_GLOSSARY_ENTITY_TYPE);
-            AtlasVertex vertex = AtlasGraphUtilsV2.glossaryFindByTypeAndPropertyName(glossaryType, glossaryName);
+            AtlasVertex vertex = AtlasGraphUtilsV3.glossaryFindByTypeAndPropertyName(glossaryType, glossaryName);
             if (vertex != null) {
                 AtlasAttribute attrName = glossaryType.getAttribute(Constants.QUALIFIED_NAME);
                 String glossaryQName = vertex.getProperty(attrName.getVertexPropertyName(), String.class);
 
-                List<AtlasVertex> vertexList = AtlasGraphUtilsV2.glossaryFindChildByTypeAndPropertyName(termType, termName, glossaryQName);
+                List<AtlasVertex> vertexList = AtlasGraphUtilsV3.glossaryFindChildByTypeAndPropertyName(termType, termName, glossaryQName);
                 ret = CollectionUtils.isNotEmpty(vertexList) ? vertexList.get(0) : null;
             }
         }
@@ -537,7 +536,7 @@ public class SearchContext {
                 AtlasEdge edge = edges.next();
 
                 AtlasVertex inVertex = edge.getInVertex();
-                if (excludeDeletedEntities && AtlasGraphUtilsV2.getState(inVertex) == AtlasEntity.Status.DELETED) {
+                if (excludeDeletedEntities && AtlasGraphUtilsV3.getState(inVertex) == AtlasEntity.Status.DELETED) {
                     continue;
                 }
                 ret.add(inVertex);
@@ -558,10 +557,10 @@ public class SearchContext {
         private final static String MARKER_DELIMITER = ":";
 
         @VisibleForTesting
-                final static String MARKER_START     = "*";
+        final static String MARKER_START     = "*";
 
         @VisibleForTesting
-                final static int    MARKER_END       = -1;
+        final static int    MARKER_END       = -1;
 
         public static String getNextEncMarker(SearchParameters searchParameters, Integer nextOffset) {
             if (nextOffset == null) {

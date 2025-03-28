@@ -11,6 +11,7 @@ import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.*;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
@@ -143,7 +144,7 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
                 resetAllRelationshipAttributes(entity);
                 // Attach previous version via rel
                 entity.setRelationshipAttribute(REL_ATTR_PREVIOUS_VERSION, getAtlasObjectId(currentVersionEntity));
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(currentVersionEntity.getGuid());
+                AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(currentVersionEntity.getGuid());
                 AtlasEntityType entityType = ensureEntityType(currentVersionEntity.getTypeName());
                 context.addUpdated(currentVersionEntity.getGuid(), currentVersionEntity, entityType, vertex);
 
@@ -175,7 +176,7 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
         removeCreatingVertex(context, entity);
         entity.setAttribute(QUALIFIED_NAME, currentVersionEntity.getAttribute(QUALIFIED_NAME));
         entity.setGuid(currentVersionEntity.getGuid());
-        AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entity.getGuid());
+        AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(entity.getGuid());
         AtlasEntityType entityType = ensureEntityType(entity.getTypeName());
 
         context.addUpdated(entity.getGuid(), entity, entityType, vertex);
@@ -269,7 +270,7 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
             entity.setRelationshipAttribute(REL_ATTR_GOVERNED_ASSET_CERTIFIED, getAtlasObjectId(contractAsset));
         }
 
-        AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entity.getGuid());
+        AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(entity.getGuid());
         AtlasEntityType entityType = ensureEntityType(entity.getTypeName());
         context.addUpdated(entity.getGuid(), entity, entityType, vertex);
         recordEntityMutatedDetails(context, entity, vertex);

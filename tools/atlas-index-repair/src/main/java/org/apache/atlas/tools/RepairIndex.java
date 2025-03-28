@@ -25,7 +25,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.utils.AuthenticationUtil;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -182,7 +182,7 @@ public class RepairIndex {
 
         for (String entityGuid : entityGUIDs){
             for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
+                AtlasVertex vertex = AtlasGraphUtilsV3.findByGuid(entityGuid);
                 try {
                     indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
                     break;

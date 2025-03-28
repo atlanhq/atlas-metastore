@@ -33,7 +33,6 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -209,9 +208,9 @@ public class GlossaryTermUtils extends GlossaryUtils {
 
                     if (DEBUG_ENABLED) {
                         LOG.debug("Updating term anchor, currAnchor = {}, newAnchor = {} and term = {}",
-                                  existingAnchor.getGlossaryGuid(),
-                                  updatedTermAnchor.getGlossaryGuid(),
-                                  storeObject.getName());
+                                existingAnchor.getGlossaryGuid(),
+                                updatedTermAnchor.getGlossaryGuid(),
+                                storeObject.getName());
                     }
                     relationshipStore.deleteById(existingAnchor.getRelationGuid(), true);
 
@@ -264,7 +263,7 @@ public class GlossaryTermUtils extends GlossaryUtils {
                     if (MapUtils.isEmpty(existingTermHeaders)) {
                         if (DEBUG_ENABLED) {
                             LOG.debug("Creating new term relations, relation = {}, terms = {}", relation,
-                                      Objects.nonNull(newTermHeaders) ? newTermHeaders.size() : "none");
+                                    Objects.nonNull(newTermHeaders) ? newTermHeaders.size() : "none");
                         }
                         createTermRelationships(storeObject, relation, newTermHeaders.values());
                         continue;
@@ -280,20 +279,20 @@ public class GlossaryTermUtils extends GlossaryUtils {
                     }
                     // Determine what to update, delete or create
                     Set<AtlasRelatedTermHeader> toCreate = newTermHeaders
-                                                                   .values()
-                                                                   .stream()
-                                                                   .filter(t -> !existingTermHeaders.containsKey(t.getTermGuid()))
-                                                                   .collect(Collectors.toSet());
+                            .values()
+                            .stream()
+                            .filter(t -> !existingTermHeaders.containsKey(t.getTermGuid()))
+                            .collect(Collectors.toSet());
                     Set<AtlasRelatedTermHeader> toUpdate = newTermHeaders
-                                                                   .values()
-                                                                   .stream()
-                                                                   .filter(t -> updatedExistingTermRelation(existingTermHeaders, t))
-                                                                   .collect(Collectors.toSet());
+                            .values()
+                            .stream()
+                            .filter(t -> updatedExistingTermRelation(existingTermHeaders, t))
+                            .collect(Collectors.toSet());
                     Set<AtlasRelatedTermHeader> toDelete = existingTermHeaders
-                                                                   .values()
-                                                                   .stream()
-                                                                   .filter(t -> !newTermHeaders.containsKey(t.getTermGuid()))
-                                                                   .collect(Collectors.toSet());
+                            .values()
+                            .stream()
+                            .filter(t -> !newTermHeaders.containsKey(t.getTermGuid()))
+                            .collect(Collectors.toSet());
 
                     createTermRelationships(storeObject, relation, toCreate);
                     updateTermRelationships(relation, toUpdate);
@@ -347,7 +346,7 @@ public class GlossaryTermUtils extends GlossaryUtils {
                 if (MapUtils.isEmpty(existingCategories)) {
                     if (DEBUG_ENABLED) {
                         LOG.debug("Creating new term categorization, term = {}, categories = {}", storeObject.getGuid(),
-                                  Objects.nonNull(newCategories) ? newCategories.size() : "none");
+                                Objects.nonNull(newCategories) ? newCategories.size() : "none");
                     }
                     createTermCategorizationRelationships(storeObject, newCategories.values());
                     break;
@@ -363,24 +362,24 @@ public class GlossaryTermUtils extends GlossaryUtils {
                 }
 
                 Set<AtlasTermCategorizationHeader> toCreate = newCategories
-                                                                      .values()
-                                                                      .stream()
-                                                                      .filter(c -> !existingCategories.containsKey(c.getCategoryGuid()))
-                                                                      .collect(Collectors.toSet());
+                        .values()
+                        .stream()
+                        .filter(c -> !existingCategories.containsKey(c.getCategoryGuid()))
+                        .collect(Collectors.toSet());
                 createTermCategorizationRelationships(storeObject, toCreate);
 
                 Set<AtlasTermCategorizationHeader> toUpdate = newCategories
-                                                                      .values()
-                                                                      .stream()
-                                                                      .filter(c -> updatedExistingCategorizationRelation(existingCategories, c))
-                                                                      .collect(Collectors.toSet());
+                        .values()
+                        .stream()
+                        .filter(c -> updatedExistingCategorizationRelation(existingCategories, c))
+                        .collect(Collectors.toSet());
                 updateTermCategorizationRelationships(storeObject, toUpdate);
 
                 Set<AtlasTermCategorizationHeader> toDelete = existingCategories
-                                                                      .values()
-                                                                      .stream()
-                                                                      .filter(c -> !newCategories.containsKey(c.getCategoryGuid()))
-                                                                      .collect(Collectors.toSet());
+                        .values()
+                        .stream()
+                        .filter(c -> !newCategories.containsKey(c.getCategoryGuid()))
+                        .collect(Collectors.toSet());
                 deleteCategorizationRelationship(storeObject.getGuid(), toDelete, false);
                 break;
             case DELETE:
@@ -429,10 +428,10 @@ public class GlossaryTermUtils extends GlossaryUtils {
             if (CollectionUtils.isNotEmpty(addedCatGuids)) {
                 AtlasVertex termVertex = getVertexById(storeObject.getGuid());
                 List<String> catQnames = addedCatGuids.stream()
-                                                        .map(this::getVertexById)
-                                                        .map(v -> v.getProperty(QUALIFIED_NAME, String.class))
-                                                        .collect(Collectors.toList());
-                        catQnames.stream().forEach(q -> addEntityAttr(termVertex, CATEGORIES_PROPERTY_KEY, q));
+                        .map(this::getVertexById)
+                        .map(v -> v.getProperty(QUALIFIED_NAME, String.class))
+                        .collect(Collectors.toList());
+                catQnames.stream().forEach(q -> addEntityAttr(termVertex, CATEGORIES_PROPERTY_KEY, q));
             }
         }
     }
@@ -777,7 +776,7 @@ public class GlossaryTermUtils extends GlossaryUtils {
                     if (relatedTermQualifiedName.equalsIgnoreCase(currTermQualifiedName)) {
                         failedTermMsgs.add("Invalid relationship specified for Term. Term cannot have a relationship with self");
                     } else {
-                        vertex = AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(GlossaryUtils.ATLAS_GLOSSARY_TERM_TYPENAME,
+                        vertex = AtlasGraphUtilsV3.findByTypeAndUniquePropertyName(GlossaryUtils.ATLAS_GLOSSARY_TERM_TYPENAME,
                                 GlossaryUtils.ATLAS_GLOSSARY_TERM_TYPENAME + invalidNameChars[1] + QUALIFIED_NAME, relatedTermQualifiedName);
 
                         if (vertex != null) {
@@ -868,7 +867,7 @@ public class GlossaryTermUtils extends GlossaryUtils {
     }
 
     private String getGlossaryGUIDFromGraphDB(String glossaryName) {
-        AtlasVertex vertex = AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(GlossaryUtils.ATLAS_GLOSSARY_TYPENAME, GlossaryUtils.ATLAS_GLOSSARY_TYPENAME + "." + QUALIFIED_NAME, glossaryName);
+        AtlasVertex vertex = AtlasGraphUtilsV3.findByTypeAndUniquePropertyName(GlossaryUtils.ATLAS_GLOSSARY_TYPENAME, GlossaryUtils.ATLAS_GLOSSARY_TYPENAME + "." + QUALIFIED_NAME, glossaryName);
 
         return (vertex != null) ? AtlasGraphUtilsV3.getIdFromVertex(vertex) : null;
     }

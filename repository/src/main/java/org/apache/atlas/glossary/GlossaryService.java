@@ -35,10 +35,8 @@ import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
-import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityChangeNotifier;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -1101,7 +1099,7 @@ public class GlossaryService {
     private boolean glossaryExists(AtlasGlossary atlasGlossary) {
         AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(GlossaryUtils.ATLAS_GLOSSARY_TYPENAME);
 
-        AtlasVertex vertex = AtlasGraphUtilsV2.glossaryFindByTypeAndPropertyName(entityType, atlasGlossary.getName());
+        AtlasVertex vertex = AtlasGraphUtilsV3.glossaryFindByTypeAndPropertyName(entityType, atlasGlossary.getName());
 
         return Objects.nonNull(vertex);
     }
@@ -1110,7 +1108,7 @@ public class GlossaryService {
         AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(ATLAS_GLOSSARY_TERM_TYPENAME);
         String glossaryQName = extractGlossaryQualifiedName(term.getQualifiedName());
 
-        List<AtlasVertex> vertexList = AtlasGraphUtilsV2.glossaryFindChildByTypeAndPropertyName(entityType, term.getName(), glossaryQName);
+        List<AtlasVertex> vertexList = AtlasGraphUtilsV3.glossaryFindChildByTypeAndPropertyName(entityType, term.getName(), glossaryQName);
 
         return CollectionUtils.isNotEmpty(vertexList);
     }
@@ -1120,7 +1118,7 @@ public class GlossaryService {
         String glossaryQName = extractGlossaryQualifiedName(category.getQualifiedName());
         int level = getCategoryLevel(category.getQualifiedName());
 
-        List<AtlasVertex> vertexList = AtlasGraphUtilsV2.glossaryFindChildByTypeAndPropertyName(entityType, category.getName(), glossaryQName);
+        List<AtlasVertex> vertexList = AtlasGraphUtilsV3.glossaryFindChildByTypeAndPropertyName(entityType, category.getName(), glossaryQName);
 
         //derive level, if (same level & different guid) then do not allow
         String qNameKey = entityType.getAllAttributes().get(QUALIFIED_NAME).getQualifiedName();

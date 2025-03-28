@@ -27,7 +27,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -131,6 +131,6 @@ public class GlossaryPreProcessor implements PreProcessor {
     }
 
     private boolean glossaryExists(String glossaryName) {
-        return AtlasGraphUtilsV2.glossaryExists(glossaryName);
+        return AtlasGraphUtilsV3.glossaryExists(glossaryName);
     }
 }
