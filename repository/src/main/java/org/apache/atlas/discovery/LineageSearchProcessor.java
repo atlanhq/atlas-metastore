@@ -21,7 +21,6 @@ package org.apache.atlas.discovery;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.SearchParameters;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
-import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.*;
 import org.apache.atlas.util.SearchPredicateUtil;
 import org.apache.commons.collections.CollectionUtils;
