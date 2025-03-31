@@ -33,7 +33,7 @@ import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.tasks.TaskManagement;
@@ -78,13 +78,13 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
     private AtlasEntityHeader anchor;
     private AtlasEntityHeader parentCategory;
-    private EntityGraphMapper entityGraphMapper;
+    private EntityGraphMapperV2 EntityGraphMapperV2;
     private EntityMutationContext context;
 
     public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
-                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapper entityGraphMapper) {
+                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapperV2 EntityGraphMapperV2) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
-        this.entityGraphMapper = entityGraphMapper;
+        this.EntityGraphMapperV2 = EntityGraphMapperV2;
     }
 
     @Override
@@ -496,7 +496,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
         AtlasStructType.AtlasAttribute attribute = entityType.getRelationshipAttribute(ANCHOR, relationshipType);
 
-        entityGraphMapper.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
+        EntityGraphMapperV2.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
     }
 
     private String createQualifiedName(AtlasVertex vertex) {

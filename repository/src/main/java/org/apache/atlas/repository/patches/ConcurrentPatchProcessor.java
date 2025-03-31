@@ -24,8 +24,8 @@ import org.apache.atlas.pc.WorkItemConsumer;
 import org.apache.atlas.pc.WorkItemManager;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graphdb.*;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.configuration.Configuration;
@@ -45,7 +45,7 @@ public abstract class ConcurrentPatchProcessor {
     public static final int    NUM_WORKERS;
     public static final int    BATCH_SIZE;
 
-    private final EntityGraphMapper        entityGraphMapper;
+    private final EntityGraphMapperV2 entityGraphMapperV2;
     private final AtlasGraph               graph;
     private final GraphBackedSearchIndexer indexer;
     private final AtlasTypeRegistry        typeRegistry;
@@ -73,11 +73,11 @@ public abstract class ConcurrentPatchProcessor {
         this.graph             = context.getGraph();
         this.indexer           = context.getIndexer();
         this.typeRegistry      = context.getTypeRegistry();
-        this.entityGraphMapper = context.getEntityGraphMapper();
+        this.entityGraphMapperV2 = context.getEntityGraphMapperV2();
     }
 
-    public EntityGraphMapper getEntityGraphMapper() {
-        return entityGraphMapper;
+    public EntityGraphMapperV2 getEntityGraphMapperV2() {
+        return entityGraphMapperV2;
     }
 
     public AtlasGraph getGraph() {

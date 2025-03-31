@@ -27,7 +27,7 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
@@ -124,7 +124,7 @@ public class AtlasServerService {
     private void updateAttribute(AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo,
                                  String propertyName,
                                  AtlasObjectId objectId) {
-        String value = EntityGraphMapper.getSoftRefFormattedValue(objectId);
+        String value = EntityGraphMapperV2.getSoftRefFormattedValue(objectId);
         updateAttribute(entityWithExtInfo.getEntity(), propertyName, value);
         for (AtlasEntity e : entityWithExtInfo.getReferredEntities().values()) {
             updateAttribute(e, propertyName, value);

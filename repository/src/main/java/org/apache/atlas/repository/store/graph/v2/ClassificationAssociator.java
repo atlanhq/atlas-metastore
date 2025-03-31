@@ -132,7 +132,7 @@ public class ClassificationAssociator {
         private final AtlasTypeRegistry typeRegistry;
         private final AtlasEntityStore entitiesStore;
         private final EntityGraphRetriever entityRetriever;
-        private final EntityGraphMapper entityGraphMapper;
+        private final EntityGraphMapperV2 EntityGraphMapperV2;
         private final IAtlasEntityChangeNotifier entityChangeNotifier;
         private final AtlasInstanceConverter instanceConverter;
         private final StringBuilder actionSummary = new StringBuilder();
@@ -140,21 +140,21 @@ public class ClassificationAssociator {
         private static final boolean IGNORE_REL = ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES.getBoolean();
 
         public Updater(AtlasGraph graph, AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
-                       EntityGraphMapper entityGraphMapper, IAtlasEntityChangeNotifier entityChangeNotifier,
+                       EntityGraphMapperV2 EntityGraphMapperV2, IAtlasEntityChangeNotifier entityChangeNotifier,
                        AtlasInstanceConverter instanceConverter) {
             this.graph = graph;
             this.typeRegistry = typeRegistry;
             this.entitiesStore = entitiesStore;
-            this.entityGraphMapper = entityGraphMapper;
+            this.EntityGraphMapperV2 = EntityGraphMapperV2;
             this.entityChangeNotifier = entityChangeNotifier;
             this.instanceConverter = instanceConverter;
             entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
         }
 
         public Updater(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
-                       EntityGraphMapper entityGraphMapper, IAtlasEntityChangeNotifier entityChangeNotifier,
+                       EntityGraphMapperV2 EntityGraphMapperV2, IAtlasEntityChangeNotifier entityChangeNotifier,
                        AtlasInstanceConverter instanceConverter) {
-            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, entitiesStore, entityGraphMapper, entityChangeNotifier, instanceConverter);
+            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, entitiesStore, EntityGraphMapperV2, entityChangeNotifier, instanceConverter);
         }
 
         public void setClassifications(Map<String, AtlasEntityHeader> map, boolean overrideClassifications) throws AtlasBaseException {
@@ -236,7 +236,7 @@ public class ClassificationAssociator {
                     entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(addedClassification), false);
                 }
             }
-            entityGraphMapper.updateClassificationText(null, allVertices);
+            EntityGraphMapperV2.updateClassificationText(null, allVertices);
             transactionInterceptHelper.intercept();
 
             RequestContext.get().endMetricRecord(recorder);

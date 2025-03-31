@@ -41,12 +41,12 @@ public class UniqAttrBasedEntityResolver implements EntityResolver {
 
     private final AtlasGraph        graph;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphMapper entityGraphMapper;
+    private final EntityGraphMapperV2 entityGraphMapperV2;
 
-    public UniqAttrBasedEntityResolver(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityGraphMapper entityGraphMapper) {
+    public UniqAttrBasedEntityResolver(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityGraphMapperV2 entityGraphMapperV2) {
         this.graph             = graph;
         this.typeRegistry      = typeRegistry;
-        this.entityGraphMapper = entityGraphMapper;
+        this.entityGraphMapperV2 = entityGraphMapperV2;
     }
 
     @Override
@@ -71,7 +71,7 @@ public class UniqAttrBasedEntityResolver implements EntityResolver {
             AtlasVertex vertex = AtlasGraphUtilsV3.findByUniqueAttributes(this.graph, entityType, objId.getUniqueAttributes());
 
             if (vertex == null && RequestContext.get().isCreateShellEntityForNonExistingReference()) {
-                vertex = entityGraphMapper.createShellEntityVertex(objId, context);
+                vertex = entityGraphMapperV2.createShellEntityVertex(objId, context);
             }
 
             if (vertex != null) {

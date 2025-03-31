@@ -6,7 +6,7 @@ import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.TermPreProcessor;
 import org.apache.atlas.tasks.AbstractTask;
 import org.apache.commons.collections4.MapUtils;
@@ -29,16 +29,16 @@ public abstract class MeaningsTask extends AbstractTask {
     protected static final String PARAM_CURRENT_TERM_NAME = "currentTermName";
 
 
-    protected final EntityGraphMapper entityGraphMapper;
+    protected final EntityGraphMapperV2 EntityGraphMapperV2;
     protected final AtlasGraph graph;
     protected final TermPreProcessor preprocessor;
     protected final AtlasEntityStoreV2 entityStoreV2;
 
 
-    public MeaningsTask(AtlasTask task, EntityGraphMapper entityGraphMapper,
+    public MeaningsTask(AtlasTask task, EntityGraphMapperV2 EntityGraphMapperV2,
                         AtlasGraph graph, TermPreProcessor preprocessor, AtlasEntityStoreV2 entityStoreV2) {
         super(task);
-        this.entityGraphMapper = entityGraphMapper;
+        this.EntityGraphMapperV2 = EntityGraphMapperV2;
         this.graph = graph;
         this.preprocessor = preprocessor;
         this.entityStoreV2 = entityStoreV2;
@@ -104,7 +104,7 @@ public abstract class MeaningsTask extends AbstractTask {
             if(UPDATE_ENTITY_MEANINGS_ON_TERM_HARD_DELETE.equals(getTaskType())){
                 LOG.info("Entity Vertex Deleted, No Need to remove pending task for: {} ",getTaskGuid());
             }else {
-                entityGraphMapper.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
+                EntityGraphMapperV2.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
             }
         } catch (EntityNotFoundException  e) {
             LOG.error("Error updating associated element for: {}", getTaskGuid(), e);

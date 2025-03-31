@@ -125,11 +125,11 @@ public class MigrationImport extends ImportStrategy {
         RestoreHandlerV1 restoreHandlerV1 = new RestoreHandlerV1(graph, typeRegistry);
 
         AtlasRelationshipStore relationshipStore = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
-        EntityGraphMapper entityGraphMapper = new EntityGraphMapper(deleteDelegate, restoreHandlerV1, typeRegistry,
+        EntityGraphMapperV2 EntityGraphMapperV2 = new EntityGraphMapperV2(deleteDelegate, restoreHandlerV1, typeRegistry,
                 graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null);
         AtlasRelationshipStoreV2 atlasRelationshipStoreV2 = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
 
-        return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null);
+        return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, EntityGraphMapperV2, null, atlasRelationshipStoreV2, null, null, null);
     }
 
     private void shutdownEntityCreationManager(EntityCreationManager creationManager) {

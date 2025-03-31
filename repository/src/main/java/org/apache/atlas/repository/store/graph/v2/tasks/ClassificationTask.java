@@ -25,7 +25,7 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
 import org.apache.atlas.tasks.AbstractTask;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -58,21 +58,21 @@ public abstract class ClassificationTask extends AbstractTask {
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE = "previousRestrictPropagationThroughLineage";
 
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY = "previousRestrictPropagationThroughHierarchy";
-  
+
     protected final AtlasGraph             graph;
-    protected final EntityGraphMapper      entityGraphMapper;
+    protected final EntityGraphMapperV2      EntityGraphMapperV2;
     protected final DeleteHandlerDelegate  deleteDelegate;
     protected final AtlasRelationshipStore relationshipStore;
 
     public ClassificationTask(AtlasTask task,
                               AtlasGraph graph,
-                              EntityGraphMapper entityGraphMapper,
+                              EntityGraphMapperV2 EntityGraphMapperV2,
                               DeleteHandlerDelegate deleteDelegate,
                               AtlasRelationshipStore relationshipStore) {
         super(task);
 
         this.graph             = graph;
-        this.entityGraphMapper = entityGraphMapper;
+        this.EntityGraphMapperV2 = EntityGraphMapperV2;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
     }
@@ -170,9 +170,9 @@ public abstract class ClassificationTask extends AbstractTask {
 
         try {
             if (CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE.equals(getTaskType())) {
-                entityGraphMapper.removePendingTaskFromEdge((String) getTaskDef().getParameters().get(PARAM_RELATIONSHIP_EDGE_ID), getTaskGuid());
+                EntityGraphMapperV2.removePendingTaskFromEdge((String) getTaskDef().getParameters().get(PARAM_RELATIONSHIP_EDGE_ID), getTaskGuid());
             } else {
-                entityGraphMapper.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
+                EntityGraphMapperV2.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
             }
         } catch (EntityNotFoundException | AtlasBaseException e) {
             LOG.warn("Error updating associated element for: {}", getTaskGuid(), e);

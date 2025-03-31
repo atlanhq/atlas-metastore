@@ -143,7 +143,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         AtlasVertex end2Vertex = getVertexFromEndPoint(relationship.getEnd2());
 
         if (relationship.getTypeName().equals(UD_RELATIONSHIP_TYPE_NAME)) {
-            EntityGraphMapper.validateCustomRelationship(end1Vertex, end2Vertex);
+            EntityGraphMapperV2.validateCustomRelationship(end1Vertex, end2Vertex);
         }
 
         AtlasEdge edge = createRelationship(end1Vertex, end2Vertex, relationship);
@@ -686,7 +686,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         relationshipType.getNormalizedValue(relationship);
 
         Map<String, Object> relAttrs = relationship.getAttributes();
-        EntityGraphMapper.validateCustomRelationshipAttributeValueCase(relAttrs);
+        EntityGraphMapperV2.validateCustomRelationshipAttributeValueCase(relAttrs);
     }
 
 
