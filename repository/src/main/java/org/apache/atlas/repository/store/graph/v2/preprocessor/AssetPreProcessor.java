@@ -12,7 +12,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -29,16 +29,16 @@ public class AssetPreProcessor implements PreProcessor {
 
     private EntityMutationContext context;
     private AtlasTypeRegistry typeRegistry;
-    private EntityGraphRetriever entityRetriever;
-    private EntityGraphRetriever retrieverNoRelation = null;
+    private EntityGraphRetrieverV2 entityRetriever;
+    private EntityGraphRetrieverV2 retrieverNoRelation = null;
 
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
-    public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
+    public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
-        this.retrieverNoRelation = new EntityGraphRetriever(graph, typeRegistry, true);
+        this.retrieverNoRelation = new EntityGraphRetrieverV2(graph, typeRegistry, true);
     }
 
     @Override

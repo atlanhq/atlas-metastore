@@ -49,7 +49,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -100,12 +100,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private RestClient lowLevelClient;
     private final Configuration configuration;
-    private EntityGraphRetriever entityGraphRetriever;
+    private EntityGraphRetrieverV2 EntityGraphRetrieverV2;
 
     @Inject
-    public ESBasedAuditRepository(Configuration configuration, EntityGraphRetriever entityGraphRetriever) {
+    public ESBasedAuditRepository(Configuration configuration, EntityGraphRetrieverV2 EntityGraphRetrieverV2) {
         this.configuration = configuration;
-        this.entityGraphRetriever = entityGraphRetriever;
+        this.EntityGraphRetrieverV2 = EntityGraphRetrieverV2;
     }
 
     @Override
@@ -184,7 +184,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         StringBuilder template = new StringBuilder();
 
         template.append("'{'\"entityId\":\"{0}\",\"action\":\"{1}\",\"detail\":{2},\"user\":\"{3}\", \"eventKey\":\"{4}\", " +
-                        "\"entityQualifiedName\": {5}, \"typeName\": \"{6}\",\"created\":{7}, \"timestamp\":{8}");
+                "\"entityQualifiedName\": {5}, \"typeName\": \"{6}\",\"created\":{7}, \"timestamp\":{8}");
 
         if (MapUtils.isNotEmpty(requestContextHeaders)) {
             template.append(",")
@@ -299,7 +299,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private AtlasEntityHeader fetchAtlasEntityHeader(String domainGUID) throws AtlasBaseException {
         try {
-            AtlasEntityHeader entityHeader = entityGraphRetriever.toAtlasEntityHeader(domainGUID);
+            AtlasEntityHeader entityHeader = EntityGraphRetrieverV2.toAtlasEntityHeader(domainGUID);
             return entityHeader;
         } catch (AtlasBaseException e) {
             throw new AtlasBaseException(e);

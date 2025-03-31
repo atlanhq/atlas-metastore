@@ -28,7 +28,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -48,17 +48,17 @@ public class AtlasServerService {
     private final DataAccess dataAccess;
     private final AtlasEntityStore entityStore;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityGraphRetriever;
+    private final EntityGraphRetrieverV2 EntityGraphRetrieverV2;
 
     @Inject
     public AtlasServerService(DataAccess dataAccess, AtlasEntityStore entityStore,
                               AtlasTypeRegistry typeRegistry,
-                              EntityGraphRetriever entityGraphRetriever) {
+                              EntityGraphRetrieverV2 EntityGraphRetrieverV2) {
 
         this.dataAccess = dataAccess;
         this.entityStore = entityStore;
         this.typeRegistry = typeRegistry;
-        this.entityGraphRetriever = entityGraphRetriever;
+        this.EntityGraphRetrieverV2 = EntityGraphRetrieverV2;
     }
 
     public AtlasServer get(AtlasServer server) throws AtlasBaseException {
@@ -135,7 +135,7 @@ public class AtlasServerService {
         if(entity.hasAttribute(attributeName) == false) return;
 
         try {
-            AtlasVertex vertex = entityGraphRetriever.getEntityVertex(entity.getGuid());
+            AtlasVertex vertex = EntityGraphRetrieverV2.getEntityVertex(entity.getGuid());
             if(vertex == null) {
                 return;
             }

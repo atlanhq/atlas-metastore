@@ -168,11 +168,11 @@ public class EntityGraphMapperV2 {
     private final AtlasRelationshipStore    relationshipStore;
     private final IAtlasEntityChangeNotifier entityChangeNotifier;
     private final AtlasInstanceConverter    instanceConverter;
-    private final EntityGraphRetriever      entityRetriever;
+    private final EntityGraphRetrieverV2      entityRetriever;
     private final IFullTextMapper           fullTextMapperV2;
     private final TaskManagement            taskManagement;
     private final TransactionInterceptHelper   transactionInterceptHelper;
-    private final EntityGraphRetriever       retrieverNoRelation;
+    private final EntityGraphRetrieverV2       retrieverNoRelation;
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
@@ -189,8 +189,8 @@ public class EntityGraphMapperV2 {
         this.relationshipStore    = relationshipStore;
         this.entityChangeNotifier = entityChangeNotifier;
         this.instanceConverter    = instanceConverter;
-        this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
-        this.retrieverNoRelation  = new EntityGraphRetriever(graph, typeRegistry, true);
+        this.entityRetriever      = new EntityGraphRetrieverV2(graph, typeRegistry);
+        this.retrieverNoRelation  = new EntityGraphRetrieverV2(graph, typeRegistry, true);
         this.fullTextMapperV2     = fullTextMapperV2;
         this.taskManagement       = taskManagement;
         this.transactionInterceptHelper = transactionInterceptHelper;}

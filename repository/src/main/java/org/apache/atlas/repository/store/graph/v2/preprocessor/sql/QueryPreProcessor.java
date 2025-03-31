@@ -25,7 +25,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -44,9 +44,9 @@ public class QueryPreProcessor implements PreProcessor {
     private static String qualifiedNameFormat = "%s/query/%s/%s";
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
-    public QueryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever) {
+    public QueryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
     }

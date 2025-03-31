@@ -83,7 +83,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     private boolean DEFERRED_ACTION_ENABLED = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
 
     private final AtlasTypeRegistry         typeRegistry;
-    private final EntityGraphRetriever      entityRetriever;
+    private final EntityGraphRetrieverV2      entityRetriever;
     private final DeleteHandlerDelegate     deleteDelegate;
     private final GraphHelper               graphHelper;
     private final IAtlasEntityChangeNotifier entityChangeNotifier;
@@ -125,7 +125,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         this.graph                = graph;
         this.typeRegistry         = typeRegistry;
         this.graphHelper          = new GraphHelper(graph);
-        this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever      = new EntityGraphRetrieverV2(graph, typeRegistry);
         this.deleteDelegate       = deleteDelegate;
         this.entityChangeNotifier = entityChangeNotifier;
     }
@@ -941,7 +941,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         return RelationshipMutationContext.getInstance(createdRelationships, updatedRelationships, deletedRelationships);
     }
 
-    public static void recordRelationshipMutation(RelationshipMutation relationshipMutation, AtlasEdge edge, EntityGraphRetriever entityRetriever) throws AtlasBaseException {
+    public static void recordRelationshipMutation(RelationshipMutation relationshipMutation, AtlasEdge edge, EntityGraphRetrieverV2 entityRetriever) throws AtlasBaseException {
         if (Objects.isNull(edge))
             throw new IllegalStateException("edge cannot be null");
         final AtlasRelationship relationship = entityRetriever.mapEdgeToAtlasRelationship(edge);

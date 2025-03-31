@@ -34,7 +34,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
 import org.apache.atlas.tasks.TaskManagement;
@@ -73,12 +73,12 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
     protected static final String ATTR_CATEGORIES = "categories";
 
     protected final AtlasTypeRegistry typeRegistry;
-    protected final EntityGraphRetriever entityRetriever;
+    protected final EntityGraphRetrieverV2 entityRetriever;
     protected final TaskManagement taskManagement;
 
     protected EntityDiscoveryService discovery;
 
-    AbstractGlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
+    AbstractGlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         this.taskManagement = taskManagement;

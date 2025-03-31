@@ -44,11 +44,11 @@ import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociato
 
 public class AtlasEntityComparator {
     private final AtlasTypeRegistry    typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     private final Map<String, String>  guidRefMap;
     private BulkRequestContext context;
 
-    public AtlasEntityComparator(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, Map<String, String> guidRefMap,
+    public AtlasEntityComparator(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, Map<String, String> guidRefMap,
                                  BulkRequestContext creteOrUpdateContext) {
         this.typeRegistry                 = typeRegistry;
         this.entityRetriever              = entityRetriever;

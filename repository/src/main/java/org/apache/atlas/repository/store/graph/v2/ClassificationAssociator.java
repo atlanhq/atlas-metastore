@@ -71,10 +71,10 @@ public class ClassificationAssociator {
 
     public static class Retriever {
         private final EntityAuditRepository auditRepository;
-        private final EntityGraphRetriever entityRetriever;
+        private final EntityGraphRetrieverV2 entityRetriever;
 
         public Retriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityAuditRepository auditRepository) {
-            this.entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+            this.entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
             this.auditRepository = auditRepository;
         }
 
@@ -131,7 +131,7 @@ public class ClassificationAssociator {
         private final AtlasGraph graph;
         private final AtlasTypeRegistry typeRegistry;
         private final AtlasEntityStore entitiesStore;
-        private final EntityGraphRetriever entityRetriever;
+        private final EntityGraphRetrieverV2 entityRetriever;
         private final EntityGraphMapperV2 EntityGraphMapperV2;
         private final IAtlasEntityChangeNotifier entityChangeNotifier;
         private final AtlasInstanceConverter instanceConverter;
@@ -148,7 +148,7 @@ public class ClassificationAssociator {
             this.EntityGraphMapperV2 = EntityGraphMapperV2;
             this.entityChangeNotifier = entityChangeNotifier;
             this.instanceConverter = instanceConverter;
-            entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+            entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
         }
 
         public Updater(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,

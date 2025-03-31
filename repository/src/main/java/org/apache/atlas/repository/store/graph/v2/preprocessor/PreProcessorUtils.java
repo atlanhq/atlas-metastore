@@ -9,7 +9,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
@@ -122,8 +122,8 @@ public class PreProcessorUtils {
         return QUERY_COLLECTION_ENTITY_TYPE.equals(parentVertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class)) ? QUALIFIED_NAME : COLLECTION_QUALIFIED_NAME;
     }
 
-    public static String updateQueryResourceAttributes(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
-                                                                       AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context) throws AtlasBaseException {
+    public static String updateQueryResourceAttributes(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever,
+                                                       AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context) throws AtlasBaseException {
         AtlasEntityType entityType      = typeRegistry.getEntityTypeByName(entity.getTypeName());
         AtlasObjectId newParentObjectId = (AtlasObjectId) entity.getRelationshipAttribute(PARENT_ATTRIBUTE_NAME);
         String relationshipType         = AtlasEntityUtil.getRelationshipType(newParentObjectId);
@@ -263,7 +263,7 @@ public class PreProcessorUtils {
         // TODO : Add the rebalancing logic here
 //        int colonIndex = inputLexorank.indexOf(":");
 //        if (colonIndex != -1 && inputLexorank.substring(colonIndex + 1).length() >= REBALANCING_TRIGGER) {
-            // Rebalancing trigger
+        // Rebalancing trigger
 //        }
     }
 

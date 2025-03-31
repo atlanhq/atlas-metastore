@@ -34,7 +34,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -68,12 +68,12 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
     private final AtlasGraph graph;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     private IndexAliasStore aliasStore;
 
     public AuthPolicyPreProcessor(AtlasGraph graph,
                                   AtlasTypeRegistry typeRegistry,
-                                  EntityGraphRetriever entityRetriever) {
+                                  EntityGraphRetrieverV2 entityRetriever) {
         this.graph = graph;
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
@@ -284,8 +284,8 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             verifyAccess(request, "delete entity: guid=" + policy.getGuid());
         }
         /* else,
-        * skip auth check
-        * */
+         * skip auth check
+         * */
     }
 
     private void validateConnectionAdmin(AtlasEntity policy) throws AtlasBaseException {

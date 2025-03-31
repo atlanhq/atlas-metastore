@@ -38,7 +38,7 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStreamForImport;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.BulkImporterImpl;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityImportStream;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -63,14 +63,14 @@ public class RegularImport extends ImportStrategy {
     private final AtlasGraph graph;
     private final AtlasEntityStore entityStore;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityGraphRetriever;
+    private final EntityGraphRetrieverV2 EntityGraphRetrieverV2;
     private boolean directoryBasedImportConfigured;
 
     public RegularImport(AtlasGraph graph, AtlasEntityStore entityStore, AtlasTypeRegistry typeRegistry) {
         this.graph       = graph;
         this.entityStore = entityStore;
         this.typeRegistry = typeRegistry;
-        this.entityGraphRetriever = new EntityGraphRetriever(graph, typeRegistry);
+        this.EntityGraphRetrieverV2 = new EntityGraphRetrieverV2(graph, typeRegistry);
         this.directoryBasedImportConfigured = StringUtils.isNotEmpty(AtlasConfiguration.IMPORT_TEMP_DIRECTORY.getString());
     }
 
@@ -165,7 +165,7 @@ public class RegularImport extends ImportStrategy {
     }
     public void updateVertexGuid(AtlasEntity entity) {
         String entityGuid = entity.getGuid();
-        AtlasObjectId objectId = entityGraphRetriever.toAtlasObjectIdWithoutGuid(entity);
+        AtlasObjectId objectId = EntityGraphRetrieverV2.toAtlasObjectIdWithoutGuid(entity);
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         String vertexGuid = null;

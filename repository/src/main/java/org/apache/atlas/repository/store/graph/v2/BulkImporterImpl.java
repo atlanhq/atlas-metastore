@@ -128,9 +128,9 @@ public class BulkImporterImpl implements BulkImporter {
         }
     }
 
-    public static void updateVertexGuid(AtlasGraph atlasGraph, AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityGraphRetriever, AtlasEntity entity) {
+    public static void updateVertexGuid(AtlasGraph atlasGraph, AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 EntityGraphRetrieverV2, AtlasEntity entity) {
         String entityGuid = entity.getGuid();
-        AtlasObjectId objectId = entityGraphRetriever.toAtlasObjectIdWithoutGuid(entity);
+        AtlasObjectId objectId = EntityGraphRetrieverV2.toAtlasObjectIdWithoutGuid(entity);
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         String vertexGuid = null;

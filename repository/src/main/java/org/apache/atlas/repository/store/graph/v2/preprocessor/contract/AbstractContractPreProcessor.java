@@ -12,7 +12,7 @@ import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -32,13 +32,13 @@ public abstract class AbstractContractPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractContractPreProcessor.class);
 
     public final AtlasTypeRegistry typeRegistry;
-    public final EntityGraphRetriever entityRetriever;
+    public final EntityGraphRetrieverV2 entityRetriever;
     public final AtlasGraph graph;
     private final EntityDiscoveryService discovery;
 
 
     AbstractContractPreProcessor(AtlasGraph graph, AtlasTypeRegistry typeRegistry,
-                                 EntityGraphRetriever entityRetriever, EntityDiscoveryService discovery) {
+                                 EntityGraphRetrieverV2 entityRetriever, EntityDiscoveryService discovery) {
         this.graph = graph;
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;

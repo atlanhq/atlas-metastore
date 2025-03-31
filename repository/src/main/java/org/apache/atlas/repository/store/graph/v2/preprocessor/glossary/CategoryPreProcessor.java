@@ -34,7 +34,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasEntityType;
@@ -81,7 +81,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
     private EntityGraphMapperV2 EntityGraphMapperV2;
     private EntityMutationContext context;
 
-    public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
+    public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever,
                                 AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapperV2 EntityGraphMapperV2) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
         this.EntityGraphMapperV2 = EntityGraphMapperV2;

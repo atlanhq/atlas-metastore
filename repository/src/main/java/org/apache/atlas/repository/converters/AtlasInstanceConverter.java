@@ -35,7 +35,7 @@ import org.apache.atlas.model.instance.EntityMutations.EntityOperation;
 import org.apache.atlas.model.instance.GuidMapping;
 import org.apache.atlas.model.legacy.EntityResult;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.v1.model.instance.Struct;
 import org.apache.atlas.repository.converters.AtlasFormatConverter.ConverterContext;
@@ -65,15 +65,15 @@ public class AtlasInstanceConverter {
 
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasFormatConverters instanceFormatters;
-    private final EntityGraphRetriever  entityGraphRetriever;
-    private final EntityGraphRetriever  entityGraphRetrieverIgnoreRelationshipAttrs;
+    private final EntityGraphRetrieverV2  EntityGraphRetrieverV2;
+    private final EntityGraphRetrieverV2  EntityGraphRetrieverV2IgnoreRelationshipAttrs;
 
     @Inject
     public AtlasInstanceConverter(AtlasGraph graph, AtlasTypeRegistry typeRegistry, AtlasFormatConverters instanceFormatters) {
         this.typeRegistry                                = typeRegistry;
         this.instanceFormatters                          = instanceFormatters;
-        this.entityGraphRetriever                        = new EntityGraphRetriever(graph, typeRegistry);
-        this.entityGraphRetrieverIgnoreRelationshipAttrs = new EntityGraphRetriever(graph, typeRegistry, true);
+        this.EntityGraphRetrieverV2                        = new EntityGraphRetrieverV2(graph, typeRegistry);
+        this.EntityGraphRetrieverV2IgnoreRelationshipAttrs = new EntityGraphRetrieverV2(graph, typeRegistry, true);
     }
 
     public Referenceable[] getReferenceables(Collection<AtlasEntity> entities) throws AtlasBaseException {
@@ -305,9 +305,9 @@ public class AtlasInstanceConverter {
 
         if (entity == null) {
             if (ignoreRelationshipAttributes) {
-                entity = entityGraphRetrieverIgnoreRelationshipAttrs.toAtlasEntity(guid);
+                entity = EntityGraphRetrieverV2IgnoreRelationshipAttrs.toAtlasEntity(guid);
             } else {
-                entity = entityGraphRetriever.toAtlasEntity(guid);
+                entity = EntityGraphRetrieverV2.toAtlasEntity(guid);
             }
 
             if (entity != null) {
@@ -325,9 +325,9 @@ public class AtlasInstanceConverter {
     public AtlasEntity getEntity(String guid, boolean ignoreRelationshipAttributes) throws AtlasBaseException {
         AtlasEntity entity = null;
         if (ignoreRelationshipAttributes) {
-            entity = entityGraphRetrieverIgnoreRelationshipAttrs.toAtlasEntity(guid);
+            entity = EntityGraphRetrieverV2IgnoreRelationshipAttrs.toAtlasEntity(guid);
         } else {
-            entity = entityGraphRetriever.toAtlasEntity(guid);
+            entity = EntityGraphRetrieverV2.toAtlasEntity(guid);
         }
         return entity;
     }
@@ -338,7 +338,7 @@ public class AtlasInstanceConverter {
         AtlasEntityWithExtInfo entityWithExtInfo = context.getEntityWithExtInfo(guid);
 
         if (entityWithExtInfo == null) {
-            entityWithExtInfo = entityGraphRetriever.toAtlasEntityWithExtInfo(guid);
+            entityWithExtInfo = EntityGraphRetrieverV2.toAtlasEntityWithExtInfo(guid);
 
             if (entityWithExtInfo != null) {
                 context.cache(entityWithExtInfo);

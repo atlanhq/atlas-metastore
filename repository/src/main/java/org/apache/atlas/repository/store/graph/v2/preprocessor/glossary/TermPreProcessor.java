@@ -32,7 +32,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -57,7 +57,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(TermPreProcessor.class);
 
     private AtlasEntityHeader anchor;
-    public TermPreProcessor( AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
+    public TermPreProcessor( AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
     }
 
@@ -200,9 +200,9 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     }
 
     public String moveTermToAnotherGlossary(AtlasEntity entity, AtlasVertex vertex,
-                                           String sourceGlossaryQualifiedName,
-                                           String targetGlossaryQualifiedName,
-                                           String currentTermQualifiedName) throws AtlasBaseException {
+                                            String sourceGlossaryQualifiedName,
+                                            String targetGlossaryQualifiedName,
+                                            String currentTermQualifiedName) throws AtlasBaseException {
 
         //check duplicate term name
         termExists((String) entity.getAttribute(NAME), targetGlossaryQualifiedName);

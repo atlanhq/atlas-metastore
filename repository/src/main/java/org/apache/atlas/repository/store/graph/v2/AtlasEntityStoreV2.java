@@ -132,7 +132,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final AtlasTypeRegistry         typeRegistry;
     private final IAtlasEntityChangeNotifier entityChangeNotifier;
     private final EntityGraphMapperV2 entityGraphMapperV2;
-    private final EntityGraphRetriever       entityRetriever;
+    private final EntityGraphRetrieverV2       entityRetriever;
     private       boolean                    storeDifferentialAudits;
     private final GraphHelper                graphHelper;
     private final TaskManagement             taskManagement;
@@ -159,7 +159,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.typeRegistry         = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
         this.entityGraphMapperV2 = entityGraphMapperV2;
-        this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever      = new EntityGraphRetrieverV2(graph, typeRegistry);
         this.storeDifferentialAudits = STORE_DIFFERENTIAL_AUDITS.getBoolean();
         this.graphHelper          = new GraphHelper(graph);
         this.taskManagement = taskManagement;
@@ -214,7 +214,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getById({}, {})", guid, isMinExtInfo);
         }
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntityWithExtInfo ret = entityRetriever.toAtlasEntityWithExtInfo(guid, isMinExtInfo);
 
@@ -238,7 +238,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getByIdWithoutAuthorization({})", guid);
         }
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry, true);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, true);
 
         AtlasEntityWithExtInfo ret = entityRetriever.toAtlasEntityWithExtInfo(guid, true);
 
@@ -260,7 +260,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getHeaderById({})", guid);
         }
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
 
         AtlasEntityHeader ret = entityRetriever.toAtlasEntityHeaderWithClassifications(guid);
 
@@ -290,7 +290,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getByIds({}, {})", guids, isMinExtInfo);
         }
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntitiesWithExtInfo ret = entityRetriever.toAtlasEntitiesWithExtInfo(guids, isMinExtInfo);
 
@@ -332,7 +332,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getEntitiesByUniqueAttributes({}, {})", entityType.getTypeName(), uniqueAttributes);
         }
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntitiesWithExtInfo ret = entityRetriever.getEntitiesByUniqueAttributes(entityType.getTypeName(), uniqueAttributes, isMinExtInfo);
 
@@ -365,7 +365,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         AtlasVertex entityVertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntityWithExtInfo ret = entityRetriever.toAtlasEntityWithExtInfo(entityVertex, isMinExtInfo);
 
@@ -398,7 +398,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         AtlasVertex entityVertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
 
-        EntityGraphRetriever entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
 
         AtlasEntityHeader ret = entityRetriever.toAtlasEntityHeader(entityVertex);
 

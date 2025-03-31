@@ -13,7 +13,7 @@ public class UniqueQNAttributeMigrationService {
 
     private static final Logger LOG = LoggerFactory.getLogger(UniqueQNAttributeMigrationService.class);
 
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
 
     private Set<String> entityGuids;
@@ -22,7 +22,7 @@ public class UniqueQNAttributeMigrationService {
     private final String QUALIFIED_NAME_ATTR = "qualifiedName";
     private final String UNIQUE_QUALIFIED_NAME_ATTR = "__u_qualifiedName";
 
-    public UniqueQNAttributeMigrationService(EntityGraphRetriever entityRetriever, Set<String> entityGuids, TransactionInterceptHelper transactionInterceptHelper) {
+    public UniqueQNAttributeMigrationService(EntityGraphRetrieverV2 entityRetriever, Set<String> entityGuids, TransactionInterceptHelper transactionInterceptHelper) {
         this.entityRetriever = entityRetriever;
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.entityGuids = entityGuids;

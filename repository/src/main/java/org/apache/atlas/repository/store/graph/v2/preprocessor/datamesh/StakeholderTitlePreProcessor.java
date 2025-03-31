@@ -16,7 +16,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -54,12 +54,12 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
     public static final String REL_ATTR_STAKEHOLDERS = "stakeholders";
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     protected EntityDiscoveryService discovery;
 
     public StakeholderTitlePreProcessor(AtlasGraph graph,
-                                       AtlasTypeRegistry typeRegistry,
-                                       EntityGraphRetriever entityRetriever) {
+                                        AtlasTypeRegistry typeRegistry,
+                                        EntityGraphRetrieverV2 entityRetriever) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
 

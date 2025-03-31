@@ -31,7 +31,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.type.*;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -60,13 +60,13 @@ public class RestoreHandlerV1 {
     public static final Logger LOG = LoggerFactory.getLogger(RestoreHandlerV1.class);
     protected final GraphHelper graphHelper;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
     @Inject
     public RestoreHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         this.graphHelper = new GraphHelper(graph);
         this.typeRegistry = typeRegistry;
-        this.entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
     }
 
     private void restoreEdge(AtlasEdge edge) throws AtlasBaseException {

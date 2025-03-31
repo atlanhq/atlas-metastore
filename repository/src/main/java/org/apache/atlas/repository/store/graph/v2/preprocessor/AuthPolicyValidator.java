@@ -5,7 +5,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutations;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 
@@ -35,9 +35,9 @@ import static org.apache.atlas.repository.Constants.PURPOSE_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
 
 public class AuthPolicyValidator {
-    private final EntityGraphRetriever entityRetriever;
-    
-    AuthPolicyValidator(EntityGraphRetriever entityRetriever) {
+    private final EntityGraphRetrieverV2 entityRetriever;
+
+    AuthPolicyValidator(EntityGraphRetrieverV2 entityRetriever) {
         this.entityRetriever = entityRetriever;
     }
 
@@ -94,7 +94,7 @@ public class AuthPolicyValidator {
         add("persona-ai-application-add-terms");
         add("persona-ai-application-remove-terms");
         add("persona-ai-application-add-classification");
-        add("persona-ai-application-remove-classification"); 
+        add("persona-ai-application-remove-classification");
 
         add("persona-ai-model-read");
         add("persona-ai-model-create");
@@ -104,7 +104,7 @@ public class AuthPolicyValidator {
         add("persona-ai-model-add-terms");
         add("persona-ai-model-remove-terms");
         add("persona-ai-model-add-classification");
-        add("persona-ai-model-remove-classification"); 
+        add("persona-ai-model-remove-classification");
     }};
 
     private static final Map<String, Set<String>> PERSONA_POLICY_VALID_ACTIONS = new HashMap<String, Set<String>>(){{
@@ -332,10 +332,10 @@ public class AuthPolicyValidator {
             //only allow argo & backend
             if (!RequestContext.get().isSkipAuthorizationCheck()) {
                 String userName = RequestContext.getCurrentUser();
-                validateOperation (!ARGO_SERVICE_USER_NAME.equals(userName) && 
-                !BACKEND_SERVICE_USER_NAME.equals(userName) && 
-                !GOVERNANCE_WORKFLOWS_SERVICE_USER_NAME.equals(userName),
-                    "Create/Update AuthPolicy with policyCategory other than persona, purpose and datamesh");
+                validateOperation (!ARGO_SERVICE_USER_NAME.equals(userName) &&
+                                !BACKEND_SERVICE_USER_NAME.equals(userName) &&
+                                !GOVERNANCE_WORKFLOWS_SERVICE_USER_NAME.equals(userName),
+                        "Create/Update AuthPolicy with policyCategory other than persona, purpose and datamesh");
             }
         }
     }

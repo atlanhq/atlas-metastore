@@ -27,7 +27,7 @@ import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -44,10 +44,10 @@ public abstract class AbstractResourcePreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AbstractResourcePreProcessor.class);
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
     AbstractResourcePreProcessor(AtlasTypeRegistry typeRegistry,
-                              EntityGraphRetriever entityRetriever) {
+                                 EntityGraphRetrieverV2 entityRetriever) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
     }

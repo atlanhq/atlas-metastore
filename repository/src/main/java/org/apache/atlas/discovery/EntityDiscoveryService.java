@@ -42,7 +42,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.userprofile.UserProfileService;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.searchlog.ESSearchLogger;
@@ -86,7 +86,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
 
     private final AtlasGraph                      graph;
-    private final EntityGraphRetriever            entityRetriever;
+    private final EntityGraphRetrieverV2            entityRetriever;
     private final AtlasGremlinQueryProvider       gremlinQueryProvider;
     private final AtlasTypeRegistry               typeRegistry;
     private final GraphBackedSearchIndexer        indexer;
@@ -108,7 +108,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                   UserProfileService userProfileService,
                                   StatsClient statsClient) throws AtlasException {
         this.graph                    = graph;
-        this.entityRetriever          = new EntityGraphRetriever(this.graph, typeRegistry);
+        this.entityRetriever          = new EntityGraphRetrieverV2(this.graph, typeRegistry);
         this.indexer                  = indexer;
         this.searchTracker            = searchTracker;
         this.gremlinQueryProvider     = AtlasGremlinQueryProvider.INSTANCE;

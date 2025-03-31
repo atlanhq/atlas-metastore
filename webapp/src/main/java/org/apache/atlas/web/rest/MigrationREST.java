@@ -60,7 +60,7 @@ public class MigrationREST {
     private KeycloakStore keycloakStore;
     private AtlasGraph graph;
 
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     private final RedisService redisService;
     protected final AtlasTypeRegistry typeRegistry;
     private final EntityDiscoveryService discovery;
@@ -69,7 +69,7 @@ public class MigrationREST {
 
     @Inject
     public MigrationREST(AtlasEntityStore entityStore, AtlasGraph graph, RedisService redisService, EntityDiscoveryService discovery,
-                         EntityGraphRetriever entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper) {
+                         EntityGraphRetrieverV2 entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper) {
         this.entityStore = entityStore;
         this.graph = graph;
         this.transformer = new PreProcessorPoliciesTransformer();

@@ -17,13 +17,13 @@ public class DataProductInputsOutputsMigrationService {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataProductInputsOutputsMigrationService.class);
 
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
 
     private String productGuid;
     private final TransactionInterceptHelper   transactionInterceptHelper;
 
-    public DataProductInputsOutputsMigrationService(EntityGraphRetriever entityRetriever, String productGuid, TransactionInterceptHelper transactionInterceptHelper) {
+    public DataProductInputsOutputsMigrationService(EntityGraphRetrieverV2 entityRetriever, String productGuid, TransactionInterceptHelper transactionInterceptHelper) {
         this.entityRetriever = entityRetriever;
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.productGuid = productGuid;

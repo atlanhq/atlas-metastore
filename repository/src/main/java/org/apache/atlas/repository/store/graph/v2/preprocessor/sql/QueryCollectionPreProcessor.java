@@ -33,7 +33,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -78,7 +78,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
     private static final String COLL_VIEWER_ROLE_PATTERN = "collection_viewer_%s";
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     private AtlasEntityStore entityStore;
     private EntityDiscoveryService discovery;
     private PreProcessorPoliciesTransformer transformer;
@@ -87,7 +87,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
 
     public QueryCollectionPreProcessor(AtlasTypeRegistry typeRegistry,
                                        EntityDiscoveryService discovery,
-                                       EntityGraphRetriever entityRetriever,
+                                       EntityGraphRetrieverV2 entityRetriever,
                                        FeatureFlagStore featureFlagStore,
                                        AtlasEntityStore entityStore) {
         this.entityRetriever = entityRetriever;

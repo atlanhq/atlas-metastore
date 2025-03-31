@@ -23,7 +23,7 @@ import org.apache.atlas.model.discovery.AtlasSearchResult.AttributeSearchResult;
 import org.apache.atlas.query.GremlinQuery;
 import org.apache.atlas.query.SelectClauseComposer;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -46,8 +46,8 @@ public class SelectClauseProjections {
     private static final Logger LOG = LoggerFactory.getLogger(SelectClauseProjections.class);
 
     public static AtlasSearchResult usingList(final GremlinQuery queryInfo,
-                                             final EntityGraphRetriever entityRetriever,
-                                             final Collection<AtlasVertex> resultList) throws AtlasBaseException {
+                                              final EntityGraphRetrieverV2 entityRetriever,
+                                              final Collection<AtlasVertex> resultList) throws AtlasBaseException {
         AtlasSearchResult     ret                   = new AtlasSearchResult();
         SelectClauseComposer  selectClauseInfo      = queryInfo.getSelectComposer();
         AttributeSearchResult attributeSearchResult = new AttributeSearchResult();
@@ -68,7 +68,7 @@ public class SelectClauseProjections {
     }
 
     public static AtlasSearchResult usingMap(final GremlinQuery gremlinQuery,
-                                             final EntityGraphRetriever entityRetriever,
+                                             final EntityGraphRetrieverV2 entityRetriever,
                                              final Map<String, Collection<AtlasVertex>> resultMap) throws AtlasBaseException {
         AtlasSearchResult     ret                   = new AtlasSearchResult();
         SelectClauseComposer  selectClauseInfo      = gremlinQuery.getSelectComposer();
@@ -113,7 +113,7 @@ public class SelectClauseProjections {
 
     private static Collection<List<Object>> getProjectionRows(final Collection<AtlasVertex> vertices,
                                                               final SelectClauseComposer selectClauseComposer,
-                                                              final EntityGraphRetriever entityRetriever) throws AtlasBaseException {
+                                                              final EntityGraphRetrieverV2 entityRetriever) throws AtlasBaseException {
         Collection<List<Object>> values = new HashSet<>();
 
         for (AtlasVertex vertex : vertices) {

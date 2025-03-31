@@ -11,7 +11,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils;
@@ -41,14 +41,14 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private EntityMutationContext context;
     private AtlasEntityStore entityStore;
     private Map<String, String> updatedPolicyResources;
-    private EntityGraphRetriever retrieverNoRelation = null;
+    private EntityGraphRetrieverV2 retrieverNoRelation = null;
 
-    public DataProductPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
+    public DataProductPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever,
                                    AtlasGraph graph, AtlasEntityStore entityStore) {
         super(typeRegistry, entityRetriever, graph);
         this.updatedPolicyResources = new HashMap<>();
         this.entityStore = entityStore;
-        this.retrieverNoRelation = new EntityGraphRetriever(graph, typeRegistry, true);
+        this.retrieverNoRelation = new EntityGraphRetrieverV2(graph, typeRegistry, true);
     }
 
     @Override
@@ -348,7 +348,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         }
         else if (newProductDaapVisibility.equals(PROTECTED)) {
             updatedAttributes = setProtectedPolicyAttributes(policy,
-                   newEntity
+                    newEntity
             );
         }
         else if (newProductDaapVisibility.equals(PUBLIC)) {

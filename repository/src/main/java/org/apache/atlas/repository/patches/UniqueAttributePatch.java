@@ -30,7 +30,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraphManagement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -202,7 +202,7 @@ public class UniqueAttributePatch extends AtlasPatchHandler {
                     try {
                         String propertyKey = attribute.getVertexPropertyName();
 
-                        uniqAttrValue = EntityGraphRetriever.mapVertexToPrimitive(vertex, propertyKey, attribute.getAttributeDef());
+                        uniqAttrValue = EntityGraphRetrieverV2.mapVertexToPrimitive(vertex, propertyKey, attribute.getAttributeDef());
 
                         AtlasGraphUtilsV3.setEncodedProperty(vertex, uniquePropertyKey, uniqAttrValue);
                     } catch (AtlasSchemaViolationException ex) {

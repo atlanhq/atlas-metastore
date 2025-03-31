@@ -25,7 +25,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -80,13 +80,13 @@ public class ESAliasStore implements IndexAliasStore {
     public static final String ENABLE_PERSONA_HIERARCHY_FILTER = "enable_persona_hierarchy_filter";
 
     private final AtlasGraph graph;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
     private final int assetsMaxLimit = AtlasConfiguration.PERSONA_POLICY_ASSET_MAX_LIMIT.getInt();
 
     @Inject
     public ESAliasStore(AtlasGraph graph,
-                        EntityGraphRetriever entityRetriever) {
+                        EntityGraphRetrieverV2 entityRetriever) {
         this.graph = graph;
         this.entityRetriever = entityRetriever;
     }
@@ -192,7 +192,7 @@ public class ESAliasStore implements IndexAliasStore {
         Set<String> terms = new HashSet<>();
         Set<String> glossaryQualifiedNames =new HashSet<>();
         Set<String> metadataPolicyQualifiedNames = new HashSet<>();
-        
+
         for (AtlasEntity policy: policies) {
 
             if (policy.getStatus() == null || AtlasEntity.Status.ACTIVE.equals(policy.getStatus())) {
@@ -203,7 +203,7 @@ public class ESAliasStore implements IndexAliasStore {
                 }
 
                 List<String> policyActions = getPolicyActions(policy);
-                
+
                 if (policyActions.contains(ACCESS_READ_PERSONA_METADATA)) {
 
                     String connectionQName = getPolicyConnectionQN(policy);
@@ -213,11 +213,11 @@ public class ESAliasStore implements IndexAliasStore {
 
                     for (String asset : assets) {
                         /*
-                        * We are introducing a hierarchical filter for qualifiedName.
-                        * This requires a migration of existing data to have a hierarchical qualifiedName.
-                        * So this will only work if migration is done, upon migration completion we will set the feature flag to true
-                        * This will be dictated by the feature flag ENABLE_PERSONA_HIERARCHY_FILTER
-                        */
+                         * We are introducing a hierarchical filter for qualifiedName.
+                         * This requires a migration of existing data to have a hierarchical qualifiedName.
+                         * So this will only work if migration is done, upon migration completion we will set the feature flag to true
+                         * This will be dictated by the feature flag ENABLE_PERSONA_HIERARCHY_FILTER
+                         */
 
                         // If asset resource ends with /* then add it in hierarchical filter
                         boolean isHierarchical = asset.endsWith("/*");
@@ -293,7 +293,7 @@ public class ESAliasStore implements IndexAliasStore {
         if (CollectionUtils.isNotEmpty(metadataPolicyQualifiedNames)) {
             allowClauseList.add(mapOf("terms", mapOf(QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, new ArrayList<>(metadataPolicyQualifiedNames))));
         }
-        
+
         if (CollectionUtils.isNotEmpty(glossaryQualifiedNames)) {
             allowClauseList.add(mapOf("terms", mapOf(GLOSSARY_PROPERTY_KEY, new ArrayList<>(glossaryQualifiedNames))));
         }

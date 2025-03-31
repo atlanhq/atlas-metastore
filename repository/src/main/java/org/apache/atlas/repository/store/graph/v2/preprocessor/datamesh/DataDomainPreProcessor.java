@@ -32,7 +32,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -51,14 +51,14 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
 
     private EntityMutationContext context;
     private Map<String, String> updatedPolicyResources;
-    private EntityGraphRetriever retrieverNoRelation = null;
+    private EntityGraphRetrieverV2 retrieverNoRelation = null;
     private Map<String, String> updatedDomainQualifiedNames;
 
-    public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
+    public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever,
                                   AtlasGraph graph) {
         super(typeRegistry, entityRetriever, graph);
         this.updatedPolicyResources = new HashMap<>();
-        this.retrieverNoRelation = new EntityGraphRetriever(graph, typeRegistry, true);
+        this.retrieverNoRelation = new EntityGraphRetrieverV2(graph, typeRegistry, true);
         this.updatedDomainQualifiedNames = new HashMap<>();
     }
 
@@ -186,11 +186,11 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     }
 
     private void processMoveSubDomainToAnotherDomain(AtlasEntity domain,
-                                                      AtlasVertex domainVertex,
-                                                      String sourceDomainQualifiedName,
-                                                      String targetDomainQualifiedName,
-                                                      String currentDomainQualifiedName,
-                                                      String superDomainQualifiedName) throws AtlasBaseException {
+                                                     AtlasVertex domainVertex,
+                                                     String sourceDomainQualifiedName,
+                                                     String targetDomainQualifiedName,
+                                                     String currentDomainQualifiedName,
+                                                     String superDomainQualifiedName) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("processMoveSubDomainToAnotherDomain");
 
         try {
@@ -276,10 +276,10 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     }
 
     private void moveChildrenToAnotherDomain(AtlasVertex childDomainVertex,
-                                               String superDomainQualifiedName,
-                                               String parentDomainQualifiedName,
-                                               String sourceDomainQualifiedName,
-                                               String targetDomainQualifiedName) throws AtlasBaseException {
+                                             String superDomainQualifiedName,
+                                             String parentDomainQualifiedName,
+                                             String sourceDomainQualifiedName,
+                                             String targetDomainQualifiedName) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("moveChildrenToAnotherDomain");
 
 

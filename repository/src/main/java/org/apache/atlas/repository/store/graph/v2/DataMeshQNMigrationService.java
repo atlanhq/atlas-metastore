@@ -36,7 +36,7 @@ public class DataMeshQNMigrationService implements MigrationService {
 
     private final AtlasEntityStore entityStore;
     private final EntityDiscoveryService discovery;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
 
     private final AtlasTypeRegistry typeRegistry;
     private final RedisService redisService;
@@ -52,7 +52,7 @@ public class DataMeshQNMigrationService implements MigrationService {
     private boolean forceRegen;
     private final TransactionInterceptHelper   transactionInterceptHelper;
 
-    public DataMeshQNMigrationService(AtlasEntityStore entityStore, EntityDiscoveryService discovery, EntityGraphRetriever entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper, RedisService redisService, boolean forceRegen) {
+    public DataMeshQNMigrationService(AtlasEntityStore entityStore, EntityDiscoveryService discovery, EntityGraphRetrieverV2 entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper, RedisService redisService, boolean forceRegen) {
         this.entityRetriever = entityRetriever;
         this.entityStore = entityStore;
         this.discovery = discovery;

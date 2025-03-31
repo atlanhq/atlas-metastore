@@ -46,7 +46,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.AtlasTypeUtil;
@@ -93,7 +93,7 @@ public class EntityLineageService implements AtlasLineageService {
 
     private final AtlasGraph graph;
     private final AtlasGremlinQueryProvider gremlinQueryProvider;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     private final AtlasTypeRegistry atlasTypeRegistry;
     private final VertexEdgeCache vertexEdgeCache;
 
@@ -103,7 +103,7 @@ public class EntityLineageService implements AtlasLineageService {
     EntityLineageService(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, VertexEdgeCache vertexEdgeCache) {
         this.graph = atlasGraph;
         this.gremlinQueryProvider = AtlasGremlinQueryProvider.INSTANCE;
-        this.entityRetriever = new EntityGraphRetriever(atlasGraph, typeRegistry);
+        this.entityRetriever = new EntityGraphRetrieverV2(atlasGraph, typeRegistry);
         this.atlasTypeRegistry = typeRegistry;
         this.vertexEdgeCache = vertexEdgeCache;
     }

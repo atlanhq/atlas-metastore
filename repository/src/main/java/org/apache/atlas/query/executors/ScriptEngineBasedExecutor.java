@@ -26,7 +26,7 @@ import org.apache.atlas.query.GremlinQuery;
 import org.apache.atlas.query.QueryParams;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -42,9 +42,9 @@ public class ScriptEngineBasedExecutor implements DSLQueryExecutor {
 
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasGraph            graph;
-    private final EntityGraphRetriever  entityRetriever;
+    private final EntityGraphRetrieverV2  entityRetriever;
 
-    public ScriptEngineBasedExecutor(AtlasTypeRegistry typeRegistry, AtlasGraph graph, EntityGraphRetriever entityRetriever) {
+    public ScriptEngineBasedExecutor(AtlasTypeRegistry typeRegistry, AtlasGraph graph, EntityGraphRetrieverV2 entityRetriever) {
         this.typeRegistry    = typeRegistry;
         this.graph           = graph;
         this.entityRetriever = entityRetriever;

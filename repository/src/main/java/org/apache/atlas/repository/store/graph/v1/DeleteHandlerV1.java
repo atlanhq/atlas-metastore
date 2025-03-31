@@ -44,7 +44,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.tasks.TaskUtil;
 import org.apache.atlas.tasks.TaskManagement;
@@ -89,7 +89,7 @@ public abstract class DeleteHandlerV1 {
 
     protected final GraphHelper          graphHelper;
     private   final AtlasTypeRegistry    typeRegistry;
-    protected   final EntityGraphRetriever entityRetriever;
+    protected   final EntityGraphRetrieverV2 entityRetriever;
     private   final boolean              shouldUpdateInverseReferences;
     private   final boolean              softDelete;
     private   final TaskManagement       taskManagement;
@@ -99,7 +99,7 @@ public abstract class DeleteHandlerV1 {
     public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
-        this.entityRetriever               = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever               = new EntityGraphRetrieverV2(graph, typeRegistry);
         this.shouldUpdateInverseReferences = shouldUpdateInverseReference;
         this.softDelete                    = softDelete;
         this.taskManagement                = taskManagement;

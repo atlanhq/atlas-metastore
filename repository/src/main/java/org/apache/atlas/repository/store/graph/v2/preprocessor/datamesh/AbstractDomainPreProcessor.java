@@ -33,7 +33,7 @@ import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -63,8 +63,8 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
 
     protected final AtlasGraph graph;
     protected final AtlasTypeRegistry typeRegistry;
-    protected final EntityGraphRetriever entityRetriever;
-    protected EntityGraphRetriever entityRetrieverNoRelations;
+    protected final EntityGraphRetrieverV2 entityRetriever;
+    protected EntityGraphRetrieverV2 entityRetrieverNoRelations;
     private final PreProcessor preProcessor;
     protected EntityDiscoveryService discovery;
 
@@ -80,14 +80,14 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
         customAttributes.put(MIGRATION_CUSTOM_ATTRIBUTE, "true");
     }
 
-    AbstractDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
+    AbstractDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph) {
         this.graph = graph;
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         this.preProcessor = new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever);
 
         try {
-            this.entityRetrieverNoRelations = new EntityGraphRetriever(graph, typeRegistry, true);
+            this.entityRetrieverNoRelations = new EntityGraphRetrieverV2(graph, typeRegistry, true);
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
         } catch (AtlasException e) {
             e.printStackTrace();
@@ -100,22 +100,22 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
         AtlasEntityHeader headerToAuth = new AtlasEntityHeader(typeName);
 
         if (sourceDomain != null) {
-           //Update sub-domains/product on source parent
-           String qualifiedNameToAuth = sourceDomain.getAttribute(QUALIFIED_NAME) + qualifiedNameToAuthSuffix;
-           headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
+            //Update sub-domains/product on source parent
+            String qualifiedNameToAuth = sourceDomain.getAttribute(QUALIFIED_NAME) + qualifiedNameToAuthSuffix;
+            headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
 
-           AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_UPDATE, headerToAuth),
-                   AtlasPrivilege.ENTITY_UPDATE.name(), " " , typeName, " : ", qualifiedNameToAuth);
-       }
+            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_UPDATE, headerToAuth),
+                    AtlasPrivilege.ENTITY_UPDATE.name(), " " , typeName, " : ", qualifiedNameToAuth);
+        }
 
-       if (targetDomain != null) {
-           //Create sub-domains/product on target parent
-           String qualifiedNameToAuth = targetDomain.getAttribute(QUALIFIED_NAME) + qualifiedNameToAuthSuffix;
-           headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
+        if (targetDomain != null) {
+            //Create sub-domains/product on target parent
+            String qualifiedNameToAuth = targetDomain.getAttribute(QUALIFIED_NAME) + qualifiedNameToAuthSuffix;
+            headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
 
-           AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, headerToAuth),
-                   AtlasPrivilege.ENTITY_CREATE.name(), " " , typeName, " : ", qualifiedNameToAuth);
-       }
+            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, headerToAuth),
+                    AtlasPrivilege.ENTITY_CREATE.name(), " " , typeName, " : ", qualifiedNameToAuth);
+        }
     }
 
     protected void updatePolicies(Map<String, String> updatedPolicyResources, EntityMutationContext context) throws AtlasBaseException {

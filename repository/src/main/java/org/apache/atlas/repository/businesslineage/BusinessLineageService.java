@@ -61,7 +61,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     private static final String TYPE_DOMAIN = "DataDomain";
 
     private final AtlasGraph graph;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV2 entityRetriever;
     private final TransactionInterceptHelper   transactionInterceptHelper;
     private final GraphHelper graphHelper;
     private final AtlasRelationshipStoreV2 relationshipStoreV2;
@@ -73,7 +73,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     @Inject
     BusinessLineageService(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, TransactionInterceptHelper transactionInterceptHelper, AtlasRelationshipStoreV2 relationshipStoreV2, IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier) {
         this.graph = atlasGraph;
-        this.entityRetriever = new EntityGraphRetriever(atlasGraph, typeRegistry);
+        this.entityRetriever = new EntityGraphRetrieverV2(atlasGraph, typeRegistry);
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.graphHelper = new GraphHelper(atlasGraph);
         this.relationshipStoreV2 = relationshipStoreV2;
