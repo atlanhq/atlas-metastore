@@ -22,7 +22,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutationResponse;
-import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -50,10 +50,10 @@ public class HdfsPathEntityCreator {
     private final String PATH_SEPARATOR = "/";
 
     private AtlasTypeRegistry typeRegistry;
-    private AtlasEntityStoreV2 entityStore;
+    private AtlasEntityStoreV3 entityStore;
 
     @Inject
-    public HdfsPathEntityCreator(AtlasTypeRegistry typeRegistry, AtlasEntityStoreV2 entityStore) {
+    public HdfsPathEntityCreator(AtlasTypeRegistry typeRegistry, AtlasEntityStoreV3 entityStore) {
         this.typeRegistry = typeRegistry;
         this.entityStore = entityStore;
     }

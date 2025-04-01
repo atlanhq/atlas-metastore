@@ -33,6 +33,7 @@ import org.apache.atlas.repository.store.graph.BulkImporter;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.ImportStrategy;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.MigrationImport;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.RegularImport;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -50,7 +51,7 @@ import static org.apache.atlas.repository.Constants.HISTORICAL_GUID_PROPERTY_KEY
 
 @Component
 public class BulkImporterImpl implements BulkImporter {
-    private static final Logger LOG = LoggerFactory.getLogger(AtlasEntityStoreV2.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AtlasEntityStoreV3.class);
 
     private final AtlasEntityStore entityStore;
     private final AtlasGraph atlasGraph;
