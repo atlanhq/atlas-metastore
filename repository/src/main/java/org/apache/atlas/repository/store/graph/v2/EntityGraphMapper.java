@@ -3519,10 +3519,10 @@ public class EntityGraphMapper {
                 throw new AtlasBaseException(String.format("propagateClassification(entityGuid=%s, classificationVertexId=%s): entityGuid and/or classification vertex id is empty", entityGuid, classificationVertexId));
             }
 
-            Map<String, Object> sourceAsset = CassandraConnector.getVertexPropertiesByGuid(entityGuid);
-            AtlasVertex entityVertex = graph.getVertex(String.valueOf(sourceAsset.get("id")));
+            //Map<String, Object> sourceAsset = CassandraConnector.getVertexPropertiesByGuid(entityGuid);
+            //AtlasVertex entityVertex = graph.getVertex(String.valueOf(sourceAsset.get("id")));
 
-            //AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
+            AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
 
             if (entityVertex == null) {
                 LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): entity vertex not found", entityGuid, classificationVertexId);
