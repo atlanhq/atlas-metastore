@@ -65,6 +65,7 @@ public class CassandraBasedAuditRepository extends AbstractStorageBasedAuditRepo
   public static final String MANAGE_EMBEDDED_CASSANDRA = "MANAGE_EMBEDDED_CASSANDRA";
 
   // Application properties
+  public static final String CASSANDRA_NEW_KEYSPACE_PROPERTY = "atlas.graph.new.keyspace";
   public static final String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
   public static final String CASSANDRA_CLUSTERNAME_PROPERTY = "atlas.graph.storage.clustername";
   public static final String CASSANDRA_PORT_PROPERTY = "atlas.graph.storage.port";
