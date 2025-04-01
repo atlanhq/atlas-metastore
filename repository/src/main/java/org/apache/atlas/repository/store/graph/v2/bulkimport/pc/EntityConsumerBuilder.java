@@ -22,7 +22,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.pc.WorkItemBuilder;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasTypeRegistry;
 
@@ -38,8 +38,8 @@ public class EntityConsumerBuilder implements WorkItemBuilder<EntityConsumer, At
     private EntityGraphRetriever entityRetrieverBulk;
     private int batchSize;
 
-    public EntityConsumerBuilder(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, AtlasEntityStoreV2 entityStore, EntityGraphRetriever entityRetriever,
-                                 AtlasGraph atlasGraphBulk, AtlasEntityStoreV2 entityStoreBulk, EntityGraphRetriever entityRetrieverBulk,
+    public EntityConsumerBuilder(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, AtlasEntityStoreV3 entityStore, EntityGraphRetriever entityRetriever,
+                                 AtlasGraph atlasGraphBulk, AtlasEntityStoreV3 entityStoreBulk, EntityGraphRetriever entityRetrieverBulk,
                                  int batchSize) {
         this.typeRegistry = typeRegistry;
 
