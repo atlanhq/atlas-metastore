@@ -844,6 +844,9 @@ public class EntityGraphRetriever {
                                 verticesWithOutClassification.add(entityVertex.getIdForDisplay());
                             }
 
+                            if (assetMap == null) {
+                                LOG.error("assetMap is null for id {}", vertexId);
+                            }
                             String entityTypeName = (String) assetMap.get("__typeName");
                             return CompletableFuture.supplyAsync(() -> getAdjacentVerticesIds(entityVertex, entityTypeName, classificationId,
                                     relationshipGuidToExclude, edgeLabelsToCheck,toExclude, visitedVerticesIds), executorService);
