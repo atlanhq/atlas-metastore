@@ -27,8 +27,8 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -48,17 +48,17 @@ public class AtlasServerService {
     private final DataAccess dataAccess;
     private final AtlasEntityStore entityStore;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 EntityGraphRetrieverV2;
+    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
 
     @Inject
     public AtlasServerService(DataAccess dataAccess, AtlasEntityStore entityStore,
                               AtlasTypeRegistry typeRegistry,
-                              EntityGraphRetrieverV2 EntityGraphRetrieverV2) {
+                              EntityGraphRetrieverV3 EntityGraphRetrieverV3) {
 
         this.dataAccess = dataAccess;
         this.entityStore = entityStore;
         this.typeRegistry = typeRegistry;
-        this.EntityGraphRetrieverV2 = EntityGraphRetrieverV2;
+        this.EntityGraphRetrieverV3 = EntityGraphRetrieverV3;
     }
 
     public AtlasServer get(AtlasServer server) throws AtlasBaseException {
@@ -124,7 +124,7 @@ public class AtlasServerService {
     private void updateAttribute(AtlasEntity.AtlasEntityWithExtInfo entityWithExtInfo,
                                  String propertyName,
                                  AtlasObjectId objectId) {
-        String value = EntityGraphMapperV2.getSoftRefFormattedValue(objectId);
+        String value = EntityGraphMapperV3.getSoftRefFormattedValue(objectId);
         updateAttribute(entityWithExtInfo.getEntity(), propertyName, value);
         for (AtlasEntity e : entityWithExtInfo.getReferredEntities().values()) {
             updateAttribute(e, propertyName, value);
@@ -135,7 +135,7 @@ public class AtlasServerService {
         if(entity.hasAttribute(attributeName) == false) return;
 
         try {
-            AtlasVertex vertex = EntityGraphRetrieverV2.getEntityVertex(entity.getGuid());
+            AtlasVertex vertex = EntityGraphRetrieverV3.getEntityVertex(entity.getGuid());
             if(vertex == null) {
                 return;
             }

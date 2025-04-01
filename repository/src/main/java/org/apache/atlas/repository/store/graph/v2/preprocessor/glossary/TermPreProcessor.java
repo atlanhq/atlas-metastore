@@ -32,7 +32,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -47,7 +47,7 @@ import java.util.Iterator;
 import java.util.List;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.getActiveParentVertices;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getActiveParentVertices;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory.UPDATE_ENTITY_MEANINGS_ON_TERM_UPDATE;
 import static org.apache.atlas.type.Constants.LEXICOGRAPHICAL_SORT_ORDER;
@@ -57,7 +57,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(TermPreProcessor.class);
 
     private AtlasEntityHeader anchor;
-    public TermPreProcessor( AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
+    public TermPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
     }
 

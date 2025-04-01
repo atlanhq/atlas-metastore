@@ -36,19 +36,18 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.atlas.repository.graph.GraphHelper.getCustomAttributes;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getCustomAttributes;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_ADD;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_DELETE;
-import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_NOOP;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_UPDATE;
 
 public class AtlasEntityComparator {
     private final AtlasTypeRegistry    typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private final Map<String, String>  guidRefMap;
     private BulkRequestContext context;
 
-    public AtlasEntityComparator(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, Map<String, String> guidRefMap,
+    public AtlasEntityComparator(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever, Map<String, String> guidRefMap,
                                  BulkRequestContext creteOrUpdateContext) {
         this.typeRegistry                 = typeRegistry;
         this.entityRetriever              = entityRetriever;

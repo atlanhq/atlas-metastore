@@ -1,9 +1,7 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -13,7 +11,7 @@ public class UniqueQNAttributeMigrationService {
 
     private static final Logger LOG = LoggerFactory.getLogger(UniqueQNAttributeMigrationService.class);
 
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
 
     private Set<String> entityGuids;
@@ -22,7 +20,7 @@ public class UniqueQNAttributeMigrationService {
     private final String QUALIFIED_NAME_ATTR = "qualifiedName";
     private final String UNIQUE_QUALIFIED_NAME_ATTR = "__u_qualifiedName";
 
-    public UniqueQNAttributeMigrationService(EntityGraphRetrieverV2 entityRetriever, Set<String> entityGuids, TransactionInterceptHelper transactionInterceptHelper) {
+    public UniqueQNAttributeMigrationService(EntityGraphRetrieverV3 entityRetriever, Set<String> entityGuids, TransactionInterceptHelper transactionInterceptHelper) {
         this.entityRetriever = entityRetriever;
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.entityGuids = entityGuids;

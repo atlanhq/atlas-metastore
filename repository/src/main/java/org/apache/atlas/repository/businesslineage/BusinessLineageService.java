@@ -27,7 +27,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.BusinessLineageRequest;
 import org.apache.atlas.repository.RepositoryException;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -45,7 +45,7 @@ import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.updateModificationMetadata;
+import static org.apache.atlas.repository.graph.GraphHelperV3.updateModificationMetadata;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.INPUT_PORT_GUIDS_ATTR;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.OUTPUT_PORT_GUIDS_ATTR;
 
@@ -61,9 +61,9 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     private static final String TYPE_DOMAIN = "DataDomain";
 
     private final AtlasGraph graph;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private final TransactionInterceptHelper   transactionInterceptHelper;
-    private final GraphHelper graphHelper;
+    private final GraphHelperV3 GraphHelperV3;
     private final AtlasRelationshipStoreV2 relationshipStoreV2;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
@@ -73,9 +73,9 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     @Inject
     BusinessLineageService(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, TransactionInterceptHelper transactionInterceptHelper, AtlasRelationshipStoreV2 relationshipStoreV2, IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier) {
         this.graph = atlasGraph;
-        this.entityRetriever = new EntityGraphRetrieverV2(atlasGraph, typeRegistry);
+        this.entityRetriever = new EntityGraphRetrieverV3(atlasGraph, typeRegistry);
         this.transactionInterceptHelper = transactionInterceptHelper;
-        this.graphHelper = new GraphHelper(atlasGraph);
+        this.GraphHelperV3 = new GraphHelperV3(atlasGraph);
         this.relationshipStoreV2 = relationshipStoreV2;
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
     }
@@ -248,7 +248,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         try{
             if(StringUtils.equals(INPUT_PORT_PRODUCT_EDGE_LABEL, edgeLabel)) {
 
-                AtlasEdge inputPortEdge = graphHelper.getEdge(assetVertex, productVertex, INPUT_PORT_PRODUCT_EDGE_LABEL);
+                AtlasEdge inputPortEdge = GraphHelperV3.getEdge(assetVertex, productVertex, INPUT_PORT_PRODUCT_EDGE_LABEL);
                 if(inputPortEdge != null){
                     graph.removeEdge(inputPortEdge);
                     updateInternalAttr(productVertex, assetGuid, operation);

@@ -35,7 +35,6 @@ import org.apache.atlas.model.notification.EntityNotification.EntityNotification
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
-import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.commons.collections.CollectionUtils;
@@ -49,13 +48,12 @@ import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2.OperationType.*;
-import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.isInternalType;
-import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.CREATE_TIME;
-import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.DESCRIPTION;
-import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.NAME;
-import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.OWNER;
-import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.QUALIFIED_NAME;
+import static org.apache.atlas.repository.graph.GraphHelperV3.isInternalType;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3.CREATE_TIME;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3.DESCRIPTION;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3.NAME;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3.OWNER;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3.QUALIFIED_NAME;
 
 @Component
 @EnableConditional(property = "atlas.enable.entity.notifications")

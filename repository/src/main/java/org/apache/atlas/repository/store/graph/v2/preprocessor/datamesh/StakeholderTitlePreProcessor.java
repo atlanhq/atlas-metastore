@@ -1,6 +1,5 @@
 package org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh;
 
-import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
@@ -16,7 +15,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -54,12 +53,12 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
     public static final String REL_ATTR_STAKEHOLDERS = "stakeholders";
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     protected EntityDiscoveryService discovery;
 
     public StakeholderTitlePreProcessor(AtlasGraph graph,
                                         AtlasTypeRegistry typeRegistry,
-                                        EntityGraphRetrieverV2 entityRetriever) {
+                                        EntityGraphRetrieverV3 entityRetriever) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
 

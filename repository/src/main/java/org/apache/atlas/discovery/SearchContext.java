@@ -26,7 +26,7 @@ import org.apache.atlas.model.discovery.SearchParameters;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
@@ -528,7 +528,7 @@ public class SearchContext {
         List<AtlasVertex>   ret      = new ArrayList<>();
         AtlasEntityType     termType = getTermEntityType();
         AtlasAttribute      attr     = termType.getRelationshipAttribute(TermSearchProcessor.ATLAS_GLOSSARY_TERM_ATTR_ASSIGNED_ENTITIES, EntityGraphRetriever.TERM_RELATION_NAME);
-        Iterator<AtlasEdge> edges    = GraphHelper.getEdgesForLabel(glossaryTerm, attr.getRelationshipEdgeLabel(), attr.getRelationshipEdgeDirection());
+        Iterator<AtlasEdge> edges    = GraphHelperV3.getEdgesForLabel(glossaryTerm, attr.getRelationshipEdgeLabel(), attr.getRelationshipEdgeDirection());
 
         boolean excludeDeletedEntities = searchParameters.getExcludeDeletedEntities();
         if (edges != null) {

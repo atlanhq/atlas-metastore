@@ -12,7 +12,7 @@ import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.*;
+import static org.apache.atlas.repository.graph.GraphHelperV3.*;
 
 
 @Component

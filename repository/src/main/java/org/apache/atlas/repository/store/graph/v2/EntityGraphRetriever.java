@@ -813,7 +813,8 @@ public class EntityGraphRetriever {
                             // If we want to store vertices without classification attached
                             // Check if vertices has classification attached or not using function isClassificationAttached
 
-                            if(storeVerticesWithoutClassification && !GraphHelper.isClassificationAttached(entityVertex, classificationVertex)) {
+                            if(storeVerticesWithoutClassification && !GraphHelper.
+                                    isClassificationAttached(entityVertex, classificationVertex)) {
                                 verticesWithOutClassification.add(entityVertex.getIdForDisplay());
                             }
 

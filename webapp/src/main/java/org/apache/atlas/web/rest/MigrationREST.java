@@ -8,7 +8,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.EntityMutationResponse;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.migration.ValidateProductEdgesMigrationService;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
@@ -60,7 +60,7 @@ public class MigrationREST {
     private KeycloakStore keycloakStore;
     private AtlasGraph graph;
 
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private final RedisService redisService;
     protected final AtlasTypeRegistry typeRegistry;
     private final EntityDiscoveryService discovery;
@@ -69,7 +69,7 @@ public class MigrationREST {
 
     @Inject
     public MigrationREST(AtlasEntityStore entityStore, AtlasGraph graph, RedisService redisService, EntityDiscoveryService discovery,
-                         EntityGraphRetrieverV2 entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper) {
+                         EntityGraphRetrieverV3 entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper) {
         this.entityStore = entityStore;
         this.graph = graph;
         this.transformer = new PreProcessorPoliciesTransformer();
@@ -367,7 +367,7 @@ public class MigrationREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "MigrationREST.bulkProductsRedundantEdgeRemoval(" + guids + ")");
             }
 
-            SoftDeletionProductMigrationService migrationService = new SoftDeletionProductMigrationService(graph, guids, new GraphHelper(graph), transactionInterceptHelper);
+            SoftDeletionProductMigrationService migrationService = new SoftDeletionProductMigrationService(graph, guids, new GraphHelperV3(graph), transactionInterceptHelper);
             migrationService.startEdgeMigration();
 
         } catch (Exception e) {
@@ -396,7 +396,7 @@ public class MigrationREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "MigrationREST.bulkValidateProductEdges(" + guids + ")");
             }
 
-            ValidateProductEdgesMigrationService migrationService = new ValidateProductEdgesMigrationService(guids, new GraphHelper(graph));
+            ValidateProductEdgesMigrationService migrationService = new ValidateProductEdgesMigrationService(guids, new GraphHelperV3(graph));
             flag = migrationService.validateEdgeMigration();
 
         } catch (Exception e) {
@@ -425,8 +425,8 @@ public class MigrationREST {
             }
 
             AtlasEntity entity = new AtlasEntity();
-            entity.setGuid(GraphHelper.getGuid(vertex));
-            entity.setTypeName(GraphHelper.getTypeName(vertex));
+            entity.setGuid(GraphHelperV3.getGuid(vertex));
+            entity.setTypeName(GraphHelperV3.getTypeName(vertex));
 
             // Use a method to extract attributes from vertex
             setVertexAttributes(vertex, entity);
@@ -450,7 +450,7 @@ public class MigrationREST {
         for (String attribute : attributes) {
             entity.setAttribute(attribute, vertex.getProperty(attribute, String.class));
         }
-        entity.setCustomAttributes(GraphHelper.getCustomAttributes(vertex));
+        entity.setCustomAttributes(GraphHelperV3.getCustomAttributes(vertex));
     }
 
     private List<AtlasEntity> getPolicyEntities(AtlasVertex vertex) {
@@ -462,13 +462,13 @@ public class MigrationREST {
             AtlasVertex policyVertex = vertices.next();
             if (policyVertex != null) {
                 AtlasEntity policyEntity = new AtlasEntity();
-                policyEntity.setGuid(GraphHelper.getGuid(policyVertex));
-                policyEntity.setTypeName(GraphHelper.getTypeName(policyVertex));
+                policyEntity.setGuid(GraphHelperV3.getGuid(policyVertex));
+                policyEntity.setTypeName(GraphHelperV3.getTypeName(policyVertex));
 
                 // Use a method to extract attributes from policy vertex
                 setVertexAttributes(policyVertex, policyEntity);
 
-                policyEntity.setCustomAttributes(GraphHelper.getCustomAttributes(policyVertex));
+                policyEntity.setCustomAttributes(GraphHelperV3.getCustomAttributes(policyVertex));
                 policyEntities.add(policyEntity);
             }
         }

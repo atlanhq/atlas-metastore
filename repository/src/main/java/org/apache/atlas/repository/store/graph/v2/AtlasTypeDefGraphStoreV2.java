@@ -27,7 +27,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.listener.TypeDefChangeListener;
 import org.apache.atlas.model.typedef.*;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -416,9 +416,9 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
     }
 
     AtlasEdge addEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws AtlasBaseException {
-        String fromGuid = GraphHelper.getGuid(outVertex);
+        String fromGuid = GraphHelperV3.getGuid(outVertex);
 
-        if (fromGuid.equals(GraphHelper.getGuid(inVertex))) {
+        if (fromGuid.equals(GraphHelperV3.getGuid(inVertex))) {
             LOG.error("Attempting to create a relationship between same vertex with guid {}", fromGuid);
             throw new AtlasBaseException(RELATIONSHIP_CREATE_INVALID_PARAMS, fromGuid);
         }

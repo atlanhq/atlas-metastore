@@ -20,14 +20,14 @@ package org.apache.atlas.repository.store.graph.v2.preprocessor.sql;
 
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.model.instance.*;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasEntityType;
@@ -55,9 +55,9 @@ public class QueryFolderPreProcessor implements PreProcessor {
     private static String qualifiedNameFormat = "%s/folder/%s/%s";
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
-    public QueryFolderPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever) {
+    public QueryFolderPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
 
@@ -220,8 +220,8 @@ public class QueryFolderPreProcessor implements PreProcessor {
         AtlasGraphUtilsV3.setEncodedProperty(childVertex, PARENT_QUALIFIED_NAME, folderQualifiedName);
 
         //update system properties
-        GraphHelper.setModifiedByAsString(childVertex, RequestContext.get().getUser());
-        GraphHelper.setModifiedTime(childVertex, System.currentTimeMillis());
+        GraphHelperV3.setModifiedByAsString(childVertex, RequestContext.get().getUser());
+        GraphHelperV3.setModifiedTime(childVertex, System.currentTimeMillis());
 
         updatedAttributes.put(PARENT_QUALIFIED_NAME, folderQualifiedName);
 

@@ -27,7 +27,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.util.NanoIdUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
@@ -224,7 +224,7 @@ public final class AccessControlUtils {
         }
     }
 
-    public static AtlasEntity getEntityByQualifiedName(EntityGraphRetrieverV2 entityRetriever, String connectionQualifiedName) throws AtlasBaseException {
+    public static AtlasEntity getEntityByQualifiedName(EntityGraphRetrieverV3 entityRetriever, String connectionQualifiedName) throws AtlasBaseException {
         AtlasObjectId objectId = new AtlasObjectId(CONNECTION_ENTITY_TYPE, mapOf(QUALIFIED_NAME, connectionQualifiedName));
 
         AtlasEntity entity = entityRetriever.toAtlasEntity(objectId);
@@ -232,7 +232,7 @@ public final class AccessControlUtils {
         return entity;
     }
 
-    public static String getConnectionQualifiedNameFromPolicyAssets(EntityGraphRetrieverV2 entityRetriever, List<String> assets) throws AtlasBaseException {
+    public static String getConnectionQualifiedNameFromPolicyAssets(EntityGraphRetrieverV3 entityRetriever, List<String> assets) throws AtlasBaseException {
         if (CollectionUtils.isEmpty(assets)) {
             throw new AtlasBaseException("Policy assets could not be null");
         }
@@ -242,7 +242,7 @@ public final class AccessControlUtils {
         return getQualifiedName(connection);
     }
 
-    public static AtlasEntity extractConnectionFromResource(EntityGraphRetrieverV2 entityRetriever, String assetQName) throws AtlasBaseException {
+    public static AtlasEntity extractConnectionFromResource(EntityGraphRetrieverV3 entityRetriever, String assetQName) throws AtlasBaseException {
         AtlasEntity connection = null;
 
         String[] splitted = assetQName.split("/");

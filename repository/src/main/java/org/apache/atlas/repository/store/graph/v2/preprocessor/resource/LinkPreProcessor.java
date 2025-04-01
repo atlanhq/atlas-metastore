@@ -7,7 +7,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -31,7 +31,7 @@ public class LinkPreProcessor extends AbstractResourcePreProcessor {
     private static final Predicate<String> REGEX_ON_OFFSITE_URL = matchesEither(REGEX_ONSITE_URL, REGEX_OFFSITE_URL);
 
     public LinkPreProcessor(AtlasTypeRegistry typeRegistry,
-                            EntityGraphRetrieverV2 entityRetriever) {
+                            EntityGraphRetrieverV3 entityRetriever) {
         super(typeRegistry, entityRetriever);
     }
 

@@ -25,7 +25,7 @@ import org.apache.atlas.model.instance.AtlasCheckStateResult;
 import org.apache.atlas.model.instance.AtlasCheckStateResult.AtlasEntityState;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -50,7 +50,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY;
-import static org.apache.atlas.repository.graph.GraphHelper.getDelimitedClassificationNames;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getDelimitedClassificationNames;
 
 @Component
 public final class EntityStateChecker {
@@ -58,13 +58,13 @@ public final class EntityStateChecker {
 
     private final AtlasGraph           graph;
     private final AtlasTypeRegistry    typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
     @Inject
     public EntityStateChecker(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         this.graph           = graph;
         this.typeRegistry    = typeRegistry;
-        this.entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
+        this.entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
     }
 
 
@@ -225,7 +225,7 @@ public final class EntityStateChecker {
             for (Iterator<AtlasEdge> iter = edges.iterator(); iter.hasNext(); ) {
                 AtlasEdge               edge               = iter.next();
                 Boolean                 isPropagated       = AtlasGraphUtilsV3.getEncodedProperty(edge, CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
-                String                  classificationName = GraphHelper.getTypeName(edge.getInVertex());
+                String                  classificationName = GraphHelperV3.getTypeName(edge.getInVertex());
                 AtlasClassificationType classification     = typeRegistry.getClassificationTypeByName(classificationName);
 
                 if (classification != null) {

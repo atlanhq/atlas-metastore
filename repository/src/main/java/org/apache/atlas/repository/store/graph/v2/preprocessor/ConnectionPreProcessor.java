@@ -34,13 +34,12 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.SoftDeleteHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
 import org.apache.atlas.repository.store.users.KeycloakStore;
 import org.apache.atlas.transformer.PreProcessorPoliciesTransformer;
 import org.apache.atlas.utils.AtlasPerfMetrics;
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.slf4j.Logger;
@@ -62,7 +61,7 @@ public class ConnectionPreProcessor implements PreProcessor {
     public static final String CONN_NAME_PATTERN = "connection_admins_%s";
 
     private final AtlasGraph graph;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private AtlasEntityStore entityStore;
     private EntityDiscoveryService discovery;
     private PreProcessorPoliciesTransformer transformer;
@@ -72,7 +71,7 @@ public class ConnectionPreProcessor implements PreProcessor {
 
     public ConnectionPreProcessor(AtlasGraph graph,
                                   EntityDiscoveryService discovery,
-                                  EntityGraphRetrieverV2 entityRetriever,
+                                  EntityGraphRetrieverV3 entityRetriever,
                                   FeatureFlagStore featureFlagStore,
                                   DeleteHandlerDelegate deleteDelegate,
                                   AtlasEntityStore entityStore) {

@@ -28,7 +28,7 @@ import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -46,10 +46,10 @@ public class GlossaryPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(GlossaryPreProcessor.class);
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     protected EntityDiscoveryService discovery;
 
-    public GlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph) {
+    public GlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever, AtlasGraph graph) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         try{

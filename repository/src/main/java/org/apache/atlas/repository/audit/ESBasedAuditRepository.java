@@ -49,7 +49,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -100,12 +100,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private RestClient lowLevelClient;
     private final Configuration configuration;
-    private EntityGraphRetrieverV2 EntityGraphRetrieverV2;
+    private EntityGraphRetrieverV3 EntityGraphRetrieverV3;
 
     @Inject
-    public ESBasedAuditRepository(Configuration configuration, EntityGraphRetrieverV2 EntityGraphRetrieverV2) {
+    public ESBasedAuditRepository(Configuration configuration, EntityGraphRetrieverV3 EntityGraphRetrieverV3) {
         this.configuration = configuration;
-        this.EntityGraphRetrieverV2 = EntityGraphRetrieverV2;
+        this.EntityGraphRetrieverV3 = EntityGraphRetrieverV3;
     }
 
     @Override
@@ -299,7 +299,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private AtlasEntityHeader fetchAtlasEntityHeader(String domainGUID) throws AtlasBaseException {
         try {
-            AtlasEntityHeader entityHeader = EntityGraphRetrieverV2.toAtlasEntityHeader(domainGUID);
+            AtlasEntityHeader entityHeader = EntityGraphRetrieverV3.toAtlasEntityHeader(domainGUID);
             return entityHeader;
         } catch (AtlasBaseException e) {
             throw new AtlasBaseException(e);

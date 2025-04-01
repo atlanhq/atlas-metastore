@@ -29,11 +29,11 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -78,7 +78,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
     private static final String COLL_VIEWER_ROLE_PATTERN = "collection_viewer_%s";
 
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private AtlasEntityStore entityStore;
     private EntityDiscoveryService discovery;
     private PreProcessorPoliciesTransformer transformer;
@@ -87,7 +87,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
 
     public QueryCollectionPreProcessor(AtlasTypeRegistry typeRegistry,
                                        EntityDiscoveryService discovery,
-                                       EntityGraphRetrieverV2 entityRetriever,
+                                       EntityGraphRetrieverV3 entityRetriever,
                                        FeatureFlagStore featureFlagStore,
                                        AtlasEntityStore entityStore) {
         this.entityRetriever = entityRetriever;
@@ -170,14 +170,14 @@ public class QueryCollectionPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processDeleteCollection");
 
         try {
-            AtlasEntity.Status collectionStatus = GraphHelper.getStatus(vertex);
+            AtlasEntity.Status collectionStatus = GraphHelperV3.getStatus(vertex);
 
             if (!AtlasEntity.Status.ACTIVE.equals(collectionStatus)) {
                 throw new AtlasBaseException("Collection is already deleted/purged");
             }
 
             if (ATLAS_AUTHORIZER_IMPL.equalsIgnoreCase(CURRENT_AUTHORIZER_IMPL)) {
-                String collectionGuid = GraphHelper.getGuid(vertex);
+                String collectionGuid = GraphHelperV3.getGuid(vertex);
 
                 //delete collection policies
                 List<AtlasEntityHeader> policies = getCollectionPolicies(collectionGuid);

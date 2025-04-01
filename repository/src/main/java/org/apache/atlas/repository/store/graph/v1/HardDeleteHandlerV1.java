@@ -18,10 +18,9 @@
 
 package org.apache.atlas.repository.store.graph.v1;
 
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -44,16 +43,16 @@ public class HardDeleteHandlerV1 extends DeleteHandlerV1 {
     @Override
     protected void _deleteVertex(AtlasVertex instanceVertex, boolean force) {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> HardDeleteHandlerV1._deleteVertex({}, {})", GraphHelper.string(instanceVertex), force);
+            LOG.debug("==> HardDeleteHandlerV1._deleteVertex({}, {})", GraphHelperV3.string(instanceVertex), force);
         }
 
-        graphHelper.removeVertex(instanceVertex);
+        graphHelperV3.removeVertex(instanceVertex);
     }
 
     @Override
     protected void deleteEdge(AtlasEdge edge, boolean force) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> HardDeleteHandlerV1.deleteEdge({}, {})", GraphHelper.string(edge), force);
+            LOG.debug("==> HardDeleteHandlerV1.deleteEdge({}, {})", GraphHelperV3.string(edge), force);
         }
         boolean isRelationshipEdge = isRelationshipEdge(edge);
 
@@ -65,7 +64,7 @@ public class HardDeleteHandlerV1 extends DeleteHandlerV1 {
             removeTagPropagation(edge);
         }
 
-        graphHelper.removeEdge(edge);
+        graphHelperV3.removeEdge(edge);
         if (isRelationshipEdge)
             AtlasRelationshipStoreV2.recordRelationshipMutation(AtlasRelationshipStoreV2.RelationshipMutation.RELATIONSHIP_HARD_DELETE, edge, entityRetriever);
     }

@@ -25,13 +25,13 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.typedef.AtlasStructDef;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.*;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -49,7 +49,7 @@ import static org.apache.atlas.model.TypeCategory.*;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.*;
+import static org.apache.atlas.repository.graph.GraphHelperV3.*;
 import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getIdFromEdge;
 import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.isReference;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
@@ -58,15 +58,15 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 @Component
 public class RestoreHandlerV1 {
     public static final Logger LOG = LoggerFactory.getLogger(RestoreHandlerV1.class);
-    protected final GraphHelper graphHelper;
+    protected final GraphHelperV3 graphHelperV3;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
     @Inject
     public RestoreHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
-        this.graphHelper = new GraphHelper(graph);
+        this.graphHelperV3 = new GraphHelperV3(graph);
         this.typeRegistry = typeRegistry;
-        this.entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
+        this.entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
     }
 
     private void restoreEdge(AtlasEdge edge) throws AtlasBaseException {
@@ -142,7 +142,7 @@ public class RestoreHandlerV1 {
             switch (attrType.getTypeCategory()) {
                 case OBJECT_ID_TYPE: {
                     if (attrDef.getIsOptional()) {
-                        edge = graphHelper.getEdgeForLabel(outVertex, edgeLabel);
+                        edge = graphHelperV3.getEdgeForLabel(outVertex, edgeLabel);
                     }
                 }
                 break;
@@ -245,13 +245,13 @@ public class RestoreHandlerV1 {
                     if (attributeInfo.getAttributeDef().isSoftReferenced()) {
                         String softRefVal = vertex.getProperty(attributeInfo.getVertexPropertyName(), String.class);
                         AtlasObjectId refObjId = AtlasEntityUtil.parseSoftRefValue(softRefVal);
-                        AtlasVertex refVertex = refObjId != null ? AtlasGraphUtilsV3.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid()) : null;
+                        AtlasVertex refVertex = refObjId != null ? AtlasGraphUtilsV3.findByGuid(graphHelperV3.getGraph(), refObjId.getGuid()) : null;
 
                         if (refVertex != null) {
                             vertices.push(refVertex);
                         }
                     } else {
-                        AtlasEdge edge = graphHelper.getEdgeForLabel(vertex, edgeLabel);
+                        AtlasEdge edge = graphHelperV3.getEdgeForLabel(vertex, edgeLabel);
 
                         if (edge == null || (AtlasGraphUtilsV3.getState(edge) != DELETED)) {
                             continue;
@@ -279,7 +279,7 @@ public class RestoreHandlerV1 {
 
                             if (CollectionUtils.isNotEmpty(refObjIds)) {
                                 for (AtlasObjectId refObjId : refObjIds) {
-                                    AtlasVertex refVertex = AtlasGraphUtilsV3.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
+                                    AtlasVertex refVertex = AtlasGraphUtilsV3.findByGuid(graphHelperV3.getGraph(), refObjId.getGuid());
 
                                     if (refVertex != null) {
                                         vertices.push(refVertex);
@@ -292,7 +292,7 @@ public class RestoreHandlerV1 {
 
                             if (MapUtils.isNotEmpty(refObjIds)) {
                                 for (AtlasObjectId refObjId : refObjIds.values()) {
-                                    AtlasVertex refVertex = AtlasGraphUtilsV3.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
+                                    AtlasVertex refVertex = AtlasGraphUtilsV3.findByGuid(graphHelperV3.getGraph(), refObjId.getGuid());
 
                                     if (refVertex != null) {
                                         vertices.push(refVertex);
@@ -340,7 +340,7 @@ public class RestoreHandlerV1 {
     }
 
     private void restoreEdgeReference(AtlasVertex outVertex, String edgeLabel, TypeCategory typeCategory, boolean isOwned) throws AtlasBaseException {
-        AtlasEdge edge = graphHelper.getEdgeForLabel(outVertex, edgeLabel);
+        AtlasEdge edge = graphHelperV3.getEdgeForLabel(outVertex, edgeLabel);
 
         if (edge != null) {
             restoreEdgeReference(edge, typeCategory, isOwned, outVertex);
@@ -581,7 +581,7 @@ public class RestoreHandlerV1 {
             //If the vertex is of type class, and its not a composite attributes, the reference AtlasVertex' lifecycle is not controlled
             //through this restore. Hence just restore the reference edge. Leave the reference AtlasVertex as is
 
-            if (GraphHelper.isRelationshipEdge(edge)) {
+            if (GraphHelperV3.isRelationshipEdge(edge)) {
                 restoreEdge(edge);
 
                 AtlasVertex referencedVertex = entityRetriever.getReferencedEntityVertex(edge, relationshipDirection, entityVertex);
@@ -625,7 +625,7 @@ public class RestoreHandlerV1 {
             String outVertexType = getTypeName(edge.getOutVertex());
             String inVertexType  = getTypeName(edge.getInVertex());
 
-            ret = GraphHelper.isRelationshipEdge(edge) || edge.getPropertyKeys().contains(RELATIONSHIP_GUID_PROPERTY_KEY) ||
+            ret = GraphHelperV3.isRelationshipEdge(edge) || edge.getPropertyKeys().contains(RELATIONSHIP_GUID_PROPERTY_KEY) ||
                     (typeRegistry.getEntityTypeByName(outVertexType) != null && typeRegistry.getEntityTypeByName(inVertexType) != null);
         }
 

@@ -1,7 +1,7 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.commons.collections.CollectionUtils;
@@ -17,13 +17,13 @@ public class DataProductInputsOutputsMigrationService {
 
     private static final Logger LOG = LoggerFactory.getLogger(DataProductInputsOutputsMigrationService.class);
 
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
 
     private String productGuid;
     private final TransactionInterceptHelper   transactionInterceptHelper;
 
-    public DataProductInputsOutputsMigrationService(EntityGraphRetrieverV2 entityRetriever, String productGuid, TransactionInterceptHelper transactionInterceptHelper) {
+    public DataProductInputsOutputsMigrationService(EntityGraphRetrieverV3 entityRetriever, String productGuid, TransactionInterceptHelper transactionInterceptHelper) {
         this.entityRetriever = entityRetriever;
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.productGuid = productGuid;
@@ -85,7 +85,7 @@ public class DataProductInputsOutputsMigrationService {
 
     private List<String> getAssetGuids(AtlasVertex vertex, String edgeLabel) throws AtlasBaseException {
         List<String> guids = new ArrayList<>();
-        Iterator<AtlasVertex> activeParent = GraphHelper.getActiveParentVertices(vertex, edgeLabel);
+        Iterator<AtlasVertex> activeParent = GraphHelperV3.getActiveParentVertices(vertex, edgeLabel);
         while(activeParent.hasNext()) {
             AtlasVertex child = activeParent.next();
             guids.add(child.getProperty(GUID_PROPERTY_KEY, String.class));

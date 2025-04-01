@@ -30,11 +30,11 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.tasks.AtlasTask;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
 import org.apache.atlas.tasks.TaskManagement;
@@ -73,12 +73,12 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
     protected static final String ATTR_CATEGORIES = "categories";
 
     protected final AtlasTypeRegistry typeRegistry;
-    protected final EntityGraphRetrieverV2 entityRetriever;
+    protected final EntityGraphRetrieverV3 entityRetriever;
     protected final TaskManagement taskManagement;
 
     protected EntityDiscoveryService discovery;
 
-    AbstractGlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
+    AbstractGlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         this.taskManagement = taskManagement;
@@ -121,7 +121,7 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
                                    String currentTermName, String updatedTermName,
                                    String termQName, String updatedTermQualifiedName,
                                    AtlasVertex termVertex) {
-        String termGuid = GraphHelper.getGuid(termVertex);
+        String termGuid = GraphHelperV3.getGuid(termVertex);
         String currentUser = RequestContext.getCurrentUser();
         Map<String, Object> taskParams = MeaningsTask.toParameters(currentTermName, updatedTermName, termQName, updatedTermQualifiedName, termGuid);
         AtlasTask task = taskManagement.createTask(taskType, currentUser, taskParams);

@@ -27,7 +27,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphTraversal;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.LruCache;
 import org.apache.commons.collections.CollectionUtils;
@@ -50,7 +50,7 @@ public class TraversalBasedExecutor implements DSLQueryExecutor {
 
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasGraph            graph;
-    private final EntityGraphRetrieverV2  entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
     static {
         translator = AtlasConfiguration.DSL_CACHED_TRANSLATOR.getBoolean()
@@ -58,7 +58,7 @@ public class TraversalBasedExecutor implements DSLQueryExecutor {
                 : new Translator();
     }
 
-    public TraversalBasedExecutor(AtlasTypeRegistry typeRegistry, AtlasGraph graph, EntityGraphRetrieverV2 entityRetriever) {
+    public TraversalBasedExecutor(AtlasTypeRegistry typeRegistry, AtlasGraph graph, EntityGraphRetrieverV3 entityRetriever) {
         this.typeRegistry    = typeRegistry;
         this.graph           = graph;
         this.entityRetriever = entityRetriever;

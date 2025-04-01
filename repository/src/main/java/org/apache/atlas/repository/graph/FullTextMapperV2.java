@@ -26,7 +26,7 @@ import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes;
 import org.apache.atlas.type.AtlasClassificationType;
@@ -63,7 +63,7 @@ public class FullTextMapperV2 implements IFullTextMapper {
 
     private final AtlasTypeRegistry        typeRegistry;
     private final Configuration            configuration;
-    private final EntityGraphRetrieverV2     EntityGraphRetrieverV2;
+    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
     private final boolean                  followReferences;
     private final Map<String, Set<String>> excludeAttributesCache = new HashMap<>();
 
@@ -75,7 +75,7 @@ public class FullTextMapperV2 implements IFullTextMapper {
 
         followReferences = this.configuration != null && this.configuration.getBoolean(FULL_TEXT_FOLLOW_REFERENCES, false);
         // If followReferences = false then ignore relationship attr loading
-        EntityGraphRetrieverV2 = new EntityGraphRetrieverV2(atlasGraph, typeRegistry, !followReferences);
+        EntityGraphRetrieverV3 = new EntityGraphRetrieverV3(atlasGraph, typeRegistry, !followReferences);
     }
 
     /**
@@ -287,7 +287,7 @@ public class FullTextMapperV2 implements IFullTextMapper {
         AtlasEntity    entity  = context.getEntity(guid);
 
         if (entity == null) {
-            entity = EntityGraphRetrieverV2.toAtlasEntity(guid, includeReferences);
+            entity = EntityGraphRetrieverV3.toAtlasEntity(guid, includeReferences);
 
             if (entity != null) {
                 context.cache(entity);
@@ -308,7 +308,7 @@ public class FullTextMapperV2 implements IFullTextMapper {
 
         if (entityWithExtInfo == null) {
             // Only map ownedRef and relationship attr when follow references is set to true
-            entityWithExtInfo = EntityGraphRetrieverV2.toAtlasEntityWithExtInfo(guid, !followReferences);
+            entityWithExtInfo = EntityGraphRetrieverV3.toAtlasEntityWithExtInfo(guid, !followReferences);
 
             if (entityWithExtInfo != null) {
                 context.cache(entityWithExtInfo);

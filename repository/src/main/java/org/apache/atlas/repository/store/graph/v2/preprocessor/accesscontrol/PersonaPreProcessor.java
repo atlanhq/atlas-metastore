@@ -33,7 +33,7 @@ import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.users.KeycloakStore;
 import org.apache.atlas.type.AtlasEntityType;
@@ -74,14 +74,14 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
     protected final AtlasGraph graph;
     protected AtlasTypeRegistry typeRegistry;
-    protected final EntityGraphRetrieverV2 entityRetriever;
+    protected final EntityGraphRetrieverV3 entityRetriever;
     protected IndexAliasStore aliasStore;
     protected AtlasEntityStore entityStore;
     protected KeycloakStore keycloakStore;
 
     public PersonaPreProcessor(AtlasGraph graph,
                                AtlasTypeRegistry typeRegistry,
-                               EntityGraphRetrieverV2 entityRetriever,
+                               EntityGraphRetrieverV3 entityRetriever,
                                AtlasEntityStore entityStore) {
         this.graph = graph;
         this.typeRegistry = typeRegistry;

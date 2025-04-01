@@ -37,7 +37,7 @@ import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
 import org.apache.atlas.model.typedef.AtlasRelationshipEndDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
@@ -76,7 +76,7 @@ import static org.apache.atlas.model.instance.AtlasRelationship.Status.DELETED;
 import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.*;
 import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.*;
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.*;
+import static org.apache.atlas.repository.graph.GraphHelperV3.*;
 import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.getIdFromVertex;
 import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.isReference;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
@@ -86,8 +86,8 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 
 @Component
-public class EntityGraphRetrieverV2 {
-    private static final Logger LOG = LoggerFactory.getLogger(EntityGraphRetrieverV2.class);
+public class EntityGraphRetrieverV3 {
+    private static final Logger LOG = LoggerFactory.getLogger(EntityGraphRetrieverV3.class);
 
     private static final String GLOSSARY_TERM_DISPLAY_NAME_ATTR = "name";
     public  static final String TERM_RELATION_NAME              = "AtlasGlossarySemanticAssignment";
@@ -100,7 +100,7 @@ public class EntityGraphRetrieverV2 {
     public static final String QUALIFIED_NAME = "qualifiedName";
 
     private static final TypeReference<List<TimeBoundary>> TIME_BOUNDARIES_LIST_TYPE = new TypeReference<List<TimeBoundary>>() {};
-    private final GraphHelper graphHelper;
+    private final GraphHelperV3 graphHelperV3;
 
     private final AtlasTypeRegistry typeRegistry;
 
@@ -108,13 +108,13 @@ public class EntityGraphRetrieverV2 {
     private final AtlasGraph graph;
 
     @Inject
-    public EntityGraphRetrieverV2(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
+    public EntityGraphRetrieverV3(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         this(graph, typeRegistry, false);
     }
 
-    public EntityGraphRetrieverV2(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean ignoreRelationshipAttr) {
+    public EntityGraphRetrieverV3(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean ignoreRelationshipAttr) {
         this.graph                  = graph;
-        this.graphHelper            = new GraphHelper(graph);
+        this.graphHelperV3 = new GraphHelperV3(graph);
         this.typeRegistry           = typeRegistry;
         this.ignoreRelationshipAttr = ignoreRelationshipAttr;
 
@@ -386,7 +386,7 @@ public class EntityGraphRetrieverV2 {
         } else if (relationshipDirection == BOTH){
             // since relationship direction is BOTH, edge direction can be inward or outward
             // compare with parent entity vertex and pick the right reference vertex
-            if (StringUtils.equals(GraphHelper.getGuid(parentVertex), GraphHelper.getGuid(edge.getOutVertex()))) {
+            if (StringUtils.equals(GraphHelperV3.getGuid(parentVertex), GraphHelperV3.getGuid(edge.getOutVertex()))) {
                 entityVertex = edge.getInVertex();
             } else {
                 entityVertex = edge.getOutVertex();
@@ -403,7 +403,7 @@ public class EntityGraphRetrieverV2 {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
         }
 
-        if (StringUtils.isEmpty(GraphHelper.getTypeName(ret))) {
+        if (StringUtils.isEmpty(GraphHelperV3.getTypeName(ret))) {
             throw new AtlasBaseException(AtlasErrorCode.NO_TYPE_NAME_ON_VERTEX, guid);
         }
 
@@ -624,7 +624,7 @@ public class EntityGraphRetrieverV2 {
     public List<String> getImpactedVerticesIdsClassificationAttached(AtlasVertex entityVertex, String classificationId, List<String> edgeLabelsToCheck,Boolean toExclude, List<String> verticesWithoutClassification) {
         List<String> ret = new ArrayList<>();
 
-        GraphHelper.getClassificationEdges(entityVertex).forEach(classificationEdge -> {
+        GraphHelperV3.getClassificationEdges(entityVertex).forEach(classificationEdge -> {
             AtlasVertex classificationVertex = classificationEdge.getInVertex();
             if (classificationVertex != null && classificationId.equals(classificationVertex.getIdForDisplay())) {
                 traverseImpactedVerticesByLevel(entityVertex, null, classificationId, ret, edgeLabelsToCheck, toExclude, verticesWithoutClassification);
@@ -777,7 +777,7 @@ public class EntityGraphRetrieverV2 {
                             // If we want to store vertices without classification attached
                             // Check if vertices has classification attached or not using function isClassificationAttached
 
-                            if(storeVerticesWithoutClassification && !GraphHelper.isClassificationAttached(entityVertex, classificationVertex)) {
+                            if(storeVerticesWithoutClassification && !GraphHelperV3.isClassificationAttached(entityVertex, classificationVertex)) {
                                 verticesWithOutClassification.add(entityVertex.getIdForDisplay());
                             }
 
@@ -921,7 +921,7 @@ public class EntityGraphRetrieverV2 {
     }
 
     private AtlasEntity mapVertexToAtlasEntity(AtlasVertex entityVertex, AtlasEntityExtInfo entityExtInfo, boolean isMinExtInfo, boolean includeReferences) throws AtlasBaseException {
-        String      guid   = GraphHelper.getGuid(entityVertex);
+        String      guid   = GraphHelperV3.getGuid(entityVertex);
         AtlasEntity entity = entityExtInfo != null ? entityExtInfo.getEntity(guid) : null;
 
         if (entity == null) {
@@ -956,7 +956,7 @@ public class EntityGraphRetrieverV2 {
     }
 
     private AtlasEntity mapVertexToAtlasEntityMin(AtlasVertex entityVertex, AtlasEntityExtInfo entityExtInfo, Set<String> attributes) throws AtlasBaseException {
-        String      guid   = GraphHelper.getGuid(entityVertex);
+        String      guid   = GraphHelperV3.getGuid(entityVertex);
         AtlasEntity entity = entityExtInfo != null ? entityExtInfo.getEntity(guid) : null;
 
         if (entity == null) {
@@ -1067,7 +1067,7 @@ public class EntityGraphRetrieverV2 {
     private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
         try {
-            Set<AbstractMap.SimpleEntry<String, String>> edgeLabelAndTypeName = graphHelper.retrieveEdgeLabelsAndTypeName(entityVertex);
+            Set<AbstractMap.SimpleEntry<String, String>> edgeLabelAndTypeName = graphHelperV3.retrieveEdgeLabelsAndTypeName(entityVertex);
 
             Set<String> edgeLabels = new HashSet<>();
             edgeLabelAndTypeName.stream().filter(Objects::nonNull).forEach(edgeLabelMap -> attributes.forEach(attribute->{
@@ -1164,7 +1164,7 @@ public class EntityGraphRetrieverV2 {
 
             ret.setTypeName(typeName);
             ret.setGuid(guid);
-            ret.setStatus(GraphHelper.getStatus(entityVertex));
+            ret.setStatus(GraphHelperV3.getStatus(entityVertex));
             RequestContext context = RequestContext.get();
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
@@ -1176,10 +1176,10 @@ public class EntityGraphRetrieverV2 {
             ret.setIsIncomplete(isIncomplete);
             ret.setLabels(getLabels(entityVertex));
 
-            ret.setCreatedBy(GraphHelper.getCreatedByAsString(entityVertex));
-            ret.setUpdatedBy(GraphHelper.getModifiedByAsString(entityVertex));
-            ret.setCreateTime(new Date(GraphHelper.getCreatedTime(entityVertex)));
-            ret.setUpdateTime(new Date(GraphHelper.getModifiedTime(entityVertex)));
+            ret.setCreatedBy(GraphHelperV3.getCreatedByAsString(entityVertex));
+            ret.setUpdatedBy(GraphHelperV3.getModifiedByAsString(entityVertex));
+            ret.setCreateTime(new Date(GraphHelperV3.getCreatedTime(entityVertex)));
+            ret.setUpdateTime(new Date(GraphHelperV3.getModifiedTime(entityVertex)));
 
             if(RequestContext.get().includeMeanings()) {
                 List<AtlasTermAssignmentHeader> termAssignmentHeaders = mapAssignedTerms(entityVertex);
@@ -1392,7 +1392,7 @@ public class EntityGraphRetrieverV2 {
                     entity.setCustomAttributes(StringUtils.isNotEmpty(customAttrsString) ? AtlasType.fromJson(customAttrsString, Map.class) : null);
 
                     String labels = properties.get(LABELS_PROPERTY_KEY) != null ? (String) properties.get(LABELS_PROPERTY_KEY) : null;
-                    entity.setLabels(GraphHelper.parseLabelsString(labels));
+                    entity.setLabels(GraphHelperV3.parseLabelsString(labels));
                     Object pendingTasks = properties.get(PENDING_TASKS_PROPERTY_KEY);
                     if (pendingTasks instanceof List) {
                         entity.setPendingTasks(new HashSet<>((List<String>) pendingTasks));
@@ -1401,21 +1401,21 @@ public class EntityGraphRetrieverV2 {
                 } else {
                     entity.setGuid(getGuid(entityVertex));
                     entity.setTypeName(getTypeName(entityVertex));
-                    entity.setStatus(GraphHelper.getStatus(entityVertex));
-                    entity.setVersion(GraphHelper.getVersion(entityVertex));
+                    entity.setStatus(GraphHelperV3.getStatus(entityVertex));
+                    entity.setVersion(GraphHelperV3.getVersion(entityVertex));
 
-                    entity.setCreatedBy(GraphHelper.getCreatedByAsString(entityVertex));
-                    entity.setUpdatedBy(GraphHelper.getModifiedByAsString(entityVertex));
+                    entity.setCreatedBy(GraphHelperV3.getCreatedByAsString(entityVertex));
+                    entity.setUpdatedBy(GraphHelperV3.getModifiedByAsString(entityVertex));
 
-                    entity.setCreateTime(new Date(GraphHelper.getCreatedTime(entityVertex)));
-                    entity.setUpdateTime(new Date(GraphHelper.getModifiedTime(entityVertex)));
+                    entity.setCreateTime(new Date(GraphHelperV3.getCreatedTime(entityVertex)));
+                    entity.setUpdateTime(new Date(GraphHelperV3.getModifiedTime(entityVertex)));
 
-                    entity.setHomeId(GraphHelper.getHomeId(entityVertex));
+                    entity.setHomeId(GraphHelperV3.getHomeId(entityVertex));
 
-                    entity.setIsProxy(GraphHelper.isProxy(entityVertex));
+                    entity.setIsProxy(GraphHelperV3.isProxy(entityVertex));
                     entity.setIsIncomplete(isEntityIncomplete(entityVertex));
 
-                    entity.setProvenanceType(GraphHelper.getProvenanceType(entityVertex));
+                    entity.setProvenanceType(GraphHelperV3.getProvenanceType(entityVertex));
                     entity.setCustomAttributes(getCustomAttributes(entityVertex));
                     entity.setLabels(getLabels(entityVertex));
                     entity.setPendingTasks(getPendingTasks(entityVertex));
@@ -1504,7 +1504,7 @@ public class EntityGraphRetrieverV2 {
 
         if (edges != null) {
             for (final AtlasEdge edge : (Iterable<AtlasEdge>) edges) {
-                if (edge != null && GraphHelper.getStatus(edge) != AtlasEntity.Status.DELETED) {
+                if (edge != null && GraphHelperV3.getStatus(edge) != AtlasEntity.Status.DELETED) {
                     ret.add(toTermAssignmentHeader(edge));
                 }
             }
@@ -1517,7 +1517,7 @@ public class EntityGraphRetrieverV2 {
 
         AtlasVertex termVertex = edge.getOutVertex();
 
-        String guid = GraphHelper.getGuid(termVertex);
+        String guid = GraphHelperV3.getGuid(termVertex);
         if (guid != null) {
             ret.setTermGuid(guid);
         }
@@ -1930,10 +1930,10 @@ public class EntityGraphRetrieverV2 {
         AtlasObjectId ret = null;
 
         if (edge == null) {
-            edge = graphHelper.getEdgeForLabel(entityVertex, edgeLabel, edgeDirection);
+            edge = graphHelperV3.getEdgeForLabel(entityVertex, edgeLabel, edgeDirection);
         }
 
-        if (GraphHelper.elementExists(edge)) {
+        if (GraphHelperV3.elementExists(edge)) {
             if (!RequestContext.get().isAllowDeletedRelationsIndexsearch() && getState(edge) == Id.EntityState.DELETED ) {
                 return null;
             }
@@ -1967,7 +1967,7 @@ public class EntityGraphRetrieverV2 {
             }
 
             if (ret != null && RequestContext.get().isIncludeRelationshipAttributes()) {
-                String relationshipTypeName = GraphHelper.getTypeName(edge);
+                String relationshipTypeName = GraphHelperV3.getTypeName(edge);
                 boolean isRelationshipAttribute = typeRegistry.getRelationshipDefByName(relationshipTypeName) != null;
                 if (isRelationshipAttribute) {
                     AtlasRelationship relationship = mapEdgeToAtlasRelationship(edge);
@@ -1991,10 +1991,10 @@ public class EntityGraphRetrieverV2 {
             AtlasStruct ret = null;
 
             if (edge == null) {
-                edge = graphHelper.getEdgeForLabel(entityVertex, edgeLabel);
+                edge = graphHelperV3.getEdgeForLabel(entityVertex, edgeLabel);
             }
 
-            if (GraphHelper.elementExists(edge)) {
+            if (GraphHelperV3.elementExists(edge)) {
                 final AtlasVertex referenceVertex = edge.getInVertex();
 
                 if (referenceVertex == null) {
@@ -2094,7 +2094,7 @@ public class EntityGraphRetrieverV2 {
 
         try {
             Object                ret                  = null;
-            String                relationshipTypeName = graphHelper.getRelationshipTypeName(entityVertex, entityType, attributeName);
+            String                relationshipTypeName = graphHelperV3.getRelationshipTypeName(entityVertex, entityType, attributeName);
             AtlasRelationshipType relationshipType     = relationshipTypeName != null ? typeRegistry.getRelationshipTypeByName(relationshipTypeName) : null;
 
             if (relationshipType == null) {
@@ -2200,7 +2200,7 @@ public class EntityGraphRetrieverV2 {
     }
 
     private AtlasObjectId mapRelatedVertexToObjectId(AtlasVertex entityVertex, AtlasAttribute attribute, AtlasEntityExtInfo entityExtInfo, boolean isMinExtInfo) throws AtlasBaseException {
-        AtlasEdge edge = graphHelper.getEdgeForLabel(entityVertex, attribute.getRelationshipEdgeLabel(), attribute.getRelationshipEdgeDirection());
+        AtlasEdge edge = graphHelperV3.getEdgeForLabel(entityVertex, attribute.getRelationshipEdgeLabel(), attribute.getRelationshipEdgeDirection());
 
         return mapVertexToRelatedObjectId(entityVertex, edge, attribute.isOwnedRef(), entityExtInfo, isMinExtInfo);
     }
@@ -2210,11 +2210,11 @@ public class EntityGraphRetrieverV2 {
         Iterator<AtlasEdge>        edges = null;
 
         if (attribute.getRelationshipEdgeDirection() == IN) {
-            edges = getIncomingEdgesByLabel(entityVertex, attribute.getRelationshipEdgeLabel());
+            edges = GraphHelperV3.getIncomingEdgesByLabel(entityVertex, attribute.getRelationshipEdgeLabel());
         } else if (attribute.getRelationshipEdgeDirection() == OUT) {
-            edges = getOutGoingEdgesByLabel(entityVertex, attribute.getRelationshipEdgeLabel());
+            edges = GraphHelperV3.getOutGoingEdgesByLabel(entityVertex, attribute.getRelationshipEdgeLabel());
         } else if (attribute.getRelationshipEdgeDirection() == BOTH) {
-            edges = getAdjacentEdgesByLabel(entityVertex, AtlasEdgeDirection.BOTH, attribute.getRelationshipEdgeLabel());
+            edges = GraphHelperV3.getAdjacentEdgesByLabel(entityVertex, AtlasEdgeDirection.BOTH, attribute.getRelationshipEdgeLabel());
         }
 
         if (edges != null) {
@@ -2233,7 +2233,7 @@ public class EntityGraphRetrieverV2 {
     private AtlasRelatedObjectId mapVertexToRelatedObjectId(AtlasVertex entityVertex, AtlasEdge edge, boolean isOwnedRef, AtlasEntityExtInfo entityExtInfo, boolean isMinExtInfo) throws AtlasBaseException {
         AtlasRelatedObjectId ret = null;
 
-        if (GraphHelper.elementExists(edge)) {
+        if (GraphHelperV3.elementExists(edge)) {
             AtlasVertex referenceVertex = edge.getInVertex();
 
             if (StringUtils.equals(getIdFromVertex(referenceVertex), getIdFromVertex(entityVertex))) {
@@ -2243,7 +2243,7 @@ public class EntityGraphRetrieverV2 {
             if (referenceVertex != null) {
                 String             entityTypeName = getTypeName(referenceVertex);
                 String             entityGuid     = getGuid(referenceVertex);
-                AtlasEntity.Status entityStatus   = GraphHelper.getStatus(referenceVertex);
+                AtlasEntity.Status entityStatus   = GraphHelperV3.getStatus(referenceVertex);
                 AtlasRelationship  relationship   = mapEdgeToAtlasRelationship(edge);
 
                 ret = new AtlasRelatedObjectId(entityGuid, entityTypeName, entityStatus,
@@ -2334,26 +2334,26 @@ public class EntityGraphRetrieverV2 {
         relationship.setGuid(getRelationshipGuid(edge));
         relationship.setTypeName(getTypeName(edge));
 
-        relationship.setCreatedBy(GraphHelper.getCreatedByAsString(edge));
-        relationship.setUpdatedBy(GraphHelper.getModifiedByAsString(edge));
+        relationship.setCreatedBy(GraphHelperV3.getCreatedByAsString(edge));
+        relationship.setUpdatedBy(GraphHelperV3.getModifiedByAsString(edge));
 
-        relationship.setCreateTime(new Date(GraphHelper.getCreatedTime(edge)));
-        relationship.setUpdateTime(new Date(GraphHelper.getModifiedTime(edge)));
+        relationship.setCreateTime(new Date(GraphHelperV3.getCreatedTime(edge)));
+        relationship.setUpdateTime(new Date(GraphHelperV3.getModifiedTime(edge)));
 
-        Long version = GraphHelper.getVersion(edge);
+        Long version = GraphHelperV3.getVersion(edge);
         if (version == null) {
             version = Long.valueOf(1L);
         }
         relationship.setVersion(version);
 
-        Integer provenanceType = GraphHelper.getProvenanceType(edge);
+        Integer provenanceType = GraphHelperV3.getProvenanceType(edge);
         if (provenanceType == null) {
             provenanceType = Integer.valueOf(0);
         }
         relationship.setProvenanceType(provenanceType);
-        relationship.setHomeId(GraphHelper.getHomeId(edge));
+        relationship.setHomeId(GraphHelperV3.getHomeId(edge));
 
-        relationship.setStatus(GraphHelper.getEdgeStatus(edge));
+        relationship.setStatus(GraphHelperV3.getEdgeStatus(edge));
 
         AtlasVertex end1Vertex = edge.getOutVertex();
         AtlasVertex end2Vertex = edge.getInVertex();

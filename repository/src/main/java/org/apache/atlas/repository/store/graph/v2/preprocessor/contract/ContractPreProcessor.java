@@ -49,7 +49,7 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
 
 
     public ContractPreProcessor(AtlasGraph graph, AtlasTypeRegistry typeRegistry,
-                                EntityGraphRetrieverV2 entityRetriever,
+                                EntityGraphRetrieverV3 entityRetriever,
                                 boolean storeDifferentialAudits, EntityDiscoveryService discovery) {
 
         super(graph, typeRegistry, entityRetriever, discovery);

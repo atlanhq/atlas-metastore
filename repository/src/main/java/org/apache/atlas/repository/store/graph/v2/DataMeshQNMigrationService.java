@@ -7,7 +7,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.service.redis.RedisService;
@@ -25,7 +25,7 @@ import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
-import static org.apache.atlas.repository.graph.GraphHelper.getAllChildrenVertices;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getAllChildrenVertices;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_CATEGORY;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_RESOURCES;
@@ -36,7 +36,7 @@ public class DataMeshQNMigrationService implements MigrationService {
 
     private final AtlasEntityStore entityStore;
     private final EntityDiscoveryService discovery;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
     private final AtlasTypeRegistry typeRegistry;
     private final RedisService redisService;
@@ -52,7 +52,7 @@ public class DataMeshQNMigrationService implements MigrationService {
     private boolean forceRegen;
     private final TransactionInterceptHelper   transactionInterceptHelper;
 
-    public DataMeshQNMigrationService(AtlasEntityStore entityStore, EntityDiscoveryService discovery, EntityGraphRetrieverV2 entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper, RedisService redisService, boolean forceRegen) {
+    public DataMeshQNMigrationService(AtlasEntityStore entityStore, EntityDiscoveryService discovery, EntityGraphRetrieverV3 entityRetriever, AtlasTypeRegistry typeRegistry, TransactionInterceptHelper transactionInterceptHelper, RedisService redisService, boolean forceRegen) {
         this.entityRetriever = entityRetriever;
         this.entityStore = entityStore;
         this.discovery = discovery;
@@ -113,7 +113,7 @@ public class DataMeshQNMigrationService implements MigrationService {
 
         Map<String, Object> updatedAttributes = new HashMap<>();
 
-        Map<String,String> customAttributes = GraphHelper.getCustomAttributes(vertex);
+        Map<String,String> customAttributes = GraphHelperV3.getCustomAttributes(vertex);
         if(!this.forceRegen && customAttributes != null && customAttributes.get(MIGRATION_CUSTOM_ATTRIBUTE) != null && customAttributes.get(MIGRATION_CUSTOM_ATTRIBUTE).equals("true")){
             LOG.info("Entity already migrated: {}", currentQualifiedName);
 
@@ -218,7 +218,7 @@ public class DataMeshQNMigrationService implements MigrationService {
         String updatedResource = "entity:"+ updatedQualifiedName;
         this.updatedPolicyResources.put(currentResource, updatedResource);
 
-        Map<String,String> customAttributes = GraphHelper.getCustomAttributes(vertex);
+        Map<String,String> customAttributes = GraphHelperV3.getCustomAttributes(vertex);
         if(Objects.isNull(customAttributes) || MapUtils.isEmpty(customAttributes)) {
             customAttributes = new HashMap<>();
         }
@@ -237,7 +237,7 @@ public class DataMeshQNMigrationService implements MigrationService {
         String currentQualifiedName = vertex.getProperty(QUALIFIED_NAME,String.class);
         String updatedQualifiedName = createProductQualifiedName(parentDomainQualifiedName);
 
-        Map<String,String> customAttributes = GraphHelper.getCustomAttributes(vertex);
+        Map<String,String> customAttributes = GraphHelperV3.getCustomAttributes(vertex);
 
         if(!this.forceRegen && customAttributes != null && customAttributes.get(MIGRATION_CUSTOM_ATTRIBUTE) != null && customAttributes.get(MIGRATION_CUSTOM_ATTRIBUTE).equals("true")) {
             LOG.info("Product already migrated: {}", currentQualifiedName);

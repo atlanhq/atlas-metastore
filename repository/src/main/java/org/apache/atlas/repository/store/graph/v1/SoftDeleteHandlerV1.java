@@ -22,7 +22,6 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity.Status;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -38,7 +37,7 @@ import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.MODIFIED_BY_KEY;
 import static org.apache.atlas.repository.Constants.STATE_PROPERTY_KEY;
-import static org.apache.atlas.repository.graph.GraphHelper.getPropagatableClassifications;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getPropagatableClassifications;
 
 public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
 
@@ -50,11 +49,11 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
     @Override
     protected void _deleteVertex(AtlasVertex instanceVertex, boolean force) {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> SoftDeleteHandlerV1._deleteVertex({}, {})", GraphHelper.string(instanceVertex), force);
+            LOG.debug("==> SoftDeleteHandlerV1._deleteVertex({}, {})", graphHelperV3.string(instanceVertex), force);
         }
 
         if (force) {
-            graphHelper.removeVertex(instanceVertex);
+            graphHelperV3.removeVertex(instanceVertex);
         } else {
             Status state = AtlasGraphUtilsV3.getState(instanceVertex);
 
@@ -70,7 +69,7 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
     protected void deleteEdge(AtlasEdge edge, boolean force) throws AtlasBaseException {
         try {
             if (LOG.isDebugEnabled()) {
-                LOG.debug("==> SoftDeleteHandlerV1.deleteEdge({}, {})", GraphHelper.string(edge), force);
+                LOG.debug("==> SoftDeleteHandlerV1.deleteEdge({}, {})", graphHelperV3.string(edge), force);
             }
             boolean isRelationshipEdge = isRelationshipEdge(edge);
             authorizeRemoveRelation(edge);
@@ -85,7 +84,7 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
             }
 
             if (force) {
-                graphHelper.removeEdge(edge);
+                graphHelperV3.removeEdge(edge);
             } else {
                 Status state = AtlasGraphUtilsV3.getState(edge);
 
@@ -98,10 +97,10 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
             if (isRelationshipEdge)
                 AtlasRelationshipStoreV2.recordRelationshipMutation(AtlasRelationshipStoreV2.RelationshipMutation.RELATIONSHIP_SOFT_DELETE, edge, entityRetriever);
         } catch (NullPointerException npe) {
-            LOG.error("Error while deleting edge {}", GraphHelper.string(edge), npe);
+            LOG.error("Error while deleting edge {}", graphHelperV3.string(edge), npe);
             throw new AtlasBaseException(AtlasErrorCode.UNKNOWN_SERVER_ERROR, npe);
         } catch (Exception e) {
-            LOG.error("Error while deleting edge {}", GraphHelper.string(edge), e);
+            LOG.error("Error while deleting edge {}", graphHelperV3.string(edge), e);
             throw new AtlasBaseException(e);
         }
 

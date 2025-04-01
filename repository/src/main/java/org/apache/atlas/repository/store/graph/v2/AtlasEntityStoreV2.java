@@ -40,7 +40,7 @@ import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -108,8 +108,8 @@ import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.*;
 import static org.apache.atlas.repository.Constants.IS_INCOMPLETE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.STATE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.*;
-import static org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2.validateLabels;
+import static org.apache.atlas.repository.graph.GraphHelperV3.*;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3.validateLabels;
 import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory.UPDATE_ENTITY_MEANINGS_ON_TERM_HARD_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory.UPDATE_ENTITY_MEANINGS_ON_TERM_SOFT_DELETE;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
@@ -131,10 +131,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final RestoreHandlerV1          restoreHandlerV1;
     private final AtlasTypeRegistry         typeRegistry;
     private final IAtlasEntityChangeNotifier entityChangeNotifier;
-    private final EntityGraphMapperV2 entityGraphMapperV2;
-    private final EntityGraphRetrieverV2       entityRetriever;
+    private final EntityGraphMapperV3 entityGraphMapperV3;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private       boolean                    storeDifferentialAudits;
-    private final GraphHelper                graphHelper;
+    private final GraphHelperV3 graphHelperV3;
     private final TaskManagement             taskManagement;
     private EntityDiscoveryService discovery;
     private final AtlasRelationshipStore atlasRelationshipStore;
@@ -149,7 +149,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
-                              IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapperV2 entityGraphMapperV2, TaskManagement taskManagement,
+                              IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapperV3 entityGraphMapperV3, TaskManagement taskManagement,
                               AtlasRelationshipStore atlasRelationshipStore, FeatureFlagStore featureFlagStore,
                               IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier, AtlasDistributedTaskNotificationSender taskNotificationSender) {
 
@@ -158,10 +158,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.restoreHandlerV1     = restoreHandlerV1;
         this.typeRegistry         = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
-        this.entityGraphMapperV2 = entityGraphMapperV2;
-        this.entityRetriever      = new EntityGraphRetrieverV2(graph, typeRegistry);
+        this.entityGraphMapperV3 = entityGraphMapperV3;
+        this.entityRetriever      = new EntityGraphRetrieverV3(graph, typeRegistry);
         this.storeDifferentialAudits = STORE_DIFFERENTIAL_AUDITS.getBoolean();
-        this.graphHelper          = new GraphHelper(graph);
+        this.graphHelperV3 = new GraphHelperV3(graph);
         this.taskManagement = taskManagement;
         this.atlasRelationshipStore = atlasRelationshipStore;
         this.featureFlagStore = featureFlagStore;
@@ -214,7 +214,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getById({}, {})", guid, isMinExtInfo);
         }
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntityWithExtInfo ret = entityRetriever.toAtlasEntityWithExtInfo(guid, isMinExtInfo);
 
@@ -238,7 +238,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getByIdWithoutAuthorization({})", guid);
         }
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, true);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry, true);
 
         AtlasEntityWithExtInfo ret = entityRetriever.toAtlasEntityWithExtInfo(guid, true);
 
@@ -260,7 +260,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getHeaderById({})", guid);
         }
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
 
         AtlasEntityHeader ret = entityRetriever.toAtlasEntityHeaderWithClassifications(guid);
 
@@ -290,7 +290,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getByIds({}, {})", guids, isMinExtInfo);
         }
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntitiesWithExtInfo ret = entityRetriever.toAtlasEntitiesWithExtInfo(guids, isMinExtInfo);
 
@@ -332,7 +332,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> getEntitiesByUniqueAttributes({}, {})", entityType.getTypeName(), uniqueAttributes);
         }
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntitiesWithExtInfo ret = entityRetriever.getEntitiesByUniqueAttributes(entityType.getTypeName(), uniqueAttributes, isMinExtInfo);
 
@@ -365,7 +365,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         AtlasVertex entityVertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry, ignoreRelationships);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry, ignoreRelationships);
 
         AtlasEntityWithExtInfo ret = entityRetriever.toAtlasEntityWithExtInfo(entityVertex, isMinExtInfo);
 
@@ -398,7 +398,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         AtlasVertex entityVertex = AtlasGraphUtilsV3.getVertexByUniqueAttributes(graph, entityType, uniqAttributes);
 
-        EntityGraphRetrieverV2 entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
+        EntityGraphRetrieverV3 entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
 
         AtlasEntityHeader ret = entityRetriever.toAtlasEntityHeader(entityVertex);
 
@@ -1049,7 +1049,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
         }
 
-        entityGraphMapperV2.repairClassificationMappings(entityVertex);
+        entityGraphMapperV3.repairClassificationMappings(entityVertex);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== repairClassificationMappings({})", guid);
@@ -1098,7 +1098,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         // validate if entity, not already associated with classifications
         validateEntityAssociations(guid, classifications);
 
-        entityGraphMapperV2.addClassifications(context, guid, classifications);
+        entityGraphMapperV3.addClassifications(context, guid, classifications);
     }
 
     @Override
@@ -1145,7 +1145,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             validateAndNormalize(classification);
         }
 
-        entityGraphMapperV2.updateClassifications(context, guid, classifications);
+        entityGraphMapperV3.updateClassifications(context, guid, classifications);
 
         AtlasPerfTracer.log(perf);
     }
@@ -1204,7 +1204,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
         for (String guid : validGuids) {
-            entityGraphMapperV2.addClassifications(context, guid, classifications);
+            entityGraphMapperV3.addClassifications(context, guid, classifications);
         }
     }
 
@@ -1240,7 +1240,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
 
-        entityGraphMapperV2.deleteClassification(guid, classificationName, associatedEntityGuid);
+        entityGraphMapperV3.deleteClassification(guid, classificationName, associatedEntityGuid);
     }
 
 
@@ -1377,7 +1377,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             LOG.debug("==> addOrUpdateBusinessAttributes(guid={}, businessAttributes={}, isOverwrite={})", guid, businessAttrbutes, isOverwrite);
         }
 
-        entityGraphMapperV2.addOrUpdateBusinessAttributes(guid, businessAttrbutes, isOverwrite);
+        entityGraphMapperV3.addOrUpdateBusinessAttributes(guid, businessAttrbutes, isOverwrite);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== addOrUpdateBusinessAttributes(guid={}, businessAttributes={}, isOverwrite={})", guid, businessAttrbutes, isOverwrite);
@@ -1408,7 +1408,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         String                          typeName       = getTypeName(entityVertex);
         AtlasEntityType                 entityType     = typeRegistry.getEntityTypeByName(typeName);
 
-        entityGraphMapperV2.removeBusinessAttributes(entityVertex, entityType, businessAttributes);
+        entityGraphMapperV3.removeBusinessAttributes(entityVertex, entityType, businessAttributes);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== removeBusinessAttributes(guid={}, businessAttributes={})", guid, businessAttributes);
@@ -1467,7 +1467,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
         }
 
-        entityGraphMapperV2.setLabels(entityVertex, labels);
+        entityGraphMapperV3.setLabels(entityVertex, labels);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== setLabels()");
@@ -1506,7 +1506,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         validateLabels(labels);
 
-        entityGraphMapperV2.removeLabels(entityVertex, labels);
+        entityGraphMapperV3.removeLabels(entityVertex, labels);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== removeLabels()");
@@ -1545,7 +1545,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         validateLabels(labels);
 
-        entityGraphMapperV2.addLabels(entityVertex, labels);
+        entityGraphMapperV3.addLabels(entityVertex, labels);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== addLabels()");
@@ -1579,7 +1579,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         MetricRecorder metric = RequestContext.get().startMetricRecord("createOrUpdate");
 
         try {
-            final EntityMutationContext context = preCreateOrUpdate(entityStream, entityGraphMapperV2, isPartialUpdate);
+            final EntityMutationContext context = preCreateOrUpdate(entityStream, entityGraphMapperV3, isPartialUpdate);
 
             // Check if authorized to create entities
             if (!RequestContext.get().isImportInProgress() && !RequestContext.get().isSkipAuthorizationCheck()) {
@@ -1673,7 +1673,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
 
-            EntityMutationResponse ret = entityGraphMapperV2.mapAttributesAndClassifications(context, isPartialUpdate, bulkRequestContext);
+            EntityMutationResponse ret = entityGraphMapperV3.mapAttributesAndClassifications(context, isPartialUpdate, bulkRequestContext);
 
             ret.setGuidAssignments(context.getGuidAssignments());
 
@@ -1731,10 +1731,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     }
 
-    private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapperV2 entityGraphMapperV2, boolean isPartialUpdate) throws AtlasBaseException {
+    private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapperV3 entityGraphMapperV3, boolean isPartialUpdate) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
         this.graph.setEnableCache(RequestContext.get().isCacheEnabled());
-        EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapperV2);
+        EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapperV3);
         EntityGraphDiscoveryContext discoveryContext = graphDiscoverer.discoverEntities();
         EntityMutationContext       context          = new EntityMutationContext(discoveryContext);
         RequestContext              requestContext   = RequestContext.get();
@@ -1792,9 +1792,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                         //Create vertices which do not exist in the repository
                         if (RequestContext.get().isImportInProgress() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
-                            vertex = entityGraphMapperV2.createVertexWithGuid(entity, entity.getGuid());
+                            vertex = entityGraphMapperV3.createVertexWithGuid(entity, entity.getGuid());
                         } else {
-                            vertex = entityGraphMapperV2.createVertex(entity);
+                            vertex = entityGraphMapperV3.createVertex(entity);
                         }
 
                         discoveryContext.addResolvedGuid(guid, vertex);
@@ -1851,12 +1851,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                             context.addEntityToDelete(vertex);
                         } else if (currStatus == Status.DELETED && newStatus == Status.ACTIVE) {
                             LOG.warn("Import is attempting to activate deleted entity (guid={}).", guid);
-                            entityGraphMapperV2.importActivateEntity(vertex, entity);
+                            entityGraphMapperV3.importActivateEntity(vertex, entity);
                             context.addCreated(guid, entity, entityType, vertex);
                         }
                     }
 
-                    entityGraphMapperV2.updateSystemAttributes(vertex, entity);
+                    entityGraphMapperV3.updateSystemAttributes(vertex, entity);
                 }
             }
         }
@@ -2015,7 +2015,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE:
-                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapperV2));
+                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapperV3));
                 break;
 
             case DATA_DOMAIN_ENTITY_TYPE:
@@ -2088,7 +2088,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         if (ret != null) {
             context.addResolvedIdByUniqAttribs(objectId, ret);
             if (entity.getLabels() != null) {
-                entityGraphMapperV2.setLabels(ret, entity.getLabels());
+                entityGraphMapperV3.setLabels(ret, entity.getLabels());
             }
         } else {
             ret = context.getResolvedEntityVertex(objectId);
@@ -2144,7 +2144,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             RequestContext.get().endMetricRecord(metric);
 
             if (CollectionUtils.isNotEmpty(categories)) {
-                entityGraphMapperV2.removeAttrForCategoryDelete(categories);
+                entityGraphMapperV3.removeAttrForCategoryDelete(categories);
                 deleteDelegate.getHandler(DeleteType.HARD).deleteEntities(categories);
             }
 
@@ -2586,7 +2586,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 entity.setBusinessAttribute(businessAttribute.getDefinedInType().getTypeName(), businessAttribute.getName(), attrValue);
             } else {
                 AtlasEntity                      entity             = new AtlasEntity();
-                String                           guid               = GraphHelper.getGuid(vertex);
+                String                           guid               = GraphHelperV3.getGuid(vertex);
                 Map<String, Map<String, Object>> businessAttributes = entityRetriever.getBusinessMetadata(vertex);
 
                 entity.setGuid(guid);
@@ -2671,7 +2671,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     public void repairIndex() throws AtlasBaseException {
         try {
             LOG.info("ReIndexPatch: Starting...");
-            PatchContext context = new PatchContext(graph, typeRegistry, null, entityGraphMapperV2);
+            PatchContext context = new PatchContext(graph, typeRegistry, null, entityGraphMapperV3);
             ReIndexPatch.ReindexPatchProcessor reindexPatchProcessor = new ReIndexPatch.ReindexPatchProcessor(context);
 
             reindexPatchProcessor.repairVertices();
@@ -2701,7 +2701,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 AtlasEdge edge = null;
                 try {
                     if (processVertex != null && assetVertex != null) {
-                        edge = graphHelper.getEdge(processVertex, assetVertex, request.getLabel());
+                        edge = graphHelperV3.getEdge(processVertex, assetVertex, request.getLabel());
                     } else {
                         LOG.warn("Skipping since vertex is null for processGuid {} and asset Guid {}"
                                 ,request.getProcessGuid(),request.getEndGuid()  );
@@ -2846,13 +2846,13 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             AtlasVertex termVertex = AtlasGraphUtilsV3.findByGuid(this.graph, guid);
 
             if(termVertex!= null && ATLAS_GLOSSARY_TERM_ENTITY_TYPE.equals(getTypeName(termVertex)) &&
-                    GraphHelper.getStatus(termVertex) == AtlasEntity.Status.ACTIVE) {
+                    GraphHelperV3.getStatus(termVertex) == AtlasEntity.Status.ACTIVE) {
                 Iterable<AtlasEdge> edges = termVertex.getEdges(AtlasEdgeDirection.OUT, Constants.TERM_ASSIGNMENT_LABEL);
                 // Get entity to tagged with term.
                 if (edges != null) {
                     for (Iterator<AtlasEdge> iter = edges.iterator(); iter.hasNext(); ) {
                         AtlasEdge edge = iter.next();
-                        if (GraphHelper.getStatus(edge) == AtlasEntity.Status.ACTIVE) {
+                        if (GraphHelperV3.getStatus(edge) == AtlasEntity.Status.ACTIVE) {
                             AtlasVertex entityVertex = edge.getInVertex();
                             if (entityVertex != null & getStatus(entityVertex) == AtlasEntity.Status.ACTIVE) {
                                 if(!RequestContext.get().getProcessGuidIds().contains(getGuid(entityVertex))) {
@@ -2874,7 +2874,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         if (edges != null) {
             for (Iterator<AtlasEdge> iter = edges.iterator(); iter.hasNext(); ) {
                 AtlasEdge edge = iter.next();
-                if (GraphHelper.getStatus(edge) == AtlasEntity.Status.ACTIVE) {
+                if (GraphHelperV3.getStatus(edge) == AtlasEntity.Status.ACTIVE) {
                     AtlasVertex termVertex = edge.getOutVertex();
                     if (termVertex != null & getStatus(termVertex) == AtlasEntity.Status.ACTIVE) {
                         String termQN = termVertex.getProperty(QUALIFIED_NAME, String.class);
@@ -2947,7 +2947,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         List<AtlasVertex> atlasVertices = new ArrayList<>();
         try {
             for (BusinessPolicyRequest.AssetComplianceInfo ad : data) {
-                AtlasVertex av = this.entityGraphMapperV2.linkBusinessPolicy(ad);
+                AtlasVertex av = this.entityGraphMapperV3.linkBusinessPolicy(ad);
                 atlasVertices.add(av);
             }
             handleEntityMutation(atlasVertices);
@@ -2964,7 +2964,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     public void unlinkBusinessPolicy(String policyGuid, Set<String> unlinkGuids) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("unlinkBusinessPolicy.GraphTransaction");
         try {
-            List<AtlasVertex> vertices = this.entityGraphMapperV2.unlinkBusinessPolicy(policyGuid, unlinkGuids);
+            List<AtlasVertex> vertices = this.entityGraphMapperV3.unlinkBusinessPolicy(policyGuid, unlinkGuids);
             if (CollectionUtils.isEmpty(vertices)) {
                 return;
             }
@@ -2986,7 +2986,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         try {
             List<String> assetGuids = new ArrayList<>(linkGuids);
             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(assetGuids);
-            List<AtlasVertex> vertices = this.entityGraphMapperV2.linkMeshEntityToAssets(meshEntityGuid, linkGuids);
+            List<AtlasVertex> vertices = this.entityGraphMapperV3.linkMeshEntityToAssets(meshEntityGuid, linkGuids);
             if (CollectionUtils.isEmpty(vertices)) {
                 return;
             }
@@ -3009,7 +3009,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         try {
             List<String> assetGuids = new ArrayList<>(unlinkGuids);
             GraphTransactionInterceptor.lockObjectAndReleasePostCommit(assetGuids);
-            List<AtlasVertex> vertices = this.entityGraphMapperV2.unlinkMeshEntityFromAssets(meshEntityGuid, unlinkGuids);
+            List<AtlasVertex> vertices = this.entityGraphMapperV3.unlinkMeshEntityFromAssets(meshEntityGuid, unlinkGuids);
             if (CollectionUtils.isEmpty(vertices)) {
                 return;
             }
@@ -3039,7 +3039,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         try {
             // Attempt to move the business policy using the entityGraphMapper
-            AtlasVertex vertex = entityGraphMapperV2.moveBusinessPolicies(policyIds, assetId, type);
+            AtlasVertex vertex = entityGraphMapperV3.moveBusinessPolicies(policyIds, assetId, type);
 
             if (vertex == null) {
                 LOG.warn("No vertex found for assetId: {}", assetId);

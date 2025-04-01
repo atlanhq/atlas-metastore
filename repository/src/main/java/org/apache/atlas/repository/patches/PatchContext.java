@@ -20,7 +20,7 @@ package org.apache.atlas.repository.patches;
 
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 
 public class PatchContext {
@@ -28,14 +28,14 @@ public class PatchContext {
     private final AtlasTypeRegistry        typeRegistry;
     private final GraphBackedSearchIndexer indexer;
     private final AtlasPatchRegistry       patchRegistry;
-    private final EntityGraphMapperV2 entityGraphMapperV2;
+    private final EntityGraphMapperV3 entityGraphMapperV3;
 
-    public PatchContext(AtlasGraph graph, AtlasTypeRegistry typeRegistry, GraphBackedSearchIndexer indexer, EntityGraphMapperV2 entityGraphMapperV2) {
+    public PatchContext(AtlasGraph graph, AtlasTypeRegistry typeRegistry, GraphBackedSearchIndexer indexer, EntityGraphMapperV3 entityGraphMapperV3) {
         this.graph         = graph;
         this.typeRegistry  = typeRegistry;
         this.indexer       = indexer;
         this.patchRegistry = new AtlasPatchRegistry(this.graph);
-        this.entityGraphMapperV2 = entityGraphMapperV2;
+        this.entityGraphMapperV3 = entityGraphMapperV3;
     }
 
     public AtlasGraph getGraph() {
@@ -53,5 +53,5 @@ public class PatchContext {
     public AtlasPatchRegistry getPatchRegistry() {
         return patchRegistry;
     }
-    public EntityGraphMapperV2 getEntityGraphMapperV2() { return entityGraphMapperV2;}
+    public EntityGraphMapperV3 getEntityGraphMapperV2() { return entityGraphMapperV3;}
 }

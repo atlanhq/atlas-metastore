@@ -25,7 +25,7 @@ import org.apache.atlas.model.instance.AtlasEntity.Status;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -109,7 +109,7 @@ public class AtlasGraphUtilsV3 {
     }
 
     public static String getEdgeLabel(String property) {
-        return GraphHelper.EDGE_LABEL_PREFIX + property;
+        return GraphHelperV3.EDGE_LABEL_PREFIX + property;
     }
 
     public static String getQualifiedAttributePropertyKey(AtlasStructType fromType, String attributeName) throws AtlasBaseException {
@@ -362,7 +362,7 @@ public class AtlasGraphUtilsV3 {
 
         Iterator iterator = query.vertices().iterator();
 
-        String ret = iterator.hasNext() ? GraphHelper.getGuid((AtlasVertex) iterator.next()) : null;
+        String ret = iterator.hasNext() ? GraphHelperV3.getGuid((AtlasVertex) iterator.next()) : null;
 
         RequestContext.get().endMetricRecord(metric);
 

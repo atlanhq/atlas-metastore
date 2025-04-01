@@ -29,7 +29,7 @@ import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.repository.audit.EntityAuditRepository;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
@@ -71,10 +71,10 @@ public class ClassificationAssociator {
 
     public static class Retriever {
         private final EntityAuditRepository auditRepository;
-        private final EntityGraphRetrieverV2 entityRetriever;
+        private final EntityGraphRetrieverV3 entityRetriever;
 
         public Retriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityAuditRepository auditRepository) {
-            this.entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
+            this.entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
             this.auditRepository = auditRepository;
         }
 
@@ -131,8 +131,8 @@ public class ClassificationAssociator {
         private final AtlasGraph graph;
         private final AtlasTypeRegistry typeRegistry;
         private final AtlasEntityStore entitiesStore;
-        private final EntityGraphRetrieverV2 entityRetriever;
-        private final EntityGraphMapperV2 EntityGraphMapperV2;
+        private final EntityGraphRetrieverV3 entityRetriever;
+        private final EntityGraphMapperV3 EntityGraphMapperV3;
         private final IAtlasEntityChangeNotifier entityChangeNotifier;
         private final AtlasInstanceConverter instanceConverter;
         private final StringBuilder actionSummary = new StringBuilder();
@@ -140,21 +140,21 @@ public class ClassificationAssociator {
         private static final boolean IGNORE_REL = ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES.getBoolean();
 
         public Updater(AtlasGraph graph, AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
-                       EntityGraphMapperV2 EntityGraphMapperV2, IAtlasEntityChangeNotifier entityChangeNotifier,
+                       EntityGraphMapperV3 EntityGraphMapperV3, IAtlasEntityChangeNotifier entityChangeNotifier,
                        AtlasInstanceConverter instanceConverter) {
             this.graph = graph;
             this.typeRegistry = typeRegistry;
             this.entitiesStore = entitiesStore;
-            this.EntityGraphMapperV2 = EntityGraphMapperV2;
+            this.EntityGraphMapperV3 = EntityGraphMapperV3;
             this.entityChangeNotifier = entityChangeNotifier;
             this.instanceConverter = instanceConverter;
-            entityRetriever = new EntityGraphRetrieverV2(graph, typeRegistry);
+            entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
         }
 
         public Updater(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
-                       EntityGraphMapperV2 EntityGraphMapperV2, IAtlasEntityChangeNotifier entityChangeNotifier,
+                       EntityGraphMapperV3 EntityGraphMapperV3, IAtlasEntityChangeNotifier entityChangeNotifier,
                        AtlasInstanceConverter instanceConverter) {
-            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, entitiesStore, EntityGraphMapperV2, entityChangeNotifier, instanceConverter);
+            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, entitiesStore, EntityGraphMapperV3, entityChangeNotifier, instanceConverter);
         }
 
         public void setClassifications(Map<String, AtlasEntityHeader> map, boolean overrideClassifications) throws AtlasBaseException {
@@ -209,7 +209,7 @@ public class ClassificationAssociator {
 
                     for (Object obj: vertices) {
                         AtlasVertex vertex = (AtlasVertex) obj;
-                        AtlasEntity entity = instanceConverter.getAndCacheEntity(GraphHelper.getGuid(vertex), IGNORE_REL);
+                        AtlasEntity entity = instanceConverter.getAndCacheEntity(GraphHelperV3.getGuid(vertex), IGNORE_REL);
 
                         allVertices.add(vertex);
                         propagatedEntities.add(entity);
@@ -227,7 +227,7 @@ public class ClassificationAssociator {
 
                     for (Object obj: vertices) {
                         AtlasVertex vertex = (AtlasVertex) obj;
-                        AtlasEntity entity = instanceConverter.getAndCacheEntity(GraphHelper.getGuid(vertex), IGNORE_REL);
+                        AtlasEntity entity = instanceConverter.getAndCacheEntity(GraphHelperV3.getGuid(vertex), IGNORE_REL);
 
                         allVertices.add(vertex);
                         propagatedEntities.add(entity);
@@ -236,7 +236,7 @@ public class ClassificationAssociator {
                     entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(addedClassification), false);
                 }
             }
-            EntityGraphMapperV2.updateClassificationText(null, allVertices);
+            EntityGraphMapperV3.updateClassificationText(null, allVertices);
             transactionInterceptHelper.intercept();
 
             RequestContext.get().endMetricRecord(recorder);

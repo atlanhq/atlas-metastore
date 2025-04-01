@@ -27,12 +27,12 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelatedObjectId;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -43,7 +43,7 @@ import org.slf4j.LoggerFactory;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.graph.GraphHelper.getActiveChildrenVertices;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getActiveChildrenVertices;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 
 public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
@@ -51,14 +51,14 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
 
     private EntityMutationContext context;
     private Map<String, String> updatedPolicyResources;
-    private EntityGraphRetrieverV2 retrieverNoRelation = null;
+    private EntityGraphRetrieverV3 retrieverNoRelation = null;
     private Map<String, String> updatedDomainQualifiedNames;
 
-    public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever,
+    public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever,
                                   AtlasGraph graph) {
         super(typeRegistry, entityRetriever, graph);
         this.updatedPolicyResources = new HashMap<>();
-        this.retrieverNoRelation = new EntityGraphRetrieverV2(graph, typeRegistry, true);
+        this.retrieverNoRelation = new EntityGraphRetrieverV3(graph, typeRegistry, true);
         this.updatedDomainQualifiedNames = new HashMap<>();
     }
 
@@ -308,8 +308,8 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             this.updatedDomainQualifiedNames.put(currentDomainQualifiedName, updatedDomainQualifiedName);
 
             //update system properties
-            GraphHelper.setModifiedByAsString(childDomainVertex, RequestContext.get().getUser());
-            GraphHelper.setModifiedTime(childDomainVertex, System.currentTimeMillis());
+            GraphHelperV3.setModifiedByAsString(childDomainVertex, RequestContext.get().getUser());
+            GraphHelperV3.setModifiedTime(childDomainVertex, System.currentTimeMillis());
 
             // move products to target Domain
             Iterator<AtlasVertex> products = getActiveChildrenVertices(childDomainVertex, DATA_PRODUCT_EDGE_LABEL);
@@ -363,8 +363,8 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             this.updatedPolicyResources.put(currentResource, updatedResource);
 
             //update system properties
-            GraphHelper.setModifiedByAsString(productVertex, RequestContext.get().getUser());
-            GraphHelper.setModifiedTime(productVertex, System.currentTimeMillis());
+            GraphHelperV3.setModifiedByAsString(productVertex, RequestContext.get().getUser());
+            GraphHelperV3.setModifiedTime(productVertex, System.currentTimeMillis());
 
             recordUpdatedChildEntities(productVertex, updatedAttributes);
 
@@ -414,7 +414,7 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
 
     @Override
     public void processDelete(AtlasVertex vertex) throws AtlasBaseException {
-        String domainGuid = GraphHelper.getGuid(vertex);
+        String domainGuid = GraphHelperV3.getGuid(vertex);
 
         if(LOG.isDebugEnabled()) {
             LOG.debug("DataDomainPreProcessor.processDelete: pre processing {}", domainGuid);

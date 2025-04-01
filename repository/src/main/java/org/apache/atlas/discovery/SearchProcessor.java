@@ -28,7 +28,7 @@ import org.apache.atlas.model.discovery.SearchParameters.FilterCriteria.Conditio
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -777,11 +777,11 @@ public abstract class SearchProcessor {
                     op      = SearchParameters.Operator.CONTAINS;
                     break;
                 case EQ:
-                    attrVal = GraphHelper.getDelimitedClassificationNames(Collections.singleton(attrVal));
+                    attrVal = GraphHelperV3.getDelimitedClassificationNames(Collections.singleton(attrVal));
                     op      = SearchParameters.Operator.CONTAINS;
                     break;
                 case NEQ:
-                    attrVal = GraphHelper.getDelimitedClassificationNames(Collections.singleton(attrVal));
+                    attrVal = GraphHelperV3.getDelimitedClassificationNames(Collections.singleton(attrVal));
                     op      = SearchParameters.Operator.NOT_CONTAINS;
                     break;
                 case CONTAINS:

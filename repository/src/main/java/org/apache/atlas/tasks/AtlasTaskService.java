@@ -26,7 +26,7 @@ import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.TASK_GUID;
-import static org.apache.atlas.repository.graph.GraphHelper.getClassificationVertex;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getClassificationVertex;
 import static org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3.setEncodedProperty;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_CLASSIFICATION_VERTEX_ID;
 import static org.apache.atlas.tasks.TaskRegistry.toAtlasTask;

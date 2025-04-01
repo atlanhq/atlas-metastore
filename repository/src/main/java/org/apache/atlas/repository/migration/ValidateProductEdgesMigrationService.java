@@ -2,10 +2,9 @@ package org.apache.atlas.repository.migration;
 
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
-import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,18 +16,18 @@ import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.EDGE_LABELS_FOR_HARD_DELETION;
 import static org.apache.atlas.repository.Constants.MODIFICATION_TIMESTAMP_PROPERTY_KEY;
-import static org.apache.atlas.repository.graph.GraphHelper.getStatus;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getStatus;
 
 public class ValidateProductEdgesMigrationService {
 
     private static final Logger LOG = LoggerFactory.getLogger(ValidateProductEdgesMigrationService.class);
 
     private final Set<String> productGuids;
-    private final GraphHelper graphHelper;
+    private final GraphHelperV3 graphHelperV3;
 
-    public ValidateProductEdgesMigrationService(Set<String> productGuids, GraphHelper graphHelper) {
+    public ValidateProductEdgesMigrationService(Set<String> productGuids, GraphHelperV3 graphHelperV3) {
         this.productGuids = productGuids;
-        this.graphHelper = graphHelper;
+        this.graphHelperV3 = graphHelperV3;
     }
 
     public boolean validateEdgeMigration() throws AtlasBaseException {
@@ -41,7 +40,7 @@ public class ValidateProductEdgesMigrationService {
                 LOG.info("Validating edges for Product: {}", productGuid);
 
                 if (productGuid != null && !productGuid.trim().isEmpty()) {
-                    AtlasVertex productVertex = graphHelper.getVertexForGUID(productGuid);
+                    AtlasVertex productVertex = graphHelperV3.getVertexForGUID(productGuid);
 
                     if (productVertex == null) {
                         LOG.info("ProductGUID with no vertex found: {}", productGuid);

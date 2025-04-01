@@ -25,7 +25,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -40,7 +40,6 @@ import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.apache.atlas.ESAliasRequestBuilder.ESAliasAction.ADD;
 import static org.apache.atlas.repository.Constants.PERSONA_ENTITY_TYPE;
@@ -49,8 +48,6 @@ import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.AI_APPLICATION;
-import static org.apache.atlas.repository.Constants.AI_MODEL;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_DOMAIN;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_METADATA;
 import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_GLOSSARY;
@@ -80,13 +77,13 @@ public class ESAliasStore implements IndexAliasStore {
     public static final String ENABLE_PERSONA_HIERARCHY_FILTER = "enable_persona_hierarchy_filter";
 
     private final AtlasGraph graph;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
     private final int assetsMaxLimit = AtlasConfiguration.PERSONA_POLICY_ASSET_MAX_LIMIT.getInt();
 
     @Inject
     public ESAliasStore(AtlasGraph graph,
-                        EntityGraphRetrieverV2 entityRetriever) {
+                        EntityGraphRetrieverV3 entityRetriever) {
         this.graph = graph;
         this.entityRetriever = entityRetriever;
     }

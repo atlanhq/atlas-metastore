@@ -34,7 +34,7 @@ import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.util.UniqueList;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.AtlasGremlinQueryProvider;
@@ -64,7 +64,7 @@ public class ExportService {
     private final StartEntityFetchByExportRequest startEntityFetchByExportRequest;
     private final EntitiesExtractor         entitiesExtractor;
     private       AuditsWriter              auditsWriter;
-    private final EntityGraphRetrieverV2      EntityGraphRetrieverV2;
+    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
     private       ExportTypeProcessor       exportTypeProcessor;
     private final HdfsPathEntityCreator     hdfsPathEntityCreator;
     private final GlossaryService           glossaryService;
@@ -74,7 +74,7 @@ public class ExportService {
                          AuditsWriter auditsWriter, HdfsPathEntityCreator hdfsPathEntityCreator,
                          GlossaryService glossaryService) {
         this.typeRegistry         = typeRegistry;
-        this.EntityGraphRetrieverV2 = new EntityGraphRetrieverV2(graph, this.typeRegistry);
+        this.EntityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, this.typeRegistry);
         this.auditsWriter         = auditsWriter;
         this.hdfsPathEntityCreator = hdfsPathEntityCreator;
         this.glossaryService = glossaryService;
@@ -260,7 +260,7 @@ public class ExportService {
             return;
         }
 
-        AtlasEntityWithExtInfo entityWithExtInfo = EntityGraphRetrieverV2.toAtlasEntityWithExtInfo(guid);
+        AtlasEntityWithExtInfo entityWithExtInfo = EntityGraphRetrieverV3.toAtlasEntityWithExtInfo(guid);
 
         processEntity(entityWithExtInfo, context);
         if (LOG.isDebugEnabled()) {
@@ -295,12 +295,12 @@ public class ExportService {
                 try {
                     String glossaryGuid = context.termsGlossary.get(termGuid);
                     if (!context.sink.hasEntity(glossaryGuid)) {
-                        AtlasEntity glossary = EntityGraphRetrieverV2.toAtlasEntity(glossaryGuid);
+                        AtlasEntity glossary = EntityGraphRetrieverV3.toAtlasEntity(glossaryGuid);
                         addEntity(new AtlasEntityWithExtInfo(glossary), context);
                     }
 
                     if (!context.sink.hasEntity(termGuid)) {
-                        AtlasEntity term = EntityGraphRetrieverV2.toAtlasEntity(termGuid);
+                        AtlasEntity term = EntityGraphRetrieverV3.toAtlasEntity(termGuid);
                         addEntity(new AtlasEntityWithExtInfo(term), context);
                     }
                 } catch (AtlasBaseException exception) {

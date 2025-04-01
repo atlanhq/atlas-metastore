@@ -27,7 +27,7 @@ import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.v1.model.instance.Struct;
 import org.apache.atlas.v1.model.notification.EntityNotificationV1;
 import org.apache.atlas.v1.model.notification.EntityNotificationV1.OperationType;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
@@ -166,7 +166,7 @@ public class NotificationEntityChangeListener implements EntityChangeListener {
         List<EntityNotificationV1> messages = new ArrayList<>();
 
         for (Referenceable entityDefinition : entityDefinitions) {
-            if(GraphHelper.isInternalType(entityDefinition.getTypeName())) {
+            if(GraphHelperV3.isInternalType(entityDefinition.getTypeName())) {
                 continue;
             }
 

@@ -30,10 +30,10 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutations;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -63,8 +63,8 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
 
     protected final AtlasGraph graph;
     protected final AtlasTypeRegistry typeRegistry;
-    protected final EntityGraphRetrieverV2 entityRetriever;
-    protected EntityGraphRetrieverV2 entityRetrieverNoRelations;
+    protected final EntityGraphRetrieverV3 entityRetriever;
+    protected EntityGraphRetrieverV3 entityRetrieverNoRelations;
     private final PreProcessor preProcessor;
     protected EntityDiscoveryService discovery;
 
@@ -80,14 +80,14 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
         customAttributes.put(MIGRATION_CUSTOM_ATTRIBUTE, "true");
     }
 
-    AbstractDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever, AtlasGraph graph) {
+    AbstractDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever, AtlasGraph graph) {
         this.graph = graph;
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         this.preProcessor = new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever);
 
         try {
-            this.entityRetrieverNoRelations = new EntityGraphRetrieverV2(graph, typeRegistry, true);
+            this.entityRetrieverNoRelations = new EntityGraphRetrieverV3(graph, typeRegistry, true);
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
         } catch (AtlasException e) {
             e.printStackTrace();
@@ -140,7 +140,7 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
                     if (policyEntity.hasRelationshipAttribute(REL_ATTR_ACCESS_CONTROL) && policyEntity.getRelationshipAttribute(REL_ATTR_ACCESS_CONTROL) != null) {
                         AtlasObjectId accessControlObjId = (AtlasObjectId) policyEntity.getRelationshipAttribute(REL_ATTR_ACCESS_CONTROL);
                         AtlasVertex accessControl = entityRetriever.getEntityVertex(accessControlObjId.getGuid());
-                        context.getDiscoveryContext().addResolvedGuid(GraphHelper.getGuid(accessControl), accessControl);
+                        context.getDiscoveryContext().addResolvedGuid(GraphHelperV3.getGuid(accessControl), accessControl);
                     }
 
                     List<String> policyResources = (List<String>) policyEntity.getAttribute(ATTR_POLICY_RESOURCES);

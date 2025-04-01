@@ -30,11 +30,11 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelatedObjectId;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasEntityType;
@@ -65,9 +65,9 @@ import static org.apache.atlas.repository.Constants.CATEGORY_TERMS_EDGE_LABEL;
 import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
-import static org.apache.atlas.repository.graph.GraphHelper.getActiveChildrenVertices;
-import static org.apache.atlas.repository.graph.GraphHelper.getActiveParentVertices;
-import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getActiveChildrenVertices;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getActiveParentVertices;
+import static org.apache.atlas.repository.graph.GraphHelperV3.getTypeName;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory.UPDATE_ENTITY_MEANINGS_ON_TERM_UPDATE;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
@@ -78,13 +78,13 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
     private AtlasEntityHeader anchor;
     private AtlasEntityHeader parentCategory;
-    private EntityGraphMapperV2 EntityGraphMapperV2;
+    private EntityGraphMapperV3 EntityGraphMapperV3;
     private EntityMutationContext context;
 
-    public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV2 entityRetriever,
-                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapperV2 EntityGraphMapperV2) {
+    public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever,
+                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapperV3 EntityGraphMapperV3) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
-        this.EntityGraphMapperV2 = EntityGraphMapperV2;
+        this.EntityGraphMapperV3 = EntityGraphMapperV3;
     }
 
     @Override
@@ -251,8 +251,8 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             updateGlossaryRelationship(childCategoryVertex, GLOSSARY_CATEGORY_REL_TYPE);
 
             //update system properties
-            GraphHelper.setModifiedByAsString(childCategoryVertex, RequestContext.get().getUser());
-            GraphHelper.setModifiedTime(childCategoryVertex, System.currentTimeMillis());
+            GraphHelperV3.setModifiedByAsString(childCategoryVertex, RequestContext.get().getUser());
+            GraphHelperV3.setModifiedTime(childCategoryVertex, System.currentTimeMillis());
 
             // move terms to target Glossary
             Iterator<AtlasVertex> terms = getActiveChildrenVertices(childCategoryVertex, CATEGORY_TERMS_EDGE_LABEL);
@@ -311,8 +311,8 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             updateGlossaryRelationship(termVertex, GLOSSARY_TERM_REL_TYPE);
 
             //update system properties
-            GraphHelper.setModifiedByAsString(termVertex, RequestContext.get().getUser());
-            GraphHelper.setModifiedTime(termVertex, System.currentTimeMillis());
+            GraphHelperV3.setModifiedByAsString(termVertex, RequestContext.get().getUser());
+            GraphHelperV3.setModifiedTime(termVertex, System.currentTimeMillis());
 
             if (checkEntityTermAssociation(currentTermQualifiedName)) {
                 if (taskManagement != null && DEFERRED_ACTION_ENABLED) {
@@ -496,7 +496,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
         AtlasStructType.AtlasAttribute attribute = entityType.getRelationshipAttribute(ANCHOR, relationshipType);
 
-        EntityGraphMapperV2.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
+        EntityGraphMapperV3.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
     }
 
     private String createQualifiedName(AtlasVertex vertex) {

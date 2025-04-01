@@ -5,7 +5,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutations;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 
@@ -35,9 +35,9 @@ import static org.apache.atlas.repository.Constants.PURPOSE_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
 
 public class AuthPolicyValidator {
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
 
-    AuthPolicyValidator(EntityGraphRetrieverV2 entityRetriever) {
+    AuthPolicyValidator(EntityGraphRetrieverV3 entityRetriever) {
         this.entityRetriever = entityRetriever;
     }
 

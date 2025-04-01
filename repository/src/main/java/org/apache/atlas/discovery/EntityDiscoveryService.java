@@ -38,11 +38,11 @@ import org.apache.atlas.query.executors.ScriptEngineBasedExecutor;
 import org.apache.atlas.query.executors.TraversalBasedExecutor;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.userprofile.UserProfileService;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.searchlog.ESSearchLogger;
@@ -86,7 +86,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
 
     private final AtlasGraph                      graph;
-    private final EntityGraphRetrieverV2            entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private final AtlasGremlinQueryProvider       gremlinQueryProvider;
     private final AtlasTypeRegistry               typeRegistry;
     private final GraphBackedSearchIndexer        indexer;
@@ -108,7 +108,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                   UserProfileService userProfileService,
                                   StatsClient statsClient) throws AtlasException {
         this.graph                    = graph;
-        this.entityRetriever          = new EntityGraphRetrieverV2(this.graph, typeRegistry);
+        this.entityRetriever          = new EntityGraphRetrieverV3(this.graph, typeRegistry);
         this.indexer                  = indexer;
         this.searchTracker            = searchTracker;
         this.gremlinQueryProvider     = AtlasGremlinQueryProvider.INSTANCE;
@@ -266,10 +266,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
                 while (qryResult.hasNext()) {
                     AtlasVertex<?, ?> vertex         = qryResult.next().getVertex();
-                    String            vertexTypeName = GraphHelper.getTypeName(vertex);
+                    String            vertexTypeName = GraphHelperV3.getTypeName(vertex);
 
                     // skip non-entity vertices
-                    if (StringUtils.isEmpty(vertexTypeName) || StringUtils.isEmpty(GraphHelper.getGuid(vertex))) {
+                    if (StringUtils.isEmpty(vertexTypeName) || StringUtils.isEmpty(GraphHelperV3.getGuid(vertex))) {
                         continue;
                     }
 
@@ -278,7 +278,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
 
                     if (classificationNames != null) {
-                        List<String> traitNames = GraphHelper.getTraitNames(vertex);
+                        List<String> traitNames = GraphHelperV3.getTraitNames(vertex);
 
                         if (CollectionUtils.isEmpty(traitNames) ||
                                 !CollectionUtils.containsAny(classificationNames, traitNames)) {
@@ -552,7 +552,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
         //validate entity
         AtlasVertex     entityVertex   = entityRetriever.getEntityVertex(guid);
-        String          entityTypeName = GraphHelper.getTypeName(entityVertex);
+        String          entityTypeName = GraphHelperV3.getTypeName(entityVertex);
         AtlasEntityType entityType     = typeRegistry.getEntityTypeByName(entityTypeName);
 
         if (entityType == null) {
@@ -577,7 +577,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             relation = attribute.getRelationshipEdgeLabel();
         } else {
             //get end entity type through label
-            String endEntityTypeName = GraphHelper.getReferencedEntityTypeName(entityVertex, relation);
+            String endEntityTypeName = GraphHelperV3.getReferencedEntityTypeName(entityVertex, relation);
 
             if (StringUtils.isNotEmpty(endEntityTypeName)) {
                 endEntityType = typeRegistry.getEntityTypeByName(endEntityTypeName);
@@ -665,7 +665,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         //set approximate count
         //state of the edge and endVertex will be same
         if (getApproximateCount) {
-            Iterator<AtlasEdge> edges = GraphHelper.getAdjacentEdgesByLabel(entityVertex, AtlasEdgeDirection.BOTH, relation);
+            Iterator<AtlasEdge> edges = GraphHelperV3.getAdjacentEdgesByLabel(entityVertex, AtlasEdgeDirection.BOTH, relation);
 
             if (searchParameters.getExcludeDeletedEntities()) {
                 List<AtlasEdge> edgeList = new ArrayList<>();
@@ -751,7 +751,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private boolean skipDeletedEntities(boolean excludeDeletedEntities, AtlasVertex<?, ?> vertex) {
-        return excludeDeletedEntities && GraphHelper.getStatus(vertex) == DELETED;
+        return excludeDeletedEntities && GraphHelperV3.getStatus(vertex) == DELETED;
     }
 
     private static String getClassificationFilter(AtlasTypeRegistry typeRegistry, String classificationName, int maxTypesLengthInIdxQuery) {

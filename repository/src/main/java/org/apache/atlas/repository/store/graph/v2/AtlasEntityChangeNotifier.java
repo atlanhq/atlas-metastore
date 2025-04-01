@@ -45,7 +45,7 @@ import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.v1.model.instance.Struct;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
 import org.apache.atlas.repository.graph.FullTextMapperV2;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.util.AtlasRepositoryConfiguration;
 import org.apache.commons.collections.CollectionUtils;
@@ -630,7 +630,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         MetricRecorder metric = RequestContext.get().startMetricRecord("fullTextMapping");
 
         for (AtlasEntityHeader entityHeader : entityHeaders) {
-            if(GraphHelper.isInternalType(entityHeader.getTypeName())) {
+            if(GraphHelperV3.isInternalType(entityHeader.getTypeName())) {
                 continue;
             }
 
@@ -663,7 +663,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         }
 
         AtlasVertex atlasVertex = AtlasGraphUtilsV3.findByGuid(entityId);
-        if(atlasVertex == null || GraphHelper.isInternalType(atlasVertex)) {
+        if(atlasVertex == null || GraphHelperV3.isInternalType(atlasVertex)) {
             return;
         }
 

@@ -21,7 +21,7 @@ import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.discovery.SearchParameters;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graph.GraphHelperV3;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
 import org.apache.atlas.type.AtlasEntityType;
@@ -169,7 +169,7 @@ public class FreeTextSearchProcessor extends SearchProcessor {
                         }
 
                         if (CollectionUtils.isNotEmpty(context.getClassificationTypes())) {
-                            List<String> entityClassifications = GraphHelper.getAllTraitNames(vertex);
+                            List<String> entityClassifications = GraphHelperV3.getAllTraitNames(vertex);
 
                             if (!context.includeClassificationTypes(entityClassifications)) {
                                 continue;

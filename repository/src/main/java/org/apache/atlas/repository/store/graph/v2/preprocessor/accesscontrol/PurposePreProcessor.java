@@ -32,7 +32,7 @@ import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v3.AtlasGraphUtilsV3;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV2;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -66,13 +66,13 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
 
     private final AtlasGraph graph;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV2 entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private IndexAliasStore aliasStore;
     private AtlasEntityStore entityStore;
 
     public PurposePreProcessor(AtlasGraph graph,
                                AtlasTypeRegistry typeRegistry,
-                               EntityGraphRetrieverV2 entityRetriever,
+                               EntityGraphRetrieverV3 entityRetriever,
                                AtlasEntityStore entityStore) {
         this.graph = graph;
         this.typeRegistry = typeRegistry;
