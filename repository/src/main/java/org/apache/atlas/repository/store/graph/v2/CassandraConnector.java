@@ -41,6 +41,9 @@ public class CassandraConnector {
             String clusterName = ApplicationProperties.get().getString(CASSANDRA_CLUSTERNAME_PROPERTY, DEFAULT_CLUSTER_NAME);
             int port = 9042;
 
+            LOG.info("Using keyspace: {}", keyspace);
+            LOG.info("Using vertexTableName: {}", vertexTableName);
+
             cassSession = CqlSession.builder()
                     .addContactPoint(new InetSocketAddress(hostname, 9042))
                     .withLocalDatacenter("datacenter1")
@@ -53,7 +56,7 @@ public class CassandraConnector {
     }
 
     public static Map<String, Object> getVertexProperties(String vertexId) {
-        String query = "SELECT * FROM vertices where id = '" + vertexId + "'";
+        String query = "SELECT * FROM "+vertexTableName+" where id = '" + vertexId + "'";
         ResultSet resultSet = cassSession.execute(query);
 
         Map<String, Object> ret = new HashMap<>();
@@ -66,7 +69,7 @@ public class CassandraConnector {
     }
 
     public static Map<String, Object> getVertexPropertiesByGuid(String guid) {
-        String query = "SELECT * FROM vertices where guid = '" + guid + "'";
+        String query = "SELECT * FROM "+vertexTableName+" where guid = '" + guid + "'";
         ResultSet resultSet = cassSession.execute(query);
 
         for (Row row : resultSet) {
@@ -102,9 +105,6 @@ public class CassandraConnector {
                 } catch (JsonProcessingException e) {
                     throw new RuntimeException(e);
                 }
-                //Map<String, Object> interimValue = AtlasType.fromJson(columnValue.toString(), Map.class);
-
-                //columnValue = AtlasType.fromJson(columnValue, Map.class);
 
                 for (String attribute : interimValue.keySet()) {
                     map.put(attribute, interimValue.get(attribute));
@@ -121,7 +121,7 @@ public class CassandraConnector {
 
         String json_data = "{\"id\":"+ tagVertexId +",\"__typeName\":\""+ typeName +"\",\"__modifiedBy\":\"service-account-atlan-argo\",\"__state\":\"ACTIVE\",\"__propagate\":true,\"__restrictPropagationThroughLineage\":false,\"__removePropagations\":true,\"__restrictPropagationThroughHierarchy\":false,\"__entityGuid\":\" " +entityGuid+ "\",\"__createdBy\":\"service-account-atlan-argo\",\"__modificationTimestamp\":1743060425553,\"__entityStatus\":\"ACTIVE\",\"__timestamp\":1743060425553}";
 
-        String insert = "INSERT INTO vertices (id, name, created_at, json_data) VALUES (?, ?, ?, ?)";
+        String insert = "INSERT INTO "+vertexTableName+" (id, name, created_at, json_data) VALUES (?, ?, ?, ?)";
         PreparedStatement preparedStmt = cassSession.prepare(insert);
         BoundStatement boundStmt  = preparedStmt.bind( tagVertexId, "placeholder", System.currentTimeMillis(), json_data);
         cassSession.execute(boundStmt);
@@ -141,7 +141,7 @@ public class CassandraConnector {
         batchQuery.append("BEGIN BATCH ");
 
         for (Map entry : entitiesMap) {
-            String update = "UPDATE vertices SET json_data = '" + AtlasType.toJson(entry) + "' WHERE id = '" +  entry.get("id") + "'";
+            String update = "UPDATE "+vertexTableName+" SET json_data = '" + AtlasType.toJson(entry) + "' WHERE id = '" +  entry.get("id") + "'";
             batchQuery.append(update).append(";");
         }
 
