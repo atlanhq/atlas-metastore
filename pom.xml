@@ -702,7 +702,6 @@
         <dropwizard-metrics>3.2.2</dropwizard-metrics>
         <elasticsearch.version>7.17.4</elasticsearch.version>
         <entity.repository.impl>org.apache.atlas.repository.audit.InMemoryEntityAuditRepository</entity.repository.impl>
-        <!--<enunciate-maven-plugin.version>2.13.2</enunciate-maven-plugin.version>-->
         <enunciate-maven-plugin.version>2.17.0</enunciate-maven-plugin.version>
         <failsafe.version>2.18.1</failsafe.version>
         <falcon.version>0.8</falcon.version>
@@ -800,7 +799,8 @@
 
         <module>repository</module>
         <module>authorization</module>
-        <module>auth-common</module>
+<!--        <module>dashboardv2</module>-->
+
         <module>auth-agents-common</module>
         <module>auth-audits</module>
         <module>auth-plugin-atlas</module>
@@ -820,14 +820,16 @@
                 <enabled>false</enabled>
             </snapshots>
         </repository>
-       <!-- <repository>
-            <id>hortonworks.repo</id>
-            <url>https://repo.hortonworks.com/content/repositories/releases</url>
-            <name>Hortonworks Repo</name>
+        <repository>
+            <id>github</id>
+            <url>https://maven.pkg.github.com/atlanhq/atlan-janusgraph</url>
             <snapshots>
-                <enabled>false</enabled>
+                <enabled>true</enabled>
             </snapshots>
-        </repository>-->
+            <releases>
+                <enabled>true</enabled>
+            </releases>
+        </repository>
         <repository>
             <id>apache.snapshots.repo</id>
             <url>https://repository.apache.org/content/groups/snapshots</url>
@@ -906,7 +908,6 @@
                 <artifactId>javax.el</artifactId>
                 <version>3.0.0</version>
             </dependency>
-
 
             <!-- Logging -->
             <dependency>
@@ -1376,12 +1377,6 @@
                 <artifactId>atlas-client</artifactId>
                 <version>${project.version}</version>
                 <type>pom</type>
-            </dependency>
-
-            <dependency>
-                <groupId>org.apache.atlas</groupId>
-                <artifactId>atlas-client-v1</artifactId>
-                <version>${project.version}</version>
             </dependency>
 
             <dependency>
@@ -1999,27 +1994,6 @@
             </plugin>
 
             <!--The findbugs-maven-plugin is outdated and does not officially support Java 17. To analyze code with a tool like FindBugs on Java 17, you should migrate to SpotBugs-->
-
-            <!--<plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>findbugs-maven-plugin</artifactId>
-                <version>3.0.5</version>
-                <configuration>
-                    &lt;!&ndash;debug>true</debug &ndash;&gt;
-                    <xmlOutput>true</xmlOutput>
-                    <failOnError>false</failOnError>
-                    <skip>${skipCheck}</skip>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>findbugs-check</id>
-                        <goals>
-                            <goal>check</goal>
-                        </goals>
-                        <phase>verify</phase>
-                    </execution>
-                </executions>
-            </plugin>-->
 
             <!-- Source code metrics: mvn javancss:report or mvn site -->
             <plugin>
