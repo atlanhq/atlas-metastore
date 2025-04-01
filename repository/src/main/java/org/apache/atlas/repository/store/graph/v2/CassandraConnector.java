@@ -22,18 +22,21 @@ import static org.apache.atlas.AtlasConstants.DEFAULT_CLUSTER_NAME;
 import static org.apache.atlas.repository.audit.CassandraBasedAuditRepository.CASSANDRA_CLUSTERNAME_PROPERTY;
 import static org.apache.atlas.repository.audit.CassandraBasedAuditRepository.CASSANDRA_HOSTNAME_PROPERTY;
 import static org.apache.atlas.repository.audit.CassandraBasedAuditRepository.CASSANDRA_NEW_KEYSPACE_PROPERTY;
+import static org.apache.atlas.repository.audit.CassandraBasedAuditRepository.CASSANDRA_NEW_KEYSPACE_VERTEX_TABLE_NAME_PROPERTY;
 
 public class CassandraConnector {
     private static final Logger LOG      = LoggerFactory.getLogger(EntityGraphMapper.class);
 
     private static CqlSession cassSession;
     private static String keyspace;
+    private static String vertexTableName;
 
     private static ObjectMapper objectMapper = new ObjectMapper();
 
     static {
         try {
-            keyspace = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlandata2_0_temp");
+            keyspace = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlas_new");
+            vertexTableName = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_VERTEX_TABLE_NAME_PROPERTY, "vertices");
             String hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
             String clusterName = ApplicationProperties.get().getString(CASSANDRA_CLUSTERNAME_PROPERTY, DEFAULT_CLUSTER_NAME);
             int port = 9042;
