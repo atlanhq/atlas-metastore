@@ -31,6 +31,7 @@ on:
       - cassaop
       - ixop
       - poctagprop
+      - poctagprophashed
 
 jobs:
   build:
