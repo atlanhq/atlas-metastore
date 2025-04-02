@@ -5,7 +5,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.TermPreProcessor;
 import org.apache.atlas.tasks.AbstractTask;
@@ -32,11 +32,11 @@ public abstract class MeaningsTask extends AbstractTask {
     protected final EntityGraphMapper entityGraphMapper;
     protected final AtlasGraph graph;
     protected final TermPreProcessor preprocessor;
-    protected final AtlasEntityStoreV2 entityStoreV2;
+    protected final AtlasEntityStoreV3 entityStoreV2;
 
 
     public MeaningsTask(AtlasTask task, EntityGraphMapper entityGraphMapper,
-                        AtlasGraph graph, TermPreProcessor preprocessor, AtlasEntityStoreV2 entityStoreV2) {
+                        AtlasGraph graph, TermPreProcessor preprocessor, AtlasEntityStoreV3 entityStoreV2) {
         super(task);
         this.entityGraphMapper = entityGraphMapper;
         this.graph = graph;

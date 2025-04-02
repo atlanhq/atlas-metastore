@@ -34,6 +34,7 @@ import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.*;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.pc.EntityConsumerBuilder;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.pc.EntityCreationManager;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,8 +100,8 @@ public class MigrationImport extends ImportStrategy {
         EntityGraphRetriever entityGraphRetriever = new EntityGraphRetriever(this.graph, typeRegistry);
         EntityGraphRetriever entityGraphRetrieverBulk = new EntityGraphRetriever(graphBulk, typeRegistry);
 
-        AtlasEntityStoreV2 entityStore = createEntityStore(this.graph, typeRegistry);
-        AtlasEntityStoreV2 entityStoreBulk = createEntityStore(graphBulk, typeRegistry);
+        AtlasEntityStoreV3 entityStore = createEntityStore(this.graph, typeRegistry);
+        AtlasEntityStoreV3 entityStoreBulk = createEntityStore(graphBulk, typeRegistry);
 
         int batchSize = importResult.getRequest().getOptionKeyBatchSize();
         int numWorkers = getNumWorkers(importResult.getRequest().getOptionKeyNumWorkers());
@@ -119,7 +120,7 @@ public class MigrationImport extends ImportStrategy {
         return ret;
     }
 
-    private AtlasEntityStoreV2 createEntityStore(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
+    private AtlasEntityStoreV3 createEntityStore(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         FullTextMapperV2Nop fullTextMapperV2 = new FullTextMapperV2Nop();
         DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null);
         RestoreHandlerV1 restoreHandlerV1 = new RestoreHandlerV1(graph, typeRegistry);
@@ -129,7 +130,7 @@ public class MigrationImport extends ImportStrategy {
                 graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null);
         AtlasRelationshipStoreV2 atlasRelationshipStoreV2 = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
 
-        return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null);
+        return new AtlasEntityStoreV3(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null);
     }
 
     private void shutdownEntityCreationManager(EntityCreationManager creationManager) {

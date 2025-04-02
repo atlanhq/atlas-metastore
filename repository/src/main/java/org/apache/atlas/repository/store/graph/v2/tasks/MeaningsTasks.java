@@ -2,7 +2,7 @@ package org.apache.atlas.repository.store.graph.v2.tasks;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.TermPreProcessor;
 
@@ -30,7 +30,7 @@ public class MeaningsTasks {
 
     public static class Delete extends MeaningsTask {
         public Delete(AtlasTask task, EntityGraphMapper entityGraphMapper,AtlasGraph graph,
-                    AtlasEntityStoreV2 entityStoreV2) {
+                    AtlasEntityStoreV3 entityStoreV2) {
             super(task,entityGraphMapper, graph, null,entityStoreV2);
         }
 
