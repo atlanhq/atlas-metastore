@@ -3650,7 +3650,7 @@ public class EntityGraphMapper {
             do {
                 LOG.info("idBucketPair");
                 LOG.info("{}", AtlasType.toJson(idBucketPair));
-                
+
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
                 List<String> chunkedIdsToPropagate = idsToPropagate.subList(offset, toIndex);
 
