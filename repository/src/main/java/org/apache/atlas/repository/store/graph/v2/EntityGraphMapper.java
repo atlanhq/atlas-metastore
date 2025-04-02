@@ -3667,7 +3667,7 @@ public class EntityGraphMapper {
                     assetAsMap.put("bucket", idBucketPair.get(id));
                     LOG.info("assetAsMap {}", assetAsMap);
 
-                    String guid = assetAsMap.get("__guid") == null ? (String) assetAsMap.get("__guid") : (String) assetAsMap.get("guid");
+                    String guid = assetAsMap.get("__guid") == null ? (String) assetAsMap.get("guid") : (String) assetAsMap.get("__guid");
                     allChunkedMaps.put(guid, assetAsMap);
 
                     LOG.info("guid {}, assetAsMap {}", guid, assetAsMap);
