@@ -3648,6 +3648,9 @@ public class EntityGraphMapper {
 
         try {
             do {
+                LOG.info("idBucketPair");
+                LOG.info("{}", AtlasType.toJson(idBucketPair));
+                
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
                 List<String> chunkedIdsToPropagate = idsToPropagate.subList(offset, toIndex);
 
@@ -3660,7 +3663,12 @@ public class EntityGraphMapper {
                     allChunkedMaps.put((String) assetAsMap.get("__guid"), assetAsMap);
                 });
 
+                LOG.info("allChunkedMaps");
+                LOG.info("{}", AtlasType.toJson(allChunkedMaps));
+
                 List<String> impactedVerticesGuidsToLock        = new ArrayList<>(allChunkedMaps.keySet());
+                LOG.info("impactedVerticesGuidsToLock");
+                LOG.info("{}", impactedVerticesGuidsToLock.toArray());
                 GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedVerticesGuidsToLock);
                 RequestContext.get().endMetricRecord(metricRecorder);
 
