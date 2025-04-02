@@ -137,6 +137,7 @@ public final class GraphHelper {
     }
 
     public AtlasEdge addClassificationEdgeNew(String fromGuid, AtlasVertex entityVertex, AtlasVertex classificationVertex, String tagTypeName, boolean isPropagated) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("addClassificationEdgeNew");
         AtlasEdge ret = addEdgeNew(fromGuid, entityVertex, classificationVertex, CLASSIFICATION_LABEL);
 
         if (ret != null) {
@@ -144,6 +145,7 @@ public final class GraphHelper {
             AtlasGraphUtilsV2.setEncodedProperty(ret, CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, isPropagated);
         }
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 

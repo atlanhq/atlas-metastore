@@ -71,7 +71,7 @@ public class ESConnector {
     }
 
     public static void writeTagProperties(Collection<Map<String, Object>> entitiesMap) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getBucket");
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
 
         try {
             StringBuilder bulkRequestBody = new StringBuilder();

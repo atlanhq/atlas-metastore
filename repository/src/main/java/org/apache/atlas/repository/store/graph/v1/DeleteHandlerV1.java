@@ -1155,6 +1155,7 @@ public abstract class DeleteHandlerV1 {
     }
 
     private void addToPropagatedClassificationNamesNew(Map<String, Object> entityPropertiesMap, String classificationName) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("addToPropagatedClassificationNamesNew");
 
         List<String> traits = (List<String>) entityPropertiesMap.get(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
         if (traits == null) {
@@ -1173,6 +1174,8 @@ public abstract class DeleteHandlerV1 {
         }
 
         entityPropertiesMap.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, tagNames);
+
+        RequestContext.get().endMetricRecord(recorder);
     }
 
     public void removeFromPropagatedClassificationNames(AtlasVertex entityVertex, String classificationName) {
