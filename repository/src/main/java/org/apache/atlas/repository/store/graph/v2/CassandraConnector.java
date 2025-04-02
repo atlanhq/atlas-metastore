@@ -11,7 +11,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,20 +79,27 @@ public class CassandraConnector {
     }
 
     public static Map<String, Integer> getIdsToPropagate() {
-        String query = "SELECT * FROM vertices_id";
-        ResultSet resultSet = cassSession.execute(query);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getIdsToPropagate");
+        Map<String, Integer> ret;
 
-        Map<String, Integer> ret = new HashMap<>();
-        for (Row row : resultSet) {
-            String id = row.getString("id");
-            int bucket = row.getInt("bucket");
-            ret.put(id, bucket);
+        try {
+            ret = new HashMap<>();
+            String query = "SELECT * FROM vertices_id";
+
+            ResultSet resultSet = cassSession.execute(query);
+            for (Row row : resultSet) {
+                String id = row.getString("id");
+                int bucket = row.getInt("bucket");
+                ret.put(id, bucket);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
-
         return ret;
     }
 
-    public static int getBucket(String value) {
+    public static int calculateBucket(String value) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
         try {
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] hashBytes = md.digest(value.getBytes());
@@ -102,32 +111,45 @@ public class CassandraConnector {
             return hashInt.mod(BigInteger.valueOf(256)).intValue();
         } catch (Exception e) {
             throw new RuntimeException("MD5 algorithm not found", e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
     }
 
     public static Map<String, Object> getVertexProperties(String vertexId, int bucket) {
-        String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, bucket);
-        ResultSet resultSet = cassSession.execute(query);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getVertexPropertiesWithBucket");
+        try {
+            String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, bucket);
+            ResultSet resultSet = cassSession.execute(query);
 
-        Map<String, Object> ret = new HashMap<>();
-        for (Row row : resultSet) {
-            //System.out.println("Vertex: " + AtlasType.toJson(row));
-            return convertRowToMap(row);
+            Map<String, Object> ret = new HashMap<>();
+            for (Row row : resultSet) {
+                //System.out.println("Vertex: " + AtlasType.toJson(row));
+                return convertRowToMap(row);
+            }
+            LOG.info("Returning null for vertex {}", vertexId);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
-        LOG.info("Returning null for vertex {}", vertexId);
         return null;
     }
 
     public static Map<String, Object> getVertexProperties(String vertexId) {
-        String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, getBucket(vertexId));
-        ResultSet resultSet = cassSession.execute(query);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getVertexProperties");
+        try {
 
-        Map<String, Object> ret = new HashMap<>();
-        for (Row row : resultSet) {
-            System.out.println("Vertex: " + AtlasType.toJson(row));
-            return convertRowToMap(row);
+            String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, calculateBucket(vertexId));
+            ResultSet resultSet = cassSession.execute(query);
+
+            Map<String, Object> ret = new HashMap<>();
+            for (Row row : resultSet) {
+                System.out.println("Vertex: " + AtlasType.toJson(row));
+                return convertRowToMap(row);
+            }
+            LOG.info("Returning null for vertex {}", vertexId);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
-        LOG.info("Returning null for vertex {}", vertexId);
         return null;
     }
 
@@ -156,6 +178,7 @@ public class CassandraConnector {
     }
 
     public static Map<String, Object> convertRowToMap(Row row) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("convertRowToMap");
         Map<String, Object> map = new HashMap<>();
         row.getColumnDefinitions().forEach(column -> {
             String columnName = column.getName().toString();
@@ -177,6 +200,8 @@ public class CassandraConnector {
             }
 
         });
+
+        RequestContext.get().endMetricRecord(recorder);
         return map;
     }
 
@@ -189,7 +214,7 @@ public class CassandraConnector {
         BoundStatement boundStmt  = preparedStmt.bind( tagVertexId, "placeholder", System.currentTimeMillis(), json_data);
         cassSession.execute(boundStmt);
 
-        return  objectMapper.readValue(json_data, new TypeReference<Map<String, Object>>() {});
+        return objectMapper.readValue(json_data, new TypeReference<Map<String, Object>>() {});
     }
 
     /*public static void updateEntity(Map<String, Object> entityMap) {
@@ -213,6 +238,7 @@ public class CassandraConnector {
     }
 
     public static void putEntitiesWithBucket(Collection<Map<String, Object>> entitiesMap) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("putEntitiesWithBucket");
         StringBuilder batchQuery = new StringBuilder();
         batchQuery.append("BEGIN BATCH ");
 
@@ -223,6 +249,8 @@ public class CassandraConnector {
 
         batchQuery.append("APPLY BATCH;");
         cassSession.execute(batchQuery.toString());
+
+        RequestContext.get().endMetricRecord(recorder);
     }
 
     public static void main(String[] args) {

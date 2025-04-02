@@ -2,7 +2,9 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
@@ -69,30 +71,37 @@ public class ESConnector {
     }
 
     public static void writeTagProperties(Collection<Map<String, Object>> entitiesMap) {
-        StringBuilder bulkRequestBody = new StringBuilder();
-
-        for (Map entry : entitiesMap) {
-            Map<String, Object> toUpdate = new HashMap<>();
-
-            DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
-            if (!toUpdate.isEmpty()) {
-                long vertexId = Long.valueOf(entry.get("id").toString());
-                String docId = LongEncoding.encode(vertexId);
-                bulkRequestBody.append("{ \"update\": { \"_index\": \"janusgraph_vertex_index\", \"_id\": \""+docId+"\" } }\n");
-
-                String attrsToUpdate = AtlasType.toJson(toUpdate);
-                bulkRequestBody.append("{ \"doc\": "+attrsToUpdate+" }\n");
-            }
-        }
-
-        Request request = new Request("POST", "/_bulk");
-        request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getBucket");
 
         try {
-            Response response = lowLevelClient.performRequest(request);
-        } catch (IOException e) {
-            LOG.error("Failed to update ES doc for denorm attributes");
-            throw new RuntimeException(e);
+            StringBuilder bulkRequestBody = new StringBuilder();
+
+
+            for (Map entry : entitiesMap) {
+                Map<String, Object> toUpdate = new HashMap<>();
+
+                DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
+                if (!toUpdate.isEmpty()) {
+                    long vertexId = Long.valueOf(entry.get("id").toString());
+                    String docId = LongEncoding.encode(vertexId);
+                    bulkRequestBody.append("{ \"update\": { \"_index\": \"janusgraph_vertex_index\", \"_id\": \"" + docId + "\" } }\n");
+
+                    String attrsToUpdate = AtlasType.toJson(toUpdate);
+                    bulkRequestBody.append("{ \"doc\": " + attrsToUpdate + " }\n");
+                }
+            }
+
+            Request request = new Request("POST", "/_bulk");
+            request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
+
+            try {
+                Response response = lowLevelClient.performRequest(request);
+            } catch (IOException e) {
+                LOG.error("Failed to update ES doc for denorm attributes");
+                throw new RuntimeException(e);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
     }
 }
