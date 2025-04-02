@@ -102,10 +102,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
     }
 
     private long getAuditMaxSize(EntityAuditRepository auditRepository, int entityCount) {
-        boolean isCassandraRepository = false;
-        // Subtracting 150 for other details in the Insert statement.
-        long auditMaxSize = isCassandraRepository ? ((CASSANDRA_AUDIT_REPOSITORY_MAX_SIZE_DEFAULT / entityCount) - 150): AUDIT_REPOSITORY_MAX_SIZE_DEFAULT;
-        return  auditMaxSize;
+        return AUDIT_REPOSITORY_MAX_SIZE_DEFAULT;
     }
 
     @Override
@@ -493,7 +490,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
             String qualifiedName = (String) originalEntity.getAttribute(QUALIFIED_NAME);
             entityAuditEventV2.setEntityQualifiedName(AtlasType.toJson(qualifiedName));
         } else {
-            String qualifiedName = (String)entity.getAttribute(QUALIFIED_NAME);
+            String qualifiedName = (String) entity.getAttribute(QUALIFIED_NAME);
             entityAuditEventV2.setEntityQualifiedName(AtlasType.toJson(qualifiedName));
         }
 

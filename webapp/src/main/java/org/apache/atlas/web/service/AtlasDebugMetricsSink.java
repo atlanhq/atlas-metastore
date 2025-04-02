@@ -61,6 +61,10 @@ public class AtlasDebugMetricsSink implements MetricsSink {
     }
 
     @Override
+    public void init(SubsetConfiguration subsetConfiguration) {
+    }
+
+    @Override
     public void flush() {
     }
 
@@ -105,11 +109,6 @@ public class AtlasDebugMetricsSink implements MetricsSink {
                 debugMetrics.setAvgTime(metric.value().floatValue());
                 break;
         }
-    }
-
-    @Override
-    public void init(SubsetConfiguration subsetConfiguration) {
-
     }
 
     private static String inferMeasureType(String fullName, String nameWithoutMetricType) {

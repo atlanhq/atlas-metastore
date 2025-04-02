@@ -20,7 +20,6 @@
 package org.apache.atlas.authorization.atlas.authorizer;
 
 import org.apache.atlas.authorize.AtlasAccessRequest;
-import org.apache.atlas.authorize.AtlasAccessResult;
 import org.apache.atlas.authorize.AtlasAccessorResponse;
 import org.apache.atlas.authorize.AtlasAdminAccessRequest;
 import org.apache.atlas.authorize.AtlasAuthorizationException;
@@ -145,12 +144,12 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     }
 
     @Override
-    public AtlasAccessResult isAccessAllowed(AtlasAdminAccessRequest request) throws AtlasAuthorizationException {
+    public boolean isAccessAllowed(AtlasAdminAccessRequest request) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
 
-        final AtlasAccessResult    ret;
+        final boolean    ret;
         RangerPerfTracer perf = null;
 
         try {
@@ -182,12 +181,12 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     }
 
     @Override
-    public AtlasAccessResult isAccessAllowed(AtlasEntityAccessRequest request) throws AtlasAuthorizationException {
+    public boolean isAccessAllowed(AtlasEntityAccessRequest request) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
 
-        AtlasAccessResult       ret;
+        boolean                 ret          = true;
         RangerPerfTracer        perf         = null;
         RangerAtlasAuditHandler auditHandler = null;
 
@@ -214,12 +213,12 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     }
 
     @Override
-    public AtlasAccessResult isAccessAllowed(AtlasTypeAccessRequest request) throws AtlasAuthorizationException {
+    public boolean isAccessAllowed(AtlasTypeAccessRequest request) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
 
-        final AtlasAccessResult ret;
+        final boolean    ret;
         RangerPerfTracer perf = null;
 
         try {
@@ -263,12 +262,12 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     }
 
     @Override
-    public AtlasAccessResult isAccessAllowed(AtlasRelationshipAccessRequest request) throws AtlasAuthorizationException {
+    public boolean isAccessAllowed(AtlasRelationshipAccessRequest request) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
 
-        AtlasAccessResult ret;
+        boolean ret;
         RangerPerfTracer perf = null;
 
         try {
@@ -323,11 +322,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             ret = checkAccess(rangerRequest);
 
-            if (!ret.isAllowed()) { // if resource based policy access not available fallback to check tag-based access.
+            if (!ret) { // if resource based policy access not available fallback to check tag-based access.
                 setClassificationsToRequestContext(end1Classifications, rangerRequest);
                 ret = checkAccess(rangerRequest); // tag-based check with end1 classification
                 LOG.info("End1 checkAccess " + ret);
-                if (ret.isAllowed()) { //
+                if (ret) { //
                     setClassificationsToRequestContext(end2Classifications, rangerRequest);
                     ret = checkAccess(rangerRequest); // tag-based check with end2 classification
                     LOG.info("End2 checkAccess " + ret);
@@ -635,7 +634,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
                 typeRequest.setForwardedAddresses(request.getForwardedAddresses());
                 typeRequest.setRemoteIPAddress(request.getRemoteIPAddress());
 
-                if (!isAccessAllowed(typeRequest).isAllowed()) {
+                if (!isAccessAllowed(typeRequest)) {
                     iter.remove();
                 }
             }
@@ -649,11 +648,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         return plugin != null ? plugin.getServiceDef() : null;
     }
 
-    private AtlasAccessResult isAccessAllowed(AtlasEntityAccessRequest request, RangerAtlasAuditHandler auditHandler) throws AtlasAuthorizationException {
+    private boolean isAccessAllowed(AtlasEntityAccessRequest request, RangerAtlasAuditHandler auditHandler) throws AtlasAuthorizationException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> isAccessAllowed(" + request + ")");
         }
-        AtlasAccessResult ret = new AtlasAccessResult(false);
+        boolean ret = false;
 
         try {
             final String                   action         = request.getAction() != null ? request.getAction().getType() : null;
@@ -706,7 +705,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
                     ret = checkAccess(rangerRequest, auditHandler);
 
-                    if (!ret.isAllowed()) {
+                    if (!ret) {
                         break;
                     }
                 }
@@ -766,8 +765,8 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         return result;
     }
 
-    private AtlasAccessResult checkAccess(RangerAccessRequestImpl request) {
-        AtlasAccessResult result = null;
+    private boolean checkAccess(RangerAccessRequestImpl request) {
+        boolean          ret    = false;
         String userName = request.getUser();
         RangerBasePlugin plugin = atlasPlugin;
 
@@ -780,21 +779,20 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Setting UserGroup for user: " + userName + " Groups: " + groupUtil.getContainedGroups(userName));
             }
+            
+            RangerAccessResult result = plugin.isAccessAllowed(request);
 
-            RangerAccessResult rangerResult = plugin.isAccessAllowed(request);
-            if (rangerResult != null) {
-                result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
-            }
+            ret = result != null && result.getIsAllowed();
 
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }
 
-        return result;
+        return ret;
     }
 
-    private AtlasAccessResult checkAccess(RangerAccessRequestImpl request, RangerAtlasAuditHandler auditHandler) {
-        AtlasAccessResult result = null;
+    private boolean checkAccess(RangerAccessRequestImpl request, RangerAtlasAuditHandler auditHandler) {
+        boolean          ret    = false;
         
         RangerBasePlugin plugin = atlasPlugin;
         String userName = request.getUser();
@@ -808,17 +806,16 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Setting UserGroup for user :" + userName + " Groups: " + groupUtil.getContainedGroups(userName));
             }
+            
+            RangerAccessResult result = plugin.isAccessAllowed(request, auditHandler);
 
-            RangerAccessResult rangerResult = plugin.isAccessAllowed(request, auditHandler);
-            if (rangerResult != null) {
-                result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
-            }
-
+            ret = result != null && result.getIsAllowed();
+        
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }
 
-        return result;
+        return ret;
     }
 
     private RangerAccessResult getAccessors(RangerAccessRequestImpl request) {
@@ -853,7 +850,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             entityAccessRequest.setForwardedAddresses(request.getForwardedAddresses());
             entityAccessRequest.setRemoteIPAddress(request.getRemoteIPAddress());
 
-            if (!isAccessAllowed(entityAccessRequest, null).isAllowed()) {
+            if (!isAccessAllowed(entityAccessRequest, null)) {
                 scrubEntityHeader(entity, request.getTypeRegistry());
             }
         }
@@ -867,9 +864,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             entityAccessRequest.setForwardedAddresses(request.getForwardedAddresses());
             entityAccessRequest.setRemoteIPAddress(request.getRemoteIPAddress());
 
-            boolean isEntityAccessAllowed  = isScrubAuditEnabled ?
-                    isAccessAllowed(entityAccessRequest).isAllowed() :
-                    isAccessAllowed(entityAccessRequest, null).isAllowed();
+            boolean isEntityAccessAllowed  = isScrubAuditEnabled ?  isAccessAllowed(entityAccessRequest) : isAccessAllowed(entityAccessRequest, null);
             if (!isEntityAccessAllowed) {
                 scrubEntityHeader(entity, request.getTypeRegistry());
             }
