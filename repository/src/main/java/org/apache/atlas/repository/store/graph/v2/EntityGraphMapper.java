@@ -3576,6 +3576,8 @@ public class EntityGraphMapper {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
 
                 return null;
+            } else {
+                LOG.info("Found {} vertexIds", idBucketPair.size());
             }
 
             return processClassificationPropagationAdditionNew(idBucketPair, classificationVertex);

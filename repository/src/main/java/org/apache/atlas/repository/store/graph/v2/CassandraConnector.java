@@ -39,8 +39,8 @@ public class CassandraConnector {
 
     private static ObjectMapper objectMapper = new ObjectMapper();
 
-    private static String SELECT_BY_ID = "SELECT * FROM %s where id = '%s' AND bucket = '%s'";
-    private static String UPDATE_BY_ID = "UPDATE %s SET json_data = '%s' WHERE id = '%s' AND bucket = '%s'";
+    private static String SELECT_BY_ID = "SELECT * FROM %s where id = '%s' AND bucket = %s";
+    private static String UPDATE_BY_ID = "UPDATE %s SET json_data = '%s' WHERE id = '%s' AND bucket = %s";
 
     static {
         try {
