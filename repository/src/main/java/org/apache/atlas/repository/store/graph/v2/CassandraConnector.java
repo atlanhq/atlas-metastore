@@ -16,7 +16,9 @@ import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.math.BigInteger;
 import java.net.InetSocketAddress;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.HashMap;
@@ -68,6 +70,21 @@ public class CassandraConnector {
 
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    public static int getBucket(String value, int numBuckets) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("MD5");
+            byte[] hashBytes = md.digest(value.getBytes());
+
+            // Convert the hash to a positive integer
+            BigInteger hashInt = new BigInteger(1, hashBytes);
+
+            // Map to a bucket
+            return hashInt.mod(BigInteger.valueOf(numBuckets)).intValue();
+        } catch (Exception e) {
+            throw new RuntimeException("MD5 algorithm not found", e);
         }
     }
 
