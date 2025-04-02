@@ -5,13 +5,10 @@ import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
 
-import javax.inject.Inject;
-
 @Component
 public class FeatureFlagStore {
     private static RedisService redisService = null;
-    @Inject
-    public FeatureFlagStore(RedisService redisService) {
+    public FeatureFlagStore(@Qualifier("redisServiceImpl") RedisService redisService) {
         FeatureFlagStore.redisService = redisService;
     }
 
