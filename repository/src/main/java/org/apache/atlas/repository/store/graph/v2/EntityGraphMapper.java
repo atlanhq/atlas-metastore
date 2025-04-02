@@ -3648,37 +3648,37 @@ public class EntityGraphMapper {
 
         try {
             do {
-                LOG.info("idBucketPair");
-                LOG.info("{}", AtlasType.toJson(idBucketPair));
+                //LOG.info("idBucketPair");
+                //LOG.info("{}", AtlasType.toJson(idBucketPair));
 
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
                 List<String> chunkedIdsToPropagate = idsToPropagate.subList(offset, toIndex);
 
-                LOG.info("chunkedIdsToPropagate");
-                LOG.info("{}", AtlasType.toJson(chunkedIdsToPropagate));
+                //LOG.info("chunkedIdsToPropagate");
+                //LOG.info("{}", AtlasType.toJson(chunkedIdsToPropagate));
 
                 AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
 
                 Map<String, Map<String, Object>> allChunkedMaps = new HashMap<>();
                 chunkedIdsToPropagate.forEach(id -> {
                     Map<String, Object> assetAsMap = CassandraConnector.getVertexProperties(id, idBucketPair.get(id));
-                    LOG.info("assetAsMap {}", assetAsMap);
+                    //LOG.info("assetAsMap {}", assetAsMap);
 
                     assetAsMap.put("bucket", idBucketPair.get(id));
-                    LOG.info("assetAsMap {}", assetAsMap);
+                    //LOG.info("assetAsMap {}", assetAsMap);
 
                     String guid = assetAsMap.get("__guid") == null ? (String) assetAsMap.get("guid") : (String) assetAsMap.get("__guid");
                     allChunkedMaps.put(guid, assetAsMap);
 
-                    LOG.info("guid {}, assetAsMap {}", guid, assetAsMap);
+                    //LOG.info("guid {}, assetAsMap {}", guid, assetAsMap);
                 });
 
-                LOG.info("allChunkedMaps");
-                LOG.info("{}", AtlasType.toJson(allChunkedMaps));
+                //LOG.info("allChunkedMaps");
+                //LOG.info("{}", AtlasType.toJson(allChunkedMaps));
 
                 List<String> impactedVerticesGuidsToLock        = new ArrayList<>(allChunkedMaps.keySet());
                 LOG.info("impactedVerticesGuidsToLock");
-                LOG.info("{}", impactedVerticesGuidsToLock.toArray());
+                LOG.info("{}", impactedVerticesGuidsToLock.size());
                 GraphTransactionInterceptor.lockObjectAndReleasePostCommit(impactedVerticesGuidsToLock);
                 RequestContext.get().endMetricRecord(metricRecorder);
 
@@ -4860,7 +4860,7 @@ public class EntityGraphMapper {
 
                 Map<String , Object> assetCopy = new HashMap<>(assetMap);
                 assetCopy.put(KEY_TYPENAME, assetMap.get("__typeName"));
-                assetCopy.put(KEY_GUID, assetMap.get("__guid"));
+                assetCopy.put(KEY_GUID, assetMap.get("__guid") == null ? assetMap.get("guid") : assetMap.get("__guid"));
                 assetCopy.put(KEY_ATTRIBUTES, assetMap);
                 assetCopy.put(KEY_UPDATE_TIME, assetMap.get("__modificationTimestamp"));
                 AtlasEntity entity = new AtlasEntity(assetCopy);

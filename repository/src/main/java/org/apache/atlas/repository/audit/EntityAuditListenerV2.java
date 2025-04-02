@@ -228,6 +228,19 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
             for (AtlasClassification classification : classifications) {
                 for (AtlasEntity entity : entities) {
+                    if (entity != null) {
+                        LOG.info("entity: {}", AtlasType.toJson(entity));
+                    } else {
+                        LOG.error("entity is NULL");
+                    }
+
+                    if (classification != null) {
+                        LOG.info("classification: {}", AtlasType.toJson(classification));
+                    } else {
+                        LOG.error("classification is NULL");
+                    }
+
+
                     if (entity.getGuid().equals(classification.getEntityGuid())) {
                         createEvent(events.next(), entity, CLASSIFICATION_ADD, "Added classification: " + AtlasType.toJson(classification));
                     } else {
