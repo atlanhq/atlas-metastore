@@ -65,14 +65,14 @@ public class AtlasInstanceConverter {
 
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasFormatConverters instanceFormatters;
-    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
+    private final EntityGraphRetrieverV3 entityGraphRetrieverV3;
     private final EntityGraphRetrieverV3 entityGraphRetrieverV3IgnoreRelationshipAttrs;
 
     @Inject
     public AtlasInstanceConverter(AtlasGraph graph, AtlasTypeRegistry typeRegistry, AtlasFormatConverters instanceFormatters) {
         this.typeRegistry                                = typeRegistry;
         this.instanceFormatters                          = instanceFormatters;
-        this.EntityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, typeRegistry);
+        this.entityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, typeRegistry);
         this.entityGraphRetrieverV3IgnoreRelationshipAttrs = new EntityGraphRetrieverV3(graph, typeRegistry, true);
     }
 
@@ -307,7 +307,7 @@ public class AtlasInstanceConverter {
             if (ignoreRelationshipAttributes) {
                 entity = entityGraphRetrieverV3IgnoreRelationshipAttrs.toAtlasEntity(guid);
             } else {
-                entity = EntityGraphRetrieverV3.toAtlasEntity(guid);
+                entity = entityGraphRetrieverV3.toAtlasEntity(guid);
             }
 
             if (entity != null) {
@@ -327,7 +327,7 @@ public class AtlasInstanceConverter {
         if (ignoreRelationshipAttributes) {
             entity = entityGraphRetrieverV3IgnoreRelationshipAttrs.toAtlasEntity(guid);
         } else {
-            entity = EntityGraphRetrieverV3.toAtlasEntity(guid);
+            entity = entityGraphRetrieverV3.toAtlasEntity(guid);
         }
         return entity;
     }
@@ -338,7 +338,7 @@ public class AtlasInstanceConverter {
         AtlasEntityWithExtInfo entityWithExtInfo = context.getEntityWithExtInfo(guid);
 
         if (entityWithExtInfo == null) {
-            entityWithExtInfo = EntityGraphRetrieverV3.toAtlasEntityWithExtInfo(guid);
+            entityWithExtInfo = entityGraphRetrieverV3.toAtlasEntityWithExtInfo(guid);
 
             if (entityWithExtInfo != null) {
                 context.cache(entityWithExtInfo);

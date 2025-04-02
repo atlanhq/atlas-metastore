@@ -48,7 +48,7 @@ public class AtlasServerService {
     private final DataAccess dataAccess;
     private final AtlasEntityStore entityStore;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
+    private final EntityGraphRetrieverV3 entityGraphRetrieverV3;
 
     @Inject
     public AtlasServerService(DataAccess dataAccess, AtlasEntityStore entityStore,
@@ -58,7 +58,7 @@ public class AtlasServerService {
         this.dataAccess = dataAccess;
         this.entityStore = entityStore;
         this.typeRegistry = typeRegistry;
-        this.EntityGraphRetrieverV3 = EntityGraphRetrieverV3;
+        this.entityGraphRetrieverV3 = EntityGraphRetrieverV3;
     }
 
     public AtlasServer get(AtlasServer server) throws AtlasBaseException {
@@ -135,7 +135,7 @@ public class AtlasServerService {
         if(entity.hasAttribute(attributeName) == false) return;
 
         try {
-            AtlasVertex vertex = EntityGraphRetrieverV3.getEntityVertex(entity.getGuid());
+            AtlasVertex vertex = entityGraphRetrieverV3.getEntityVertex(entity.getGuid());
             if(vertex == null) {
                 return;
             }

@@ -60,19 +60,19 @@ public abstract class ClassificationTask extends AbstractTask {
     public static final String PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY = "previousRestrictPropagationThroughHierarchy";
 
     protected final AtlasGraph             graph;
-    protected final EntityGraphMapperV3 EntityGraphMapperV3;
+    protected final EntityGraphMapperV3 entityGraphMapperV3;
     protected final DeleteHandlerDelegate  deleteDelegate;
     protected final AtlasRelationshipStore relationshipStore;
 
     public ClassificationTask(AtlasTask task,
                               AtlasGraph graph,
-                              EntityGraphMapperV3 EntityGraphMapperV3,
+                              EntityGraphMapperV3 entityGraphMapperV3,
                               DeleteHandlerDelegate deleteDelegate,
                               AtlasRelationshipStore relationshipStore) {
         super(task);
 
         this.graph             = graph;
-        this.EntityGraphMapperV3 = EntityGraphMapperV3;
+        this.entityGraphMapperV3 = entityGraphMapperV3;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
     }
@@ -170,9 +170,9 @@ public abstract class ClassificationTask extends AbstractTask {
 
         try {
             if (CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE.equals(getTaskType())) {
-                EntityGraphMapperV3.removePendingTaskFromEdge((String) getTaskDef().getParameters().get(PARAM_RELATIONSHIP_EDGE_ID), getTaskGuid());
+                entityGraphMapperV3.removePendingTaskFromEdge((String) getTaskDef().getParameters().get(PARAM_RELATIONSHIP_EDGE_ID), getTaskGuid());
             } else {
-                EntityGraphMapperV3.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
+                entityGraphMapperV3.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
             }
         } catch (EntityNotFoundException | AtlasBaseException e) {
             LOG.warn("Error updating associated element for: {}", getTaskGuid(), e);

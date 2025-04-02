@@ -63,7 +63,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     private final AtlasGraph graph;
     private final EntityGraphRetrieverV3 entityRetriever;
     private final TransactionInterceptHelper   transactionInterceptHelper;
-    private final GraphHelperV3 GraphHelperV3;
+    private final GraphHelperV3 graphHelperV3;
     private final AtlasRelationshipStoreV2 relationshipStoreV2;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
@@ -75,7 +75,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         this.graph = atlasGraph;
         this.entityRetriever = new EntityGraphRetrieverV3(atlasGraph, typeRegistry);
         this.transactionInterceptHelper = transactionInterceptHelper;
-        this.GraphHelperV3 = new GraphHelperV3(atlasGraph);
+        this.graphHelperV3 = new GraphHelperV3(atlasGraph);
         this.relationshipStoreV2 = relationshipStoreV2;
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
     }
@@ -248,7 +248,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         try{
             if(StringUtils.equals(INPUT_PORT_PRODUCT_EDGE_LABEL, edgeLabel)) {
 
-                AtlasEdge inputPortEdge = GraphHelperV3.getEdge(assetVertex, productVertex, INPUT_PORT_PRODUCT_EDGE_LABEL);
+                AtlasEdge inputPortEdge = graphHelperV3.getEdge(assetVertex, productVertex, INPUT_PORT_PRODUCT_EDGE_LABEL);
                 if(inputPortEdge != null){
                     graph.removeEdge(inputPortEdge);
                     updateInternalAttr(productVertex, assetGuid, operation);

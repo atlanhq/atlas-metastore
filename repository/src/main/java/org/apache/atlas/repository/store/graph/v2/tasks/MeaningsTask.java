@@ -29,16 +29,16 @@ public abstract class MeaningsTask extends AbstractTask {
     protected static final String PARAM_CURRENT_TERM_NAME = "currentTermName";
 
 
-    protected final EntityGraphMapperV3 EntityGraphMapperV3;
+    protected final EntityGraphMapperV3 entityGraphMapperV3;
     protected final AtlasGraph graph;
     protected final TermPreProcessor preprocessor;
     protected final AtlasEntityStoreV2 entityStoreV2;
 
 
-    public MeaningsTask(AtlasTask task, EntityGraphMapperV3 EntityGraphMapperV3,
+    public MeaningsTask(AtlasTask task, EntityGraphMapperV3 entityGraphMapperV3,
                         AtlasGraph graph, TermPreProcessor preprocessor, AtlasEntityStoreV2 entityStoreV2) {
         super(task);
-        this.EntityGraphMapperV3 = EntityGraphMapperV3;
+        this.entityGraphMapperV3 = entityGraphMapperV3;
         this.graph = graph;
         this.preprocessor = preprocessor;
         this.entityStoreV2 = entityStoreV2;
@@ -104,7 +104,7 @@ public abstract class MeaningsTask extends AbstractTask {
             if(UPDATE_ENTITY_MEANINGS_ON_TERM_HARD_DELETE.equals(getTaskType())){
                 LOG.info("Entity Vertex Deleted, No Need to remove pending task for: {} ",getTaskGuid());
             }else {
-                EntityGraphMapperV3.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
+                entityGraphMapperV3.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
             }
         } catch (EntityNotFoundException  e) {
             LOG.error("Error updating associated element for: {}", getTaskGuid(), e);

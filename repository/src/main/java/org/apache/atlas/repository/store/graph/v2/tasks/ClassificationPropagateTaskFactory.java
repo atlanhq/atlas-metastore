@@ -71,14 +71,14 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
     }};
 
     private final AtlasGraph             graph;
-    private final EntityGraphMapperV3 EntityGraphMapperV3;
+    private final EntityGraphMapperV3 entityGraphMapperV3;
     private final DeleteHandlerDelegate  deleteDelegate;
     private final AtlasRelationshipStore relationshipStore;
 
     @Inject
-    public ClassificationPropagateTaskFactory(AtlasGraph graph, EntityGraphMapperV3 EntityGraphMapperV3, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
+    public ClassificationPropagateTaskFactory(AtlasGraph graph, EntityGraphMapperV3 entityGraphMapperV3, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
         this.graph             = graph;
-        this.EntityGraphMapperV3 = EntityGraphMapperV3;
+        this.entityGraphMapperV3 = entityGraphMapperV3;
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
     }
@@ -89,28 +89,28 @@ public class ClassificationPropagateTaskFactory implements TaskFactory {
 
         switch (taskType) {
             case CLASSIFICATION_PROPAGATION_ADD:
-                return new ClassificationPropagationTasks.Add(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.Add(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_PROPAGATION_TEXT_UPDATE:
-                return new ClassificationPropagationTasks.UpdateText(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.UpdateText(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_PROPAGATION_DELETE:
-                return new ClassificationPropagationTasks.Delete(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.Delete(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_ONLY_PROPAGATION_DELETE:
-                return new ClassificationPropagationTasks.DeleteOnlyPropagations(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.DeleteOnlyPropagations(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_ONLY_PROPAGATION_DELETE_ON_HARD_DELETE:
-                return new ClassificationPropagationTasks.DeleteOnlyPropagationsOnHardDelete(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.DeleteOnlyPropagationsOnHardDelete(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_REFRESH_PROPAGATION:
-                return new ClassificationPropagationTasks.RefreshPropagation(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.RefreshPropagation(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE:
-                return new ClassificationPropagationTasks.UpdateRelationship(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.UpdateRelationship(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
             case CLEANUP_CLASSIFICATION_PROPAGATION:
-                return new ClassificationPropagationTasks.CleanUpClassificationPropagation(task, graph, EntityGraphMapperV3, deleteDelegate, relationshipStore);
+                return new ClassificationPropagationTasks.CleanUpClassificationPropagation(task, graph, entityGraphMapperV3, deleteDelegate, relationshipStore);
 
 
             default:

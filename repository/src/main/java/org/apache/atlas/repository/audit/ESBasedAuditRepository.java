@@ -100,12 +100,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private RestClient lowLevelClient;
     private final Configuration configuration;
-    private EntityGraphRetrieverV3 EntityGraphRetrieverV3;
+    private EntityGraphRetrieverV3 entityGraphRetrieverV3;
 
     @Inject
-    public ESBasedAuditRepository(Configuration configuration, EntityGraphRetrieverV3 EntityGraphRetrieverV3) {
+    public ESBasedAuditRepository(Configuration configuration, EntityGraphRetrieverV3 entityGraphRetrieverV3) {
         this.configuration = configuration;
-        this.EntityGraphRetrieverV3 = EntityGraphRetrieverV3;
+        this.entityGraphRetrieverV3 = entityGraphRetrieverV3;
     }
 
     @Override
@@ -299,7 +299,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private AtlasEntityHeader fetchAtlasEntityHeader(String domainGUID) throws AtlasBaseException {
         try {
-            AtlasEntityHeader entityHeader = EntityGraphRetrieverV3.toAtlasEntityHeader(domainGUID);
+            AtlasEntityHeader entityHeader = entityGraphRetrieverV3.toAtlasEntityHeader(domainGUID);
             return entityHeader;
         } catch (AtlasBaseException e) {
             throw new AtlasBaseException(e);

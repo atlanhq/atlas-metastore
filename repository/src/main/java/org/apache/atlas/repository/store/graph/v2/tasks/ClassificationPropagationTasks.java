@@ -42,7 +42,7 @@ public class ClassificationPropagationTasks {
             String relationshipGuid         = (String) parameters.get(PARAM_RELATIONSHIP_GUID);
             Boolean previousRestrictPropagationThroughLineage = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
             Boolean previousRestrictPropagationThroughHierarchy = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
-            EntityGraphMapperV3.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage,previousRestrictPropagationThroughHierarchy);
+            entityGraphMapperV3.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage,previousRestrictPropagationThroughHierarchy);
         }
     }
 
@@ -54,7 +54,7 @@ public class ClassificationPropagationTasks {
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            EntityGraphMapperV3.updateClassificationTextPropagation(classificationVertexId);
+            entityGraphMapperV3.updateClassificationTextPropagation(classificationVertexId);
         }
     }
 
@@ -68,7 +68,7 @@ public class ClassificationPropagationTasks {
             String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
 
-            EntityGraphMapperV3.deleteClassificationPropagation(entityGuid, classificationVertexId);
+            entityGraphMapperV3.deleteClassificationPropagation(entityGuid, classificationVertexId);
         }
     }
 
@@ -82,11 +82,11 @@ public class ClassificationPropagationTasks {
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             if (parameters.get(PARAM_DELETED_EDGE_IDS) != null) {
                 Set<String> deletedEdgeIds    =  AtlasType.fromJson((String) parameters.get(PARAM_DELETED_EDGE_IDS), Set.class);
-                EntityGraphMapperV3.deleteClassificationOnlyPropagation(deletedEdgeIds);
+                entityGraphMapperV3.deleteClassificationOnlyPropagation(deletedEdgeIds);
             } else {
                 String deletedEdgeId          =  (String) parameters.get(PARAM_DELETED_EDGE_ID);
                 String classificationVertexId =  (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-                EntityGraphMapperV3.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                entityGraphMapperV3.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
             }
         }
     }
@@ -103,7 +103,7 @@ public class ClassificationPropagationTasks {
             String referencedVertexId = (String) parameters.get(PARAM_REFERENCED_VERTEX_ID);
             boolean isTermEntityEdge = (boolean) parameters.get(PARAM_IS_TERM_ENTITY_EDGE);
 
-            EntityGraphMapperV3.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
+            entityGraphMapperV3.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
         }
     }
 
@@ -116,7 +116,7 @@ public class ClassificationPropagationTasks {
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String            classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
 
-            EntityGraphMapperV3.classificationRefreshPropagation(classificationVertexId);
+            entityGraphMapperV3.classificationRefreshPropagation(classificationVertexId);
         }
     }
 
@@ -130,7 +130,7 @@ public class ClassificationPropagationTasks {
             String            relationshipEdgeId = (String) parameters.get(PARAM_RELATIONSHIP_EDGE_ID);
             AtlasRelationship relationship       = AtlasType.fromJson((String) parameters.get(PARAM_RELATIONSHIP_OBJECT), AtlasRelationship.class);
 
-            EntityGraphMapperV3.updateTagPropagations(relationshipEdgeId, relationship);
+            entityGraphMapperV3.updateTagPropagations(relationshipEdgeId, relationship);
         }
     }
 
@@ -146,7 +146,7 @@ public class ClassificationPropagationTasks {
             if(parameters.containsKey(PARAM_BATCH_LIMIT)) {
                 batchLimit = (int) parameters.get(PARAM_BATCH_LIMIT);
             }
-            EntityGraphMapperV3.cleanUpClassificationPropagation(classificationName, batchLimit);
+            entityGraphMapperV3.cleanUpClassificationPropagation(classificationName, batchLimit);
         }
     }
 }

@@ -26,13 +26,13 @@ public class SoftDeletionProductMigrationService {
 
     private final AtlasGraph graph;
     private final Set<String> productGuids;
-    private final GraphHelperV3 GraphHelperV3;
+    private final GraphHelperV3 graphHelperV3;
     private final TransactionInterceptHelper transactionInterceptHelper;
 
-    public SoftDeletionProductMigrationService(AtlasGraph graph, Set<String> productGuids, GraphHelperV3 GraphHelperV3, TransactionInterceptHelper transactionInterceptHelper) {
+    public SoftDeletionProductMigrationService(AtlasGraph graph, Set<String> productGuids, GraphHelperV3 graphHelperV3, TransactionInterceptHelper transactionInterceptHelper) {
         this.graph = graph;
         this.productGuids = productGuids;
-        this.GraphHelperV3 = GraphHelperV3;
+        this.graphHelperV3 = graphHelperV3;
         this.transactionInterceptHelper = transactionInterceptHelper;
     }
 
@@ -44,7 +44,7 @@ public class SoftDeletionProductMigrationService {
                 LOG.info("Removing edges for Product: {}", productGuid);
 
                 if (productGuid != null && !productGuid.trim().isEmpty()) {
-                    AtlasVertex productVertex = GraphHelperV3.getVertexForGUID(productGuid);
+                    AtlasVertex productVertex = graphHelperV3.getVertexForGUID(productGuid);
 
                     if (productVertex == null) {
                         LOG.info("ProductGUID with no vertex found: {}", productGuid);

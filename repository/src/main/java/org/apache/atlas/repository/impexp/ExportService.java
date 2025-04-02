@@ -64,7 +64,7 @@ public class ExportService {
     private final StartEntityFetchByExportRequest startEntityFetchByExportRequest;
     private final EntitiesExtractor         entitiesExtractor;
     private       AuditsWriter              auditsWriter;
-    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
+    private final EntityGraphRetrieverV3 entityGraphRetrieverV3;
     private       ExportTypeProcessor       exportTypeProcessor;
     private final HdfsPathEntityCreator     hdfsPathEntityCreator;
     private final GlossaryService           glossaryService;
@@ -74,7 +74,7 @@ public class ExportService {
                          AuditsWriter auditsWriter, HdfsPathEntityCreator hdfsPathEntityCreator,
                          GlossaryService glossaryService) {
         this.typeRegistry         = typeRegistry;
-        this.EntityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, this.typeRegistry);
+        this.entityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, this.typeRegistry);
         this.auditsWriter         = auditsWriter;
         this.hdfsPathEntityCreator = hdfsPathEntityCreator;
         this.glossaryService = glossaryService;
@@ -260,7 +260,7 @@ public class ExportService {
             return;
         }
 
-        AtlasEntityWithExtInfo entityWithExtInfo = EntityGraphRetrieverV3.toAtlasEntityWithExtInfo(guid);
+        AtlasEntityWithExtInfo entityWithExtInfo = entityGraphRetrieverV3.toAtlasEntityWithExtInfo(guid);
 
         processEntity(entityWithExtInfo, context);
         if (LOG.isDebugEnabled()) {
@@ -295,12 +295,12 @@ public class ExportService {
                 try {
                     String glossaryGuid = context.termsGlossary.get(termGuid);
                     if (!context.sink.hasEntity(glossaryGuid)) {
-                        AtlasEntity glossary = EntityGraphRetrieverV3.toAtlasEntity(glossaryGuid);
+                        AtlasEntity glossary = entityGraphRetrieverV3.toAtlasEntity(glossaryGuid);
                         addEntity(new AtlasEntityWithExtInfo(glossary), context);
                     }
 
                     if (!context.sink.hasEntity(termGuid)) {
-                        AtlasEntity term = EntityGraphRetrieverV3.toAtlasEntity(termGuid);
+                        AtlasEntity term = entityGraphRetrieverV3.toAtlasEntity(termGuid);
                         addEntity(new AtlasEntityWithExtInfo(term), context);
                     }
                 } catch (AtlasBaseException exception) {

@@ -78,13 +78,13 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
     private AtlasEntityHeader anchor;
     private AtlasEntityHeader parentCategory;
-    private EntityGraphMapperV3 EntityGraphMapperV3;
+    private EntityGraphMapperV3 entityGraphMapperV3;
     private EntityMutationContext context;
 
     public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetrieverV3 entityRetriever,
-                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapperV3 EntityGraphMapperV3) {
+                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapperV3 entityGraphMapperV3) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
-        this.EntityGraphMapperV3 = EntityGraphMapperV3;
+        this.entityGraphMapperV3 = entityGraphMapperV3;
     }
 
     @Override
@@ -496,7 +496,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
         AtlasStructType.AtlasAttribute attribute = entityType.getRelationshipAttribute(ANCHOR, relationshipType);
 
-        EntityGraphMapperV3.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
+        entityGraphMapperV3.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
     }
 
     private String createQualifiedName(AtlasVertex vertex) {

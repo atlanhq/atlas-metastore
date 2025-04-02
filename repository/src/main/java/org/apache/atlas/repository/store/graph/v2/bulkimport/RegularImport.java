@@ -63,14 +63,14 @@ public class RegularImport extends ImportStrategy {
     private final AtlasGraph graph;
     private final AtlasEntityStore entityStore;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetrieverV3 EntityGraphRetrieverV3;
+    private final EntityGraphRetrieverV3 entityGraphRetrieverV3;
     private boolean directoryBasedImportConfigured;
 
     public RegularImport(AtlasGraph graph, AtlasEntityStore entityStore, AtlasTypeRegistry typeRegistry) {
         this.graph       = graph;
         this.entityStore = entityStore;
         this.typeRegistry = typeRegistry;
-        this.EntityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, typeRegistry);
+        this.entityGraphRetrieverV3 = new EntityGraphRetrieverV3(graph, typeRegistry);
         this.directoryBasedImportConfigured = StringUtils.isNotEmpty(AtlasConfiguration.IMPORT_TEMP_DIRECTORY.getString());
     }
 
@@ -165,7 +165,7 @@ public class RegularImport extends ImportStrategy {
     }
     public void updateVertexGuid(AtlasEntity entity) {
         String entityGuid = entity.getGuid();
-        AtlasObjectId objectId = EntityGraphRetrieverV3.toAtlasObjectIdWithoutGuid(entity);
+        AtlasObjectId objectId = entityGraphRetrieverV3.toAtlasObjectIdWithoutGuid(entity);
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         String vertexGuid = null;

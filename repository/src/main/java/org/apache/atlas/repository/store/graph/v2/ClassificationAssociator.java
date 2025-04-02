@@ -132,7 +132,7 @@ public class ClassificationAssociator {
         private final AtlasTypeRegistry typeRegistry;
         private final AtlasEntityStore entitiesStore;
         private final EntityGraphRetrieverV3 entityRetriever;
-        private final EntityGraphMapperV3 EntityGraphMapperV3;
+        private final EntityGraphMapperV3 entityGraphMapperV3;
         private final IAtlasEntityChangeNotifier entityChangeNotifier;
         private final AtlasInstanceConverter instanceConverter;
         private final StringBuilder actionSummary = new StringBuilder();
@@ -140,12 +140,12 @@ public class ClassificationAssociator {
         private static final boolean IGNORE_REL = ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES.getBoolean();
 
         public Updater(AtlasGraph graph, AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
-                       EntityGraphMapperV3 EntityGraphMapperV3, IAtlasEntityChangeNotifier entityChangeNotifier,
+                       EntityGraphMapperV3 entityGraphMapperV3, IAtlasEntityChangeNotifier entityChangeNotifier,
                        AtlasInstanceConverter instanceConverter) {
             this.graph = graph;
             this.typeRegistry = typeRegistry;
             this.entitiesStore = entitiesStore;
-            this.EntityGraphMapperV3 = EntityGraphMapperV3;
+            this.entityGraphMapperV3 = entityGraphMapperV3;
             this.entityChangeNotifier = entityChangeNotifier;
             this.instanceConverter = instanceConverter;
             entityRetriever = new EntityGraphRetrieverV3(graph, typeRegistry);
@@ -236,7 +236,7 @@ public class ClassificationAssociator {
                     entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(addedClassification), false);
                 }
             }
-            EntityGraphMapperV3.updateClassificationText(null, allVertices);
+            entityGraphMapperV3.updateClassificationText(null, allVertices);
             transactionInterceptHelper.intercept();
 
             RequestContext.get().endMetricRecord(recorder);
