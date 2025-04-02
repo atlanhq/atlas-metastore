@@ -3538,9 +3538,9 @@ public class EntityGraphMapper {
             }
 
             // since every tag add creates new tag vertex, we must create new tag vertex in Cassandra
-            Map<String, Object> tagAsMap = CassandraConnector.tempPutTagMap(classificationVertex.getIdForDisplay(),
+            /*Map<String, Object> tagAsMap = CassandraConnector.tempPutTagMap(classificationVertex.getIdForDisplay(),
                     classificationVertex.getProperty("__typeName", String.class),
-                    entityGuid);
+                    entityGuid);*/
 
             /*
                 If restrictPropagateThroughLineage was false at past
@@ -3549,8 +3549,12 @@ public class EntityGraphMapper {
              */
 
 
-            Boolean currentRestrictPropagationThroughLineage = (Boolean) tagAsMap.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
-            Boolean currentRestrictPropagationThroughHierarchy = (Boolean) tagAsMap.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
+            //Boolean currentRestrictPropagationThroughLineage = (Boolean) tagAsMap.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
+            //Boolean currentRestrictPropagationThroughHierarchy = (Boolean) tagAsMap.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
+
+            Boolean currentRestrictPropagationThroughLineage = AtlasGraphUtilsV2.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE, Boolean.class);
+
+            Boolean currentRestrictPropagationThroughHierarchy = AtlasGraphUtilsV2.getProperty(classificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY, Boolean.class);
 
             if (previousRestrictPropagationThroughLineage != null && currentRestrictPropagationThroughLineage != null && !previousRestrictPropagationThroughLineage && currentRestrictPropagationThroughLineage) {
                 deleteDelegate.getHandler().removeTagPropagation(classificationVertex);
@@ -3574,7 +3578,7 @@ public class EntityGraphMapper {
                 return null;
             }
 
-            return processClassificationPropagationAdditionNew(idBucketPair, classificationVertex, tagAsMap);
+            return processClassificationPropagationAdditionNew(idBucketPair, classificationVertex);
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
 
@@ -3630,8 +3634,7 @@ public class EntityGraphMapper {
     }
 
     public List<String> processClassificationPropagationAdditionNew(Map<String, Integer> idBucketPair,
-                                                                    AtlasVertex classificationVertex,
-                                                                    Map<String, Object> tagAsMap) throws AtlasBaseException{
+                                                                    AtlasVertex classificationVertex) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
         List<String> idsToPropagate = new ArrayList<>(idBucketPair.keySet());
@@ -3660,7 +3663,7 @@ public class EntityGraphMapper {
                 RequestContext.get().endMetricRecord(metricRecorder);
 
 
-                AtlasClassification classification       = entityRetriever.toAtlasClassification(tagAsMap); // done
+                AtlasClassification classification       = entityRetriever.toAtlasClassification(classificationVertex); // done
                 List<AtlasVertex>   entitiesPropagatedTo = deleteDelegate.getHandler().addTagPropagationNew(classificationVertex, classification, allChunkedMaps); //done
 
                 if (CollectionUtils.isEmpty(entitiesPropagatedTo)) {
