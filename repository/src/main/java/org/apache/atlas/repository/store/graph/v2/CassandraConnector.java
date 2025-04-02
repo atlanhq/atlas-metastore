@@ -39,9 +39,12 @@ public class CassandraConnector {
 
     private static ObjectMapper objectMapper = new ObjectMapper();
 
+    private static String SELECT_BY_ID = "SELECT * FROM %s where id = '%s' AND bucket = '%s'";
+    private static String UPDATE_BY_ID = "UPDATE %s SET json_data = '%s' WHERE id = '%s' AND bucket = '%s'";
+
     static {
         try {
-            keyspace = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlas_new");
+            keyspace = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlas_test");
             vertexTableName = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_VERTEX_TABLE_NAME_PROPERTY, "vertices");
             String hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
             String clusterName = ApplicationProperties.get().getString(CASSANDRA_CLUSTERNAME_PROPERTY, DEFAULT_CLUSTER_NAME);
@@ -73,7 +76,21 @@ public class CassandraConnector {
         }
     }
 
-    public static int getBucket(String value, int numBuckets) {
+    public static Map<String, Integer> getIdsToPropagate() {
+        String query = "SELECT * FROM vertices_id";
+        ResultSet resultSet = cassSession.execute(query);
+
+        Map<String, Integer> ret = new HashMap<>();
+        for (Row row : resultSet) {
+            String id = row.getString("id");
+            int bucket = row.getInt("bucket");
+            ret.put(id, bucket);
+        }
+
+        return ret;
+    }
+
+    public static int getBucket(String value) {
         try {
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] hashBytes = md.digest(value.getBytes());
@@ -82,14 +99,27 @@ public class CassandraConnector {
             BigInteger hashInt = new BigInteger(1, hashBytes);
 
             // Map to a bucket
-            return hashInt.mod(BigInteger.valueOf(numBuckets)).intValue();
+            return hashInt.mod(BigInteger.valueOf(256)).intValue();
         } catch (Exception e) {
             throw new RuntimeException("MD5 algorithm not found", e);
         }
     }
 
+    public static Map<String, Object> getVertexProperties(String vertexId, int bucket) {
+        String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, bucket);
+        ResultSet resultSet = cassSession.execute(query);
+
+        Map<String, Object> ret = new HashMap<>();
+        for (Row row : resultSet) {
+            System.out.println("Vertex: " + AtlasType.toJson(row));
+            return convertRowToMap(row);
+        }
+        LOG.info("Returning null for vertex {}", vertexId);
+        return null;
+    }
+
     public static Map<String, Object> getVertexProperties(String vertexId) {
-        String query = "SELECT * FROM "+vertexTableName+" where id = '" + vertexId + "'";
+        String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, getBucket(vertexId));
         ResultSet resultSet = cassSession.execute(query);
 
         Map<String, Object> ret = new HashMap<>();
@@ -175,6 +205,19 @@ public class CassandraConnector {
 
         for (Map entry : entitiesMap) {
             String update = "UPDATE "+vertexTableName+" SET json_data = '" + AtlasType.toJson(entry) + "' WHERE id = '" +  entry.get("id") + "'";
+            batchQuery.append(update).append(";");
+        }
+
+        batchQuery.append("APPLY BATCH;");
+        cassSession.execute(batchQuery.toString());
+    }
+
+    public static void putEntitiesWithBucket(Collection<Map<String, Object>> entitiesMap) {
+        StringBuilder batchQuery = new StringBuilder();
+        batchQuery.append("BEGIN BATCH ");
+
+        for (Map entry : entitiesMap) {
+            String update = String.format(UPDATE_BY_ID, vertexTableName, AtlasType.toJson(entry), entry.get("id"), entry.get("bucket"));
             batchQuery.append(update).append(";");
         }
 

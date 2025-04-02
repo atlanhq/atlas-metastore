@@ -3564,15 +3564,17 @@ public class EntityGraphMapper {
 
             List<String> edgeLabelsToCheck = CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode);
             Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
-            List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
+            //List<AtlasVertex> impactedVertices = entityRetriever.getIncludedImpactedVerticesV2(entityVertex, relationshipGuid, classificationVertexId, edgeLabelsToCheck,toExclude);
 
-            if (CollectionUtils.isEmpty(impactedVertices)) {
+            Map<String, Integer> idBucketPair = CassandraConnector.getIdsToPropagate();
+
+            if (MapUtils.isEmpty(idBucketPair)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
 
                 return null;
             }
 
-            return processClassificationPropagationAdditionNew(impactedVertices, classificationVertex, tagAsMap);
+            return processClassificationPropagationAdditionNew(idBucketPair, classificationVertex, tagAsMap);
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
 
@@ -3627,12 +3629,14 @@ public class EntityGraphMapper {
 
     }
 
-    public List<String> processClassificationPropagationAdditionNew(List<AtlasVertex> verticesToPropagate,
+    public List<String> processClassificationPropagationAdditionNew(Map<String, Integer> idBucketPair,
                                                                     AtlasVertex classificationVertex,
                                                                     Map<String, Object> tagAsMap) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
         List<String> propagatedEntitiesGuids = new ArrayList<>();
-        int impactedVerticesSize = verticesToPropagate.size();
+        List<String> idsToPropagate = new ArrayList<>(idBucketPair.keySet());
+        int impactedVerticesSize = idsToPropagate.size();
+
         int offset = 0;
         int toIndex;
         LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
@@ -3640,13 +3644,14 @@ public class EntityGraphMapper {
         try {
             do {
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
-                List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
+                List<String> chunkedIdsToPropagate = idsToPropagate.subList(offset, toIndex);
 
                 AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
 
                 Map<String, Map<String, Object>> allChunkedMaps = new HashMap<>();
-                chunkedVerticesToPropagate.forEach(x -> {
-                    Map<String, Object> assetAsMap = CassandraConnector.getVertexProperties(x.getIdForDisplay());
+                chunkedIdsToPropagate.forEach(id -> {
+                    Map<String, Object> assetAsMap = CassandraConnector.getVertexProperties(id, idBucketPair.get(id));
+                    assetAsMap.put("bucket", idBucketPair.get(id));
                     allChunkedMaps.put((String) assetAsMap.get("__guid"), assetAsMap);
                 });
 
@@ -3671,7 +3676,7 @@ public class EntityGraphMapper {
                 offset += CHUNK_SIZE;
 
                 transactionInterceptHelper.intercept();
-                CassandraConnector.putEntities(allChunkedMaps.values());
+                CassandraConnector.putEntitiesWithBucket(allChunkedMaps.values());
                 ESConnector.writeTagProperties(allChunkedMaps.values());
 
             } while (offset < impactedVerticesSize);
