@@ -2,7 +2,7 @@ package org.apache.atlas.repository.store.graph.v2.tasks;
 
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
+import org.apache.atlas.repository.store.graph.v3.AtlasEntityStoreV3;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.TermPreProcessor;
 import org.apache.atlas.tasks.TaskFactory;
@@ -31,12 +31,12 @@ public class MeaningsTaskFactory implements TaskFactory {
 
     protected final EntityGraphMapper entityGraphMapper;
     protected final TermPreProcessor preprocessor;
-    protected  final AtlasEntityStoreV2 entityStoreV2;
+    protected  final AtlasEntityStoreV3 entityStoreV2;
     protected final AtlasGraph graph;
 
     @Inject
     public MeaningsTaskFactory(EntityGraphMapper entityGraphMapper,
-                               TermPreProcessor preprocessor, AtlasEntityStoreV2 entityStoreV2, AtlasGraph graph) {
+                               TermPreProcessor preprocessor, AtlasEntityStoreV3 entityStoreV2, AtlasGraph graph) {
         this.entityGraphMapper = entityGraphMapper;
         this.preprocessor = preprocessor;
         this.entityStoreV2 = entityStoreV2;
