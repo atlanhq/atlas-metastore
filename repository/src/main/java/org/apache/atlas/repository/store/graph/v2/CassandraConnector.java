@@ -111,7 +111,7 @@ public class CassandraConnector {
 
         Map<String, Object> ret = new HashMap<>();
         for (Row row : resultSet) {
-            System.out.println("Vertex: " + AtlasType.toJson(row));
+            //System.out.println("Vertex: " + AtlasType.toJson(row));
             return convertRowToMap(row);
         }
         LOG.info("Returning null for vertex {}", vertexId);

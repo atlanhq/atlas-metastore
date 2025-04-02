@@ -3660,7 +3660,9 @@ public class EntityGraphMapper {
                 chunkedIdsToPropagate.forEach(id -> {
                     Map<String, Object> assetAsMap = CassandraConnector.getVertexProperties(id, idBucketPair.get(id));
                     assetAsMap.put("bucket", idBucketPair.get(id));
-                    allChunkedMaps.put((String) assetAsMap.get("__guid"), assetAsMap);
+
+                    String guid = assetAsMap.get("__guid") == null ? (String) assetAsMap.get("__guid") : (String) assetAsMap.get("guid");
+                    allChunkedMaps.put(guid, assetAsMap);
                 });
 
                 LOG.info("allChunkedMaps");
