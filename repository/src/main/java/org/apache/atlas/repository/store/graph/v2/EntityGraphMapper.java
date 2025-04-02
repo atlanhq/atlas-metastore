@@ -3654,15 +3654,23 @@ public class EntityGraphMapper {
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
                 List<String> chunkedIdsToPropagate = idsToPropagate.subList(offset, toIndex);
 
+                LOG.info("chunkedIdsToPropagate");
+                LOG.info("{}", AtlasType.toJson(chunkedIdsToPropagate));
+
                 AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
 
                 Map<String, Map<String, Object>> allChunkedMaps = new HashMap<>();
                 chunkedIdsToPropagate.forEach(id -> {
                     Map<String, Object> assetAsMap = CassandraConnector.getVertexProperties(id, idBucketPair.get(id));
+                    LOG.info("assetAsMap {}", assetAsMap);
+
                     assetAsMap.put("bucket", idBucketPair.get(id));
+                    LOG.info("assetAsMap {}", assetAsMap);
 
                     String guid = assetAsMap.get("__guid") == null ? (String) assetAsMap.get("__guid") : (String) assetAsMap.get("guid");
                     allChunkedMaps.put(guid, assetAsMap);
+
+                    LOG.info("guid {}, assetAsMap {}", guid, assetAsMap);
                 });
 
                 LOG.info("allChunkedMaps");
