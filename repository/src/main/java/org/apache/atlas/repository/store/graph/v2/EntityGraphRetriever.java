@@ -1033,8 +1033,13 @@ public class EntityGraphRetriever {
     }
 
     private Map<String, Object> getRelationPropertyMarkerMap(AtlasVertex entityVertex, AtlasEntityType entityType, Set<String> attributes, List<String> includeAttrs) throws AtlasBaseException {
-        Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
-        return retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, includeAttrs);
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getRelationPropertyMarkerMap");
+        try {
+            Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
+            return retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, includeAttrs);
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
     }
 
     private Map<String, Object> preloadProperties(AtlasVertex entityVertex,  AtlasStructType structType, Set<String> attributes, boolean fetchEdgeLabels) throws AtlasBaseException {
@@ -1178,61 +1183,65 @@ public class EntityGraphRetriever {
     }
 
     private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithCache(AtlasVertex vertex,String entityTypeName, String guid, Set<String> attributes) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithCache");
+        try {
+            // 1. Check cache first
+            AtlasEntityHeader cachedHeader = EntityDistributedCache.getEntity(guid);
+            if (cachedHeader == null) {
+                // Cache Miss: Delegate to the full mapping function
+                return mapVertexToAtlasEntityHeaderWithPrefetch(vertex, attributes);
+            }
 
-        // 1. Check cache first
-        AtlasEntityHeader cachedHeader = EntityDistributedCache.getEntity(guid);
-        if (cachedHeader == null) {
-            // Cache Miss: Delegate to the full mapping function
-            return mapVertexToAtlasEntityHeaderWithPrefetch(vertex, attributes);
-        }
 
+            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entityTypeName);
+            Set<String>  headerAttributes = entityType.getHeaderAttributes().keySet();
+            HashSet<String> headerAttributesSet = new HashSet<>(headerAttributes);
+            if (CollectionUtils.isNotEmpty(attributes) && CollectionUtils.isNotEmpty(headerAttributes)) {
+                headerAttributesSet.addAll(attributes);
+            }
 
-        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entityTypeName);
-        Set<String>  headerAttributes = entityType.getHeaderAttributes().keySet();
-        HashSet<String> headerAttributesSet = new HashSet<>(headerAttributes);
-        if (CollectionUtils.isNotEmpty(attributes) && CollectionUtils.isNotEmpty(headerAttributes)) {
-            headerAttributesSet.addAll(attributes);
-        }
+            AtlasEntityHeader resultHeader = new AtlasEntityHeader(cachedHeader, headerAttributesSet);
+            if (entityType == null) {
+                LOG.error("Entity type '" + entityTypeName + "' not found in Type Registry."); // Replace with proper logging
+                return resultHeader;
+            }
 
-        AtlasEntityHeader resultHeader = new AtlasEntityHeader(cachedHeader, headerAttributesSet);
-        if (entityType == null) {
-            LOG.error("Entity type '" + entityTypeName + "' not found in Type Registry."); // Replace with proper logging
+            // 2. Identify relevant relationship attributes from the input 'attributes' set
+            List<AtlasAttribute> relationshipAttrsToFetch = new ArrayList<>();
+            List<String> relationshipAttrNames = new ArrayList<>();
+
+            if (CollectionUtils.isNotEmpty(attributes)) {
+                for (String requestedAttrName : attributes) {
+                    Map<String, AtlasAttribute> relationshipAttrMap = entityType.getRelationshipAttributes().get(requestedAttrName);
+                    if (relationshipAttrMap != null && !relationshipAttrMap.isEmpty()) {
+                        // It is a relationship attribute we need to handle
+                        relationshipAttrNames.add(requestedAttrName);
+                        relationshipAttrsToFetch.addAll(relationshipAttrMap.values());
+                    }
+                }
+            }
+
+            //If there are relationship attributes to fetch, proceed to get their values
+            if (!relationshipAttrsToFetch.isEmpty()) {
+                Map<String, Object> propertiesFromEdges = new HashMap<>(); // Will be populated by retrieveEdgeLabels
+
+                // Fetch metadata needed to retrieve relationship values
+                // this was implemented in part of Cassandra optimization activity in mapVertexToAtlasEntityHeaderWithPrefetch
+                propertiesFromEdges = getRelationPropertyMarkerMap(vertex, entityType, attributes, relationshipAttrNames);
+
+                // 4. Get vertex attribute values using the potentially pre-fetched edge info
+                for (AtlasAttribute relAttr : relationshipAttrsToFetch) {
+                    Object attrValue = getVertexAttributePreFetchCache(vertex, relAttr, propertiesFromEdges);
+                    if (attrValue != null) {
+                        resultHeader.setAttribute(relAttr.getName(), attrValue);
+                    }
+                }
+            }
+
             return resultHeader;
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
         }
-
-        // 2. Identify relevant relationship attributes from the input 'attributes' set
-        List<AtlasAttribute> relationshipAttrsToFetch = new ArrayList<>();
-        List<String> relationshipAttrNames = new ArrayList<>();
-
-        if (CollectionUtils.isNotEmpty(attributes)) {
-            for (String requestedAttrName : attributes) {
-                Map<String, AtlasAttribute> relationshipAttrMap = entityType.getRelationshipAttributes().get(requestedAttrName);
-                if (relationshipAttrMap != null && !relationshipAttrMap.isEmpty()) {
-                    // It is a relationship attribute we need to handle
-                    relationshipAttrNames.add(requestedAttrName);
-                    relationshipAttrsToFetch.addAll(relationshipAttrMap.values());
-                }
-            }
-        }
-
-        //If there are relationship attributes to fetch, proceed to get their values
-        if (!relationshipAttrsToFetch.isEmpty()) {
-            Map<String, Object> propertiesFromEdges = new HashMap<>(); // Will be populated by retrieveEdgeLabels
-
-            // Fetch metadata needed to retrieve relationship values
-            // this was implemented in part of Cassandra optimization activity in mapVertexToAtlasEntityHeaderWithPrefetch
-            propertiesFromEdges = getRelationPropertyMarkerMap(vertex, entityType, attributes, relationshipAttrNames);
-
-            // 4. Get vertex attribute values using the potentially pre-fetched edge info
-            for (AtlasAttribute relAttr : relationshipAttrsToFetch) {
-                Object attrValue = getVertexAttributePreFetchCache(vertex, relAttr, propertiesFromEdges);
-                if (attrValue != null) {
-                    resultHeader.setAttribute(relAttr.getName(), attrValue);
-                }
-            }
-        }
-
-        return resultHeader;
     }
 
     private AtlasEntityHeader mapVertexToAtlasEntityHeader(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
