@@ -28,7 +28,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStreamForImport;
 import org.apache.atlas.repository.store.graph.v2.BulkImporterImpl;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -54,14 +54,14 @@ public class EntityConsumer extends WorkItemConsumer<AtlasEntity.AtlasEntityWith
     private final AtlasGraph atlasGraphBulk;
     private final AtlasEntityStore entityStoreBulk;
     private final AtlasTypeRegistry typeRegistry;
-    private final EntityGraphRetriever entityRetrieverBulk;
+    private final EntityGraphRetrieverV3 entityRetrieverBulk;
 
     private List<AtlasEntity.AtlasEntityWithExtInfo> entityBuffer = new ArrayList<>();
     private List<String> localResults = new ArrayList<>();
 
     public EntityConsumer(AtlasTypeRegistry typeRegistry,
                           AtlasGraph atlasGraph, AtlasEntityStore entityStore,
-                          AtlasGraph atlasGraphBulk, AtlasEntityStore entityStoreBulk, EntityGraphRetriever entityRetrieverBulk,
+                          AtlasGraph atlasGraphBulk, AtlasEntityStore entityStoreBulk, EntityGraphRetrieverV3 entityRetrieverBulk,
                           BlockingQueue queue, int batchSize) {
         super(queue);
         this.typeRegistry = typeRegistry;

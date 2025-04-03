@@ -23,7 +23,7 @@ import org.apache.atlas.pc.WorkItemBuilder;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 
 import java.util.concurrent.BlockingQueue;
@@ -33,13 +33,13 @@ public class EntityConsumerBuilder implements WorkItemBuilder<EntityConsumer, At
     private AtlasEntityStore entityStore;
     private AtlasGraph atlasGraphBulk;
     private AtlasEntityStore entityStoreBulk;
-    private final EntityGraphRetriever entityRetriever;
+    private final EntityGraphRetrieverV3 entityRetriever;
     private final AtlasTypeRegistry typeRegistry;
-    private EntityGraphRetriever entityRetrieverBulk;
+    private EntityGraphRetrieverV3 entityRetrieverBulk;
     private int batchSize;
 
-    public EntityConsumerBuilder(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, AtlasEntityStoreV2 entityStore, EntityGraphRetriever entityRetriever,
-                                 AtlasGraph atlasGraphBulk, AtlasEntityStoreV2 entityStoreBulk, EntityGraphRetriever entityRetrieverBulk,
+    public EntityConsumerBuilder(AtlasTypeRegistry typeRegistry, AtlasGraph atlasGraph, AtlasEntityStoreV2 entityStore, EntityGraphRetrieverV3 entityRetriever,
+                                 AtlasGraph atlasGraphBulk, AtlasEntityStoreV2 entityStoreBulk, EntityGraphRetrieverV3 entityRetrieverBulk,
                                  int batchSize) {
         this.typeRegistry = typeRegistry;
 

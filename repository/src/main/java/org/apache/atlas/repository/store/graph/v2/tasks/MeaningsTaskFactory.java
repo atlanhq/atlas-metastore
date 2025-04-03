@@ -3,7 +3,7 @@ package org.apache.atlas.repository.store.graph.v2.tasks;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.TermPreProcessor;
 import org.apache.atlas.tasks.TaskFactory;
 import org.slf4j.Logger;
@@ -29,13 +29,13 @@ public class MeaningsTaskFactory implements TaskFactory {
     }};
 
 
-    protected final EntityGraphMapper entityGraphMapper;
+    protected final EntityGraphMapperV3 entityGraphMapper;
     protected final TermPreProcessor preprocessor;
     protected  final AtlasEntityStoreV2 entityStoreV2;
     protected final AtlasGraph graph;
 
     @Inject
-    public MeaningsTaskFactory(EntityGraphMapper entityGraphMapper,
+    public MeaningsTaskFactory(EntityGraphMapperV3 entityGraphMapper,
                                TermPreProcessor preprocessor, AtlasEntityStoreV2 entityStoreV2, AtlasGraph graph) {
         this.entityGraphMapper = entityGraphMapper;
         this.preprocessor = preprocessor;

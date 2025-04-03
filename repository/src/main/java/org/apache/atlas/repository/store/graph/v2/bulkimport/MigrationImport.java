@@ -96,8 +96,8 @@ public class MigrationImport extends ImportStrategy {
                                                               DataMigrationStatusService dataMigrationStatusService) {
         AtlasGraph graphBulk = graphProvider.getBulkLoading();
 
-        EntityGraphRetriever entityGraphRetriever = new EntityGraphRetriever(this.graph, typeRegistry);
-        EntityGraphRetriever entityGraphRetrieverBulk = new EntityGraphRetriever(graphBulk, typeRegistry);
+        EntityGraphRetrieverV3 entityGraphRetriever = new EntityGraphRetrieverV3(this.graph, typeRegistry);
+        EntityGraphRetrieverV3 entityGraphRetrieverBulk = new EntityGraphRetrieverV3(graphBulk, typeRegistry);
 
         AtlasEntityStoreV2 entityStore = createEntityStore(this.graph, typeRegistry);
         AtlasEntityStoreV2 entityStoreBulk = createEntityStore(graphBulk, typeRegistry);

@@ -43,7 +43,7 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.ClassificationAssociator;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
 import org.apache.atlas.repository.store.graph.v2.IAtlasEntityChangeNotifier;
 import org.apache.atlas.type.AtlasClassificationType;
@@ -113,13 +113,13 @@ public class EntityREST {
     private final AtlasTypeRegistry      typeRegistry;
     private final AtlasEntityStore       entitiesStore;
     private final ESBasedAuditRepository  esBasedAuditRepository;
-    private final EntityGraphMapper entityGraphMapper;
+    private final EntityGraphMapperV3 entityGraphMapper;
     private final IAtlasEntityChangeNotifier entityChangeNotifier;
     private final AtlasInstanceConverter instanceConverter;
 
     @Inject
     public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository,
-                      EntityGraphMapper entityGraphMapper, IAtlasEntityChangeNotifier entityChangeNotifier, AtlasInstanceConverter instanceConverter) {
+                      EntityGraphMapperV3 entityGraphMapper, IAtlasEntityChangeNotifier entityChangeNotifier, AtlasInstanceConverter instanceConverter) {
         this.typeRegistry      = typeRegistry;
         this.entitiesStore     = entitiesStore;
         this.esBasedAuditRepository = esBasedAuditRepository;

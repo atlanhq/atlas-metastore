@@ -32,7 +32,7 @@ import org.apache.atlas.model.impexp.ExportImportAuditEntry;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -183,9 +183,9 @@ public class AuditsWriter {
                 return null;
             }
 
-            String hiveDBQualifiedName = extractHiveDBQualifiedName((String) extInfo.getEntity().getAttribute(EntityGraphRetriever.QUALIFIED_NAME));
+            String hiveDBQualifiedName = extractHiveDBQualifiedName((String) extInfo.getEntity().getAttribute(EntityGraphRetrieverV3.QUALIFIED_NAME));
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(ENTITY_TYPE_HIVE_DB);
-            return entityStore.getGuidByUniqueAttributes(entityType, Collections.singletonMap(EntityGraphRetriever.QUALIFIED_NAME, hiveDBQualifiedName));
+            return entityStore.getGuidByUniqueAttributes(entityType, Collections.singletonMap(EntityGraphRetrieverV3.QUALIFIED_NAME, hiveDBQualifiedName));
         }
 
         @VisibleForTesting

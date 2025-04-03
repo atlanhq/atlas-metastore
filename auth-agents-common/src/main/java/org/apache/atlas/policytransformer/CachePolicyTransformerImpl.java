@@ -42,7 +42,7 @@ import org.apache.atlas.plugin.model.RangerValiditySchedule;
 import org.apache.atlas.plugin.util.ServicePolicies.TagPolicies;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -117,7 +117,7 @@ public class CachePolicyTransformerImpl {
 
     private EntityDiscoveryService discoveryService;
     private AtlasGraph                graph;
-    private EntityGraphRetriever      entityRetriever;
+    private EntityGraphRetrieverV3      entityRetriever;
 
     private PersonaCachePolicyTransformer personaTransformer;
     private PurposeCachePolicyTransformer purposeTransformer;
@@ -129,7 +129,7 @@ public class CachePolicyTransformerImpl {
     @Inject
     public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
         this.graph                = new AtlasJanusGraph();
-        this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever      = new EntityGraphRetrieverV3(graph, typeRegistry);
 
         personaTransformer = new PersonaCachePolicyTransformer(entityRetriever);
         purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);

@@ -20,7 +20,7 @@ package org.apache.atlas.policytransformer;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphRetrieverV3;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -47,10 +47,10 @@ public class PurposeCachePolicyTransformer extends AbstractCachePolicyTransforme
 
     private final static String TEMPLATE_SUFFIX = "purpose";
 
-    private EntityGraphRetriever entityRetriever = null;
+    private EntityGraphRetrieverV3 entityRetriever = null;
     private PolicyTransformerTemplate purposeTemplate;
 
-    public PurposeCachePolicyTransformer(EntityGraphRetriever entityRetriever) throws AtlasBaseException {
+    public PurposeCachePolicyTransformer(EntityGraphRetrieverV3 entityRetriever) throws AtlasBaseException {
         purposeTemplate = getTemplate(TEMPLATE_SUFFIX);
         this.entityRetriever = entityRetriever;
     }

@@ -22,7 +22,7 @@ import org.apache.atlas.model.patches.AtlasPatch.AtlasPatches;
 import org.apache.atlas.model.patches.AtlasPatch.PatchStatus;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
+import org.apache.atlas.repository.store.graph.v2.EntityGraphMapperV3;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,11 +44,11 @@ public class AtlasPatchManager {
     private final AtlasGraph atlasGraph;
     private final AtlasTypeRegistry typeRegistry;
     private final GraphBackedSearchIndexer indexer;
-    private final EntityGraphMapper entityGraphMapper;
+    private final EntityGraphMapperV3 entityGraphMapper;
     private PatchContext            context;
 
     @Inject
-    public AtlasPatchManager(AtlasGraph atlasGraph, AtlasTypeRegistry typeRegistry, GraphBackedSearchIndexer indexer, EntityGraphMapper entityGraphMapper) {
+    public AtlasPatchManager(AtlasGraph atlasGraph, AtlasTypeRegistry typeRegistry, GraphBackedSearchIndexer indexer, EntityGraphMapperV3 entityGraphMapper) {
         this.atlasGraph = atlasGraph;
         this.typeRegistry = typeRegistry;
         this.indexer = indexer;
