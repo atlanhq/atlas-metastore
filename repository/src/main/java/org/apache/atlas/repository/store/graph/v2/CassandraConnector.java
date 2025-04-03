@@ -125,7 +125,7 @@ public class CassandraConnector {
             Map<String, Object> ret = new HashMap<>();
             for (Row row : resultSet) {
                 //System.out.println("Vertex: " + AtlasType.toJson(row));
-                return convertRowToMap(row);
+                return convertRowToMap(vertexId, bucket, row);
             }
             LOG.info("Returning null for vertex {}", vertexId);
         } finally {
@@ -138,13 +138,14 @@ public class CassandraConnector {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getVertexProperties");
         try {
 
-            String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, calculateBucket(vertexId));
+            int bucket = calculateBucket(vertexId);
+            String query = String.format(SELECT_BY_ID, vertexTableName, vertexId, bucket);
             ResultSet resultSet = cassSession.execute(query);
 
             Map<String, Object> ret = new HashMap<>();
             for (Row row : resultSet) {
                 System.out.println("Vertex: " + AtlasType.toJson(row));
-                return convertRowToMap(row);
+                return convertRowToMap(vertexId, bucket, row);
             }
             LOG.info("Returning null for vertex {}", vertexId);
         } finally {
@@ -153,31 +154,7 @@ public class CassandraConnector {
         return null;
     }
 
-    public static Map<String, Object> getVertexPropertiesByGuid(String guid) {
-        String query = "SELECT * FROM "+vertexTableName+" where guid = '" + guid + "'";
-        ResultSet resultSet = cassSession.execute(query);
-
-        for (Row row : resultSet) {
-            System.out.println("Vertex: " + AtlasType.toJson(row));
-            return convertRowToMap(row);
-        }
-        LOG.info("Returning null vertex for GUID {}", guid);
-        return null;
-    }
-
-    public static Map<String, Object> getEdgeProperties(String edgeId) {
-        String query = "SELECT * FROM edges where id = '" + edgeId + "'";
-        ResultSet resultSet = cassSession.execute(query);
-
-        for (Row row : resultSet) {
-            System.out.println("Edge: " + AtlasType.toJson(row));
-            return convertRowToMap(row);
-        }
-        LOG.info("Returning null for edge {}", edgeId);
-        return null;
-    }
-
-    public static Map<String, Object> convertRowToMap(Row row) {
+    public static Map<String, Object> convertRowToMap(String vertexId, int bucket, Row row) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("convertRowToMap");
         Map<String, Object> map = new HashMap<>();
         row.getColumnDefinitions().forEach(column -> {
@@ -189,6 +166,7 @@ public class CassandraConnector {
                 try {
                     interimValue = objectMapper.readValue(columnValue.toString(), new TypeReference<Map<String, Object>>() {});
                 } catch (JsonProcessingException e) {
+                    LOG.error("Failed to parse json_data for record where id='{}' AND bucket={}", vertexId, bucket);
                     throw new RuntimeException(e);
                 }
 
