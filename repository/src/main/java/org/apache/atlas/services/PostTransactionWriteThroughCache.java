@@ -43,7 +43,7 @@ public class PostTransactionWriteThroughCache extends GraphTransactionIntercepto
 
             if (CollectionUtils.isNotEmpty(entitiesToEvict) && isSuccess) {
                 for (AtlasEntityHeader entity : entitiesToEvict) {
-                    entityDistributedCache.evictEntity(entity.getTypeName(), (String) entity.getAttribute("qualifiedName"));
+                    entityDistributedCache.evictEntity(entity.getTypeName(), entity.getGuid());
                 }
             }
         } catch (Exception e) {

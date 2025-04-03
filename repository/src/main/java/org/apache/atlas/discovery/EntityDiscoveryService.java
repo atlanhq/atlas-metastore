@@ -1185,9 +1185,14 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     public List<AtlasEntityHeader> searchUsingType(int from, int size, String typeName, Set<String> attributes) throws AtlasBaseException {
         IndexSearchParams indexSearchParams = new IndexSearchParams();
-        Map<String, Object> dsl = getMap("from", from);
-        dsl.put("size", size);
-        dsl.put("query", getMap("term", getMap("__typeName.keyword", typeName)));
+        Map<String, Object> dsl = getMap("size", size);
+        dsl.put("from", from);
+        dsl.put("track_total_hits", true);
+
+        List<Map<String, Object>> mustClauseList = new ArrayList<>();
+        mustClauseList.add(getMap("term", getMap("__typeName.keyword", typeName)));
+        mustClauseList.add(getMap("term", getMap("__state", ACTIVE_STATE_VALUE)));
+        dsl.put("query", getMap("bool", getMap("must", mustClauseList)));
         indexSearchParams.setDsl(dsl);
         indexSearchParams.setAttributes(attributes);
         AtlasSearchResult searchResult = null;
@@ -1202,10 +1207,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     public Integer getSearchCountUsingTypes(List<String> typeNames) {
         IndexSearchParams indexSearchParams = new IndexSearchParams();
-        Map<String, Object> dsl = getMap("query", getMap("terms", getMap("__typeName.keyword", typeNames)));
-        dsl.put("size", 0);
+        Map<String, Object> dsl = getMap("size", 0);
         dsl.put("from", 0);
         dsl.put("track_total_hits", true);
+
+        List<Map<String, Object>> mustClauseList = new ArrayList<>();
+        mustClauseList.add(getMap("terms", getMap("__typeName.keyword", typeNames)));
+        mustClauseList.add(getMap("term", getMap("__state", ACTIVE_STATE_VALUE)));
+        dsl.put("query", getMap("bool", getMap("must", mustClauseList)));
+
         indexSearchParams.setDsl(dsl);
 
         try {
