@@ -1359,7 +1359,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
-    public AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
+    private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithPrefetch");
         AtlasEntityHeader ret = new AtlasEntityHeader();
         try {
@@ -1369,6 +1369,7 @@ public class EntityGraphRetriever {
             Map<String, Object> properties = preloadProperties(entityVertex, entityType, attributes, true);
 
             String guid = (String) properties.get(Constants.GUID_PROPERTY_KEY);
+
             Integer value = (Integer)properties.get(Constants.IS_INCOMPLETE_PROPERTY_KEY);
             Boolean isIncomplete = value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
 
