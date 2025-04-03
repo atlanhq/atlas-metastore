@@ -104,6 +104,19 @@ public interface AtlasIndexQuery<V, E> {
 
         Map<String, List<String>> getHighLights();
         ArrayList<Object> getSort();
+
+        /**
+         * Gets TypeName of the vertex
+         */
+        String getTypeName();
+        /**
+         * Gets GUID of the vertex
+         */
+        String getGuid();
+        /**
+         * Gets the QualifiedName of the vertex
+         */
+        String getQualifiedName();
     }
 
 }

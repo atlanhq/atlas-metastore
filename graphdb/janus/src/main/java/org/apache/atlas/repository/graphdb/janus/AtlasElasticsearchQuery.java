@@ -173,7 +173,7 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             if(searchParams.isCallAsync() || AtlasConfiguration.ENABLE_ASYNC_INDEXSEARCH.getBoolean()) {
                 return performAsyncDirectIndexQuery(searchParams);
             } else {
-                String responseString =  performDirectIndexQuery(searchParams.getQuery(), false);
+                String responseString =  performDirectIndexQuery(searchParams.getQuery(), searchParams.getFetchSources());
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("runQueryWithLowLevelClient.response : {}", responseString);
                 }
@@ -249,7 +249,7 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             if (searchParams.getRequestTimeoutInSecs() !=  null) {
                 KeepAliveTime = searchParams.getRequestTimeoutInSecs() +"s";
             }
-            AsyncQueryResult response = submitAsyncSearch(searchParams, KeepAliveTime, false).get();
+            AsyncQueryResult response = submitAsyncSearch(searchParams, KeepAliveTime, searchParams.getFetchSources()).get();
             if(response.isRunning()) {
                 /*
                     * If the response is still running, then we need to wait for the response
@@ -666,6 +666,21 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
         public ArrayList<Object> getSort() {
             return new ArrayList<>();
         }
+
+        @Override
+        public String getTypeName() {
+            return "";
+        }
+
+        @Override
+        public String getGuid() {
+            return "";
+        }
+
+        @Override
+        public String getQualifiedName() {
+            return "";
+        }
     }
 
 
@@ -739,6 +754,43 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
                 return (ArrayList<Object>) sort;
             }
             return new ArrayList<>();
+        }
+
+        @Override
+        public String getTypeName() {
+            Object source = this.hit.get("_source");
+            if (Objects.nonNull(source)) {
+                Object typeName = ((Map<String, Object>) source).get("__typeName");
+                if (Objects.nonNull(typeName)) {
+                    return String.valueOf(typeName);
+                }
+            }
+            return "";
+        }
+
+        @Override
+        public String getGuid() {
+            Object source = this.hit.get("_source");
+            if (Objects.nonNull(source)) {
+                Object guid = ((Map<String, Object>) source).get("__guid");
+                if (Objects.nonNull(guid)) {
+                    return String.valueOf(guid);
+                }
+            }
+            return "";
+        }
+
+        @Override
+        public String getQualifiedName() {
+            Object source = this.hit.get("_source");
+            if (Objects.nonNull(source)) {
+                Object qualifiedName = ((Map<String, Object>) source).get("__qualifiedName");
+                if (Objects.nonNull(qualifiedName)) {
+                    return String.valueOf(qualifiedName);
+                }
+            }
+            return "";
+
         }
     }
 

@@ -37,7 +37,7 @@ public class PostTransactionWriteThroughCache extends GraphTransactionIntercepto
 
             if (CollectionUtils.isNotEmpty(entitiesToCache) && isSuccess) {
                     for (AtlasEntityHeader entity : entitiesToCache) {
-                        entityDistributedCache.storeEntity(entity.getTypeName(), entity);
+                        entityDistributedCache.storeEntity(entity);
                     }
             }
 

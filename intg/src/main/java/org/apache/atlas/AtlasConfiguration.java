@@ -133,6 +133,8 @@ public enum AtlasConfiguration {
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
 
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
+    ATLAS_ENTITY_CACHE_ENABLED("atlas.entity.cache.enabled", false),
+    ATLAS_ENTITY_CACHE_ALLOWED_ENTITY_TYPES("atlas.entity.cache.allowed.entity.types", "Persona,Purpose,Connection,AtlasGlossary"),
 
     /***
      * OTEL Configuration

@@ -137,7 +137,11 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         if (CollectionUtils.isNotEmpty(updatedEntities)) {
             for (AtlasEntityHeader entity : updatedEntities) {
                 if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    entitiesToCache.add(entity);
+                    AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(entity.getGuid());
+                    if (existingEntity == null) {
+                        existingEntity = new AtlasEntityHeader(entity);
+                    }
+                    entitiesToCache.add(getUpdatedEntityHeader(existingEntity, entity));
                 }
             }
         }
@@ -145,7 +149,11 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         if (CollectionUtils.isNotEmpty(partiallyUpdatedEntities)) {
             for (AtlasEntityHeader entity : partiallyUpdatedEntities) {
                 if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    entitiesToCache.add(entity);
+                    AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(entity.getGuid());
+                    if (existingEntity == null) {
+                        existingEntity = new AtlasEntityHeader(entity);
+                    }
+                    entitiesToCache.add(getUpdatedEntityHeader(existingEntity, entity));
                 }
             }
         }
@@ -166,12 +174,26 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
             }
         }
         PostTransactionWriteThroughCache postTransactionWriteThroughCache  = new PostTransactionWriteThroughCache(redisService);
-
         postTransactionWriteThroughCache.setEntitiesToCache(entitiesToCache);
         postTransactionWriteThroughCache.setEntitiesToEvict(entitiesToEvict);
 
 
         notifyPropagatedEntities();
+    }
+
+    private AtlasEntityHeader getUpdatedEntityHeader(AtlasEntityHeader existingEntity, AtlasEntityHeader updatedEntity) {
+        if (updatedEntity == null || existingEntity == null) {
+            return null;
+        }
+
+        for (String attrKey : updatedEntity.getAttributes().keySet()) {
+            Object value = updatedEntity.getAttribute(attrKey);
+            if (value != null) {
+                existingEntity.setAttribute(attrKey, value);
+            }
+        }
+        return existingEntity;
+
     }
 
     @Override
