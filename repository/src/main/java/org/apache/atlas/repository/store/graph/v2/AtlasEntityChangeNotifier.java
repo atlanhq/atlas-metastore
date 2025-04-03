@@ -37,6 +37,10 @@ import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.instance.EntityMutations.EntityOperation;
 import org.apache.atlas.model.notification.EntityNotification;
 import org.apache.atlas.repository.audit.AtlasAuditService;
+import org.apache.atlas.repository.graphdb.janus.EntityDistributedCache;
+import org.apache.atlas.service.redis.RedisService;
+import org.apache.atlas.service.redis.RedisServiceImpl;
+import org.apache.atlas.services.PostTransactionWriteThroughCache;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
@@ -55,6 +59,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
+import javax.inject.Named;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
@@ -74,6 +79,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     private final FullTextMapperV2            fullTextMapperV2;
     private final AtlasTypeRegistry           atlasTypeRegistry;
     private final boolean                     isV2EntityNotificationEnabled;
+    private final RedisServiceImpl                redisService;
     private static final List<String> ALLOWED_RELATIONSHIP_TYPES = Arrays.asList(AtlasConfiguration.SUPPORTED_RELATIONSHIP_EVENTS.getStringArray());
 
     @Inject
@@ -81,13 +87,14 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                                      Set<EntityChangeListenerV2> entityChangeListenersV2,
                                      AtlasInstanceConverter instanceConverter,
                                      FullTextMapperV2 fullTextMapperV2,
-                                     AtlasTypeRegistry atlasTypeRegistry) {
+                                     AtlasTypeRegistry atlasTypeRegistry, RedisServiceImpl redisService) {
         this.entityChangeListeners         = entityChangeListeners;
         this.entityChangeListenersV2       = entityChangeListenersV2;
         this.instanceConverter             = instanceConverter;
         this.fullTextMapperV2              = fullTextMapperV2;
         this.atlasTypeRegistry             = atlasTypeRegistry;
         this.isV2EntityNotificationEnabled = AtlasRepositoryConfiguration.isV2EntityNotificationEnabled();
+        this.redisService = redisService;
     }
 
     @Override
@@ -116,7 +123,77 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         notifyListeners(deletedEntities, EntityOperation.DELETE, isImport);
         notifyListeners(purgedEntities, EntityOperation.PURGE, isImport);
 
+        // From the entities extract entitiesToSet in cache and entitiesToEvict from cache for the type EntityDistributedCache.allowedEntityTypes
+        List<AtlasEntityHeader> entitiesToCache = new ArrayList<>();
+        List<AtlasEntityHeader> entitiesToEvict = new ArrayList<>();
+        if (CollectionUtils.isNotEmpty(createdEntities)) {
+            for (AtlasEntityHeader entity : createdEntities) {
+                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
+                    entitiesToCache.add(entity);
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(updatedEntities)) {
+            for (AtlasEntityHeader entity : updatedEntities) {
+                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
+                    AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(entity.getGuid());
+                    if (existingEntity == null) {
+                        existingEntity = new AtlasEntityHeader(entity);
+                    }
+                    entitiesToCache.add(getUpdatedEntityHeader(existingEntity, entity));
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(partiallyUpdatedEntities)) {
+            for (AtlasEntityHeader entity : partiallyUpdatedEntities) {
+                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
+                    AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(entity.getGuid());
+                    if (existingEntity == null) {
+                        existingEntity = new AtlasEntityHeader(entity);
+                    }
+                    entitiesToCache.add(getUpdatedEntityHeader(existingEntity, entity));
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(deletedEntities)) {
+            for (AtlasEntityHeader entity : deletedEntities) {
+                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
+                    entitiesToEvict.add(entity);
+                }
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(purgedEntities)) {
+            for (AtlasEntityHeader entity : purgedEntities) {
+                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
+                    entitiesToEvict.add(entity);
+                }
+            }
+        }
+        PostTransactionWriteThroughCache postTransactionWriteThroughCache  = new PostTransactionWriteThroughCache(redisService);
+        postTransactionWriteThroughCache.setEntitiesToCache(entitiesToCache);
+        postTransactionWriteThroughCache.setEntitiesToEvict(entitiesToEvict);
+
+
         notifyPropagatedEntities();
+    }
+
+    private AtlasEntityHeader getUpdatedEntityHeader(AtlasEntityHeader existingEntity, AtlasEntityHeader updatedEntity) {
+        if (updatedEntity == null || existingEntity == null) {
+            return null;
+        }
+
+        for (String attrKey : updatedEntity.getAttributes().keySet()) {
+            Object value = updatedEntity.getAttribute(attrKey);
+            if (value != null) {
+                existingEntity.setAttribute(attrKey, value);
+            }
+        }
+        return existingEntity;
+
     }
 
     @Override

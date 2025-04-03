@@ -977,6 +977,14 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
         RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
 
+        if(AtlasConfiguration.ATLAS_ENTITY_CACHE_ENABLED.getBoolean()) {
+            params.setSources(new HashSet<>(){{
+                add(ENTITY_TYPE_PROPERTY_KEY);
+                add(GUID_PROPERTY_KEY);
+                add(QUALIFIED_NAME);
+            }});
+        }
+
         AtlasSearchResult ret = new AtlasSearchResult();
         AtlasIndexQuery indexQuery;
 
@@ -1086,13 +1094,21 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             while (iterator.hasNext()) {
                 Result result = iterator.next();
                 AtlasVertex vertex = result.getVertex();
+                String typeName = result.getTypeName();
+                String guid = result.getGuid();
 
                 if (vertex == null) {
                     LOG.warn("vertex in null");
                     continue;
                 }
+                AtlasEntityHeader header;
+                boolean useCache = AtlasConfiguration.ATLAS_ENTITY_CACHE_ENABLED.getBoolean() && Arrays.asList(AtlasConfiguration.ATLAS_ENTITY_CACHE_ALLOWED_ENTITY_TYPES.getStringArray()).contains(typeName);
+                if (useCache){
+                    header = entityRetriever.toAtlasEntityHeaderWithCache(vertex, resultAttributes, typeName, guid);
+                } else {
+                    header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
+                }
 
-                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
                 if(RequestContext.get().includeClassifications()){
                     header.setClassifications(entityRetriever.getAllClassifications(vertex));
                 }
@@ -1165,6 +1181,46 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         searchResult = directIndexSearch(indexSearchParams);
         List<AtlasEntityHeader> entityHeaders = searchResult.getEntities();
         return  entityHeaders;
+    }
+
+    public List<AtlasEntityHeader> searchUsingType(int from, int size, String typeName, Set<String> attributes) throws AtlasBaseException {
+        IndexSearchParams indexSearchParams = new IndexSearchParams();
+        Map<String, Object> dsl = getMap("from", from);
+        dsl.put("size", size);
+        dsl.put("query", getMap("term", getMap("__typeName.keyword", typeName)));
+        indexSearchParams.setDsl(dsl);
+        indexSearchParams.setAttributes(attributes);
+        AtlasSearchResult searchResult = null;
+        try {
+            searchResult = directIndexSearch(indexSearchParams);
+        } catch (AtlasBaseException e) {
+            LOG.error("Error while performing direct search for the params ({}), {}", indexSearchParams, e.getMessage());
+        }
+
+        return searchResult.getEntities();
+    }
+
+    public Integer getSearchCountUsingTypes(List<String> typeNames) {
+        IndexSearchParams indexSearchParams = new IndexSearchParams();
+        Map<String, Object> dsl = getMap("query", getMap("terms", getMap("__typeName.keyword", typeNames)));
+        dsl.put("size", 0);
+        dsl.put("from", 0);
+        dsl.put("track_total_hits", true);
+        indexSearchParams.setDsl(dsl);
+
+        try {
+            String indexName = getIndexName(indexSearchParams);
+            AtlasIndexQuery indexQuery = graph.elasticsearchQuery(indexName);
+            SearchParams searchParams = indexSearchParams;
+            Map<String,Object> result = indexQuery.directIndexQuery(searchParams.getQuery());
+            if(result.get("total") != null){
+                return ((Integer) result.get("total"));
+            }
+        } catch (AtlasBaseException e) {
+            LOG.error("Error while performing direct search for the params ({}), {}", indexSearchParams, e.getMessage());
+            return -1;
+        }
+        return -1;
     }
 
     private String getIndexName(IndexSearchParams params) throws AtlasBaseException {
