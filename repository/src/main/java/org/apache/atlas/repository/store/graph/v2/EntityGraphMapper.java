@@ -3654,10 +3654,9 @@ public class EntityGraphMapper {
                 toIndex = ((offset + CHUNK_SIZE > impactedVerticesSize) ? impactedVerticesSize : (offset + CHUNK_SIZE));
                 List<String> chunkedIdsToPropagate = idsToPropagate.subList(offset, toIndex);
 
-                //LOG.info("chunkedIdsToPropagate");
+                LOG.info("chunkedIdsToPropagate size");
+                LOG.info("{}", chunkedIdsToPropagate.size());
                 //LOG.info("{}", AtlasType.toJson(chunkedIdsToPropagate));
-
-                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
 
                 Map<String, Map<String, Object>> allChunkedMaps = new HashMap<>();
                 chunkedIdsToPropagate.forEach(id -> {
@@ -3673,9 +3672,10 @@ public class EntityGraphMapper {
                     //LOG.info("guid {}, assetAsMap {}", guid, assetAsMap);
                 });
 
-                //LOG.info("allChunkedMaps");
-                //LOG.info("{}", AtlasType.toJson(allChunkedMaps));
+                LOG.info("allChunkedMaps");
+                LOG.info("{}", allChunkedMaps.size());
 
+                AtlasPerfMetrics.MetricRecorder metricRecorder  = RequestContext.get().startMetricRecord("lockObjectsAfterTraverse");
                 List<String> impactedVerticesGuidsToLock        = new ArrayList<>(allChunkedMaps.keySet());
                 LOG.info("impactedVerticesGuidsToLock");
                 LOG.info("{}", impactedVerticesGuidsToLock.size());
@@ -3702,6 +3702,7 @@ public class EntityGraphMapper {
                 CassandraConnector.putEntitiesWithBucket(allChunkedMaps.values());
                 ESConnector.writeTagProperties(allChunkedMaps.values());
 
+                LOG.info("offset {}, impactedVerticesSize: {}", offset, impactedVerticesSize);
             } while (offset < impactedVerticesSize);
 
             LOG.info(String.format("Total number of vertices propagated: %d", impactedVerticesSize));

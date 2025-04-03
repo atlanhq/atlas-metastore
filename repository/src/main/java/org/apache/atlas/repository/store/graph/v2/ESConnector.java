@@ -76,11 +76,12 @@ public class ESConnector {
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-
             for (Map entry : entitiesMap) {
                 Map<String, Object> toUpdate = new HashMap<>();
 
                 DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
+                toUpdate.put("__modificationTimestamp", System.currentTimeMillis());
+
                 if (!toUpdate.isEmpty()) {
                     long vertexId = Long.valueOf(entry.get("id").toString());
                     String docId = LongEncoding.encode(vertexId);
