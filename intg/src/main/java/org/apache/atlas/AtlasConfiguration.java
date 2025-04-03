@@ -134,7 +134,7 @@ public enum AtlasConfiguration {
 
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
     ATLAS_ENTITY_CACHE_ENABLED("atlas.entity.cache.enabled", false),
-    ATLAS_ENTITY_CACHE_ALLOWED_ENTITY_TYPES("atlas.entity.cache.allowed.entity.types", "Persona,Purpose,Connection,AtlasGlossary"),
+    ATLAS_ENTITY_CACHE_ALLOWED_ENTITY_TYPES("atlas.entity.cache.allowed.entity.types", "Persona,Purpose,Connection,AtlasGlossary,AuthPolicy"),
 
     /***
      * OTEL Configuration
