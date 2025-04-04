@@ -1036,7 +1036,7 @@ public class EntityGraphRetriever {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getRelationPropertyMarkerMap");
         try {
             Map<String, Set<String>> relationshipsLookup = fetchEdgeNames(entityType);
-            return retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup, includeAttrs);
+            return retrieveEdgeLabels(entityVertex, attributes, relationshipsLookup);
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
@@ -1118,7 +1118,7 @@ public class EntityGraphRetriever {
         return edgeNames;
     }
 
-    private Map<String, Object> retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup, List<String> includeAttrs) throws AtlasBaseException {
+    private Map<String, Object> retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
         Map<String, Object> propertiesMap = new HashMap<>();
         try {
@@ -1127,14 +1127,9 @@ public class EntityGraphRetriever {
             Set<String> edgeLabels = new HashSet<>();
             edgeLabelAndTypeName.stream().filter(Objects::nonNull).forEach(edgeLabelMap -> attributes.forEach(attribute->{
 
-                if (edgeLabelMap.getKey().contains(attribute)) {
-                    if (CollectionUtils.isNotEmpty(includeAttrs)) {
-                        if (includeAttrs.contains(attribute)) {
-                            edgeLabels.add(attribute);
-                        }
-                    } else {
-                        edgeLabels.add(attribute);
-                    }
+                if (edgeLabelMap.getKey().contains(attribute)){
+                    edgeLabels.add(attribute);
+                    return;
                 }
 
                 String edgeTypeName = edgeLabelMap.getValue();
