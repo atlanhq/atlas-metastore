@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
@@ -1032,6 +1033,7 @@ public class EntityGraphRetriever {
         return mapVertexToAtlasEntityHeader(entityVertex, Collections.<String>emptySet());
     }
 
+    @WithSpan
     private Map<String, Object> getRelationPropertyMarkerMap(AtlasVertex entityVertex, AtlasEntityType entityType, Set<String> attributes, List<String> includeAttrs) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getRelationPropertyMarkerMap");
         try {
@@ -1042,6 +1044,7 @@ public class EntityGraphRetriever {
         }
     }
 
+    @WithSpan
     private Map<String, Object> preloadProperties(AtlasVertex entityVertex,  AtlasStructType structType, Set<String> attributes, boolean fetchEdgeLabels) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("preloadProperties");
 
@@ -1106,6 +1109,7 @@ public class EntityGraphRetriever {
         }
     }
 
+    @WithSpan
     private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
         Map<String, Map<String, AtlasAttribute>> relationships = entityType.getRelationshipAttributes();
         Map<String, Set<String>> edgeNames = new HashMap<>();
@@ -1118,6 +1122,7 @@ public class EntityGraphRetriever {
         return edgeNames;
     }
 
+    @WithSpan
     private Map<String, Object> retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
         Map<String, Object> propertiesMap = new HashMap<>();
@@ -1147,6 +1152,8 @@ public class EntityGraphRetriever {
         }
 
     }
+
+
     private void updateAttrValue( Map<String, Object> propertiesMap, VertexProperty<Object> property){
         Object value = propertiesMap.get(property.key());
         if (value instanceof List) {
@@ -1181,6 +1188,7 @@ public class EntityGraphRetriever {
         return exclusionSet.stream().anyMatch(attributes::contains);
     }
 
+    @WithSpan
     private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithCache(AtlasVertex vertex,String entityTypeName, String guid, Set<String> attributes) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithCache");
         try {
@@ -1261,6 +1269,7 @@ public class EntityGraphRetriever {
         }
     }
 
+    @WithSpan
     private AtlasEntityHeader mapVertexToAtlasEntityHeader(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
         String typeName = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
         boolean isS3Bucket = StringUtils.isNotEmpty(typeName)
@@ -1376,6 +1385,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    @WithSpan
     private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithPrefetch");
         AtlasEntityHeader ret = new AtlasEntityHeader();
@@ -1607,6 +1617,7 @@ public class EntityGraphRetriever {
         entity.setBusinessAttributes(getBusinessMetadata(entityVertex));
     }
 
+    @WithSpan
     public List<AtlasClassification> getAllClassificationsV2(AtlasVertex entityVertex) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAllClassificationsV2");
         try {
@@ -1668,6 +1679,7 @@ public class EntityGraphRetriever {
         }
     }
 
+    @WithSpan
     public List<AtlasTermAssignmentHeader> mapAssignedTerms(AtlasVertex entityVertex) {
         List<AtlasTermAssignmentHeader> ret = new ArrayList<>();
 
@@ -1771,6 +1783,7 @@ public class EntityGraphRetriever {
         return mapVertexToAttribute(entityVertex, attribute, entityExtInfo, isMinExtInfo, includeReferences, false);
     }
 
+    @WithSpan
     private Object mapVertexToAttribute(AtlasVertex entityVertex, AtlasAttribute attribute, AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo, boolean includeReferences, boolean ignoreInactive) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAttribute");
         try {
@@ -1903,6 +1916,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    @WithSpan
     private AtlasObjectId mapVertexToObjectIdForSoftRef(AtlasVertex entityVertex, AtlasAttribute attribute, AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo) {
         String softRefVal = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), String.class);
 
@@ -2047,6 +2061,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    @WithSpan
     public static Object mapVertexToPrimitive(AtlasElement entityVertex, final String vertexPropertyName, AtlasAttributeDef attrDef) {
         Object ret = null;
 
@@ -2095,6 +2110,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    @WithSpan
     private AtlasObjectId mapVertexToObjectId(AtlasVertex entityVertex, String edgeLabel, AtlasEdge edge,
                                               AtlasEntityExtInfo entityExtInfo, boolean isOwnedAttribute,
                                               AtlasRelationshipEdgeDirection edgeDirection, final boolean isMinExtInfo) throws AtlasBaseException {
@@ -2156,6 +2172,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    @WithSpan
     private AtlasStruct mapVertexToStruct(AtlasVertex entityVertex, String edgeLabel, AtlasEdge edge, AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToStruct");
         try {
@@ -2195,6 +2212,7 @@ public class EntityGraphRetriever {
         return vertex != null && attribute != null ? mapVertexToAttribute(vertex, attribute, null, false) : null;
     }
 
+    @WithSpan
     public Object getVertexAttributePreFetchCache(AtlasVertex vertex, AtlasAttribute attribute, Map<String, Object> properties,  AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo, final boolean includeReferences) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getVertexAttributePreFetchCache");
 
