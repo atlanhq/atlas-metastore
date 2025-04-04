@@ -829,7 +829,6 @@ public class EntityREST {
         }
 
         AtlasPerfTracer perf = null;
-        RequestContext.get().setEnableCache(false);
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
         try {
 
@@ -858,6 +857,10 @@ public class EntityREST {
                     .setReplaceBusinessAttributes(replaceBusinessAttributes)
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
                     .build();
+
+            if (AtlasConfiguration.ATLAS_BULK_API_ENABLE_JANUS_OPTIMISATION.getBoolean()){
+                RequestContext.get().setIsInvokedByIndexSearchOrBulk(true);
+            }
             return entitiesStore.createOrUpdate(entityStream, context);
         } finally {
             AtlasPerfTracer.log(perf);
