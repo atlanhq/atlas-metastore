@@ -63,6 +63,7 @@ import javax.inject.Named;
 import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2.PROPAGATED_CLASSIFICATION_ADD;
 import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2.PROPAGATED_CLASSIFICATION_DELETE;
@@ -123,62 +124,48 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         notifyListeners(deletedEntities, EntityOperation.DELETE, isImport);
         notifyListeners(purgedEntities, EntityOperation.PURGE, isImport);
 
-        // From the entities extract entitiesToSet in cache and entitiesToEvict from cache for the type EntityDistributedCache.allowedEntityTypes
-        List<AtlasEntityHeader> entitiesToCache = new ArrayList<>();
-        List<AtlasEntityHeader> entitiesToEvict = new ArrayList<>();
-        if (CollectionUtils.isNotEmpty(createdEntities)) {
-            for (AtlasEntityHeader entity : createdEntities) {
-                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    entitiesToCache.add(entity);
-                }
-            }
-        }
+        //Start operation to update cache
 
-        if (CollectionUtils.isNotEmpty(updatedEntities)) {
-            for (AtlasEntityHeader entity : updatedEntities) {
-                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(entity.getGuid());
-                    if (existingEntity == null) {
-                        existingEntity = new AtlasEntityHeader(entity);
-                    }
-                    entitiesToCache.add(getUpdatedEntityHeader(existingEntity, entity));
-                }
-            }
-        }
+        Predicate<AtlasEntityHeader> isAllowedType = entity ->
+                entity != null && EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName());
 
-        if (CollectionUtils.isNotEmpty(partiallyUpdatedEntities)) {
-            for (AtlasEntityHeader entity : partiallyUpdatedEntities) {
-                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(entity.getGuid());
-                    if (existingEntity == null) {
-                        existingEntity = new AtlasEntityHeader(entity);
-                    }
-                    entitiesToCache.add(getUpdatedEntityHeader(existingEntity, entity));
-                }
-            }
-        }
+        List<AtlasEntityHeader> createdToCache = safeStream(createdEntities)
+                .filter(isAllowedType)
+                .toList();
 
-        if (CollectionUtils.isNotEmpty(deletedEntities)) {
-            for (AtlasEntityHeader entity : deletedEntities) {
-                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    entitiesToEvict.add(entity);
-                }
-            }
-        }
+        List<AtlasEntityHeader> updatesToCache = Stream.concat(safeStream(updatedEntities), safeStream(partiallyUpdatedEntities))
+                .filter(isAllowedType)
+                .map(this::prepareUpdatedHeaderForCache)
+                .filter(Objects::nonNull)
+                .toList();
 
-        if (CollectionUtils.isNotEmpty(purgedEntities)) {
-            for (AtlasEntityHeader entity : purgedEntities) {
-                if (EntityDistributedCache.allowedEntityTypes.contains(entity.getTypeName())) {
-                    entitiesToEvict.add(entity);
-                }
-            }
-        }
-        PostTransactionWriteThroughCache postTransactionWriteThroughCache  = new PostTransactionWriteThroughCache(redisService);
+
+        List<AtlasEntityHeader> entitiesToCache = new ArrayList<>(createdToCache.size() + updatesToCache.size());
+        entitiesToCache.addAll(createdToCache);
+        entitiesToCache.addAll(updatesToCache);
+        List<AtlasEntityHeader> entitiesToEvict = Stream.concat(safeStream(deletedEntities), safeStream(purgedEntities))
+                .filter(isAllowedType)
+                .collect(Collectors.toList());
+
+        PostTransactionWriteThroughCache postTransactionWriteThroughCache = new PostTransactionWriteThroughCache(redisService);
         postTransactionWriteThroughCache.setEntitiesToCache(entitiesToCache);
         postTransactionWriteThroughCache.setEntitiesToEvict(entitiesToEvict);
 
 
         notifyPropagatedEntities();
+    }
+
+    private AtlasEntityHeader prepareUpdatedHeaderForCache(AtlasEntityHeader updatedEntity) {
+        if (updatedEntity == null) {
+            return null;
+        }
+        AtlasEntityHeader existingEntity = EntityDistributedCache.getEntity(updatedEntity.getGuid());
+
+        return getUpdatedEntityHeader(existingEntity, updatedEntity);
+    }
+
+    private <T> Stream<T> safeStream(Collection<T> collection) {
+        return Optional.ofNullable(collection).stream().flatMap(Collection::stream);
     }
 
     private AtlasEntityHeader getUpdatedEntityHeader(AtlasEntityHeader existingEntity, AtlasEntityHeader updatedEntity) {

@@ -81,6 +81,11 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
     private SearchParams searchParams;
     private long vertexTotals = -1;
 
+    private static final String SOURCE_KEY = "_source";
+    private static final String TYPE_NAME_KEY = "__typeName";
+    private static final String GUID_KEY = "__guid";
+    private static final String QUALIFIED_NAME_KEY = "__qualifiedName";
+
     public AtlasElasticsearchQuery(AtlasJanusGraph graph, RestHighLevelClient esClient, String index, SearchSourceBuilder sourceBuilder) {
         this(graph, index);
         this.esClient = esClient;
@@ -756,41 +761,34 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             return new ArrayList<>();
         }
 
+        /**
+         * Helper method to safely extract a String value from the nested "_source" map.
+         *
+         * @param key The key to look for within the "_source" map.
+         * @return The String representation of the value if found, otherwise an empty string.
+         */
+        private String getStringValueFromSource(String key) {
+            return Optional.ofNullable(this.hit.get(SOURCE_KEY))
+                    .filter(Map.class::isInstance) // Making sure its a map befor casting
+                    .map(source -> (Map<String, Object>) source)
+                    .map(sourceMap -> sourceMap.get(key))
+                    .map(String::valueOf)
+                    .orElse("");
+        }
+
         @Override
         public String getTypeName() {
-            Object source = this.hit.get("_source");
-            if (Objects.nonNull(source)) {
-                Object typeName = ((Map<String, Object>) source).get("__typeName");
-                if (Objects.nonNull(typeName)) {
-                    return String.valueOf(typeName);
-                }
-            }
-            return "";
+            return getStringValueFromSource(TYPE_NAME_KEY);
         }
 
         @Override
         public String getGuid() {
-            Object source = this.hit.get("_source");
-            if (Objects.nonNull(source)) {
-                Object guid = ((Map<String, Object>) source).get("__guid");
-                if (Objects.nonNull(guid)) {
-                    return String.valueOf(guid);
-                }
-            }
-            return "";
+            return getStringValueFromSource(GUID_KEY);
         }
 
         @Override
         public String getQualifiedName() {
-            Object source = this.hit.get("_source");
-            if (Objects.nonNull(source)) {
-                Object qualifiedName = ((Map<String, Object>) source).get("__qualifiedName");
-                if (Objects.nonNull(qualifiedName)) {
-                    return String.valueOf(qualifiedName);
-                }
-            }
-            return "";
-
+            return getStringValueFromSource(QUALIFIED_NAME_KEY);
         }
     }
 

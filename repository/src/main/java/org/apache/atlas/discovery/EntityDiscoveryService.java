@@ -1110,7 +1110,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 }
 
                 if(RequestContext.get().includeClassifications()){
-                    header.setClassifications(entityRetriever.getAllClassifications(vertex));
+                    header.setClassifications(entityRetriever.getAllClassificationsV2(vertex));
                 }
                 if (showSearchScore) {
                     ret.addEntityScore(header.getGuid(), result.getScore());
@@ -1224,7 +1224,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             SearchParams searchParams = indexSearchParams;
             Map<String,Object> result = indexQuery.directIndexQuery(searchParams.getQuery());
             if(result.get("total") != null){
-                return ((Integer) result.get("total"));
+                return ((Number) result.get("total")).intValue();
             }
         } catch (AtlasBaseException e) {
             LOG.error("Error while performing direct search for the params ({}), {}", indexSearchParams, e.getMessage());

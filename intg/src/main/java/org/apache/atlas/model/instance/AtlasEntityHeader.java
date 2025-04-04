@@ -170,6 +170,13 @@ public class AtlasEntityHeader extends AtlasStruct implements Serializable {
             setDeleteHandler(other.getDeleteHandler());
         }
         Map<String, Object> requestedAttributes = new HashMap<>();
+        if (CollectionUtils.isNotEmpty(other.getClassifications())) {
+            this.classificationNames = new ArrayList<>(other.getClassifications().size());
+
+            for (AtlasClassification classification : other.getClassifications()) {
+                this.classificationNames.add(classification.getTypeName());
+            }
+        }
         if (attributes != null) {
 
             for (String attribute : attributes) {
