@@ -1110,7 +1110,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 }
 
                 if(RequestContext.get().includeClassifications()){
-                    header.setClassifications(entityRetriever.getAllClassifications(vertex));
+                    header.setClassifications(entityRetriever.getAllClassificationsV2(vertex));
                 }
                 if (showSearchScore) {
                     ret.addEntityScore(header.getGuid(), result.getScore());
