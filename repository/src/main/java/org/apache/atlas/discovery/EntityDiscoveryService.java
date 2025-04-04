@@ -1224,7 +1224,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             SearchParams searchParams = indexSearchParams;
             Map<String,Object> result = indexQuery.directIndexQuery(searchParams.getQuery());
             if(result.get("total") != null){
-                return ((Integer) result.get("total"));
+                return ((Number) result.get("total")).intValue();
             }
         } catch (AtlasBaseException e) {
             LOG.error("Error while performing direct search for the params ({}), {}", indexSearchParams, e.getMessage());

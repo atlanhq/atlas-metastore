@@ -1058,7 +1058,6 @@ public class EntityGraphRetriever {
             // we don't support relation attributes of a relation
             if (fetchEdgeLabels && structType instanceof AtlasEntityType) {
                 //  retrieve all the valid relationships for this entityType
-                Map<String, Set<String>> relationshipsLookup = fetchEdgeNames((AtlasEntityType) structType);
                 propertiesMap = getRelationPropertyMarkerMap(entityVertex,(AtlasEntityType) structType, attributes, null);
             } else {
                 propertiesMap = new HashMap<>();
@@ -1128,9 +1127,14 @@ public class EntityGraphRetriever {
             Set<String> edgeLabels = new HashSet<>();
             edgeLabelAndTypeName.stream().filter(Objects::nonNull).forEach(edgeLabelMap -> attributes.forEach(attribute->{
 
-                if (edgeLabelMap.getKey().contains(attribute) && includeAttrs!= null && !includeAttrs.contains(attribute)) {
-                    edgeLabels.add(attribute);
-                    return;
+                if (edgeLabelMap.getKey().contains(attribute)) {
+                    if (CollectionUtils.isNotEmpty(includeAttrs)) {
+                        if (includeAttrs.contains(attribute)) {
+                            edgeLabels.add(attribute);
+                        }
+                    } else {
+                        edgeLabels.add(attribute);
+                    }
                 }
 
                 String edgeTypeName = edgeLabelMap.getValue();
