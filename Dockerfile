@@ -50,6 +50,9 @@ COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 RUN mkdir /opt/apache-atlas/libext
 RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
 
+RUN mkdir /opt/apache-atlas/otel-agent
+RUN curl https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.14.0/opentelemetry-javaagent.jar -o /opt/apache-atlas/otel-agent/opentelemetry-javaagent.jar
+
 RUN cd /opt/apache-atlas/bin \
     && ./atlas_start.py -setup || true
 
