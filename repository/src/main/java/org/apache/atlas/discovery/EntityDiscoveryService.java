@@ -18,6 +18,7 @@
 package org.apache.atlas.discovery;
 
 import com.google.common.annotations.VisibleForTesting;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
@@ -932,6 +933,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         scrubSearchResults(result, false);
     }
 
+    @WithSpan
     private void scrubSearchResults(AtlasSearchResult result, boolean suppressLogs) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder scrubSearchResultsMetrics = RequestContext.get().startMetricRecord("scrubSearchResults");
         AtlasAuthorizationUtils.scrubSearchResults(new AtlasSearchResultScrubRequest(typeRegistry, result), suppressLogs);
@@ -971,6 +973,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     @Override
+    @WithSpan
     public AtlasSearchResult directIndexSearch(SearchParams searchParams) throws AtlasBaseException {
         IndexSearchParams params = (IndexSearchParams) searchParams;
         RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
@@ -1079,6 +1082,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
     }
 
+    @WithSpan
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         SearchParams searchParams = ret.getSearchParameters();
         try {

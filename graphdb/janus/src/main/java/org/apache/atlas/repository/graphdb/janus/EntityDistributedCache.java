@@ -1,4 +1,5 @@
 package org.apache.atlas.repository.graphdb.janus;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
@@ -24,7 +25,7 @@ public class EntityDistributedCache {
         entityCache = redissonClient.getMap("entityCache");
     }
 
-
+    @WithSpan
     public static void storeEntity(AtlasEntityHeader entity) {
         if (!allowedEntityTypes.contains(entity.getTypeName())) {
             return;
@@ -32,6 +33,7 @@ public class EntityDistributedCache {
         entityCache.put(entity.getGuid(), entity);
     }
 
+    @WithSpan
     public static void storeEntities(List<AtlasEntityHeader> entities) {
         for (AtlasEntityHeader entity : entities) {
             if (!allowedEntityTypes.contains(entity.getTypeName())) {
@@ -40,6 +42,8 @@ public class EntityDistributedCache {
             entityCache.put(entity.getGuid(), entity);
         }
     }
+
+    @WithSpan
     public static void evictEntity(String entityType, String guid) {
         if (!allowedEntityTypes.contains(entityType)) {
             return;
@@ -47,10 +51,12 @@ public class EntityDistributedCache {
         entityCache.remove(guid);
     }
 
+    @WithSpan
     public static AtlasEntityHeader getEntity(String guid) {
         return entityCache.get(guid);
     }
 
+    @WithSpan
     public static Integer getEntityCount() {
         return entityCache.size();
     }
