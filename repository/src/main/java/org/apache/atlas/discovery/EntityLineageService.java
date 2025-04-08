@@ -459,9 +459,9 @@ public class EntityLineageService implements AtlasLineageService {
                 }
 
                 AtlasEdge incomingEdge = incomingEdges.next();
-                AtlasVertex connecterVertex = incomingEdge.getOutVertex();
+                AtlasVertex connectorVertex = incomingEdge.getOutVertex();
 
-                if (!vertexMatchesEvaluation(connecterVertex, atlasLineageOnDemandContext) || !edgeMatchesEvaluation(incomingEdge, atlasLineageOnDemandContext)) {
+                if (!vertexMatchesEvaluation(connectorVertex, atlasLineageOnDemandContext) || !edgeMatchesEvaluation(incomingEdge, atlasLineageOnDemandContext)) {
                     continue;
                 }
 
@@ -482,7 +482,7 @@ public class EntityLineageService implements AtlasLineageService {
                 }
 
                 AtlasPerfMetrics.MetricRecorder traverseEdgesOnDemandGetEdgesOut = RequestContext.get().startMetricRecord("traverseEdgesOnDemandGetEdgesOut");
-                Iterator<AtlasEdge> outgoingEdges = connecterVertex.getEdges(OUT, isInput ? lineageInputLabel : lineageOutputLabel).iterator();
+                Iterator<AtlasEdge> outgoingEdges = connectorVertex.getEdges(OUT, isInput ? lineageInputLabel : lineageOutputLabel).iterator();
 
                 RequestContext.get().endMetricRecord(traverseEdgesOnDemandGetEdgesOut);
 
@@ -500,11 +500,11 @@ public class EntityLineageService implements AtlasLineageService {
                         continue;
                     }
 
-                    if (checkForOffset(outgoingEdge, connecterVertex, atlasLineageOnDemandContext, ret)) {
+                    if (checkForOffset(outgoingEdge, connectorVertex, atlasLineageOnDemandContext, ret)) {
                         continue;
                     }
                     if (incrementAndCheckIfRelationsLimitReached(outgoingEdge, isInput, atlasLineageOnDemandContext, ret, depth, entitiesTraversed, direction, visitedVertices)) {
-                        String processGuid = AtlasGraphUtilsV2.getIdFromVertex(connecterVertex);
+                        String processGuid = AtlasGraphUtilsV2.getIdFromVertex(connectorVertex);
                         LineageInfoOnDemand entityOnDemandInfo = ret.getRelationsOnDemand().get(processGuid);
                         if (entityOnDemandInfo == null)
                             continue;
