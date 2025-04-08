@@ -22,12 +22,9 @@ name: Java CI with Maven
 on:
   push:
     branches:
-      - alpha
       - beta
-      - development
+      - staging
       - master
-      - lineageondemand
-      - optimise_get_classifications_master
 
 jobs:
   build:
