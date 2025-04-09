@@ -1,5 +1,6 @@
 package org.apache.atlas.service.redis;
 
+import org.redisson.api.RedissonClient;
 import org.slf4j.Logger;
 
 public interface RedisService {
@@ -15,6 +16,8 @@ public interface RedisService {
   String putValue(String key, String value, int timeout);
 
   void removeValue(String key);
+
+  RedissonClient getRedisCacheClient();
 
   Logger getLogger();
 

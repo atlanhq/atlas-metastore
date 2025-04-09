@@ -158,5 +158,20 @@ public class AtlasJanusIndexQuery implements AtlasIndexQuery<AtlasJanusVertex, A
         public ArrayList<Object> getSort() {
             return new ArrayList<>();
         }
+
+        @Override
+        public String getTypeName() {
+            return "";
+        }
+
+        @Override
+        public String getGuid() {
+            return "";
+        }
+
+        @Override
+        public String getQualifiedName() {
+            return "";
+        }
     }
 }
