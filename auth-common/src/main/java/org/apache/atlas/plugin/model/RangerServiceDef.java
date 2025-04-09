@@ -19,9 +19,7 @@
 
 package org.apache.atlas.plugin.model;
 
-
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
@@ -100,10 +98,10 @@ public class RangerServiceDef extends RangerBaseModelObject implements java.io.S
 	}
 
 	public RangerServiceDef(String name, String displayName, String implClass, String label, String description,
-			Map<String, String> options, List<RangerServiceConfigDef> configs,
-			List<RangerResourceDef> modifiedResourceDefs, List<RangerAccessTypeDef> accessTypes,
-			List<RangerPolicyConditionDef> policyConditions, List<RangerContextEnricherDef> contextEnrichers,
-			List<RangerEnumDef> enums) {
+                            Map<String, String> options, List<RangerServiceConfigDef> configs,
+                            List<RangerResourceDef> modifiedResourceDefs, List<RangerAccessTypeDef> accessTypes,
+                            List<RangerPolicyConditionDef> policyConditions, List<RangerContextEnricherDef> contextEnrichers,
+                            List<RangerEnumDef> enums) {
 		this(name, implClass, label, description, options, configs, modifiedResourceDefs, accessTypes, policyConditions, contextEnrichers, enums);
 		this.setDisplayName(displayName);
 	}
