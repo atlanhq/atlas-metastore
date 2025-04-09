@@ -67,7 +67,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     private final AtlasRelationshipStoreV2 relationshipStoreV2;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
-    private static final HashMap<String, AtlasEntity> guidEntityMap = new HashMap<>();
+    private static final HashMap<String, AtlasEntity> diffEntityCache = new HashMap<>();
 
 
 
@@ -115,8 +115,6 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 }
 
                 if (StringUtils.isEmpty(edgeLabel)) {
-                    LOG.info("Processing lineage operation for assetGuid: {}, productGuid: {}, operation: {}, assetDenormAttribute: {}",
-                            assetGuid, productGuid, operation, assetDenormAttribute);
                     AtlasVertex updatedVertex = processProductAssetLink(assetGuid, productGuid, operation, assetDenormAttribute);
                     if (!updatedVertices.contains(updatedVertex)) {
                         updatedVertices.add(updatedVertex);
@@ -146,11 +144,8 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, assetGuid + " or " + productGuid);
             }
 
-            LOG.info("assetVertex: {}, productVertex: {}", assetVertex, productVertex);
-
             switch (operation) {
                 case ADD:
-                    LOG.info("Linking product {} to asset {}", productGuid, assetGuid);
                     linkProductToAsset (assetVertex, productGuid, assetDenormAttribute);
                     break;
                 case REMOVE:
@@ -199,12 +194,10 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 LOG.warn("Type {} is not allowed to link with PRODUCT entity", typeName);
             }
             Set<String> existingValues = assetVertex.getMultiValuedSetProperty(assetDenormAttribute, String.class);
-            LOG.info("Existing values for {}: {}", assetDenormAttribute, existingValues);
 
             if (!existingValues.contains(productGuid)) {
                 assetVertex.setProperty(assetDenormAttribute, productGuid);
                 existingValues.add(productGuid);
-                LOG.info("Adding {} to {}: {}", productGuid, assetDenormAttribute, existingValues);
 
                 updateModificationMetadata(assetVertex);
 
@@ -302,11 +295,11 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         AtlasEntity diffEntity;
         String assetGuid = ev.getProperty(GUID_PROPERTY_KEY, String.class);
 
-        if (guidEntityMap.containsKey(assetGuid)) {
-            diffEntity = guidEntityMap.get(assetGuid);
+        if (diffEntityCache.containsKey(assetGuid)) {
+            diffEntity = diffEntityCache.get(assetGuid);
         } else {
             diffEntity = new AtlasEntity(ev.getProperty(TYPE_NAME_PROPERTY_KEY, String.class));
-            guidEntityMap.put(assetGuid, diffEntity);
+            diffEntityCache.put(assetGuid, diffEntity);
         }
 
         diffEntity.setGuid(ev.getProperty(GUID_PROPERTY_KEY, String.class));
