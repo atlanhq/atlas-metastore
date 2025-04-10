@@ -128,6 +128,34 @@ public class TagDAOCassandraImpl implements TagDAO {
         RequestContext.get().endMetricRecord(recorder);
     }
 
+    @Override
+    public void deletePropagatedTags(String sourceAssetId, String tagTypeName) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("removeTagPropagation");
+
+        try {
+            String query = String.format("SELECT bucket, id FROM %s.effective_tags WHERE source_id = ? ALLOW FILTERING", KEYSPACE);
+            PreparedStatement selectStmt = cassSession.prepare(query);
+            ResultSet rs = cassSession.execute(selectStmt.bind(sourceAssetId));
+
+            StringBuilder batchQuery = new StringBuilder();
+            batchQuery.append("BEGIN BATCH ");
+
+            for (Row row : rs) {
+                int bucket = row.getInt("bucket");
+                String id = row.getString("id");
+                batchQuery.append(String.format("DELETE FROM %s.effective_tags WHERE bucket = %d AND id = '%s';", KEYSPACE, bucket, id));
+            }
+
+            batchQuery.append("APPLY BATCH;");
+            cassSession.execute(batchQuery.toString());
+        } catch (Exception e) {
+            LOG.error("Failed to remove propagated tags for sourceAssetId={}", sourceAssetId, e);
+            throw new AtlasBaseException("Failed to remove propagated tags", e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
     private AtlasClassification convertToAtlasClassification(String tagMetaJson) throws AtlasBaseException {
         try {
             Map jsonMap = objectMapper.readValue(tagMetaJson, Map.class);

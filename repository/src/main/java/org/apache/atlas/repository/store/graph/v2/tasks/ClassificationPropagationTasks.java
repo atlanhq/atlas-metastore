@@ -41,10 +41,10 @@ public class ClassificationPropagationTasks {
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            String entityGuid               = (String) parameters.get(PARAM_ENTITY_GUID);
-            String classificationVertexId   = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            String relationshipGuid         = (String) parameters.get(PARAM_RELATIONSHIP_GUID);
-            String tagTypeName              = (String) parameters.get(Constants.TASK_CLASSIFICATION_TYPENAME);
+            String entityGuid               = (String)  parameters.get(PARAM_ENTITY_GUID);
+            String classificationVertexId   = (String)  parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+            String relationshipGuid         = (String)  parameters.get(PARAM_RELATIONSHIP_GUID);
+            String tagTypeName              = (String)  parameters.get(Constants.TASK_CLASSIFICATION_TYPENAME);
             Boolean mode                    = (Boolean) parameters.get("newMode");
 
             Boolean previousRestrictPropagationThroughLineage = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
@@ -81,8 +81,16 @@ public class ClassificationPropagationTasks {
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
             String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+            String tagTypeName            = (String) parameters.get(Constants.TASK_CLASSIFICATION_TYPENAME);
+            Boolean mode                  = (Boolean) parameters.get("newMode");
 
-            entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
+            if (mode != null && mode) {
+                LOG.info("via new mode");
+                entityGraphMapper.deleteClassificationPropagationNew(parameters, entityGuid, classificationVertexId, tagTypeName);
+            } else {
+                LOG.info("via old mode");
+                entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
+            }
         }
     }
 

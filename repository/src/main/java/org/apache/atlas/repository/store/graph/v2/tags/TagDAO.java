@@ -10,5 +10,5 @@ public interface TagDAO {
     List<AtlasClassification> getTagsForVertex(String vertexId) throws AtlasBaseException;
     AtlasClassification findTagByVertexIdAndTagTypeName(String assetVertexId, String tagTypeName) throws AtlasBaseException;
     void putPropagatedTags(String sourceAssetId, String tagTypeName, Set<String> propagatedAssetVertexIds);
-
+    void deletePropagatedTags(String sourceAssetId, String tagTypeName) throws AtlasBaseException;
 }
