@@ -98,6 +98,12 @@ public abstract class AbstractRedisService implements RedisService {
         redisCacheClient.getBucket(convertToNamespace(key)).delete();
     }
 
+    @Override
+    public RedissonClient getRedisCacheClient() {
+        return redisCacheClient;
+    }
+
+
     private String getHostAddress() throws UnknownHostException {
         return InetAddress.getLocalHost().getHostAddress();
     }
