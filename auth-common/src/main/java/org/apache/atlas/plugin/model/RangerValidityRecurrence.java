@@ -20,7 +20,6 @@
 package org.apache.atlas.plugin.model;
 
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
-
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
 import javax.xml.bind.annotation.XmlRootElement;
