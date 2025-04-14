@@ -189,8 +189,15 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         try {
             String typeName = assetVertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
             if (excludedTypes.contains(typeName)){
-                LOG.warn("Type {} is not allowed to link with PRODUCT entity", typeName);
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Type " + typeName + " is not allowed to link with PRODUCT entity");
             }
+
+            AtlasVertex productVertex = entityRetriever.getEntityVertex(productGuid);
+            String productTypeName = productVertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+            if (!productTypeName.equals(TYPE_PRODUCT)) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, productTypeName + " type is not a Data Product");
+            }
+
             Set<String> existingValues = assetVertex.getMultiValuedSetProperty(assetDenormAttribute, String.class);
 
             if (!existingValues.contains(productGuid)) {
