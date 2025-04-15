@@ -1225,7 +1225,7 @@ public class EntityGraphRetriever {
 
             // 2. Identify relevant relationship attributes from the input 'attributes' set
             List<AtlasAttribute> relationshipAttrsToFetch = new ArrayList<>();
-            List<String> relationshipAttrNames = new ArrayList<>();
+            Set<String> relationshipAttrNames = new HashSet<>();
 
             if (CollectionUtils.isNotEmpty(attributes)) {
                 for (String requestedAttrName : attributes) {
@@ -1244,7 +1244,7 @@ public class EntityGraphRetriever {
 
                 // Fetch metadata needed to retrieve relationship values
                 // this was implemented in part of Cassandra optimization activity in mapVertexToAtlasEntityHeaderWithPrefetch
-                propertiesFromEdges = getRelationPropertyMarkerMap(vertex, entityType, attributes, relationshipAttrNames);
+                propertiesFromEdges = preloadProperties(vertex, entityType, relationshipAttrNames, false);
 
                 // 4. Get vertex attribute values using the potentially pre-fetched edge info
                 for (AtlasAttribute relAttr : relationshipAttrsToFetch) {
