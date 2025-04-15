@@ -21,6 +21,7 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
@@ -384,6 +385,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     @Override
+    @WithSpan
     public AtlasIndexQuery elasticsearchQuery(String indexName) throws AtlasBaseException {
         if (restClient == null) {
             LOG.error("restClient is not initiated, failed to run query on ES");

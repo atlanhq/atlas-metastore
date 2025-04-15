@@ -19,6 +19,7 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
@@ -203,6 +204,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     }
 
     @Override
+    @WithSpan
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
         List<V> value = new ArrayList<>();
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);

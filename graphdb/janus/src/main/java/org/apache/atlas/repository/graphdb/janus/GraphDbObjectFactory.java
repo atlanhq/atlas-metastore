@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.janusgraph.core.EdgeLabel;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
@@ -70,6 +71,7 @@ public final class GraphDbObjectFactory {
      * @param graph The graph that contains the vertex
      * @param source the Gremlin vertex
      */
+    @WithSpan
     public static AtlasJanusVertex createVertex(AtlasJanusGraph graph, Vertex source) {
 
         if (source == null) {

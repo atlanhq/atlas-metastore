@@ -21,6 +21,7 @@ package org.apache.atlas.repository.graph;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.collect.BiMap;
 import com.google.common.collect.HashBiMap;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
@@ -834,6 +835,8 @@ public final class GraphHelper {
     public static List<String> getPropagatedTraitNames(AtlasVertex entityVertex) {
         return getTraitNames(entityVertex, true);
     }
+
+    @WithSpan
     public static List<String> getAllTraitNamesFromAttribute(AtlasVertex entityVertex) {
         List<String>     ret   = new ArrayList<>();
         List<String>    traitNames = entityVertex.getMultiValuedProperty(TRAIT_NAMES_PROPERTY_KEY, String.class);

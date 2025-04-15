@@ -18,6 +18,7 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.GraphTransactionInterceptor;
@@ -288,6 +289,7 @@ public class AtlasGraphUtilsV2 {
         return getProperty(element, propertyName, returnType, false);
     }
 
+    @WithSpan
     public static <T extends AtlasElement, O> O getEncodedProperty(T element, String propertyName, Class<O> returnType) {
         return getProperty(element, propertyName, returnType, true);
     }
