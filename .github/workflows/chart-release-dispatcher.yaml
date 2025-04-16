@@ -12,7 +12,6 @@ on:
       - mlh41tests
       - mlh40java17
       - dq651
-      - betaatlasmultiarch
     types:
       - completed
 

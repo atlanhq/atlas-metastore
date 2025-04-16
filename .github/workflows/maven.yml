@@ -25,7 +25,6 @@ on:
       - beta
       - staging
       - master
-      - betaatlasmultiarch
 
 jobs:
   build:
