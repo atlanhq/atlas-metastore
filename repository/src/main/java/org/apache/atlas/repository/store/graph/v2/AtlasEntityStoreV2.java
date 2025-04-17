@@ -46,6 +46,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.EntityDistributedCache;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
@@ -59,6 +60,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEnt
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.LineagePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
@@ -90,6 +92,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
@@ -123,6 +126,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("store.EntityStore");
 
     static final boolean DEFERRED_ACTION_ENABLED = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
+    public static final  String[] entityTypesToCache = AtlasConfiguration.ATLAS_ENTITY_CACHE_ALLOWED_ENTITY_TYPES.getStringArray();
 
     private static final String ATTR_MEANINGS = "meanings";
 
@@ -173,6 +177,24 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         } catch (AtlasException e) {
             e.printStackTrace();
         }
+
+    }
+
+    public void initCache() {
+
+        for (String entityType : entityTypesToCache) {
+            AtlasEntityType entityTypeDef = typeRegistry.getEntityTypeByName(entityType);
+            try {
+                List<AtlasEntityHeader> entities = fetchAllEntitiesWithTypeName(entityType, entityTypeDef.getAllAttributes().values().stream().toList());
+                if (CollectionUtils.isNotEmpty(entities)) {
+                    EntityDistributedCache.storeEntities(entities);
+                }
+            } catch (AtlasBaseException abe) {
+                abe.printStackTrace();
+                LOG.error("Failed to fetch all entities with type name: " + entityType, abe);
+            }
+        }
+
 
     }
 
@@ -969,6 +991,35 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         return hasEntityAssociation;
     }
+    public Integer getEntityCountByTypeNames(List<String> typeNames) {
+        return discovery.getSearchCountUsingTypes(typeNames);
+    }
+
+    private List<AtlasEntityHeader> fetchAllEntitiesWithTypeName(String typeName, List<AtlasAttribute> attributes) throws AtlasBaseException {
+        Set<String> attributeNames = new HashSet<>();
+        for (AtlasAttribute attribute : attributes) {
+            attributeNames.add(attribute.getName());
+        }
+        int from = 0;
+        List<AtlasEntityHeader> entityHeaders = new ArrayList<>();
+        while (true) {
+            List<AtlasEntityHeader> entityHeadersBatch = discovery.searchUsingType(from, ELASTICSEARCH_PAGINATION_SIZE, typeName, attributeNames);
+
+            if (entityHeadersBatch == null || entityHeadersBatch.isEmpty()) {
+                break;
+            }
+
+            entityHeaders.addAll(entityHeadersBatch);
+            from += ELASTICSEARCH_PAGINATION_SIZE;
+
+            if (entityHeadersBatch.size() < ELASTICSEARCH_PAGINATION_SIZE) {
+                break;
+            }
+        }
+
+        return entityHeaders;
+    }
+
 
     public void updateMeaningsNamesInEntitiesOnTermDelete(String termName, String termQName, String termGuid) throws AtlasBaseException {
         int from = 0;
@@ -2073,6 +2124,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
                 preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
                 break;
+
+            case PROCESS_ENTITY_TYPE:
+                preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
         }
 
         //  The default global pre-processor for all AssetTypes

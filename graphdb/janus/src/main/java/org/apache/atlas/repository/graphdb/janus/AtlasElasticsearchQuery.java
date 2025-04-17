@@ -81,6 +81,11 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
     private SearchParams searchParams;
     private long vertexTotals = -1;
 
+    private static final String SOURCE_KEY = "_source";
+    private static final String TYPE_NAME_KEY = "__typeName";
+    private static final String GUID_KEY = "__guid";
+    private static final String QUALIFIED_NAME_KEY = "__qualifiedName";
+
     public AtlasElasticsearchQuery(AtlasJanusGraph graph, RestHighLevelClient esClient, String index, SearchSourceBuilder sourceBuilder) {
         this(graph, index);
         this.esClient = esClient;
@@ -173,7 +178,7 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             if(searchParams.isCallAsync() || AtlasConfiguration.ENABLE_ASYNC_INDEXSEARCH.getBoolean()) {
                 return performAsyncDirectIndexQuery(searchParams);
             } else {
-                String responseString =  performDirectIndexQuery(searchParams.getQuery(), false);
+                String responseString =  performDirectIndexQuery(searchParams.getQuery(), searchParams.getFetchSources());
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("runQueryWithLowLevelClient.response : {}", responseString);
                 }
@@ -249,7 +254,7 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             if (searchParams.getRequestTimeoutInSecs() !=  null) {
                 KeepAliveTime = searchParams.getRequestTimeoutInSecs() +"s";
             }
-            AsyncQueryResult response = submitAsyncSearch(searchParams, KeepAliveTime, false).get();
+            AsyncQueryResult response = submitAsyncSearch(searchParams, KeepAliveTime, searchParams.getFetchSources()).get();
             if(response.isRunning()) {
                 /*
                     * If the response is still running, then we need to wait for the response
@@ -666,6 +671,21 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
         public ArrayList<Object> getSort() {
             return new ArrayList<>();
         }
+
+        @Override
+        public String getTypeName() {
+            return "";
+        }
+
+        @Override
+        public String getGuid() {
+            return "";
+        }
+
+        @Override
+        public String getQualifiedName() {
+            return "";
+        }
     }
 
 
@@ -739,6 +759,36 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
                 return (ArrayList<Object>) sort;
             }
             return new ArrayList<>();
+        }
+
+        /**
+         * Helper method to safely extract a String value from the nested "_source" map.
+         *
+         * @param key The key to look for within the "_source" map.
+         * @return The String representation of the value if found, otherwise an empty string.
+         */
+        private String getStringValueFromSource(String key) {
+            return Optional.ofNullable(this.hit.get(SOURCE_KEY))
+                    .filter(Map.class::isInstance) // Making sure its a map befor casting
+                    .map(source -> (Map<String, Object>) source)
+                    .map(sourceMap -> sourceMap.get(key))
+                    .map(String::valueOf)
+                    .orElse("");
+        }
+
+        @Override
+        public String getTypeName() {
+            return getStringValueFromSource(TYPE_NAME_KEY);
+        }
+
+        @Override
+        public String getGuid() {
+            return getStringValueFromSource(GUID_KEY);
+        }
+
+        @Override
+        public String getQualifiedName() {
+            return getStringValueFromSource(QUALIFIED_NAME_KEY);
         }
     }
 
