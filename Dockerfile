@@ -33,6 +33,7 @@ RUN apt-get update \
         patch \
         netcat \
         curl \
+        coreutils \
     && cd / \
     && export MAVEN_OPTS="-Xms2g -Xmx2g" \
     && export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
