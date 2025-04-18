@@ -109,6 +109,7 @@ public class CachePolicyTransformerImpl {
     public static final String ATTR_POLICY_VALIDITY           = "policyValiditySchedule";
     public static final String ATTR_POLICY_CONDITIONS         = "policyConditions";
     public static final String ATTR_POLICY_MASK_TYPE          = "policyMaskType";
+    public static final String ATTR_POLICY_EXCLUDE_TYPES          = "excludeTypes";
 
     private static final String RESOURCE_SERVICE_DEF_PATH = "/service-defs/";
     private static final String RESOURCE_SERVICE_DEF_PATTERN = RESOURCE_SERVICE_DEF_PATH + "atlas-servicedef-%s.json";
@@ -616,6 +617,7 @@ public class CachePolicyTransformerImpl {
             attributes.add(ATTR_POLICY_CONDITIONS);
             attributes.add(ATTR_POLICY_IS_ENABLED);
             attributes.add(ATTR_POLICY_CONNECTION_QN);
+            attributes.add(ATTR_POLICY_EXCLUDE_TYPES);
 
             Map<String, Object> dsl = getMap("size", 0);
 

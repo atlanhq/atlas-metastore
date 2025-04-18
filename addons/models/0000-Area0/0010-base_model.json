@@ -729,6 +729,17 @@
           "includeInNotification": true
         },
         {
+          "name": "excludeTypes",
+          "typeName": "array<string>",
+          "indexType": "STRING",
+          "cardinality": "SET",
+          "isIndexable": false,
+          "isOptional": true,
+          "isUnique": false,
+          "skipScrubbing": true,
+          "includeInNotification": true
+        },
+        {
           "name": "policyUsers",
           "typeName": "array<string>",
           "indexType": "STRING",
