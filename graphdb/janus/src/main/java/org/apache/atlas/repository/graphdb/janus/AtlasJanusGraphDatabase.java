@@ -87,7 +87,7 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
     public AtlasJanusGraphDatabase() {
         //update registry
-        GraphSONMapper.build().addRegistry(JanusGraphIoRegistry.getInstance()).create();
+        GraphSONMapper.build().addRegistry(JanusGraphIoRegistry.instance()).create();
     }
 
     public static Configuration getConfiguration() throws AtlasException {
@@ -103,20 +103,32 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
         Configuration janusConfig = ApplicationProperties.getSubsetConfiguration(configProperties, GRAPH_PREFIX);
 
-        //add serializers for non-standard property value types that Atlas uses
-        janusConfig.setProperty("attributes.custom.attribute1.attribute-class", TypeCategory.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute1.serializer-class", TypeCategorySerializer.class.getName());
+//        //add serializers for non-standard property value types that Atlas uses
+//        janusConfig.setProperty("attributes.custom.attribute1.attribute-class", TypeCategory.class.getName());
+//        janusConfig.setProperty("attributes.custom.attribute1.serializer-class", TypeCategorySerializer.class.getName());
+//
+//        //not ideal, but avoids making large changes to Atlas
+//        janusConfig.setProperty("attributes.custom.attribute2.attribute-class", ArrayList.class.getName());
+//        janusConfig.setProperty("attributes.custom.attribute2.serializer-class", SerializableSerializer.class.getName());
+//
+//        janusConfig.setProperty("attributes.custom.attribute3.attribute-class", BigInteger.class.getName());
+//        janusConfig.setProperty("attributes.custom.attribute3.serializer-class", BigIntegerSerializer.class.getName());
+//
+//        janusConfig.setProperty("attributes.custom.attribute4.attribute-class", BigDecimal.class.getName());
+//        janusConfig.setProperty("attributes.custom.attribute4.serializer-class", BigDecimalSerializer.class.getName());
 
-        //not ideal, but avoids making large changes to Atlas
-        janusConfig.setProperty("attributes.custom.attribute2.attribute-class", ArrayList.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute2.serializer-class", SerializableSerializer.class.getName());
+        // For JanusGraph 1.0
+ janusConfig.setProperty("serializers.registered-classes",
+                TypeCategory.class.getName() + "," +
+                        ArrayList.class.getName() + "," +
+                        BigInteger.class.getName() + "," +
+                        BigDecimal.class.getName());
 
-        janusConfig.setProperty("attributes.custom.attribute3.attribute-class", BigInteger.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute3.serializer-class", BigIntegerSerializer.class.getName());
-
-        janusConfig.setProperty("attributes.custom.attribute4.attribute-class", BigDecimal.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute4.serializer-class", BigDecimalSerializer.class.getName());
-
+// Register serializers
+        janusConfig.setProperty("serializers.class-serializer-mapping." + TypeCategory.class.getName(), TypeCategorySerializer.class.getName());
+        janusConfig.setProperty("serializers.class-serializer-mapping." + ArrayList.class.getName(), SerializableSerializer.class.getName());
+        janusConfig.setProperty("serializers.class-serializer-mapping." + BigInteger.class.getName(), BigIntegerSerializer.class.getName());
+        janusConfig.setProperty("serializers.class-serializer-mapping." + BigDecimal.class.getName(), BigDecimalSerializer.class.getName());
         return janusConfig;
     }
 

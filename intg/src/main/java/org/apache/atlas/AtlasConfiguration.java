@@ -132,7 +132,10 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED("atlas.indexsearch.enable.janus.optimization.extended", false),
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
-
+    ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
+    ATLAS_CASSANDRA_PROPERTIES_KEYSPACE("atlas.cassandra.properties.keyspace",  "atlan_new_keyspace_2_1"),
+    ATLAS_CASSANDRA_VERTICES_TABLE("atlas.cassandra.vertices.table",  "vertices"),
+    ATLAS_CASSANDRA_EDGES_TABLE("atlas.cassandra.edges.table",  "edges"),
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
 
     /***

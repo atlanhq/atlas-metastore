@@ -194,11 +194,11 @@ public class AtlasMetricsUtil {
 
     private boolean getBackendStoreStatus(){
         try {
-            boolean isCacheEnabled = this.graph.isCacheEnabled();
+        //    boolean isCacheEnabled = this.graph.isCacheEnabled();
             runWithTimeout(new Runnable() {
                 @Override
                 public void run() {
-                    graph.setEnableCache(isCacheEnabled);
+                  //  graph.setEnableCache(isCacheEnabled);
                     graph.query().has(TYPE_NAME_PROPERTY_KEY, TYPE_NAME_INTERNAL).vertices(1);
 
                     graphCommit();
@@ -219,11 +219,11 @@ public class AtlasMetricsUtil {
         final String query = AtlasGraphUtilsV2.getIndexSearchPrefix() + "\"" + Constants.TYPE_NAME_PROPERTY_KEY + "\":(" + TYPE_NAME_INTERNAL + ")";
 
         try {
-            boolean isCacheEnabled = this.graph.isCacheEnabled();
+           // boolean isCacheEnabled = this.graph.isCacheEnabled();
             runWithTimeout(new Runnable() {
                 @Override
                 public void run() {
-                    graph.setEnableCache(isCacheEnabled);
+                 //   graph.setEnableCache(isCacheEnabled);
                     graph.indexQuery(Constants.VERTEX_INDEX, query).vertices(0, 1);
 
                     graphCommit();
