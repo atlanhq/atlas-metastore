@@ -18,6 +18,8 @@ public class SearchParams {
     boolean suppressLogs;
     boolean excludeMeanings;
     boolean excludeClassifications;
+    boolean enableFullRestriction;
+    boolean fetchSources;
 
     boolean includeClassificationNames = false;
 
@@ -30,6 +32,10 @@ public class SearchParams {
 
     public String getQuery() {
         return getQuery();
+    }
+
+    public boolean getEnableFullRestriction() {
+        return enableFullRestriction;
     }
 
     public Set<String> getAttributes() {
@@ -170,6 +176,14 @@ public class SearchParams {
 
     public boolean getShowSearchMetadata() {
         return showSearchMetadata;
+    }
+
+    public void setFetchSources(boolean fetchSources) {
+        this.fetchSources = fetchSources;
+    }
+
+    public boolean getFetchSources() {
+        return fetchSources;
     }
 
 

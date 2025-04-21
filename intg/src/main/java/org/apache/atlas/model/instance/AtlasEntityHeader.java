@@ -40,6 +40,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.Date;
+import java.util.HashMap;
 
 import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE;
 import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.PUBLIC_ONLY;
@@ -84,7 +85,11 @@ public class AtlasEntityHeader extends AtlasStruct implements Serializable {
 
 
     public AtlasEntityHeader() {
-        this(null, null);
+        super(null, null);
+
+        setClassificationNames(null);
+        setClassifications(null);
+        setLabels(null);
     }
 
     public AtlasEntityHeader(String typeName) {
@@ -145,6 +150,44 @@ public class AtlasEntityHeader extends AtlasStruct implements Serializable {
             setUpdatedBy(other.getUpdatedBy());
             setDeleteHandler(other.getDeleteHandler());
         }
+    }
+
+    public AtlasEntityHeader(AtlasEntityHeader other, Set<String> attributes) {
+        super(other);
+
+        if (other != null) {
+            setGuid(other.getGuid());
+            setStatus(other.getStatus());
+            setDisplayText(other.getDisplayText());
+            setClassificationNames(other.getClassificationNames());
+            setClassifications(other.getClassifications());
+            setIsIncomplete(other.getIsIncomplete());
+            setLabels(other.getLabels());
+            setCreateTime(other.getCreateTime());
+            setCreatedBy(other.getCreatedBy());
+            setUpdateTime(other.getUpdateTime());
+            setUpdatedBy(other.getUpdatedBy());
+            setDeleteHandler(other.getDeleteHandler());
+        }
+        Map<String, Object> requestedAttributes = new HashMap<>();
+        if (CollectionUtils.isNotEmpty(other.getClassifications())) {
+            this.classificationNames = new ArrayList<>(other.getClassifications().size());
+
+            for (AtlasClassification classification : other.getClassifications()) {
+                this.classificationNames.add(classification.getTypeName());
+            }
+        }
+        if (attributes != null) {
+
+            for (String attribute : attributes) {
+                Object value = getAttribute(attribute);
+
+                if (value != null) {
+                    requestedAttributes.put(attribute, value);
+                }
+            }
+        }
+        setAttributes(requestedAttributes);
     }
 
     public AtlasEntityHeader(AtlasEntity entity) {

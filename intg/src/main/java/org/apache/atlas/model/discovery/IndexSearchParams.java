@@ -80,6 +80,12 @@ public class IndexSearchParams extends SearchParams {
         this.persona = persona;
     }
 
+    public void setSources(Set<String> sources) {
+        super.setFetchSources(true);
+        this.dsl.put("_source", sources);
+        this.setDsl(this.dsl);
+    }
+
     public void setRelationAttributes(Set<String> relationAttributes) {
         this.relationAttributes = relationAttributes;
     }
@@ -103,6 +109,7 @@ public class IndexSearchParams extends SearchParams {
                 ", accessControlExclusive=" + accessControlExclusive +
                 ", includeRelationshipAttributes=" + includeRelationshipAttributes +
                 ", utmTags="+ getUtmTags() +
+                ", enableFullRestriction="+ enableFullRestriction +
                 '}';
     }
 

@@ -28,6 +28,7 @@ public enum AtlasConfiguration {
     //web server configuration
     WEBSERVER_MIN_THREADS("atlas.webserver.minthreads", 10),
     WEBSERVER_MAX_THREADS("atlas.webserver.maxthreads", 100),
+    WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 40),
     WEBSERVER_KEEPALIVE_SECONDS("atlas.webserver.keepalivetimesecs", 60),
     WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 100),
     WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 16192),
@@ -132,6 +133,8 @@ public enum AtlasConfiguration {
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
 
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
+    ATLAS_ENTITY_CACHE_ENABLED("atlas.entity.cache.enabled", false),
+    ATLAS_ENTITY_CACHE_ALLOWED_ENTITY_TYPES("atlas.entity.cache.allowed.entity.types", "Persona,Purpose,Connection,AtlasGlossary,AuthPolicy"),
 
     /***
      * OTEL Configuration
