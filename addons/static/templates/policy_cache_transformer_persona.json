@@ -392,7 +392,7 @@
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
       "resources": [
-        "entity:{entity}",
+        "entity:{entity}/*",
         "entity-type:DataDomain",
         "entity-classification:*"
       ],
@@ -410,6 +410,7 @@
         "end-one-entity-type:DataDomain",
         "end-one-entity-classification:*",
 
+        "end-two-entity:{entity}/*",
         "end-two-entity:{entity}",
         "end-two-entity-type:DataDomain",
         "end-two-entity-classification:*"
