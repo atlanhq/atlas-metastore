@@ -4542,8 +4542,8 @@ public class EntityGraphMapper {
 
             //AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex);
             AtlasEntityHeader header = new AtlasEntityHeader(getTypeName(vertex));
-            header.setGuid(getGuid(vertex));
-            header.setUpdateTime(new Date(getCreatedTime(vertex)));
+            header.setGuid(GraphHelper.getGuid(vertex));
+            header.setCreateTime(new Date(getCreatedTime(vertex)));
             header.setUpdateTime(new Date(getModifiedTime(vertex)));
             header.setCreatedBy(getCreatedByAsString(vertex));
             header.setUpdatedBy(getModifiedByAsString(vertex));
