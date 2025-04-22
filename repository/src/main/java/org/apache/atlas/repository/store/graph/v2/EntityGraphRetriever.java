@@ -1219,13 +1219,13 @@ public class EntityGraphRetriever {
             ret.setUpdatedBy(GraphHelper.getModifiedByAsString(entityVertex));
 
             // Set entity creation time if available
-            Long createdTime = GraphHelper.getCreatedTime(entityVertex);
+            Long createdTime = GraphHelper.getTime(entityVertex, TIMESTAMP_PROPERTY_KEY);
             if (createdTime != null) {
                 ret.setCreateTime(new Date(createdTime));
             }
 
             // Set entity last update time if available
-            Long updatedTime = GraphHelper.getModifiedTime(entityVertex);
+            Long updatedTime = GraphHelper.getTime(entityVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY);
             if (updatedTime != null) {
                 ret.setUpdateTime(new Date(updatedTime));
             }

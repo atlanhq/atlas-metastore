@@ -1234,6 +1234,10 @@ public final class GraphHelper {
          element.setProperty(MODIFIED_BY_KEY, modifiedBy);
     }
 
+    public static Long getTime(AtlasElement element, String propertyKey) {
+        return element.getProperty(propertyKey, Long.class);
+    }
+
     public static long getCreatedTime(AtlasElement element){
         return element.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class);
     }
