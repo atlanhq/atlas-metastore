@@ -27,7 +27,6 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.model.discovery.SearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -45,7 +44,6 @@ import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
-import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.configuration.Configuration;
 import org.apache.http.HttpEntity;
@@ -59,11 +57,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ImmutablePath;
 import org.apache.tinkerpop.gremlin.structure.Edge;
-import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.apache.tinkerpop.gremlin.structure.io.IoCore;
-import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONMapper;
-import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONWriter;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
@@ -87,7 +81,6 @@ import javax.script.Bindings;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -398,24 +391,10 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     @Override
-    public Set getOpenTransactions() {
-        return janusGraph.getOpenTransactions();
-    }
-
-    @Override
     public void shutdown() {
         getGraph().close();
     }
 
-    @Override
-    public Set<String> getEdgeIndexKeys() {
-        return getIndexKeys(Edge.class);
-    }
-
-    @Override
-    public Set<String> getVertexIndexKeys() {
-        return getIndexKeys(Vertex.class);
-    }
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex(String vertexId) {
@@ -423,15 +402,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         Vertex           vertex = getSingleElement(it, vertexId);
 
         return GraphDbObjectFactory.createVertex(this, vertex);
-    }
-
-    @Override
-    public Iterable<AtlasVertex<AtlasJanusVertex, AtlasJanusEdge>> getVertices(String key, Object value) {
-        AtlasGraphQuery<AtlasJanusVertex, AtlasJanusEdge> query = query();
-
-        query.has(key, value);
-
-        return query.vertices();
     }
 
     @Override
@@ -456,18 +426,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     public JanusGraph getGraph() {
         return this.janusGraph;
-    }
-
-    @Override
-    public void exportToGson(OutputStream os) throws IOException {
-        GraphSONMapper         mapper  = getGraph().io(IoCore.graphson()).mapper().create();
-        GraphSONWriter.Builder builder = GraphSONWriter.build();
-
-        builder.mapper(mapper);
-
-        GraphSONWriter writer = builder.create();
-
-        writer.writeGraph(os, getGraph());
     }
 
     @Override
@@ -506,36 +464,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return convertGremlinValue(result);
     }
 
-    @Override
-    public GroovyExpression generatePersisentToLogicalConversionExpression(GroovyExpression expr, AtlasType type) {
-        //nothing special needed, value is stored in required type
-        return expr;
-    }
-
-    @Override
-    public boolean isPropertyValueConversionNeeded(AtlasType type) {
-        return false;
-    }
-
-    @Override
-    public boolean requiresInitialIndexedPredicate() {
-        return false;
-    }
-
-    @Override
-    public GroovyExpression getInitialIndexedPredicate(GroovyExpression parent) {
-        return parent;
-    }
-
-    @Override
-    public GroovyExpression addOutputTransformationPredicate(GroovyExpression expr, boolean isSelect, boolean isPath) {
-        return expr;
-    }
-
-    @Override
-    public boolean isMultiProperty(String propertyName) {
-        return multiProperties.contains(propertyName);
-    }
 
     public Iterable<AtlasVertex<AtlasJanusVertex, AtlasJanusEdge>> wrapVertices(Iterable<? extends Vertex> it) {
 
@@ -629,20 +557,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return rawValue;
     }
 
-    private Set<String> getIndexKeys(Class<? extends Element> janusGraphElementClass) {
-        JanusGraphManagement      mgmt    = getGraph().openManagement();
-        Iterable<JanusGraphIndex> indices = mgmt.getGraphIndexes(janusGraphElementClass);
-        Set<String>               result  = new HashSet<String>();
-
-        for (JanusGraphIndex index : indices) {
-            result.add(index.name());
-        }
-
-        mgmt.commit();
-
-        return result;
-
-    }
 
     private Object executeGremlinScript(String gremlinQuery) throws AtlasBaseException {
         GremlinGroovyScriptEngine scriptEngine = getGremlinScriptEngine();

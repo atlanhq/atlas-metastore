@@ -201,10 +201,6 @@ public class EntityGraphRetriever {
         return ret;
     }
 
-    public AtlasEntitiesWithExtInfo toAtlasEntitiesWithExtInfo(List<String> guids) throws AtlasBaseException {
-        return toAtlasEntitiesWithExtInfo(guids, false);
-    }
-
     public AtlasEntityHeader toAtlasEntityHeader(String guid) throws AtlasBaseException {
         return toAtlasEntityHeader(getEntityVertex(guid));
     }
@@ -593,21 +589,11 @@ public class EntityGraphRetriever {
 
         return propagationMode;
     }
-    public List<AtlasVertex> getImpactedVerticesV2(AtlasVertex entityVertex) {
-        return getImpactedVerticesV2(entityVertex, (List<String>) null,false);
-    }
+
 
     public List<AtlasVertex> getImpactedVerticesV2(AtlasVertex entityVertex,  List<String> edgeLabelsToCheck,Boolean toExclude){
         List<AtlasVertex> ret = new ArrayList<>();
         traverseImpactedVertices(entityVertex, null, null, ret, edgeLabelsToCheck,toExclude);
-
-        return ret;
-    }
-
-    public List<AtlasVertex> getImpactedVerticesV2(AtlasVertex entityVertex, String relationshipGuidToExclude) {
-        List<AtlasVertex> ret = new ArrayList<>();
-
-        traverseImpactedVertices(entityVertex, relationshipGuidToExclude, null, ret, null,false);
 
         return ret;
     }

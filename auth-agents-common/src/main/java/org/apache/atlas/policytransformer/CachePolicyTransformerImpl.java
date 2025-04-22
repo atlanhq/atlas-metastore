@@ -90,7 +90,6 @@ public class CachePolicyTransformerImpl {
 
     private static final String RESOURCES_SPLITTER = ":";
 
-    static final String ATTR_QUALIFIED_NAME = "qualifiedName";
     static final String ATTR_NAME           = "name";
 
     public static final String ATTR_POLICY_ACTIONS            = "policyActions";
@@ -134,7 +133,7 @@ public class CachePolicyTransformerImpl {
         purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
 
         try {
-            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize discoveryService");
             throw new AtlasBaseException(e.getCause());

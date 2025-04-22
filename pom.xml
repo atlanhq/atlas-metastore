@@ -784,13 +784,11 @@
     </properties>
 
     <modules>
-        <module>build-tools</module>
 
         <module>intg</module>
         <module>common</module>
         <module>server-api</module>
         <module>notification</module>
-        <module>client</module>
         <module>client-auth</module>
         <module>graphdb</module>
 
@@ -1402,11 +1400,6 @@
                 <type>war</type>
             </dependency>
 
-            <dependency>
-                <groupId>org.apache.atlas</groupId>
-                <artifactId>atlas-buildtools</artifactId>
-                <version>${project.version}</version>
-            </dependency>
 
             <dependency>
                 <groupId>org.apache.atlas</groupId>

@@ -20,17 +20,12 @@ package org.apache.atlas.repository.graphdb;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.model.discovery.SearchParams;
-import org.apache.atlas.type.AtlasType;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
-import java.io.IOException;
-import java.io.OutputStream;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Represents a graph.
@@ -117,36 +112,6 @@ public interface AtlasGraph<V, E> {
      * @return
      */
     AtlasVertex<V, E> getVertex(String vertexId);
-
-    /**
-     * Gets the names of the indexes on edges
-     * type.
-     *
-     * @return
-     */
-    Set<String> getEdgeIndexKeys();
-
-
-    /**
-     * Gets the names of the indexes on vertices.
-     * type.
-     *
-     * @return
-     */
-    Set<String> getVertexIndexKeys();
-
-
-    /**
-     * Finds the vertices where the given property key
-     * has the specified value.  For multi-valued properties,
-     * finds the vertices where the value list contains
-     * the specified value.
-     *
-     * @param key
-     * @param value
-     * @return
-     */
-    Iterable<AtlasVertex<V, E>> getVertices(String key, Object value);
 
     /**
      * Creates a graph query.
@@ -246,44 +211,6 @@ public interface AtlasGraph<V, E> {
      */
     void clear();
 
-    /**
-     * Gets all open transactions.
-     */
-    Set getOpenTransactions();
-
-    /**
-     * Converts the graph to gson and writes it to the specified stream.
-     *
-     * @param os
-     * @throws IOException
-     */
-    void exportToGson(OutputStream os) throws IOException;
-
-    //the following methods insulate Atlas from the details
-    //of the interaction with Gremlin
-
-    /**
-     * This method is used in the generation of queries.  It is used to
-     * convert property values from the value that is stored in the graph
-     * to the value/type that the user expects to get back.
-     *
-     * @param valueExpr - gremlin expr that represents the persistent property value
-     * @param type
-     * @return
-     */
-    GroovyExpression generatePersisentToLogicalConversionExpression(GroovyExpression valueExpr, AtlasType type);
-
-    /**
-     * Indicates whether or not stored values with the specified type need to be converted
-     * within generated gremlin queries before they can be compared with literal values.
-     * As an example, a graph database might choose to store Long values as Strings or
-     * List values as a delimited list.  In this case, the generated gremlin needs to
-     * convert the stored property value prior to comparing it a literal.  In this returns
-     * true, @code{generatePersisentToLogicalConversionExpression} is used to generate a
-     * gremlin expression with the converted value.  In addition, this cause the gremlin
-     * 'filter' step to be used to compare the values instead of a 'has' step.
-     */
-    boolean isPropertyValueConversionNeeded(AtlasType type);
 
     /**
      * Gets the version of Gremlin that this graph uses.
@@ -291,32 +218,6 @@ public interface AtlasGraph<V, E> {
      * @return
      */
     GremlinVersion getSupportedGremlinVersion();
-
-    /**
-     * Whether or not an initial predicate needs to be added to gremlin queries
-     * in order for them to run successfully.  This is needed for some graph database where
-     * graph scans are disabled.
-     * @return
-     */
-    boolean requiresInitialIndexedPredicate();
-
-    /**
-     * Some graph database backends have graph scans disabled.  In order to execute some queries there,
-     * an initial 'dummy' predicate needs to be added to gremlin queries so that the first
-     * condition uses an index.
-     *
-     * @return
-     */
-    GroovyExpression getInitialIndexedPredicate(GroovyExpression parent);
-
-    /**
-     * As an optimization, a graph database implementation may want to retrieve additional
-     * information about the query results.  For example, in the IBM Graph implementation,
-     * this changes the query to return both matching vertices and their outgoing edges to
-     * avoid the need to make an extra REST API call to look up those edges.  For implementations
-     * that do not require any kind of transform, an empty String should be returned.
-     */
-    GroovyExpression addOutputTransformationPredicate(GroovyExpression expr, boolean isSelect, boolean isPath);
 
     /**
      * Get an instance of the script engine to execute Gremlin queries
@@ -359,15 +260,6 @@ public interface AtlasGraph<V, E> {
      */
     Object executeGremlinScript(ScriptEngine scriptEngine, Map<? extends  String, ? extends  Object> bindings, String query, boolean isPath) throws ScriptException;
 
-
-    /**
-     * Convenience method to check whether the given property is
-     * a multi-property.
-     *
-     * @param name
-     * @return
-     */
-    boolean isMultiProperty(String name);
 
     /**
      * Create Index query parameter for use with atlas graph.

@@ -4476,14 +4476,6 @@ public class EntityGraphMapper {
         entityChangeNotifier.notifyPropagatedEntities();
     }
 
-    private void validateClassificationExists(List<String> existingClassifications, List<String> suppliedClassifications) throws AtlasBaseException {
-        Set<String> existingNames = new HashSet<>(existingClassifications);
-        for (String classificationName : suppliedClassifications) {
-            if (!existingNames.contains(classificationName)) {
-                throw new AtlasBaseException(AtlasErrorCode.CLASSIFICATION_NOT_ASSOCIATED_WITH_ENTITY, classificationName);
-            }
-        }
-    }
 
     private void validateClassificationExists(List<String> existingClassifications, String suppliedClassificationName) throws AtlasBaseException {
         if (!existingClassifications.contains(suppliedClassificationName)) {

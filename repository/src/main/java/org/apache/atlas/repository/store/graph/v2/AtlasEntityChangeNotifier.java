@@ -36,7 +36,6 @@ import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.instance.EntityMutations.EntityOperation;
 import org.apache.atlas.model.notification.EntityNotification;
-import org.apache.atlas.repository.audit.AtlasAuditService;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
@@ -406,27 +405,15 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         return listener.getClass().getSimpleName();
     }
 
-    private static final Predicate<AtlasEntityHeader> PRED_IS_NOT_TYPE_AUDIT_ENTITY = obj -> !obj.getTypeName().equals(AtlasAuditService.ENTITY_TYPE_AUDIT_ENTRY);
-
-    private boolean skipAuditEntries(List<AtlasEntityHeader> entityHeaders) {
-        return CollectionUtils.isEmpty(entityHeaders) || !entityHeaders.stream().anyMatch(PRED_IS_NOT_TYPE_AUDIT_ENTITY);
-    }
-
     private void notifyListeners(List<AtlasEntityHeader> entityHeaders, EntityOperation operation, boolean isImport) throws AtlasBaseException {
         if (CollectionUtils.isEmpty(entityHeaders)) {
             return;
         }
-        if (skipAuditEntries(entityHeaders)) {
-            return;
-        }
+        //TODO: Avoid notifying for __AtlasAuditEntry
 
         MetricRecorder metric = RequestContext.get().startMetricRecord("notifyListeners");
 
-        if (isV2EntityNotificationEnabled) {
-            notifyV2Listeners(entityHeaders, operation, isImport);
-        } else {
-            notifyV1Listeners(entityHeaders, operation, isImport);
-        }
+        notifyV2Listeners(entityHeaders, operation, isImport);
 
         RequestContext.get().endMetricRecord(metric);
     }
@@ -442,32 +429,6 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         }
 
         LOG.warn("Relationships not supported by v1 notifications. {}", relationships);
-    }
-
-
-    private void notifyV1Listeners(List<AtlasEntityHeader> entityHeaders, EntityOperation operation, boolean isImport) throws AtlasBaseException {
-        if (operation != EntityOperation.PURGE && instanceConverter != null) {
-            List<Referenceable> typedRefInsts = toReferenceables(entityHeaders, operation);
-
-            for (EntityChangeListener listener : entityChangeListeners) {
-                try {
-                    switch (operation) {
-                        case CREATE:
-                            listener.onEntitiesAdded(typedRefInsts, isImport);
-                            break;
-                        case UPDATE:
-                        case PARTIAL_UPDATE:
-                            listener.onEntitiesUpdated(typedRefInsts, isImport);
-                            break;
-                        case DELETE:
-                            listener.onEntitiesDeleted(typedRefInsts, isImport);
-                            break;
-                    }
-                } catch (AtlasException e) {
-                    throw new AtlasBaseException(AtlasErrorCode.NOTIFICATION_FAILED, e, getListenerName(listener), operation.toString());
-                }
-            }
-        }
     }
 
     private void notifyV2Listeners(List<AtlasEntityHeader> entityHeaders, EntityOperation operation, boolean isImport) throws AtlasBaseException {
@@ -514,25 +475,6 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                     break;
             }
         }
-    }
-
-    private List<Referenceable> toReferenceables(List<AtlasEntityHeader> entityHeaders, EntityOperation operation) throws AtlasBaseException {
-        List<Referenceable> ret = new ArrayList<>(entityHeaders.size());
-
-        if (instanceConverter != null) {
-            // delete notifications don't need all attributes. Hence the special handling for delete operation
-            if (operation == EntityOperation.DELETE) {
-                for (AtlasEntityHeader entityHeader : entityHeaders) {
-                    ret.add(new Referenceable(entityHeader.getGuid(), entityHeader.getTypeName(), entityHeader.getAttributes()));
-                }
-            } else {
-                for (AtlasEntityHeader entityHeader : entityHeaders) {
-                    ret.add(toReferenceable(entityHeader.getGuid()));
-                }
-            }
-        }
-
-        return ret;
     }
 
     private List<Referenceable> toReferenceables(List<AtlasRelatedObjectId> entityIds) throws AtlasBaseException {

@@ -215,50 +215,6 @@ public class RangerPluginClassLoader extends URLClassLoader {
          return ret;
      }
 
-    public void activate() {
-        if(LOG.isDebugEnabled()) {
-           LOG.debug("==> RangerPluginClassLoader.activate()");
-        }
-
-        //componentClassLoader.set(new MyClassLoader(Thread.currentThread().getContextClassLoader()));
-
-        preActivateClassLoader.set(Thread.currentThread().getContextClassLoader());
-
-        Thread.currentThread().setContextClassLoader(this);
-
-        if(LOG.isDebugEnabled()) {
-           LOG.debug("<== RangerPluginClassLoader.activate()");
-        }
-    }
-
-    public void deactivate() {
-
-       if(LOG.isDebugEnabled()) {
-          LOG.debug("==> RangerPluginClassLoader.deactivate()");
-       }
-
-       ClassLoader classLoader = preActivateClassLoader.get();
-
-       if (classLoader != null) {
-           preActivateClassLoader.remove();
-       } else {
-           MyClassLoader savedClassLoader = getComponentClassLoader();
-           if (savedClassLoader != null && savedClassLoader.getParent() != null) {
-               classLoader = savedClassLoader.getParent();
-           }
-       }
-
-       if (classLoader != null) {
-           Thread.currentThread().setContextClassLoader(classLoader);
-       } else {
-           LOG.warn("RangerPluginClassLoader.deactivate() was not successful. Couldn't not get the saved classLoader...");
-       }
-
-       if(LOG.isDebugEnabled()) {
-          LOG.debug("<== RangerPluginClassLoader.deactivate()");
-       }
-    }
-
     private MyClassLoader getComponentClassLoader() {
     	return  componentClassLoader;
         //return componentClassLoader.get();

@@ -22,10 +22,7 @@ import io.micrometer.core.instrument.binder.jetty.JettyConnectionMetrics;
 import io.micrometer.core.instrument.binder.jetty.JettyServerThreadPoolMetrics;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.util.BeanUtil;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.audit.AtlasAuditEntry;
-import org.apache.atlas.repository.audit.AtlasAuditService;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -38,7 +35,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Date;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
@@ -53,18 +49,14 @@ public class EmbeddedServer {
 
     public static final String ATLAS_DEFAULT_BIND_ADDRESS = "0.0.0.0";
 
-    public static final Date SERVER_START_TIME = new Date();
 
     protected final Server server;
 
-    private AtlasAuditService auditService;
 
-    private ServiceState serviceState;
 
     public EmbeddedServer(String host, int port, String path) throws IOException {
         int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
         LinkedBlockingQueue<Runnable> queue         = new LinkedBlockingQueue<>(queueSize);
-        int                           minThreads    = AtlasConfiguration.WEBSERVER_MIN_THREADS.getInt();
         int                           maxThreads    = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
         int                           reservedThreads    = AtlasConfiguration.WEBSERVER_RESERVED_THREADS.getInt();
         long                          keepAliveTime = AtlasConfiguration.WEBSERVER_KEEPALIVE_SECONDS.getLong();
@@ -117,8 +109,6 @@ public class EmbeddedServer {
         try {
             server.start();
 
-            auditServerStatus();
-
             server.join();
         } catch(Exception e) {
             throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
@@ -130,23 +120,6 @@ public class EmbeddedServer {
             server.stop();
         } catch (Exception e) {
             LOG.warn("Error during shutdown", e);
-        }
-    }
-
-    private void auditServerStatus() {
-        auditService = BeanUtil.getBean(AtlasAuditService.class);
-        serviceState = BeanUtil.getBean(ServiceState.class);
-
-        ServiceState.ServiceStateValue serviceStateValue = serviceState.getState();
-
-        if (serviceStateValue == ServiceState.ServiceStateValue.ACTIVE) {
-            Date   date        = new Date();
-            try {
-                auditService.add(AtlasAuditEntry.AuditOperation.SERVER_START, SERVER_START_TIME, date, null, null, 0);
-                auditService.add(AtlasAuditEntry.AuditOperation.SERVER_STATE_ACTIVE, date, date, null, null, 0);
-            } catch (AtlasBaseException e) {
-                LOG.error("Exception occurred during audit", e);
-            }
         }
     }
 }

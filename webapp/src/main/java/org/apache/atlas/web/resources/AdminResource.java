@@ -46,13 +46,6 @@ import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.metrics.AtlasMetrics;
 import org.apache.atlas.model.patches.AtlasPatch.AtlasPatches;
 import org.apache.atlas.model.tasks.AtlasTask;
-import org.apache.atlas.repository.audit.AtlasAuditService;
-import org.apache.atlas.repository.impexp.AtlasServerService;
-import org.apache.atlas.repository.impexp.ExportImportAuditService;
-import org.apache.atlas.repository.impexp.ExportService;
-import org.apache.atlas.repository.impexp.ImportService;
-import org.apache.atlas.repository.impexp.MigrationProgressService;
-import org.apache.atlas.repository.impexp.ZipSink;
 import org.apache.atlas.repository.patches.AtlasPatchManager;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.service.FeatureFlagStore;
@@ -169,18 +162,12 @@ public class AdminResource {
     private static Configuration            atlasProperties;
     private final  ServiceState             serviceState;
     private final  MetricsService           metricsService;
-    private final  ExportService            exportService;
-    private final  ImportService            importService;
     private final  SearchTracker            activeSearches;
     private final  AtlasTypeRegistry        typeRegistry;
-    private final  MigrationProgressService migrationProgressService;
     private final  ReentrantLock            importExportOperationLock;
-    private final  ExportImportAuditService exportImportAuditService;
     private final  TaskManagement           taskManagement;
-    private final  AtlasServerService       atlasServerService;
     private final  AtlasEntityStore         entityStore;
     private final  AtlasPatchManager        patchManager;
-    private final  AtlasAuditService        auditService;
     private final  String                   defaultUIVersion;
     private final  boolean                  isTimezoneFormatEnabled;
     private final  String                   uiDateFormat;
@@ -200,26 +187,16 @@ public class AdminResource {
     }
 
     @Inject
-    public AdminResource(ServiceState serviceState, MetricsService metricsService, AtlasTypeRegistry typeRegistry,
-                         ExportService exportService, ImportService importService, SearchTracker activeSearches,
-                         MigrationProgressService migrationProgressService,
-                         AtlasServerService serverService,
-                         ExportImportAuditService exportImportAuditService, AtlasEntityStore entityStore,
-                         AtlasPatchManager patchManager, AtlasAuditService auditService,
+    public AdminResource(ServiceState serviceState, MetricsService metricsService, AtlasTypeRegistry typeRegistry, SearchTracker activeSearches,
+                         AtlasEntityStore entityStore, AtlasPatchManager patchManager,
                          TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry) {
         this.serviceState              = serviceState;
         this.metricsService            = metricsService;
-        this.exportService             = exportService;
-        this.importService             = importService;
         this.activeSearches            = activeSearches;
         this.typeRegistry              = typeRegistry;
-        this.migrationProgressService  = migrationProgressService;
-        this.atlasServerService        = serverService;
         this.entityStore               = entityStore;
-        this.exportImportAuditService  = exportImportAuditService;
         this.importExportOperationLock = new ReentrantLock();
         this.patchManager              = patchManager;
-        this.auditService              = auditService;
         this.taskManagement            = taskManagement;
         this.debugMetricsRESTSink      = debugMetricsRESTSink;
         this.metricsRegistry           = metricsRegistry;
@@ -330,12 +307,6 @@ public class AdminResource {
                 put(STATUS, serviceState.getState().toString());
             }};
 
-        if(serviceState.isInstanceInMigration()) {
-            MigrationStatus status = migrationProgressService.getStatus();
-            if (status != null) {
-                responseData.put("MigrationStatus", status);
-            }
-        }
 
         Response response = Response.ok(AtlasJson.toV1Json(responseData)).build();
 
@@ -451,22 +422,6 @@ public class AdminResource {
         return Response.status(200).entity(result).build();
     }
 
-    @GET
-    @Path("killtheleader")
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public Response killTheLeader() {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> AdminResource.killTheLeader()");
-        }
-
-        System.out.println(electorService);
-        try{
-            return Response.status(200).build();
-        } finally {
-            //do after actions
-            electorService.quitElection();
-        }
-    }
 
     @GET
     @Path("isactive")
@@ -537,298 +492,6 @@ public class AdminResource {
         }
 
         return Response.ok().build();
-    }
-
-    private void releaseExportImportLock() {
-        importExportOperationLock.unlock();
-    }
-
-    @POST
-    @Path("/export")
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    public Response export(AtlasExportRequest request) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> AdminResource.export()");
-        }
-
-        AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_EXPORT), "export");
-
-        boolean preventMultipleRequests = request != null && request.getOptions() != null
-                && !(request.getOptions().containsKey(AtlasExportRequest.OPTION_SKIP_LINEAGE)
-                     || request.getOptions().containsKey(AtlasExportRequest.OPTION_KEY_REPLICATED_TO));
-        if (preventMultipleRequests) {
-            acquireExportImportLock("export");
-        }
-
-        ZipSink exportSink = null;
-        boolean isSuccessful = false;
-        AtlasExportResult result = null;
-        try {
-            exportSink = new ZipSink(httpServletResponse.getOutputStream());
-            result = exportService.run(exportSink, request, AtlasAuthorizationUtils.getCurrentUserName(),
-                                                         Servlets.getHostName(httpServletRequest),
-                                                         AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
-
-            exportSink.close();
-
-            httpServletResponse.addHeader("Content-Encoding","gzip");
-            httpServletResponse.setContentType("application/zip");
-            httpServletResponse.setHeader("Content-Disposition",
-                                          "attachment; filename=" + result.getClass().getSimpleName());
-            httpServletResponse.setHeader("Transfer-Encoding", "chunked");
-
-            httpServletResponse.getOutputStream().flush();
-            isSuccessful = true;
-            return Response.ok().build();
-        } catch (IOException excp) {
-            LOG.error("export() failed", excp);
-
-            throw new AtlasBaseException(excp);
-        } finally {
-            if (preventMultipleRequests) {
-                releaseExportImportLock();
-            }
-
-            if (exportSink != null) {
-                exportSink.close();
-            }
-
-            addToExportOperationAudits(isSuccessful, result);
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("<== AdminResource.export()");
-            }
-        }
-    }
-
-    @POST
-    @Path("/import")
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    @Consumes(MediaType.MULTIPART_FORM_DATA)
-    public AtlasImportResult importData(@DefaultValue("{}") @FormDataParam("request") String jsonData,
-                                        @FormDataParam("data") InputStream inputStream) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> AdminResource.importData(jsonData={}, inputStream={})", jsonData, (inputStream != null));
-        }
-
-        AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_IMPORT), "importData");
-
-        AtlasImportResult result = null;
-        boolean preventMultipleRequests = true;
-
-        try {
-            AtlasImportRequest request = AtlasType.fromJson(jsonData, AtlasImportRequest.class);
-            preventMultipleRequests = request != null && request.getOptions() != null
-                    && !request.getOptions().containsKey(AtlasImportRequest.OPTION_KEY_REPLICATED_FROM);
-            if (preventMultipleRequests) {
-                acquireExportImportLock("import");
-            }
-
-            result = importService.run(inputStream, request, Servlets.getUserName(httpServletRequest),
-                    Servlets.getHostName(httpServletRequest),
-                    AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
-        } catch (AtlasBaseException excp) {
-            if (excp.getAtlasErrorCode().equals(AtlasErrorCode.IMPORT_ATTEMPTING_EMPTY_ZIP)) {
-                LOG.info(excp.getMessage());
-                return new AtlasImportResult();
-            } else {
-                LOG.error("importData(binary) failed", excp);
-                throw excp;
-            }
-
-        } catch (Exception excp) {
-            LOG.error("importData(binary) failed", excp);
-
-            throw new AtlasBaseException(excp);
-        } finally {
-            if (preventMultipleRequests) {
-                releaseExportImportLock();
-            }
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("<== AdminResource.importData(binary)");
-            }
-        }
-
-        addToImportOperationAudits(result);
-
-        return result;
-    }
-
-    @PUT
-    @Path("/purge")
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public EntityMutationResponse purgeByIds(Set<String> guids) throws AtlasBaseException {
-        if (CollectionUtils.isNotEmpty(guids)) {
-            for (String guid : guids) {
-                Servlets.validateQueryParamLength("guid", guid);
-            }
-        }
-
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "AdminResource.purgeByIds(" + guids  + ")");
-            }
-
-            EntityMutationResponse resp =  entityStore.purgeByIds(guids);
-
-            final List<AtlasEntityHeader> purgedEntities = resp.getPurgedEntities();
-            if(purgedEntities != null && purgedEntities.size() > 0) {
-                auditService.add(AuditOperation.PURGE, guids.toString(), resp.getPurgedEntitiesIds(),
-                        resp.getPurgedEntities().size());
-            }
-
-            return resp;
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-    @POST
-    @Path("/importfile")
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public AtlasImportResult importFile(String jsonData) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> AdminResource.importFile()");
-        }
-
-        AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_IMPORT), "importFile");
-        boolean preventMultipleRequests = true;
-        AtlasImportResult result;
-
-        try {
-            AtlasImportRequest request = AtlasType.fromJson(jsonData, AtlasImportRequest.class);
-            preventMultipleRequests = request != null && request.getOptions() != null
-                    && request.getOptions().containsKey(AtlasImportRequest.OPTION_KEY_REPLICATED_FROM);
-
-            if (preventMultipleRequests) {
-                acquireExportImportLock("importFile");
-            }
-
-            result = importService.run(request, AtlasAuthorizationUtils.getCurrentUserName(),
-                                       Servlets.getHostName(httpServletRequest),
-                                       AtlasAuthorizationUtils.getRequestIpAddress(httpServletRequest));
-        } catch (AtlasBaseException excp) {
-            if (excp.getAtlasErrorCode().getErrorCode().equals(AtlasErrorCode.IMPORT_ATTEMPTING_EMPTY_ZIP)) {
-                LOG.info(excp.getMessage());
-            } else {
-                LOG.error("importData(binary) failed", excp);
-            }
-
-            throw excp;
-        } catch (Exception excp) {
-            LOG.error("importFile() failed", excp);
-
-            throw new AtlasBaseException(excp);
-        } finally {
-            if (preventMultipleRequests) {
-                releaseExportImportLock();
-            }
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("<== AdminResource.importFile()");
-            }
-        }
-
-        return result;
-    }
-
-    /**
-     * Fetch details of a cluster.
-     * @param serverName name of target cluster with which it is paired
-     * @return AtlasServer
-     * @throws AtlasBaseException
-     */
-    @GET
-    @Path("/server/{serverName}")
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public AtlasServer getCluster(@PathParam("serverName") String serverName) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "cluster.getServer(" + serverName + ")");
-            }
-
-            AtlasServer cluster = new AtlasServer(serverName, serverName);
-            return atlasServerService.get(cluster);
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-    @GET
-    @Path("/expimp/audit")
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public List<ExportImportAuditEntry> getExportImportAudit(@QueryParam("serverName") String serverName,
-                                                             @QueryParam("userName") String userName,
-                                                             @QueryParam("operation") String operation,
-                                                             @QueryParam("startTime") String startTime,
-                                                             @QueryParam("endTime") String endTime,
-                                                             @QueryParam("limit") int limit,
-                                                             @QueryParam("offset") int offset) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "getExportImportAudit(" + serverName + ")");
-            }
-
-            return exportImportAuditService.get(userName, operation, serverName, startTime, endTime, limit, offset);
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-    @POST
-    @Path("/audits")
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public List<AtlasAuditEntry> getAtlasAudits(AuditSearchParameters auditSearchParameters) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "AdminResource.getAtlasAudits(" + auditSearchParameters + ")");
-            }
-
-            AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_AUDITS), "Admin Audits");
-
-            return auditService.get(auditSearchParameters);
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-
-    @GET
-    @Path("/audit/{auditGuid}/details")
-    @Consumes(Servlets.JSON_MEDIA_TYPE)
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public List<AtlasEntityHeader> getAuditDetails(@PathParam("auditGuid") String auditGuid,
-                                    @QueryParam("limit") @DefaultValue("10") int limit,
-                                    @QueryParam("offset") @DefaultValue("0") int offset) throws AtlasBaseException {
-        throw new AtlasBaseException(DEPRECATED_API, "/entity/auditSearch");
-    }
-
-    @GET
-    @Path("activeSearches")
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public Set<String> getActiveSearches() {
-        return activeSearches.getActiveSearches();
-    }
-
-    @DELETE
-    @Path("activeSearches/{id}")
-    @Produces(Servlets.JSON_MEDIA_TYPE)
-    public boolean terminateActiveSearch(@PathParam("id") String searchId) {
-        SearchContext terminate = activeSearches.terminate(searchId);
-        return null != terminate;
     }
 
     @POST
@@ -970,54 +633,5 @@ public class AdminResource {
         }
 
         return ret;
-    }
-
-    private void acquireExportImportLock(String activity) throws AtlasBaseException {
-        boolean alreadyLocked = importExportOperationLock.isLocked();
-        if (alreadyLocked) {
-            LOG.warn("Another export or import is currently in progress..aborting this " + activity, Thread.currentThread().getName());
-
-            throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_IMPORT_EXPORT_LOCK);
-        }
-
-        importExportOperationLock.lock();
-    }
-
-    private void addToImportOperationAudits(AtlasImportResult result) throws AtlasBaseException {
-        Map<String, Object> optionMap = new HashMap<>();
-        optionMap.put(OPERATION_STATUS, result.getOperationStatus().name());
-        String params = AtlasJson.toJson(optionMap);
-
-        if(result.getExportResult().getRequest() == null) {
-            int resultCount = result.getProcessedEntities().size();
-            auditService.add(AuditOperation.IMPORT, params, AtlasJson.toJson(result.getMetrics()), resultCount);
-        } else {
-            List<AtlasObjectId> objectIds = result.getExportResult().getRequest().getItemsToExport();
-            auditImportExportOperations(objectIds, AuditOperation.IMPORT, params);
-        }
-    }
-
-    private void addToExportOperationAudits(boolean isSuccessful, AtlasExportResult result) throws AtlasBaseException {
-        if (!isSuccessful
-                || CollectionUtils.isEmpty(result.getRequest().getItemsToExport())
-                || result.getRequest().getOptions() == null) {
-            return;
-        }
-
-        Map<String, Object> optionMap = result.getRequest().getOptions();
-        optionMap.put(OPERATION_STATUS, result.getOperationStatus().name());
-        String params = AtlasJson.toJson(optionMap);
-
-        List<AtlasObjectId> objectIds = result.getRequest().getItemsToExport();
-
-        auditImportExportOperations(objectIds, AuditOperation.EXPORT, params);
-    }
-
-    private void auditImportExportOperations(List<AtlasObjectId> objectIds, AuditOperation auditOperation, String params) throws AtlasBaseException {
-
-        Map<String, Long> entityCountByType = objectIds.stream().collect(Collectors.groupingBy(AtlasObjectId::getTypeName, Collectors.counting()));
-        int resultCount = objectIds.size();
-
-        auditService.add(auditOperation, params, AtlasJson.toJson(entityCountByType), resultCount);
     }
 }

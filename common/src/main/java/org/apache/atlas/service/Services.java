@@ -18,7 +18,7 @@
 package org.apache.atlas.service;
 
 import org.apache.atlas.annotation.AtlasService;
-import org.apache.atlas.type.AtlasType;
+
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
