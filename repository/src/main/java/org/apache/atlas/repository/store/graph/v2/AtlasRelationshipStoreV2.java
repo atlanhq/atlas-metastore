@@ -241,46 +241,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     @Override
     @GraphTransaction
-    public List<AtlasRelationship> createOrUpdate(List<AtlasRelationship> relationships) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> createOrUpdate({})", relationships);
-        }
-        List<AtlasRelationship> ret = new ArrayList<>();
-
-        for (AtlasRelationship relationship : relationships) {
-            AtlasVertex end1Vertex = getVertexFromEndPoint(relationship.getEnd1());
-            AtlasVertex end2Vertex = getVertexFromEndPoint(relationship.getEnd2());
-
-            if (end1Vertex == null) {
-                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_END_VERTEX_NOT_FOUND, relationship.getTypeName(),
-                        relationship.getEnd1().getGuid(), relationship.getEnd1().getTypeName());
-            }
-
-            if (end2Vertex == null) {
-                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_END_VERTEX_NOT_FOUND, relationship.getTypeName(),
-                        relationship.getEnd2().getGuid(), relationship.getEnd2().getTypeName());
-            }
-
-            String relationshipLabel = getRelationshipEdgeLabel(end1Vertex, end2Vertex, relationship.getTypeName());
-
-            AtlasEdge existingEdge = getRelationshipEdge(end1Vertex, end2Vertex, relationshipLabel);
-
-            if (existingEdge == null) {
-                ret.add(create(relationship));
-            } else {
-                ret.add(update(relationship));
-            }
-        }
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("<== createOrUpdate({}): {}", relationships, ret);
-        }
-
-        return ret;
-    }
-
-    @Override
-    @GraphTransaction
     public AtlasRelationship getById(String guid) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> getById({})", guid);
@@ -294,70 +254,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         }
 
         return ret;
-    }
-
-    @Override
-    @GraphTransaction
-    public AtlasRelationshipWithExtInfo getExtInfoById(String guid) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> getExtInfoById({})", guid);
-        }
-
-        AtlasEdge                    edge = graphHelper.getEdgeForGUID(guid);
-        AtlasRelationshipWithExtInfo ret  = entityRetriever.mapEdgeToAtlasRelationshipWithExtInfo(edge);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("<== getExtInfoById({}): {}", guid, ret);
-        }
-
-        return ret;
-    }
-
-
-    @Override
-    @GraphTransaction
-    public void deleteByIds(List<String> guids) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> deleteByIds({}})", guids.size());
-        }
-
-        Set<AtlasRelationship> deletedRelationships = new HashSet<>();
-        List<AtlasEdge> edgesToDelete = new ArrayList<>();
-
-        for (String guid : guids) {
-            AtlasEdge edge = graphHelper.getEdgeForGUID(guid);
-
-            if (edge == null) {
-                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_GUID_NOT_FOUND, guid);
-            }
-
-            if (getState(edge) == DELETED) {
-                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_ALREADY_DELETED, guid);
-            }
-
-            validateRelationshipType(getTypeName(edge));
-
-            edgesToDelete.add(edge);
-            AtlasRelationship relationshipToDelete = entityRetriever.mapEdgeToAtlasRelationship(edge);
-            deletedRelationships.add(relationshipToDelete);
-        }
-
-        deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(edgesToDelete,null);
-        deleteDelegate.getHandler().deleteRelationships(edgesToDelete, false);
-
-        if (DEFERRED_ACTION_ENABLED) {
-            Set<String> deletedEdgeIds = RequestContext.get().getDeletedEdgesIds();
-            for (String deletedEdgeId : deletedEdgeIds) {
-                AtlasEdge deletedEdge = graph.getEdge(deletedEdgeId);
-                deleteDelegate.getHandler().createAndQueueClassificationRefreshPropagationTask(deletedEdge);
-            }
-        }
-
-        onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("<== deleteByIds({}):", guids.size());
-        }
     }
 
     @Override
@@ -877,18 +773,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         return typeName;
     }
 
-    /**
-     * Check whether this vertex has a relationship associated with this relationship type.
-     * @param vertex
-     * @param relationshipTypeName
-     * @return true if found an edge with this relationship type in.
-     */
-    private boolean vertexHasRelationshipWithType(AtlasVertex vertex, String relationshipTypeName) {
-        String relationshipEdgeLabel = getRelationshipEdgeLabel(getTypeName(vertex), relationshipTypeName);
-        Iterator<AtlasEdge> iter     = graphHelper.getAdjacentEdgesByLabel(vertex, AtlasEdgeDirection.BOTH, relationshipEdgeLabel);
-
-        return (iter != null) ? iter.hasNext() : false;
-    }
 
     private String getRelationshipEdgeLabel(String typeName, String relationshipTypeName) {
         AtlasRelationshipType relationshipType = typeRegistry.getRelationshipTypeByName(relationshipTypeName);

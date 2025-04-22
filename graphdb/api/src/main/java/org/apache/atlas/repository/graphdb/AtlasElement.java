@@ -135,13 +135,6 @@ public interface AtlasElement {
     <T> void setProperty(String propertyName, T value);
 
 
-    /**
-     * Creates a Jettison JSONObject from this Element.
-     *
-     * @param propertyKeys The property keys at the root of the element to serialize.
-     *  If null, then all keys are serialized.
-     */
-    JSONObject toJson(Set<String> propertyKeys) throws JSONException;
 
     /**
      * Determines if this element exists in the graph database.  If the element has not

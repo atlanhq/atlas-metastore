@@ -22,7 +22,6 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.featureflag.FeatureFlagStore;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -82,18 +81,15 @@ public class QueryCollectionPreProcessor implements PreProcessor {
     private AtlasEntityStore entityStore;
     private EntityDiscoveryService discovery;
     private PreProcessorPoliciesTransformer transformer;
-    private FeatureFlagStore featureFlagStore;
     private KeycloakStore keycloakStore;
 
     public QueryCollectionPreProcessor(AtlasTypeRegistry typeRegistry,
                                        EntityDiscoveryService discovery,
                                        EntityGraphRetriever entityRetriever,
-                                       FeatureFlagStore featureFlagStore,
                                        AtlasEntityStore entityStore) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         this.entityStore = entityStore;
-        this.featureFlagStore = featureFlagStore;
         this.discovery = discovery;
 
         transformer = new PreProcessorPoliciesTransformer();

@@ -23,12 +23,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
-import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
-import org.codehaus.jettison.json.JSONException;
-import org.codehaus.jettison.json.JSONObject;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Lists;
@@ -167,12 +163,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         return element;
     }
 
-
-    @Override
-    public JSONObject toJson(Set<String> propertyKeys) throws JSONException {
-
-        return AtlasGraphSONUtility.jsonFromElement(this, propertyKeys, AtlasGraphSONMode.NORMAL);
-    }
 
     @Override
     public int hashCode() {

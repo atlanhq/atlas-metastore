@@ -28,19 +28,11 @@ import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasFullTextResult;
 import org.apache.atlas.model.notification.EntityNotification;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationType;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2;
-import org.apache.atlas.model.notification.HookNotification;
-import org.apache.atlas.model.notification.HookNotification.HookNotificationType;
-import org.apache.atlas.model.notification.HookNotification.EntityCreateRequestV2;
-import org.apache.atlas.model.notification.HookNotification.EntityDeleteRequestV2;
-import org.apache.atlas.model.notification.HookNotification.EntityPartialUpdateRequestV2;
-import org.apache.atlas.model.notification.HookNotification.EntityUpdateRequestV2;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.v1.model.instance.AtlasSystemAttributes;
 import org.apache.atlas.v1.model.instance.Id;
 import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.v1.model.instance.Struct;
-import org.apache.atlas.v1.model.notification.EntityNotificationV1;
-import org.apache.atlas.v1.model.notification.HookNotificationV1.*;
 import org.apache.commons.collections.MapUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -77,7 +69,6 @@ public class AtlasJson {
         atlasSerDeModule.addDeserializer(Struct.class, new StructDeserializer());
         atlasSerDeModule.addSerializer(Id.class, new IdSerializer());
         atlasSerDeModule.addDeserializer(Id.class, new IdDeserializer());
-        atlasSerDeModule.addDeserializer(HookNotification.class, new HookNotificationDeserializer());
         atlasSerDeModule.addDeserializer(EntityNotification.class, new EntityNotificationDeserializer());
 
         mapper.registerModule(atlasSerDeModule);
@@ -350,61 +341,6 @@ public class AtlasJson {
         }
     }
 
-    static class HookNotificationDeserializer extends JsonDeserializer<HookNotification> {
-        @Override
-        public HookNotification deserialize(JsonParser parser, DeserializationContext context) throws IOException {
-            HookNotification     ret              = null;
-            ObjectCodec          mapper           = parser.getCodec();
-            TreeNode             root             = mapper.readTree(parser);
-            JsonNode             typeNode         = root != null ? (JsonNode) root.get("type") : null;
-            String               strType          = typeNode != null ? typeNode.asText() : null;
-            HookNotificationType notificationType = strType != null ? HookNotificationType.valueOf(strType) : null;
-
-            if (notificationType != null) {
-                switch (notificationType) {
-                    case TYPE_CREATE:
-                    case TYPE_UPDATE:
-                        ret = mapper.treeToValue(root, TypeRequest.class);
-                        break;
-
-                    case ENTITY_CREATE:
-                        ret = mapper.treeToValue(root, EntityCreateRequest.class);
-                        break;
-
-                    case ENTITY_PARTIAL_UPDATE:
-                        ret = mapper.treeToValue(root, EntityPartialUpdateRequest.class);
-                        break;
-
-                    case ENTITY_FULL_UPDATE:
-                        ret = mapper.treeToValue(root, EntityUpdateRequest.class);
-                        break;
-
-                    case ENTITY_DELETE:
-                        ret = mapper.treeToValue(root, EntityDeleteRequest.class);
-                        break;
-
-                    case ENTITY_CREATE_V2:
-                        ret = mapper.treeToValue(root, EntityCreateRequestV2.class);
-                        break;
-
-                    case ENTITY_PARTIAL_UPDATE_V2:
-                        ret = mapper.treeToValue(root, EntityPartialUpdateRequestV2.class);
-                        break;
-
-                    case ENTITY_FULL_UPDATE_V2:
-                        ret = mapper.treeToValue(root, EntityUpdateRequestV2.class);
-                        break;
-
-                    case ENTITY_DELETE_V2:
-                        ret = mapper.treeToValue(root, EntityDeleteRequestV2.class);
-                        break;
-                }
-            }
-
-            return ret;
-        }
-    }
-
     static class EntityNotificationDeserializer extends JsonDeserializer<EntityNotification> {
         @Override
         public EntityNotification deserialize(JsonParser parser, DeserializationContext context) throws IOException {
@@ -416,15 +352,7 @@ public class AtlasJson {
             EntityNotificationType notificationType = strType != null ? EntityNotificationType.valueOf(strType) : EntityNotificationType.ENTITY_NOTIFICATION_V1;
 
             if (root != null) {
-                switch (notificationType) {
-                    case ENTITY_NOTIFICATION_V1:
-                        ret = mapper.treeToValue(root, EntityNotificationV1.class);
-                        break;
-
-                    case ENTITY_NOTIFICATION_V2:
-                        ret = mapper.treeToValue(root, EntityNotificationV2.class);
-                        break;
-                }
+                ret = mapper.treeToValue(root, EntityNotificationV2.class);
             }
 
             return ret;

@@ -28,7 +28,6 @@ import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.bulkimport.BulkImportResponse.ImportInfo;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.featureflag.FeatureFlagStore;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.*;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
@@ -137,8 +136,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final TaskManagement             taskManagement;
     private EntityDiscoveryService discovery;
     private final AtlasRelationshipStore atlasRelationshipStore;
-    private final FeatureFlagStore featureFlagStore;
-
     private final ESAliasStore esAliasStore;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
@@ -149,7 +146,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
-                              AtlasRelationshipStore atlasRelationshipStore, FeatureFlagStore featureFlagStore,
+                              AtlasRelationshipStore atlasRelationshipStore,
                               IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier, AtlasDistributedTaskNotificationSender taskNotificationSender) {
 
         this.graph                = graph;
@@ -163,7 +160,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.graphHelper          = new GraphHelper(graph);
         this.taskManagement = taskManagement;
         this.atlasRelationshipStore = atlasRelationshipStore;
-        this.featureFlagStore = featureFlagStore;
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
@@ -2034,7 +2030,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case QUERY_COLLECTION_ENTITY_TYPE:
-                preProcessors.add(new QueryCollectionPreProcessor(typeRegistry, discovery, entityRetriever, featureFlagStore, this));
+                preProcessors.add(new QueryCollectionPreProcessor(typeRegistry, discovery, entityRetriever, this));
                 break;
 
             case PERSONA_ENTITY_TYPE:
@@ -2054,7 +2050,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case CONNECTION_ENTITY_TYPE:
-                preProcessors.add(new ConnectionPreProcessor(graph, discovery, entityRetriever, featureFlagStore, deleteDelegate, this));
+                preProcessors.add(new ConnectionPreProcessor(graph, discovery, entityRetriever, deleteDelegate, this));
                 break;
 
             case LINK_ENTITY_TYPE:

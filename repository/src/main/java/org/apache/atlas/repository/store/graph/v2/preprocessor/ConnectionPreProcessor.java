@@ -20,7 +20,6 @@ import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.featureflag.FeatureFlagStore;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -66,20 +65,17 @@ public class ConnectionPreProcessor implements PreProcessor {
     private AtlasEntityStore entityStore;
     private EntityDiscoveryService discovery;
     private PreProcessorPoliciesTransformer transformer;
-    private FeatureFlagStore featureFlagStore;
     private KeycloakStore keycloakStore;
     private final DeleteHandlerDelegate deleteDelegate;
 
     public ConnectionPreProcessor(AtlasGraph graph,
                                   EntityDiscoveryService discovery,
                                   EntityGraphRetriever entityRetriever,
-                                  FeatureFlagStore featureFlagStore,
                                   DeleteHandlerDelegate deleteDelegate,
                                   AtlasEntityStore entityStore) {
         this.graph = graph;
         this.entityRetriever = entityRetriever;
         this.entityStore = entityStore;
-        this.featureFlagStore = featureFlagStore;
         this.discovery = discovery;
         this.deleteDelegate = deleteDelegate;
         transformer = new PreProcessorPoliciesTransformer();

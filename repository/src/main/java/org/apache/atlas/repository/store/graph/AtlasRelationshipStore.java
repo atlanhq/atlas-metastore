@@ -19,11 +19,9 @@ package org.apache.atlas.repository.store.graph;
 
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasRelationship;
-import org.apache.atlas.model.instance.AtlasRelationship.AtlasRelationshipWithExtInfo;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -47,25 +45,11 @@ public interface AtlasRelationshipStore {
     AtlasRelationship update(AtlasRelationship relationship) throws AtlasBaseException;
 
     /**
-     * Bulk createOrUpdate relationships
-     * @param relationships list of relationship instance definition
-     * @return AtlasRelationships list
-     */
-    List<AtlasRelationship> createOrUpdate(List<AtlasRelationship> relationships) throws AtlasBaseException;
-
-    /**
      * Retrieve a relationship instance using guid.
      * @param guid relationship instance guid
      * @return AtlasRelationship
      */
     AtlasRelationship getById(String guid) throws AtlasBaseException;
-
-    /**
-     * Retrieve a relationship instance and its referred entities using guid.
-     * @param guid relationship instance guid
-     * @return AtlasRelationship
-     */
-    AtlasRelationshipWithExtInfo getExtInfoById(String guid) throws AtlasBaseException;
 
 
     AtlasEdge getOrCreate(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean skipAuth) throws AtlasBaseException;
@@ -84,12 +68,6 @@ public interface AtlasRelationshipStore {
      * @param guid relationship instance guid
      */
     void deleteById(String guid) throws AtlasBaseException;
-
-    /**
-     * Delete relationships instance using guid.
-     * @param guids relationship guids
-     */
-    void deleteByIds(List<String> guids) throws AtlasBaseException;
 
     /**
      * Delete a relationship instance using guid.
