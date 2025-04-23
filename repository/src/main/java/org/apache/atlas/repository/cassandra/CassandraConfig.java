@@ -1,5 +1,6 @@
 package org.apache.atlas.repository.cassandra;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -10,6 +11,7 @@ import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 
 import java.net.InetSocketAddress;
 import java.time.Duration;
+
 
 @Configuration
 public class CassandraConfig {
@@ -23,18 +25,14 @@ public class CassandraConfig {
         String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
         String CASSANDRA_PORT_PROPERTY = "atlas.graph.storage.port";
         String CASSANDRA_DATACENTER_PROPERTY = "atlas.graph.storage.datacenter";
-        // atlan_new_keyspace_2_1
 
-        String keyspace = "atlan_new_keyspace_2_1";
-                //ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlan_new_keyspace_2_1");
-        int bucketPower = 6;
-                //ApplicationProperties.get().getInt(CASSANDRA_BUCKET_POWER, 6);
-        String hostname = "localhost";
-                //ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
-        int port = 9042;
-                //ApplicationProperties.get().getInt(CASSANDRA_PORT_PROPERTY, 9042);
-        String datacenter = "datacenter1";
-                //ApplicationProperties.get().getString(CASSANDRA_DATACENTER_PROPERTY, "datacenter1");
+        String keyspace = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlan_new_keyspace_2_1");
+
+        String hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
+
+        int port = ApplicationProperties.get().getInt(CASSANDRA_PORT_PROPERTY, 9042);
+
+        String datacenter = ApplicationProperties.get().getString(CASSANDRA_DATACENTER_PROPERTY, "datacenter1");
 
         // Initialize Cassandra connection
         return CqlSession.builder()
