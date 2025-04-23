@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.fasterxml.jackson.databind.node.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -17,12 +19,14 @@ import java.util.Map;
  * Jackson-based implementation of the VertexDataSerializer.
  */
 class JacksonVertexSerializer implements VertexDataSerializer {
+    private static final Logger LOG = LoggerFactory.getLogger(JacksonVertexSerializer.class);
     private final ObjectMapper objectMapper;
     private final DynamicVertexDeserializer deserializer;
 
-    public JacksonVertexSerializer() {
+
+    public JacksonVertexSerializer(final  ObjectMapper objectMapper) {
         this.deserializer = new DynamicVertexDeserializer();
-        this.objectMapper = new ObjectMapper();
+        this.objectMapper = objectMapper;
 
         // Configure Jackson to handle nulls similar to GSON
         this.objectMapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);

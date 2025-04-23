@@ -21,30 +21,22 @@ import org.slf4j.LoggerFactory;
 import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Enhanced Cassandra implementation for vertex data repository with advanced
  * features like connection pooling, retry mechanisms, and better error handling.
  */
-class EnhancedCassandraRepository implements VertexDataRepository {
-    private static final Logger LOG = LoggerFactory.getLogger(EnhancedCassandraRepository.class);
+class VertexDataRepositoryCassandraImpl implements VertexDataRepository {
+    private static final Logger LOG = LoggerFactory.getLogger(VertexDataRepositoryCassandraImpl.class);
 
     // Maximum number of items in an IN clause for Cassandra
+    // make it configurable
     private static final int MAX_IN_CLAUSE_ITEMS = 100;
-
-    // Maximum number of retry attempts for failed queries
-    private static final int MAX_RETRY_ATTEMPTS = 3;
-
-    // Base delay for exponential backoff (in milliseconds)
-    private static final long BASE_RETRY_DELAY_MS = 100;
-
     private final CqlSession session;
     private final String keyspace;
     private final String tableName;
     private final Map<Integer, PreparedStatement> batchSizeToStatement = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
-    //  private final ConnectionHealthMonitor healthMonitor;
 
     /**
      * Creates a new enhanced Cassandra repository.
@@ -54,15 +46,11 @@ class EnhancedCassandraRepository implements VertexDataRepository {
      * @param tableName The table name for vertex data
      */
     @Inject
-    public EnhancedCassandraRepository(CqlSession session, String keyspace, String tableName) {
+    public VertexDataRepositoryCassandraImpl(CqlSession session, ObjectMapper objectMapper, String keyspace, String tableName) {
         this.session = session;
         this.keyspace = keyspace;
         this.tableName = tableName;
-        this.objectMapper = new ObjectMapper();
-        // this.healthMonitor = new ConnectionHealthMonitor(session);
-
-        // Start health monitoring
-        //  this.healthMonitor.start();
+        this.objectMapper = objectMapper;
     }
 
     /**
@@ -90,7 +78,7 @@ class EnhancedCassandraRepository implements VertexDataRepository {
         if (sanitizedIds.size() > MAX_IN_CLAUSE_ITEMS) {
             return fetchLargeBatch(sanitizedIds);
         } else {
-            return fetchSingleBatch(sanitizedIds, 0);
+            return fetchSingleBatch(sanitizedIds);
         }
     }
 
@@ -102,21 +90,21 @@ class EnhancedCassandraRepository implements VertexDataRepository {
      * @return Map of vertex ID to parsed JsonNode
      */
     @Override
-    public Map<String, JsonNode> fetchVerticesAsJsonElements(List<String> vertexIds) throws AtlasBaseException {
-        Map<String, String> jsonStrings = fetchVerticesJsonData(vertexIds);
-        Map<String, JsonNode> jsonNodes = new HashMap<>(jsonStrings.size());
+    public Map<String, JsonNode> fetchVerticesAsJsonNodes(List<String> vertexIds) throws AtlasBaseException {
+        Map<String, String> vertexJsonDataLookup = fetchVerticesJsonData(vertexIds);
+        Map<String, JsonNode> vertexJsonNodesLookup = new HashMap<>(vertexJsonDataLookup.size());
 
-        for (Map.Entry<String, String> entry : jsonStrings.entrySet()) {
+        for (Map.Entry<String, String> entry : vertexJsonDataLookup.entrySet()) {
             try {
                 JsonNode node = objectMapper.readTree(entry.getValue());
-                jsonNodes.put(entry.getKey(), node);
+                vertexJsonNodesLookup.put(entry.getKey(), node);
             } catch (JsonProcessingException e) {
                 LOG.warn("Failed to parse JSON for vertex ID {}: {}", entry.getKey(), e.getMessage());
-                // Skip invalid JSON entries
+                throw new AtlasBaseException("Failed to parse JSON for vertex ID: " + entry.getKey(), e);
             }
         }
 
-        return jsonNodes;
+        return vertexJsonNodesLookup;
     }
 
     /**
@@ -129,7 +117,7 @@ class EnhancedCassandraRepository implements VertexDataRepository {
         // Process each batch
         for (List<String> batch : batches) {
             try {
-                Map<String, String> batchResults = fetchSingleBatch(batch, 0);
+                Map<String, String> batchResults = fetchSingleBatch(batch);
                 results.putAll(batchResults);
             } catch (Exception e) {
                 LOG.error("Error fetching batch of vertex data", e);
@@ -144,7 +132,7 @@ class EnhancedCassandraRepository implements VertexDataRepository {
      * Fetches a single batch of vertices with retry logic.
      * Parses JSON data into JsonNode trees using Jackson.
      */
-    private Map<String, String> fetchSingleBatch(List<String> vertexIds, int retryAttempt) throws AtlasBaseException {
+    private Map<String, String> fetchSingleBatch(List<String> vertexIds) throws AtlasBaseException {
         try {
 
             // Get or prepare the statement for this batch size
@@ -161,47 +149,24 @@ class EnhancedCassandraRepository implements VertexDataRepository {
                     .setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
 
             // Execute the query
-            ResultSet resultSet = (ResultSet) session.execute(boundStatement);
+            ResultSet resultSet = session.execute(boundStatement);
 
             // Process the results and parse JSON with Jackson
             Map<String, String> results = new HashMap<>();
 
 
-
-
             for (Row row : resultSet) {
                 String id = row.getString("id");
                 String jsonData = row.getString("json_data");
-
                 results.put(id, jsonData);
             }
 
             return results;
 
-        } catch (NoHostAvailableException | QueryExecutionException e) {
-            // These are potentially recoverable errors
-            if (retryAttempt < MAX_RETRY_ATTEMPTS) {
-                long delayMs = calculateExponentialBackoff(retryAttempt);
-                LOG.warn("Recoverable error, retrying after {}ms (attempt {}/{}): {}",
-                        delayMs, retryAttempt + 1, MAX_RETRY_ATTEMPTS, e.getMessage());
-
-                try {
-                    Thread.sleep(delayMs);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    throw new AtlasBaseException("Interrupted during retry delay", ie);
-                }
-
-                return fetchSingleBatch(vertexIds, retryAttempt + 1);
-            } else {
-                throw new AtlasBaseException("Max retry attempts exceeded", e);
-            }
-
         } catch (QueryValidationException e) {
             // These are non-recoverable errors with the query itself
             LOG.error("Invalid query error fetching vertex data: {}", e.getMessage());
             throw new AtlasBaseException("Invalid query: " + e.getMessage(), e);
-
         } catch (Exception e) {
             // For unexpected errors
             LOG.error("Unexpected error fetching vertex data", e);
@@ -221,6 +186,8 @@ class EnhancedCassandraRepository implements VertexDataRepository {
      */
     private PreparedStatement prepareStatementForBatchSize(int batchSize) {
         StringBuilder queryBuilder = new StringBuilder();
+
+        // fix this code to use bucket id
         queryBuilder.append("SELECT id, json_data FROM ")
                 .append(keyspace)
                 .append(".")
@@ -238,92 +205,5 @@ class EnhancedCassandraRepository implements VertexDataRepository {
         queryBuilder.append(" ALLOW FILTERING");
 
         return session.prepare(queryBuilder.toString());
-    }
-
-    /**
-     * Calculates exponential backoff delay for retries.
-     */
-    private long calculateExponentialBackoff(int retryAttempt) {
-        return (long) (BASE_RETRY_DELAY_MS * Math.pow(2, retryAttempt)) +
-                ThreadLocalRandom.current().nextLong(50); // Add jitter
-    }
-
-    /**
-     * Shutdown the repository and its resources.
-     */
-    public void shutdown() {
-        //healthMonitor.stop();
-    }
-
-    /**
-     * Monitors Cassandra connection health in the background.
-     */
-    private static class ConnectionHealthMonitor {
-        private static final Logger LOG = LoggerFactory.getLogger(ConnectionHealthMonitor.class);
-
-        private final CqlSession session;
-        private final ScheduledExecutorService scheduler;
-        private final AtomicBoolean isHealthy = new AtomicBoolean(true);
-        private ScheduledFuture<?> monitorTask;
-
-        @Inject
-        public ConnectionHealthMonitor(CqlSession session) {
-            this.session = session;
-            this.scheduler = Executors.newSingleThreadScheduledExecutor(
-                    r -> {
-                        Thread t = new Thread(r, "cassandra-health-monitor");
-                        t.setDaemon(true);
-                        return t;
-                    }
-            );
-        }
-
-        /**
-         * Starts the health monitoring.
-         */
-        public void start() {
-            monitorTask = scheduler.scheduleAtFixedRate(
-                    this::checkHealth, 0, 30, TimeUnit.SECONDS
-            );
-        }
-
-        /**
-         * Stops the health monitoring.
-         */
-        public void stop() {
-            if (monitorTask != null) {
-                monitorTask.cancel(true);
-            }
-            scheduler.shutdown();
-        }
-
-        /**
-         * Checks if the connection is healthy.
-         */
-        public boolean isHealthy() {
-            return isHealthy.get();
-        }
-
-        /**
-         * Checks the health of the Cassandra connection.
-         */
-        private void checkHealth() {
-            try {
-                // Simple health check query
-                ResultSet resultSet = (ResultSet) session.execute("SELECT release_version FROM system.local");
-                Row row = resultSet.one();
-                if (row != null) {
-                    String version = row.getString("release_version");
-                    LOG.debug("Cassandra connection healthy, version: {}", version);
-                    isHealthy.set(true);
-                } else {
-                    LOG.warn("Cassandra health check returned no rows");
-                    isHealthy.set(false);
-                }
-            } catch (Exception e) {
-                LOG.warn("Cassandra connection health check failed: {}", e.getMessage());
-                isHealthy.set(false);
-            }
-        }
     }
 }

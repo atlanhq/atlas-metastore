@@ -2,6 +2,7 @@ package org.apache.atlas.repository.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +10,6 @@ import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.util.*;
-import java.util.concurrent.*;
 
 /**
  * Main entry point for the batch vertex retrieval system.
@@ -17,14 +17,12 @@ import java.util.concurrent.*;
  */
 
 @Service
-public class BatchVertexRetrievalService {
-    private static final Logger LOG = LoggerFactory.getLogger(BatchVertexRetrievalService.class);
+public class VertexRetrievalService {
+    private static final Logger LOG = LoggerFactory.getLogger(VertexRetrievalService.class);
 
     private final VertexDataRepository repository;
     private final JacksonVertexSerializer serializer;
     private final int defaultBatchSize;
-    private final int maxParallelBatches;
-    private final ExecutorService executorService;
 
     /**
      * Creates a new BatchVertexRetrievalService with custom configuration.
@@ -32,13 +30,11 @@ public class BatchVertexRetrievalService {
      * @param session The Cassandra session
      */
     @Inject
-    public BatchVertexRetrievalService(CqlSession session) {
-        this.repository = new EnhancedCassandraRepository(session, "atlan_new_keyspace_2_1", "vertices");
-        this.serializer = new JacksonVertexSerializer();
-        this.defaultBatchSize = 10;
+    public VertexRetrievalService(CqlSession session, ObjectMapper objectMapper) {
+        this.repository = new VertexDataRepositoryCassandraImpl(session,  objectMapper, "atlan_new_keyspace_2_1", "vertices");
+        this.serializer = new JacksonVertexSerializer(objectMapper);
         //AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
-        this.maxParallelBatches = 2;
-        this.executorService = Executors.newFixedThreadPool(maxParallelBatches);
+        this.defaultBatchSize = 10;
     }
 
     /**
@@ -48,7 +44,7 @@ public class BatchVertexRetrievalService {
      * @return A map of vertex ID to dynamic vertex data
      */
     public Map<String, DynamicVertex> retrieveVertices(List<String> vertexIds) throws AtlasBaseException {
-        return retrieveVertices(vertexIds, defaultBatchSize, false);
+        return retrieveVertices(vertexIds, defaultBatchSize);
     }
 
     /**
@@ -56,23 +52,13 @@ public class BatchVertexRetrievalService {
      *
      * @param vertexIds The list of vertex IDs to retrieve
      * @param batchSize The batch size to use
-     * @param parallel Whether to use parallel processing
      * @return A map of vertex ID to dynamic vertex data
      */
-    public Map<String, DynamicVertex> retrieveVertices(List<String> vertexIds, int batchSize, boolean parallel) throws AtlasBaseException {
+    private Map<String, DynamicVertex> retrieveVertices(List<String> vertexIds, int batchSize) throws AtlasBaseException {
         if (vertexIds == null || vertexIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        // Use immutable copy to prevent concurrent modification issues
-        final List<String> immutableVertexIds = new ArrayList<>(vertexIds);
-        return retrieveVerticesSequential(immutableVertexIds, batchSize);
-    }
-
-    /**
-     * Retrieves vertices sequentially in batches.
-     */
-    private Map<String, DynamicVertex> retrieveVerticesSequential(List<String> vertexIds, int batchSize) throws AtlasBaseException {
         Map<String, DynamicVertex> results = new HashMap<>();
 
         for (int i = 0; i < vertexIds.size(); i += batchSize) {
@@ -80,34 +66,13 @@ public class BatchVertexRetrievalService {
             List<String> batch = vertexIds.subList(i, endIndex);
 
             // Use the JsonNode-based method for more efficient processing
-            Map<String, JsonNode> jsonNodeMap = repository.fetchVerticesAsJsonElements(batch);
+            Map<String, JsonNode> jsonNodeMap = repository.fetchVerticesAsJsonNodes(batch);
             Map<String, DynamicVertex> batchResults = convertJsonNodesToVertices(jsonNodeMap);
 
             results.putAll(batchResults);
         }
 
         return results;
-    }
-
-    /**
-     * Converts JSON data strings to DynamicVertex objects.
-     */
-    private Map<String, DynamicVertex> convertJsonToVertices(Map<String, String> jsonDataMap) {
-        Map<String, DynamicVertex> vertexMap = new HashMap<>();
-
-        for (Map.Entry<String, String> entry : jsonDataMap.entrySet()) {
-            String id = entry.getKey();
-            String jsonData = entry.getValue();
-
-            try {
-                DynamicVertex vertex = serializer.deserialize(jsonData);
-                vertexMap.put(id, vertex);
-            } catch (Exception e) {
-                LOG.error("Error deserializing JSON for ID: {}", id, e);
-            }
-        }
-
-        return vertexMap;
     }
 
     /**
@@ -131,21 +96,5 @@ public class BatchVertexRetrievalService {
         }
 
         return vertexMap;
-    }
-
-    /**
-     * Shuts down any resources used by this service.
-     */
-    public void shutdown() {
-        executorService.shutdown();
-        try {
-            if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
-                executorService.shutdownNow();
-            }
-        } catch (InterruptedException e) {
-            LOG.warn("Interrupted during shutdown", e);
-            executorService.shutdownNow();
-            Thread.currentThread().interrupt();
-        }
     }
 }
