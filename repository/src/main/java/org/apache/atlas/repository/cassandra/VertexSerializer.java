@@ -4,7 +4,7 @@ package org.apache.atlas.repository.cassandra;
 /**
  * Interface for serializing and deserializing vertex data.
  */
-interface VertexDataSerializer {
+interface VertexSerializer {
     /**
      * Deserializes a JSON string into a DynamicVertex.
      *

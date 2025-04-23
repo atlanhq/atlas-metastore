@@ -31,7 +31,7 @@ public class VertexRetrievalService {
      */
     @Inject
     public VertexRetrievalService(CqlSession session, ObjectMapper objectMapper) {
-        this.repository = new VertexDataRepositoryCassandraImpl(session,  objectMapper, "atlan_new_keyspace_2_1", "vertices");
+        this.repository = new CassandraVertexDataRepository(session,  objectMapper, "atlan_new_keyspace_2_1", "vertices");
         this.serializer = new JacksonVertexSerializer(objectMapper);
         //AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
         this.defaultBatchSize = 10;

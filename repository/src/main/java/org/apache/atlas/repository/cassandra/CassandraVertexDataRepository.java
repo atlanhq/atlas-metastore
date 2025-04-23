@@ -1,7 +1,5 @@
 package org.apache.atlas.repository.cassandra;
 
-import com.datastax.driver.core.exceptions.NoHostAvailableException;
-import com.datastax.driver.core.exceptions.QueryExecutionException;
 import com.datastax.driver.core.exceptions.QueryValidationException;
 import com.datastax.oss.driver.api.core.ConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
@@ -26,8 +24,8 @@ import java.util.concurrent.*;
  * Enhanced Cassandra implementation for vertex data repository with advanced
  * features like connection pooling, retry mechanisms, and better error handling.
  */
-class VertexDataRepositoryCassandraImpl implements VertexDataRepository {
-    private static final Logger LOG = LoggerFactory.getLogger(VertexDataRepositoryCassandraImpl.class);
+class CassandraVertexDataRepository implements VertexDataRepository {
+    private static final Logger LOG = LoggerFactory.getLogger(CassandraVertexDataRepository.class);
 
     // Maximum number of items in an IN clause for Cassandra
     // make it configurable
@@ -46,7 +44,7 @@ class VertexDataRepositoryCassandraImpl implements VertexDataRepository {
      * @param tableName The table name for vertex data
      */
     @Inject
-    public VertexDataRepositoryCassandraImpl(CqlSession session, ObjectMapper objectMapper, String keyspace, String tableName) {
+    public CassandraVertexDataRepository(CqlSession session, ObjectMapper objectMapper, String keyspace, String tableName) {
         this.session = session;
         this.keyspace = keyspace;
         this.tableName = tableName;

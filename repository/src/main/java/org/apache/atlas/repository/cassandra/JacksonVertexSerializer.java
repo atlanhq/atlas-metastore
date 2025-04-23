@@ -18,7 +18,7 @@ import java.util.Map;
 /**
  * Jackson-based implementation of the VertexDataSerializer.
  */
-class JacksonVertexSerializer implements VertexDataSerializer {
+class JacksonVertexSerializer implements VertexSerializer {
     private static final Logger LOG = LoggerFactory.getLogger(JacksonVertexSerializer.class);
     private final ObjectMapper objectMapper;
     private final DynamicVertexDeserializer deserializer;
