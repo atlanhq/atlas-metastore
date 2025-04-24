@@ -21,6 +21,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
+import org.apache.atlas.auth.client.jmx.JMXCassandraConnect;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
@@ -202,6 +203,7 @@ public class EntityGraphMapper {
     private final TaskManagement            taskManagement;
     private final TransactionInterceptHelper   transactionInterceptHelper;
     private final EntityGraphRetriever       retrieverNoRelation;
+    private final JMXCassandraConnect jmxCassandraConnect = new JMXCassandraConnect();
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
@@ -3249,11 +3251,13 @@ public class EntityGraphMapper {
     public void cleanUpClassificationPropagation(String classificationName, int batchLimit) {
         int CLEANUP_MAX = batchLimit <= 0 ? CLEANUP_BATCH_SIZE : batchLimit * CLEANUP_BATCH_SIZE;
         int cleanedUpCount = 0;
+        int gcInvokeBatchCount = 0;
         long classificationEdgeCount = 0;
         long classificationEdgeInMemoryCount = 0;
         Iterator<AtlasVertex> tagVertices = GraphHelper.getClassificationVertices(graph, classificationName, CLEANUP_BATCH_SIZE);
         List<AtlasVertex> tagVerticesProcessed = new ArrayList<>(0);
         List<AtlasVertex> currentAssetVerticesBatch = new ArrayList<>(0);
+
 
         while (tagVertices != null && tagVertices.hasNext()) {
             if (cleanedUpCount >= CLEANUP_MAX){
@@ -3333,6 +3337,15 @@ public class EntityGraphMapper {
                 transactionInterceptHelper.intercept();
 
                 cleanedUpCount += currentAssetsBatchSize;
+                gcInvokeBatchCount += currentAssetsBatchSize;
+                if (gcInvokeBatchCount >= CLEANUP_MAX) {
+                   try {
+                       jmxCassandraConnect.invokeCassandraGarbageCollection();
+                       gcInvokeBatchCount = 0;
+                   } catch (Exception e) {
+                          LOG.error("Error while invoking Cassandra Garbage Collection", e);
+                   }
+                }
                 currentAssetVerticesBatch.clear();
                 tagVerticesProcessed.clear();
             }
