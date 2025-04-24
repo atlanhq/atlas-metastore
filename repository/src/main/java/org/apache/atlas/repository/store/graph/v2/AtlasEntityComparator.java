@@ -222,9 +222,11 @@ public class AtlasEntityComparator {
             }
 
             if (context.isReplaceBusinessAttributes()) {
-                Map<String, Map<String, Object>> newBusinessMetadata = updatedEntity.getBusinessAttributes();
-                Map<String, Map<String, Object>> currBusinessMetadata = (storedEntity != null) ? storedEntity.getBusinessAttributes() : entityRetriever.getBusinessMetadata(storedVertex);
-                ;
+                getBusinessMetadataFromEntityAttribute(updatedEntity, entityType);
+                Map<String, Map<String, Object>> newBusinessMetadata  = updatedEntity.getBusinessAttributes() == null ? getBusinessMetadataFromEntityAttribute(updatedEntity, entityType) : updatedEntity.getBusinessAttributes();
+                Map<String, Map<String, Object>> currBusinessMetadata = (storedEntity != null)
+                        ? storedEntity.getBusinessAttributes()
+                        : entityRetriever.getBusinessMetadata(storedVertex);
 
                 if (!Objects.equals(currBusinessMetadata, newBusinessMetadata)) {
                     diffEntity.setBusinessAttributes(newBusinessMetadata);
@@ -243,45 +245,6 @@ public class AtlasEntityComparator {
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
-
-        if (updatedEntity.getCustomAttributes() != null) {
-            // event coming from hook does not have custom attributes, such events must not remove existing attributes
-            // UI sends empty object in case of intended removal.
-            Map<String, String> newCustomAttributes  = updatedEntity.getCustomAttributes();
-            Map<String, String> currCustomAttributes = (storedEntity != null) ? storedEntity.getCustomAttributes() : getCustomAttributes(storedVertex);
-
-            if (!Objects.equals(currCustomAttributes, newCustomAttributes)) {
-                diffEntity.setCustomAttributes(newCustomAttributes);
-
-                hasDiffInCustomAttributes = true;
-                sectionsWithDiff++;
-
-                if (findOnlyFirstDiff && sectionsWithDiff > 1) {
-                    return new AtlasEntityDiffResult(diffEntity, true, false, false);
-                }
-            }
-        }
-
-        if (context.isReplaceBusinessAttributes()) {
-            getBusinessMetadataFromEntityAttribute(updatedEntity, entityType);
-            Map<String, Map<String, Object>> newBusinessMetadata  = updatedEntity.getBusinessAttributes() == null ? getBusinessMetadataFromEntityAttribute(updatedEntity, entityType) : updatedEntity.getBusinessAttributes();
-            Map<String, Map<String, Object>> currBusinessMetadata = (storedEntity != null)
-                    ? storedEntity.getBusinessAttributes()
-                    : entityRetriever.getBusinessMetadata(storedVertex);
-
-            if (!Objects.equals(currBusinessMetadata, newBusinessMetadata)) {
-                diffEntity.setBusinessAttributes(newBusinessMetadata);
-
-                hasDiffInBusinessAttributes = true;
-                sectionsWithDiff++;
-
-                if (findOnlyFirstDiff && sectionsWithDiff > 1) {
-                    return new AtlasEntityDiffResult(diffEntity, true, false, false);
-                }
-            }
-        }
-
-        return new AtlasEntityDiffResult(diffEntity, sectionsWithDiff > 0, sectionsWithDiff == 1 && hasDiffInCustomAttributes, sectionsWithDiff == 1 && hasDiffInBusinessAttributes);
     }
 
     public Map<String, Map<String, Object>> getBusinessMetadataFromEntityAttribute(AtlasEntity entity, AtlasEntityType entityType) {
