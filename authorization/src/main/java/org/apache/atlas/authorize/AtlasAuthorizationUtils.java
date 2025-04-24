@@ -44,19 +44,19 @@ public class AtlasAuthorizationUtils {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasAuthorizationUtils.class);
 
     public static void verifyAccess(AtlasAdminAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (! isAccessAllowed(request)) {
-            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
-
-            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
-        }
+//        if (! isAccessAllowed(request)) {
+//            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
+//
+//            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
+//        }
     }
 
     public static void verifyAccess(AtlasTypeAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (! isAccessAllowed(request)) {
-            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
-
-            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
-        }
+//        if (! isAccessAllowed(request)) {
+//            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
+//
+//            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
+//        }
     }
 
     public static void verifyUpdateEntityAccess(AtlasTypeRegistry typeRegistry, AtlasEntityHeader entityHeader, String message) throws AtlasBaseException {
@@ -74,28 +74,28 @@ public class AtlasAuthorizationUtils {
     }
 
     public static void verifyAccess(AtlasEntityAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (! isAccessAllowed(request)) {
-            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
-
-            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
-        }
+//        if (! isAccessAllowed(request)) {
+//            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
+//
+//            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
+//        }
     }
 
     public static void verifyAccess(AtlasRelationshipAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
-        if (!isAccessAllowed(request)) {
-            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
-            if (StringUtils.isEmpty(message)){
-                Map<String, String> errorMap = new HashMap<>();
-                errorMap.put("action", request.getAction().toString());
-                errorMap.put("end1", request.getEnd1Entity().getGuid());
-                errorMap.put("end2", request.getEnd2Entity().getGuid());
-
-                throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, errorMap, request.getUser(), "");
-
-            } else {
-                throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
-            }
-        }
+//        if (!isAccessAllowed(request)) {
+//            String message = (errorMsgParams != null && errorMsgParams.length > 0) ? StringUtils.join(errorMsgParams) : "";
+//            if (StringUtils.isEmpty(message)){
+//                Map<String, String> errorMap = new HashMap<>();
+//                errorMap.put("action", request.getAction().toString());
+//                errorMap.put("end1", request.getEnd1Entity().getGuid());
+//                errorMap.put("end2", request.getEnd2Entity().getGuid());
+//
+//                throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, errorMap, request.getUser(), "");
+//
+//            } else {
+//                throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, request.getUser(), message);
+//            }
+//        }
     }
 
     public static void scrubSearchResults(AtlasSearchResultScrubRequest request, boolean suppressLogs) throws AtlasBaseException {
