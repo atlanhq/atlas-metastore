@@ -1,5 +1,6 @@
 package org.apache.atlas.repository.cassandra;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.springframework.context.annotation.Bean;
@@ -49,5 +50,10 @@ public class CassandraConfig {
                 .withLocalDatacenter(datacenter)
                 .withKeyspace(keyspace)
                 .build();
+    }
+
+    @Bean
+    public ObjectMapper objectMapper() {
+        return new ObjectMapper();
     }
 }
