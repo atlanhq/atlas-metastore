@@ -22,7 +22,6 @@ import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.auth.client.jmx.JMXCassandraConnect;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
