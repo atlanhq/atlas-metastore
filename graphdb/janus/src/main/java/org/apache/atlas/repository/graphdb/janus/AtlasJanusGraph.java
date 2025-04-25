@@ -17,6 +17,10 @@
  */
 package org.apache.atlas.repository.graphdb.janus;
 
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -43,6 +47,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
 import org.apache.atlas.type.AtlasType;
@@ -88,6 +93,8 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -124,6 +131,14 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     private final RestClient esUiClusterClient;
     private final RestClient esNonUiClusterClient;
+
+    private String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
+    private final CqlSession cqlSession;
+    private final VertexRetrievalService dynamicVertexRetrievalService;
+
+    public VertexRetrievalService getDynamicVertexRetrievalService() {
+        return dynamicVertexRetrievalService;
+    }
 
     private final ThreadLocal<GremlinGroovyScriptEngine> scriptEngine = ThreadLocal.withInitial(() -> {
         DefaultImportCustomizer.Builder builder = DefaultImportCustomizer.build()
@@ -162,6 +177,32 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.elasticsearchClient = elasticsearchClient;
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
+        this.cqlSession = initializeCassandraSession();
+        this.dynamicVertexRetrievalService = new VertexRetrievalService(cqlSession, new ObjectMapper());
+    }
+
+    private CqlSession initializeCassandraSession() {
+        String hostname = null;
+        try {
+            hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+        return CqlSession.builder()
+                .addContactPoint(new InetSocketAddress(hostname, 9042))
+                .withConfigLoader(
+                        DriverConfigLoader.programmaticBuilder()
+                                .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(10))
+                                .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofSeconds(15))
+                                .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(15))
+                                .withDuration(DefaultDriverOption.CONTROL_CONNECTION_AGREEMENT_TIMEOUT, Duration.ofSeconds(20))
+                                .withDuration(DefaultDriverOption.REQUEST_TRACE_INTERVAL, Duration.ofMillis(500))
+                                .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
+                                .build())
+                .withLocalDatacenter("datacenter1")
+                .withKeyspace("atlan_new_keyspace_2_1")
+                .build();
     }
 
     @Override

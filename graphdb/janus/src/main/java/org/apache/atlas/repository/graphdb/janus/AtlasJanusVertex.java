@@ -29,6 +29,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.AtlasVertexQuery;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.ArrayUtils;
@@ -46,6 +47,15 @@ import org.janusgraph.core.JanusGraphVertex;
  */
 public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> {
 
+    private DynamicVertex dynamicVertex;
+
+    public DynamicVertex getDynamicVertex() {
+        return dynamicVertex;
+    }
+
+    public void setDynamicVertex(DynamicVertex dynamicVertex) {
+        this.dynamicVertex = dynamicVertex;
+    }
 
     public AtlasJanusVertex(AtlasJanusGraph graph, Vertex source) {
         super(graph, source);

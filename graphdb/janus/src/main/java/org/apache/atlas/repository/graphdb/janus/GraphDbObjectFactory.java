@@ -71,11 +71,18 @@ public final class GraphDbObjectFactory {
      * @param source the Gremlin vertex
      */
     public static AtlasJanusVertex createVertex(AtlasJanusGraph graph, Vertex source) {
-
         if (source == null) {
             return null;
         }
-        return new AtlasJanusVertex(graph, source);
+
+        AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
+
+        try {
+            ret.setDynamicVertex(graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString()));
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return ret;
     }
 
     /**
