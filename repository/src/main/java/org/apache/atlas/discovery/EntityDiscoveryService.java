@@ -59,6 +59,7 @@ import org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery;
 import org.apache.atlas.util.SearchPredicateUtil;
 import org.apache.atlas.util.SearchTracker;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.v1.model.instance.Id;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections4.IteratorUtils;
@@ -81,6 +82,7 @@ import static org.apache.atlas.SortOrder.ASCENDING;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
+import static org.apache.atlas.repository.graph.GraphHelper.parseLabelsString;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.BASIC_SEARCH_STATE_FILTER;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.TO_RANGE_LIST;
 
@@ -1150,6 +1152,22 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     DynamicVertex vertex = entry.getValue();
                     AtlasEntityHeader header = new AtlasEntityHeader();
                     header.setGuid(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
+                    header.setTypeName(vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class));
+                    header.setCreateTime(new Date((vertex.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class))));
+                    header.setCreatedBy(vertex.getProperty(CREATED_BY_KEY, String.class));
+                    header.setUpdateTime(new Date((vertex.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class))));
+                    header.setUpdatedBy(vertex.getProperty(MODIFIED_BY_KEY, String.class));
+                    header.setDisplayText(vertex.getProperty(TYPE_DISPLAYNAME_PROPERTY_KEY, String.class));
+                    header.setLabels(parseLabelsString(vertex.getProperty(LABELS_PROPERTY_KEY, String.class)));
+
+                    Integer value = vertex.getProperty(Constants.IS_INCOMPLETE_PROPERTY_KEY, Integer.class);
+                    Boolean isIncomplete = value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
+                    header.setIsIncomplete(isIncomplete);
+
+                    String state = vertex.getProperty(Constants.STATE_PROPERTY_KEY, String.class);
+                    Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);
+                    header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
+
                     header.setAttributes(filterMapByKeys(vertex.getAllProperties(), resultAttributes));
                     ret.addEntity(header);
                 }
