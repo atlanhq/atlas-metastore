@@ -2,6 +2,7 @@ package org.apache.atlas.repository.cassandra;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,13 +22,11 @@ public class CassandraConfig {
     @Bean(destroyMethod = "close")
     public CqlSession cqlSession() throws AtlasException {
         // Read configuration from Atlas properties
-        String CASSANDRA_BUCKET_POWER = "atlas.graph.new.bucket.power";
-        String CASSANDRA_NEW_KEYSPACE_PROPERTY = "atlas.graph.new.keyspace";
         String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
         String CASSANDRA_PORT_PROPERTY = "atlas.graph.storage.port";
         String CASSANDRA_DATACENTER_PROPERTY = "atlas.graph.storage.datacenter";
 
-        String keyspace = ApplicationProperties.get().getString(CASSANDRA_NEW_KEYSPACE_PROPERTY, "atlan_new_keyspace_2_1");
+        String keyspace = AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString();
 
         String hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
 

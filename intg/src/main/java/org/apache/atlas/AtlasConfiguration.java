@@ -132,7 +132,6 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED("atlas.indexsearch.enable.janus.optimization.extended", false),
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
-
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
 
     /***
@@ -141,7 +140,15 @@ public enum AtlasConfiguration {
     OTEL_RESOURCE_ATTRIBUTES("OTEL_RESOURCE_ATTRIBUTES", "service.name=atlas"),
     OTEL_SERVICE_NAME(" OTEL_SERVICE_NAME", "atlas"),
     OTEL_EXPORTER_OTLP_ENDPOINT("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
-    ATLAS_BULK_API_MAX_ENTITIES_ALLOWED("atlas.bulk.api.max.entities.allowed", 10000);
+    ATLAS_BULK_API_MAX_ENTITIES_ALLOWED("atlas.bulk.api.max.entities.allowed", 10000),
+
+    /**
+     * Cassabdra Configuration
+     */
+    ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
+    ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "atlan_new_keyspace_2_1"),
+    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "vertices");
+
 
 
 
