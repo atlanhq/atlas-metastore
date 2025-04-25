@@ -415,8 +415,10 @@ public class DiscoveryREST {
                 }
             }
 
-             parameters.setShouldInvokeVanillaCassandraFlow(parameters.getUtmTags().stream().anyMatch("page_assets"::equalsIgnoreCase) &&
-                    parameters.getUtmTags().stream().anyMatch("project_webapp"::equalsIgnoreCase));
+            if (CollectionUtils.isNotEmpty(parameters.getUtmTags())) {
+                parameters.setShouldInvokeVanillaCassandraFlow(parameters.getUtmTags().stream().anyMatch("page_assets"::equalsIgnoreCase) &&
+                        parameters.getUtmTags().stream().anyMatch("project_webapp"::equalsIgnoreCase));
+            }
 
             RequestContext.get().setShouldInvokeCassandraFlow(parameters.isShouldInvokeVanillaCassandraFlow());
 
