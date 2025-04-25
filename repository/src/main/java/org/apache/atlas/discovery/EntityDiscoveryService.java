@@ -1089,7 +1089,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
-        if (true){
+        if (RequestContext.get().isShouldInvokeCassandraFlow()) {
             fetchCollapsedResults = false;
             prepareSearchResultV2(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
         } else {
@@ -1147,7 +1147,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 // Iterate through vertexPropertiesMap
                 // for each entry in vertexPropertiesMap create AtlasEntityHeader
                 for (Map.Entry<String, DynamicVertex> entry : vertexPropertiesMap.entrySet()) {
-                    String id = entry.getKey();
                     DynamicVertex vertex = entry.getValue();
                     AtlasEntityHeader header = new AtlasEntityHeader();
                     header.setGuid(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
@@ -1218,7 +1217,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
                         DirectIndexQueryResult indexQueryCollapsedResult = result.getCollapseVertices(collapseKey);
                         collapseRet.setApproximateCount(indexQueryCollapsedResult.getApproximateCount());
-                        prepareSearchResult(collapseRet, indexQueryCollapsedResult, collapseResultAttributes, false);
+                        prepareSearchResultV1(collapseRet, indexQueryCollapsedResult, collapseResultAttributes, false);
 
                         collapseRet.setSearchParameters(null);
                         collapse.put(collapseKey, collapseRet);

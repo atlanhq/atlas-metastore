@@ -18,6 +18,7 @@ public class IndexSearchParams extends SearchParams {
     private String purpose;
     private String persona;
     private String queryString;
+    private boolean shouldInvokeVanillaCassandraFlow;
 
     /*
     * Indexsearch includes all relations (if requested with param attributes) even if relationshipStatus is DELETED
@@ -104,6 +105,14 @@ public class IndexSearchParams extends SearchParams {
                 ", includeRelationshipAttributes=" + includeRelationshipAttributes +
                 ", utmTags="+ getUtmTags() +
                 '}';
+    }
+
+    public boolean isShouldInvokeVanillaCassandraFlow() {
+        return shouldInvokeVanillaCassandraFlow;
+    }
+
+    public void setShouldInvokeVanillaCassandraFlow(boolean shouldInvokeVanillaCassandraFlow) {
+        this.shouldInvokeVanillaCassandraFlow = shouldInvokeVanillaCassandraFlow;
     }
 
     @Override

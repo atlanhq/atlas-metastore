@@ -115,6 +115,8 @@ public class RequestContext {
     private boolean delayTagNotifications = false;
     private boolean skipHasLineageCalculation = false;
     private boolean isInvokedByIndexSearch = false;
+
+    private boolean shouldInvokeCassandraFlow = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
 
@@ -812,6 +814,15 @@ public class RequestContext {
     public boolean isInvokedByIndexSearch() {
         return isInvokedByIndexSearch;
     }
+
+    public boolean isShouldInvokeCassandraFlow() {
+        return shouldInvokeCassandraFlow;
+    }
+
+    public void setShouldInvokeCassandraFlow(boolean shouldInvokeCassandraFlow) {
+        this.shouldInvokeCassandraFlow = shouldInvokeCassandraFlow;
+    }
+
 
     public class EntityGuidPair {
         private final Object entity;

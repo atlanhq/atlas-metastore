@@ -406,12 +406,19 @@ public class DiscoveryREST {
                 if(CollectionUtils.isEmpty(parameters.getUtmTags())) {
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
                 }
+
+
                 for (String utmTag : parameters.getUtmTags()) {
                     if (Arrays.stream(AtlasConfiguration.ATLAS_INDEXSEARCH_LIMIT_UTM_TAGS.getStringArray()).anyMatch(utmTag::equalsIgnoreCase)) {
                             throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
                     }
                 }
             }
+
+             parameters.setShouldInvokeVanillaCassandraFlow(parameters.getUtmTags().stream().anyMatch("page_assets"::equalsIgnoreCase) &&
+                    parameters.getUtmTags().stream().anyMatch("project_webapp"::equalsIgnoreCase));
+
+            RequestContext.get().setShouldInvokeCassandraFlow(parameters.isShouldInvokeVanillaCassandraFlow());
 
             if (StringUtils.isEmpty(parameters.getQuery())) {
                 AtlasBaseException abe = new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid search query");
