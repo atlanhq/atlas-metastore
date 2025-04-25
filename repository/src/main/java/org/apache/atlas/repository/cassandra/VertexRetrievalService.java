@@ -31,7 +31,8 @@ public class VertexRetrievalService {
      * @param session The Cassandra session
      */
     @Inject
-    public VertexRetrievalService(CqlSession session, ObjectMapper objectMapper) {
+    public VertexRetrievalService(CqlSession session) {
+        ObjectMapper objectMapper = new ObjectMapper();
         this.repository = new CassandraVertexDataRepository(session,  objectMapper, AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
                 AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString());
         this.serializer = new JacksonVertexSerializer(objectMapper);

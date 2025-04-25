@@ -1,7 +1,6 @@
 package org.apache.atlas.repository.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -13,7 +12,7 @@ public class Validation  {
         try {
             CassandraConfig config = new CassandraConfig();
             cqlSession = config.cqlSession();
-            VertexRetrievalService batchVertexRetrievalService = new VertexRetrievalService(cqlSession, new ObjectMapper());
+            VertexRetrievalService batchVertexRetrievalService = new VertexRetrievalService(cqlSession);
             Map<String, DynamicVertex> vertexPropertiesMap = batchVertexRetrievalService.retrieveVertices(Arrays.asList("40964232", "122884120"));
             System.out.println("vertexPropertiesMap = " + vertexPropertiesMap);
 
