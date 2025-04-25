@@ -4,6 +4,8 @@ import com.datastax.oss.driver.api.core.CqlSession;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -44,6 +46,15 @@ public class VertexRetrievalService {
     public DynamicVertex retrieveVertex(String vertexId) throws AtlasBaseException {
         Map<String, DynamicVertex> ret = retrieveVertices(Collections.singletonList(vertexId));
         return ret.get(vertexId);
+    }
+
+    public void insertVertices(List<AtlasVertex> vertices) throws AtlasBaseException {
+        Map<String, String> toInsert = new HashMap<>(vertices.size());
+        vertices.stream()
+                .filter(x -> ((AtlasJanusVertex) x).getDynamicVertex().hasProperties())
+                .forEach(x -> toInsert.put(x.getIdForDisplay(), serializer.serialize(((AtlasJanusVertex) x).getDynamicVertex())));
+
+        repository.insertVertices(toInsert);
     }
 
     /**

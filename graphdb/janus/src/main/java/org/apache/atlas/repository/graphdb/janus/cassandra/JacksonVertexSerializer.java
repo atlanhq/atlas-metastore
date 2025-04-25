@@ -50,7 +50,7 @@ class JacksonVertexSerializer implements VertexSerializer {
     @Override
     public String serialize(DynamicVertex vertex) {
         try {
-            return objectMapper.writeValueAsString(vertex);
+            return objectMapper.writeValueAsString(vertex.getAllProperties());
         } catch (JsonProcessingException e) {
             // Handle exception appropriately
             throw new RuntimeException("Failed to serialize vertex data", e);

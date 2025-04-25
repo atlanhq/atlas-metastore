@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.janusgraph.core.EdgeLabel;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
@@ -77,8 +78,14 @@ public final class GraphDbObjectFactory {
 
         AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
 
+        // TODO: flag based
         try {
-            ret.setDynamicVertex(graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString()));
+            DynamicVertex dynamicVertex = graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString());
+            if (dynamicVertex == null) {
+                dynamicVertex = new DynamicVertex();
+            }
+            ret.setDynamicVertex(dynamicVertex);
+
         } catch (Exception e) {
             throw new RuntimeException(e);
         }

@@ -609,6 +609,8 @@ public class RequestContext {
 
     public Collection<AtlasEntity> getDifferentialEntities() { return diffEntityCache.values(); }
 
+    public Set<String> getDifferentialGUIDS() { return diffEntityCache.keySet(); }
+
     public Map<String,AtlasEntity> getDifferentialEntitiesMap() { return diffEntityCache; }
 
     public Collection<AtlasEntityHeader> getUpdatedEntities() {

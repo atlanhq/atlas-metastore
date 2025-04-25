@@ -34,6 +34,7 @@ import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
+import org.janusgraph.graphdb.vertices.AbstractVertex;
 
 /**
  * Janus implementation of AtlasElement.
@@ -45,6 +46,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     private T element;
     protected AtlasJanusGraph graph;
+    protected final static Set<String> VERTEX_CORE_PROPERTIES = new HashSet<>();
 
     //excludeProperties: Getting key related issue while Migration mode when fetching few attributes from graph
     //This is dirty fix to ignore getting such attributes value from graph & return null explicitly
@@ -52,6 +54,11 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     static {
         excludeProperties.add("replicatedTo");
         excludeProperties.add("replicatedFrom");
+
+        VERTEX_CORE_PROPERTIES.add("__guid");
+        VERTEX_CORE_PROPERTIES.add("__state");
+        VERTEX_CORE_PROPERTIES.add("__typeName");
+        VERTEX_CORE_PROPERTIES.add("qualifiedName");
     }
 
     public AtlasJanusElement(AtlasJanusGraph graph, T element) {
@@ -65,6 +72,14 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             return null;
         }
 
+        if (isVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
+            if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
+                return (T) vertex.getDynamicVertex().getProperty(propertyName);
+            }
+        }
+
         //add explicit logic to return null if the property does not exist
         //This is the behavior Atlas expects.  Janus throws an exception
         //in this scenario.
@@ -75,12 +90,12 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 return null;
             }
             if (AtlasEdge.class == clazz) {
-                return (T)graph.getEdge(propertyValue.toString());
+                return (T) graph.getEdge(propertyValue.toString());
             }
             if (AtlasVertex.class == clazz) {
-                return (T)graph.getVertex(propertyValue.toString());
+                return (T) graph.getVertex(propertyValue.toString());
             }
-            return (T)propertyValue;
+            return (T) propertyValue;
 
         }
         return null;
@@ -150,11 +165,29 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                     removeProperty(propertyName);
                 }
             } else {
-                getWrappedElement().property(propertyName, value);
+                if (isVertex()) {
+                    AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+                    vertex.getDynamicVertex().setProperty(propertyName, value);
+
+                    if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                        getWrappedElement().property(propertyName, value);
+                    }
+                } else {
+                    // Might be an edge
+                    getWrappedElement().property(propertyName, value);
+                 }
             }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         }
+    }
+
+    protected boolean isVertex() {
+        return this instanceof AtlasVertex;
+    }
+
+    private boolean isEdge() {
+        return this instanceof AtlasEdge;
     }
 
     @Override

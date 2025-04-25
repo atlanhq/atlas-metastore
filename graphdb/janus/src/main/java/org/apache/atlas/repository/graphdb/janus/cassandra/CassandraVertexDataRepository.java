@@ -11,7 +11,9 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.type.AtlasType;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,6 +37,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     private final String tableName;
     private final Map<Integer, PreparedStatement> batchSizeToStatement = new ConcurrentHashMap<>();
     private final ObjectMapper objectMapper;
+
+    private static String INSERT_VERTEX = "INSERT into %s.%s (bucket, id, json_data, updated_at) values (%s, '%s', '%s', %s)";
 
     /**
      * Creates a new enhanced Cassandra repository.
@@ -103,6 +107,27 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         }
 
         return vertexJsonNodesLookup;
+    }
+
+    @Override
+    public void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException {
+        StringBuilder batchQuery = new StringBuilder();
+        batchQuery.append("BEGIN BATCH ");
+
+        for (String vertexId : serialisedVertices.keySet()) {
+            int bucket = calculateBucket(vertexId);
+            String insert = String.format(INSERT_VERTEX,
+                    keyspace,
+                    tableName,
+                    bucket,
+                    vertexId,
+                    serialisedVertices.get(vertexId),
+                    RequestContext.get().getRequestTime());
+            batchQuery.append(insert).append(";");
+        }
+
+        batchQuery.append("APPLY BATCH;");
+        session.execute(batchQuery.toString());
     }
 
     /**
@@ -203,5 +228,10 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         queryBuilder.append(" ALLOW FILTERING");
 
         return session.prepare(queryBuilder.toString());
+    }
+
+    private int calculateBucket(String vertexId) {
+        int numBuckets = 2 << 5; // 2^5=32
+        return (int) (Long.parseLong(vertexId) % numBuckets);
     }
 }

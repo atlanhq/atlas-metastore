@@ -1,8 +1,13 @@
 package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 
+import org.apache.commons.collections.MapUtils;
+
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -12,6 +17,10 @@ import java.util.Set;
 public class DynamicVertex {
 
     private final Map<String, Object> properties = new HashMap<>();
+
+    public boolean hasProperties() {
+        return !MapUtils.isEmpty(properties);
+    }
 
     /**
      * Gets a property value by its key.
@@ -49,6 +58,21 @@ public class DynamicVertex {
     public DynamicVertex setProperty(String key, Object value) {
         properties.put(key, value);
         return this;
+    }
+
+    public void addSetProperty(String key, Object value) {
+        Set<Object> values = (Set<Object>) properties.getOrDefault(key, new HashSet<>(1));
+
+        if (!values.contains(value)) {
+            values.add(value);
+            properties.put(key, values);
+        }
+    }
+
+    public void addListProperty(String key, Object value) {
+        List<Object> values = (List<Object>) properties.getOrDefault(key, new ArrayList<>(1));
+        values.add(value);
+        properties.put(key, values);
     }
 
     /**
