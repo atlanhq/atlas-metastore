@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
+import org.apache.atlas.exception.AtlasBaseException;
 import org.janusgraph.core.EdgeLabel;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
@@ -75,7 +76,15 @@ public final class GraphDbObjectFactory {
         if (source == null) {
             return null;
         }
-        return new AtlasJanusVertex(graph, source);
+
+        AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
+
+        try {
+            ret.setDynamicVertex(graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString()));
+        } catch (AtlasBaseException e) {
+            throw new RuntimeException(e);
+        }
+        return ret;
     }
 
     /**
