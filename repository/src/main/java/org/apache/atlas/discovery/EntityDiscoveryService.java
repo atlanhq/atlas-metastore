@@ -1111,8 +1111,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return;
             }
 
-            final int BATCH_SIZE = 10;
-                    //AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt(); // Adjust based on testing
+            final int BATCH_SIZE = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
             List<String> batchIds = new ArrayList<>(BATCH_SIZE);
             List<Result> batchResults = new ArrayList<>(BATCH_SIZE);
 
