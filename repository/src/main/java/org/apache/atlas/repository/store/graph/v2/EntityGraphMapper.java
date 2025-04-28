@@ -3291,7 +3291,19 @@ public class EntityGraphMapper {
                             List<AtlasEdge> classificationEdges = GraphHelper.getClassificationEdges(vertex, null, classificationName);
                             classificationEdgeCount += classificationEdges.size();
                             int batchSize = CHUNK_SIZE;
+                            LOG.info("Invoking C* GarbageCollect 1");
+                            try {
+                                jmxCassandraConnect.invokeCassandraGarbageCollection();
+                            } catch (MalformedObjectNameException e) {
+                                LOG.error("Error while invoking GarbageCollect 1", e);
+                            }
                             for (int i = 0; i < classificationEdges.size(); i += batchSize) {
+                                LOG.info("Invoking C* GarbageCollect 2");
+                                try {
+                                    jmxCassandraConnect.invokeCassandraGarbageCollection();
+                                } catch (MalformedObjectNameException e) {
+                                    LOG.error("Error while invoking GarbageCollect 2", e);
+                                }
                                 int end = Math.min(i + batchSize, classificationEdges.size());
                                 List<AtlasEdge> batch = classificationEdges.subList(i, end);
                                 for (AtlasEdge edge : batch) {
