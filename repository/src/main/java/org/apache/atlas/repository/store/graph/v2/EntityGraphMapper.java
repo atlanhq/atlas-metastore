@@ -80,6 +80,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
+import javax.management.MalformedObjectNameException;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -3338,14 +3339,13 @@ public class EntityGraphMapper {
 
                 cleanedUpCount += currentAssetsBatchSize;
                 gcInvokeBatchCount += currentAssetsBatchSize;
-                if (gcInvokeBatchCount >= CLEANUP_MAX) {
-                   try {
-                       jmxCassandraConnect.invokeCassandraGarbageCollection();
-                       gcInvokeBatchCount = 0;
-                   } catch (Exception e) {
-                          LOG.error("Error while invoking Cassandra Garbage Collection", e);
-                   }
+                LOG.info("Invoking C* GarbageCollect");
+                try {
+                    jmxCassandraConnect.invokeCassandraGarbageCollection();
+                } catch (MalformedObjectNameException e) {
+                    LOG.error("Error while invoking GarbageCollect", e);
                 }
+                LOG.info("Invoked C* GC collect");
                 currentAssetVerticesBatch.clear();
                 tagVerticesProcessed.clear();
             }
