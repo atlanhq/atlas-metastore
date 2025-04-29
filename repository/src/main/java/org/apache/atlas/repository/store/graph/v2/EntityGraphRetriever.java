@@ -1959,7 +1959,8 @@ public class EntityGraphRetriever {
                 break;
 
             case STRUCT:
-                ret = mapVertexToStruct(entityVertex, edgeLabel, (AtlasEdge) value, entityExtInfo, isMinExtInfo);
+                //ret = mapVertexToStruct(entityVertex, edgeLabel, (AtlasEdge) value, entityExtInfo, isMinExtInfo);
+                ret = value;
                 break;
 
             case OBJECT_ID_TYPE:

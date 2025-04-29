@@ -14,4 +14,7 @@ public final class JanusUtils {
         return LongEncoding.encode(Long.parseLong(vertexId.toString()));
     }
 
+    public static void main(String[] args) {
+        System.out.println(LongEncoding.encode(Long.parseLong("368784")));
+    }
 }

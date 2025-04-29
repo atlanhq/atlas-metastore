@@ -723,7 +723,7 @@ public class AtlasStructType extends AtlasType {
             if (map == null) {
                 ret = null;
             } else {
-                ret = new AtlasStruct((Map) val);
+                ret = new AtlasStruct(this.getTypeName(), map);
             }
         } else {
             ret = null;

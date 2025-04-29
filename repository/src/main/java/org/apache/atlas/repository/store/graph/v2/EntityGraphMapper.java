@@ -2751,7 +2751,8 @@ public class EntityGraphMapper {
             return ctx.getValue();
 
         case STRUCT:
-            return mapStructValue(ctx, context);
+            return ctx.getValue();
+            //return mapStructValue(ctx, context);
 
         case OBJECT_ID_TYPE:
             AtlasEntityType instanceType = getInstanceType(ctx.getValue(), context);
@@ -3172,9 +3173,10 @@ public class EntityGraphMapper {
     private void setArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName, List<Object> allValues, List<Object> currentValues, Cardinality cardinality) {
         boolean isArrayOfPrimitiveType = elementType.getTypeCategory().equals(TypeCategory.PRIMITIVE);
         boolean isArrayOfEnum = elementType.getTypeCategory().equals(TypeCategory.ENUM);
+        boolean isArrayOfStruct = elementType.getTypeCategory().equals(TypeCategory.STRUCT);
 
         if (!isReference(elementType) || isSoftReference) {
-            if (isArrayOfPrimitiveType || isArrayOfEnum) {
+            if (isArrayOfPrimitiveType || isArrayOfEnum || isArrayOfStruct) {
                 AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
                 /*vertex.removeProperty(vertexPropertyName);
                 if (CollectionUtils.isNotEmpty(allValues)) {
