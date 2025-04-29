@@ -27,5 +27,7 @@ interface VertexDataRepository  {
      */
     Map<String, JsonNode> fetchVerticesAsJsonNodes(List<String> vertexIds) throws AtlasBaseException;
 
+    JsonNode fetchVertexAsJsonNode(String vertexId) throws AtlasBaseException;
+
     void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException;
 }

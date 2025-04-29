@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -109,20 +110,46 @@ class JacksonVertexSerializer implements VertexSerializer {
                 return null;
             } else if (node.isTextual()) {
                 return node.asText();
-            } else if (node.isNumber()) {
+            }  else if (node.isBoolean()) {
+                return node.asBoolean();
+            } else if (node.isArray()) {
+                List<Object> list = new ArrayList<>();
+                ArrayNode arrayNode = (ArrayNode) node;
+                for (JsonNode element : arrayNode) {
+                    list.add(convertJsonNodeToJava(element));
+                }
+                return list;
+            }
+
+            /* else if (node.isNumber()) {
                 // Check if it's an integer or a floating-point number
-                if (node.isIntegralNumber()) {
-                    if (node.canConvertToLong()) {
-                        return node.asLong();
-                    } else {
-                        // For really big integers
-                        return node.bigIntegerValue();
+                /*if (node.isIntegralNumber()) {
+                    String textValue = node.asText(); // Get the original string representation
+                    try {
+                        return Integer.parseInt(textValue);
+                        //return intValue;
+                    } catch (NumberFormatException e) {
+                        try {
+                            long longValue = Long.parseLong(textValue);
+                            return longValue;
+                        } catch (NumberFormatException ex) {
+                            // For really big integers that don't fit in Long
+                            return node.bigIntegerValue();
+                        }
                     }
                 } else {
-                    return node.asDouble();
+                    if (node.isFloatingPointNumber()) {
+                        String textValue = node.asText(); // Get the original string representation
+                        try {
+                            float floatValue = Float.parseFloat(textValue);
+                            return floatValue;
+                        } catch (NumberFormatException e) {
+                            return node.asDouble();
+                        }
+                    } else {
+                        return node.asDouble();
+                    }
                 }
-            } else if (node.isBoolean()) {
-                return node.asBoolean();
             } else if (node.isArray()) {
                 List<Object> list = new ArrayList<>();
                 ArrayNode arrayNode = (ArrayNode) node;
@@ -137,10 +164,25 @@ class JacksonVertexSerializer implements VertexSerializer {
                     map.put(entry.getKey(), convertJsonNodeToJava(entry.getValue()));
                 });
                 return map;
-            }
+            }*/
 
             // Default case
             return node.toString();
         }
+    }
+
+    class NumericValue {
+        enum NumericType { INT, LONG, FLOAT, DOUBLE, BIG_INTEGER }
+        Object value;
+        NumericType type;
+
+        public NumericValue(int value) { this.value = value; this.type = NumericType.INT; }
+        public NumericValue(long value) { this.value = value; this.type = NumericType.LONG; }
+        public NumericValue(float value) { this.value = value; this.type = NumericType.FLOAT; }
+        public NumericValue(double value) { this.value = value; this.type = NumericType.DOUBLE; }
+        public NumericValue(BigInteger value) { this.value = value; this.type = NumericType.BIG_INTEGER; }
+
+        public Object getValue() { return value; }
+        public NumericType getType() { return type; }
     }
 }

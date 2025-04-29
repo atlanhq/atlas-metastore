@@ -110,6 +110,17 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     }
 
     @Override
+    public JsonNode fetchVertexAsJsonNode(String vertexId) throws AtlasBaseException {
+        Map<String, String> data = fetchVerticesJsonData(Collections.singletonList(vertexId));
+        try {
+            return objectMapper.readTree(data.get(vertexId));
+        } catch (JsonProcessingException e) {
+            LOG.warn("Failed to parse JSON for vertex ID {}: {}", vertexId, e.getMessage());
+            throw new AtlasBaseException("Failed to parse JSON for vertex ID: " + vertexId, e);
+        }
+    }
+
+    @Override
     public void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException {
         StringBuilder batchQuery = new StringBuilder();
         batchQuery.append("BEGIN BATCH ");

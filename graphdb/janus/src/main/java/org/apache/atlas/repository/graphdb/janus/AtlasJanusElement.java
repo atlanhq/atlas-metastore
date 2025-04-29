@@ -59,6 +59,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         VERTEX_CORE_PROPERTIES.add("__state");
         VERTEX_CORE_PROPERTIES.add("__typeName");
         VERTEX_CORE_PROPERTIES.add("qualifiedName");
+        VERTEX_CORE_PROPERTIES.add("__u_qualifiedName");
     }
 
     public AtlasJanusElement(AtlasJanusGraph graph, T element) {
@@ -76,7 +77,22 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
             if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
-                return (T) vertex.getDynamicVertex().getProperty(propertyName);
+                Object val = vertex.getDynamicVertex().getProperty(propertyName);
+
+                if (clazz.equals(Long.class) && ! (val instanceof Long)) {
+                    return (T) Long.valueOf((String) val);
+
+                } else if (clazz.equals(Float.class) && ! (val instanceof Float)) {
+                    return (T) Float.valueOf((String) val);
+
+                } else if (clazz.equals(Double.class) && ! (val instanceof Float)) {
+                    return (T) Float.valueOf((String) val);
+
+                } else if (clazz.equals(Integer.class) && ! (val instanceof Integer)) {
+                    return (T) Integer.valueOf((String) val);
+                }
+
+                return (T) val;
             }
         }
 
@@ -115,11 +131,22 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public Set<String> getPropertyKeys() {
-        return getWrappedElement().keys();
+        if (isVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            return vertex.getDynamicVertex().getPropertyKeys();
+        } else {
+            return getWrappedElement().keys();
+        }
     }
 
     @Override
     public void removeProperty(String propertyName) {
+        if (isVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            vertex.getDynamicVertex().removeProperty(propertyName);
+            return;
+        }
+
         Iterator<? extends Property<String>> it = getWrappedElement().properties(propertyName);
         while(it.hasNext()) {
             Property<String> property = it.next();
@@ -128,7 +155,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     }
 
     @Override
-    public void removePropertyValue(String propertyName, Object propertyValue) {
+    public void removePropertyValue(String propertyName, Object propertyValue) { //TODO
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
         while (it.hasNext()) {
@@ -143,7 +170,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     }
 
     @Override
-    public void removeAllPropertyValue(String propertyName, Object propertyValue) {
+    public void removeAllPropertyValue(String propertyName, Object propertyValue) { //TODO
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
         while (it.hasNext()) {
@@ -237,9 +264,15 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
-        List<V> value = new ArrayList<>();
+        if (isVertex()) {
+            return (List<V>) getProperty(propertyName, elementType);
+            //AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            //return  (List<V>) vertex.getDynamicVertex().getProperty(propertyName);
+        }
+
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
+        List<V> value = new ArrayList<>();
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
@@ -250,6 +283,12 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> Set<V> getMultiValuedSetProperty(String propertyName, Class<V> elementType) {
+        if (isVertex()) {
+            return (Set<V>) getProperty(propertyName, elementType);
+            //AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            //return  (Set<V>) vertex.getDynamicVertex().getProperty(propertyName);
+        }
+
         Set<V> value = new HashSet<>();
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
@@ -293,7 +332,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     }
 
     @Override
-    public <V> List<V> getListProperty(String propertyName, Class<V> elementType) {
+    public <V> List<V> getListProperty(String propertyName, Class<V> elementType) { //TODO
 
         List<String> value = getListProperty(propertyName);
 

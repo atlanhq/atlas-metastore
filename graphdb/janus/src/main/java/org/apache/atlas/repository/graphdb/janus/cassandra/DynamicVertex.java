@@ -61,7 +61,17 @@ public class DynamicVertex {
     }
 
     public void addSetProperty(String key, Object value) {
-        Set<Object> values = (Set<Object>) properties.getOrDefault(key, new HashSet<>(1));
+        Object currentValue = properties.getOrDefault(key, null);
+
+        Set<Object> values;
+
+        if (currentValue == null){
+            values = new HashSet<>(1);
+        } else if (currentValue instanceof List) {
+            values = new HashSet<>((List) currentValue);
+        } else {
+            values = (Set) currentValue;
+        }
 
         if (!values.contains(value)) {
             values.add(value);

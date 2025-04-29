@@ -3175,12 +3175,13 @@ public class EntityGraphMapper {
 
         if (!isReference(elementType) || isSoftReference) {
             if (isArrayOfPrimitiveType || isArrayOfEnum) {
-                vertex.removeProperty(vertexPropertyName);
+                AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
+                /*vertex.removeProperty(vertexPropertyName);
                 if (CollectionUtils.isNotEmpty(allValues)) {
                     for (Object value: allValues) {
                         AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
-                }
+                }*/
             } else {
                 AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
             }
