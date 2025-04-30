@@ -500,14 +500,15 @@ public class TypesREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.updateAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
-        
-            lockAcquired = attemptAcquiringSpecificLock(lockKey);
+
             LOG.info("Lock successfully acquired, proceeding with update :: traceId {}", RequestContext.get().getTraceId());
 
             for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
                 AtlasBusinessMetadataDef existingMB;
                 try{
                     existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
+                    //  append in lock key :BUSINESS_METADATA_NAME:DisplayName
+                    lockKey = lockKey + ":" + mb.getName() + ":" + mb.getDisplayName();
                 }catch (AtlasBaseException e){
                     //do nothing -- this BM is ew
                     existingMB = null;
@@ -518,6 +519,7 @@ public class TypesREST {
                 AtlasClassificationDef existingClassificationDef;
                 try{
                     existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
+                    lockKey = lockKey + ":" + classificationDef.getName() + ":" + classificationDef.getDisplayName();
                 }catch (AtlasBaseException e){
                     //do nothing -- this classification is ew
                     existingClassificationDef = null;
@@ -526,6 +528,7 @@ public class TypesREST {
             }
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
+            lockAcquired = attemptAcquiringSpecificLock(lockKey);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
             AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
             typeCacheRefresher.refreshAllHostCache();
