@@ -65,13 +65,18 @@ public abstract class AbstractRedisService implements RedisService {
         try {
             RLock lock = keyLockMap.get(key);
             if (lock.isHeldByCurrentThread()) {
+                getLogger().info("Released lock for key: {}", key);
                 lock.unlock();
-                // Remove the lock from the map after releasing it to prevent memory leaks
-                keyLockMap.remove(key);
-                getLogger().debug("Released and removed lock for key: {}", key);
             }
+            // Remove the lock from the map after releasing it to prevent memory leaks
+            keyLockMap.remove(key);
+            getLogger().info("Removed lock for key: {}", key);
         } catch (Exception e) {
             getLogger().error("Failed to release distributed lock for {}", key, e);
+        } finally {
+            // Ensure the lock is removed from the map even if an exception occurs
+            keyLockMap.remove(key);
+            getLogger().info("Removed lock for key: {} after exception", key);
         }
     }
 
