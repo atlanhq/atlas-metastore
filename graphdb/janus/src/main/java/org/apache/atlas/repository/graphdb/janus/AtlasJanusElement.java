@@ -19,6 +19,8 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+import com.datastax.oss.driver.shaded.fasterxml.jackson.core.JsonProcessingException;
+import com.datastax.oss.driver.shaded.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
@@ -48,6 +50,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     private T element;
     protected AtlasJanusGraph graph;
     protected final static Set<String> VERTEX_CORE_PROPERTIES = new HashSet<>();
+    ObjectMapper mapper = new ObjectMapper();
 
     //excludeProperties: Getting key related issue while Migration mode when fetching few attributes from graph
     //This is dirty fix to ignore getting such attributes value from graph & return null explicitly
@@ -83,13 +86,13 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 if (clazz.equals(Long.class) && ! (val instanceof Long)) {
                     return (T) Long.valueOf((String) val);
 
-                } else if (clazz.equals(Float.class) && ! (val instanceof Float)) {
+                } else if (clazz.equals(Float.class) && !(val instanceof Float)) {
                     return (T) Float.valueOf((String) val);
 
-                } else if (clazz.equals(Double.class) && ! (val instanceof Double)) {
+                } else if (clazz.equals(Double.class) && !(val instanceof Double)) {
                     return (T) Double.valueOf((String) val);
 
-                } else if (clazz.equals(Integer.class) && ! (val instanceof Integer)) {
+                } else if (clazz.equals(Integer.class) && !(val instanceof Integer)) {
                     return (T) Integer.valueOf((String) val);
                 }
 
@@ -212,10 +215,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     protected boolean isVertex() {
         return this instanceof AtlasVertex;
-    }
-
-    protected boolean isStruct() {
-        return this instanceof AtlasJanusStruct;
     }
 
     private boolean isEdge() {

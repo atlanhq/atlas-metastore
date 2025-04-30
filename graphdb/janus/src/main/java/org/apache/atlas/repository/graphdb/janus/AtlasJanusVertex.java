@@ -64,19 +64,14 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     @Override
     public <T> void addProperty(String propertyName, T value) {
         try {
-            if (RequestContext.get().NEW_FLOW) {
-                if (isVertex()) {
-                    this.getDynamicVertex().addSetProperty(propertyName, value);
+            if (RequestContext.get().NEW_FLOW && isVertex()) {
+                this.getDynamicVertex().addSetProperty(propertyName, value);
 
-                    if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
-                        getWrappedElement().property(propertyName, value);
-                    }
-                } else if (isStruct())  {
-                    AtlasJanusStruct struct = (AtlasJanusStruct) this;
-                    struct.getStruct().setAttribute(propertyName, value);
+                if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                    getWrappedElement().property(propertyName, value);
                 }
             } else {
-            getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+                getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
             }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
