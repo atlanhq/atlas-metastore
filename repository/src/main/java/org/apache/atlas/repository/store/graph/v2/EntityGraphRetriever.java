@@ -1957,7 +1957,11 @@ public class EntityGraphRetriever {
             case ENUM:
             case ARRAY:
             case MAP:
-                ret = value;
+                if (RequestContext.get().NEW_FLOW && value instanceof String) { // For indexsearch & diff & constructHeader (probably all reads)
+                    return AtlasType.fromJson((String) value, Map.class);
+                } else {
+                    ret = value;
+                }
                 break;
 
             case CLASSIFICATION:

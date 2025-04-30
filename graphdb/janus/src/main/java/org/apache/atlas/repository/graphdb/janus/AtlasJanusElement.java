@@ -28,6 +28,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
+import org.apache.atlas.type.AtlasType;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
 import org.codehaus.jettison.json.JSONException;
@@ -94,6 +95,9 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
                 } else if (clazz.equals(Integer.class) && !(val instanceof Integer)) {
                     return (T) Integer.valueOf((String) val);
+
+                } else if (clazz.equals(Map.class) && !(val instanceof Map)) {
+                    return (T) AtlasType.fromJson((String) val, Map.class);
                 }
 
                 return (T) val;
