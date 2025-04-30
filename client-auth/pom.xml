@@ -72,6 +72,12 @@
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-common</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-core-shaded</artifactId>
+            <version>4.13.0</version>
+            <scope>compile</scope>
+        </dependency>
     </dependencies>
 
 </project>

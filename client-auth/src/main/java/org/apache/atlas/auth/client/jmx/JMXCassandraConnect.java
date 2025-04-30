@@ -44,6 +44,7 @@ public class JMXCassandraConnect {
     }
 
     public void invokeCassandraGarbageCollection() throws MalformedObjectNameException {
+        LOG.info("Invoking Cassandra garbage collection...");
         String keyspace = configuration.getString("atlas.graph.storage.cql.keyspace", "atlas");
         String table = configuration.getString("atlas.graph.storage.cql.table", "edgestore");
         ObjectName name = new ObjectName("org.apache.cassandra.db:type=StorageService");

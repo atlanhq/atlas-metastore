@@ -21,6 +21,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
+import org.apache.atlas.auth.client.cassandra.CassandraClient;
 import org.apache.atlas.auth.client.jmx.JMXCassandraConnect;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
@@ -205,6 +206,7 @@ public class EntityGraphMapper {
     private final TransactionInterceptHelper   transactionInterceptHelper;
     private final EntityGraphRetriever       retrieverNoRelation;
     private final JMXCassandraConnect jmxCassandraConnect = new JMXCassandraConnect();
+    private final CassandraClient cassandraClient = new CassandraClient();
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
@@ -3291,19 +3293,7 @@ public class EntityGraphMapper {
                             List<AtlasEdge> classificationEdges = GraphHelper.getClassificationEdges(vertex, null, classificationName);
                             classificationEdgeCount += classificationEdges.size();
                             int batchSize = CHUNK_SIZE;
-                            LOG.info("Invoking C* GarbageCollect 1");
-                            try {
-                                jmxCassandraConnect.invokeCassandraGarbageCollection();
-                            } catch (MalformedObjectNameException e) {
-                                LOG.error("Error while invoking GarbageCollect 1", e);
-                            }
                             for (int i = 0; i < classificationEdges.size(); i += batchSize) {
-                                LOG.info("Invoking C* GarbageCollect 2");
-                                try {
-                                    jmxCassandraConnect.invokeCassandraGarbageCollection();
-                                } catch (MalformedObjectNameException e) {
-                                    LOG.error("Error while invoking GarbageCollect 2", e);
-                                }
                                 int end = Math.min(i + batchSize, classificationEdges.size());
                                 List<AtlasEdge> batch = classificationEdges.subList(i, end);
                                 for (AtlasEdge edge : batch) {
@@ -3336,6 +3326,19 @@ public class EntityGraphMapper {
                         LOG.info("For offset {} , classificationEdge were : {}", offset, classificationEdgeCount);
                         classificationEdgeCount = 0;
                         LOG.info("Cleaned up {} entities for classification {}", offset, classificationName);
+                        if (offset >= 1000) {
+                            LOG.info("Invoking C* GarbageCollect");
+                            try {
+                                cassandraClient.updateTableGCGraceSeconds(0);
+                                jmxCassandraConnect.invokeCassandraGarbageCollection();
+                                cassandraClient.updateTableGCGraceSeconds(1800);
+                            } catch (MalformedObjectNameException e) {
+                                LOG.error("Error while invoking GarbageCollect", e);
+                                e.printStackTrace();
+                            }
+                            LOG.info("Invoked C* GC collect");
+                            offset = 0;
+                        }
                     }
 
                 } while (offset < currentAssetsBatchSize);
