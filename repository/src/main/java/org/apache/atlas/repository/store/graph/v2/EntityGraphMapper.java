@@ -206,7 +206,7 @@ public class EntityGraphMapper {
     private final TransactionInterceptHelper   transactionInterceptHelper;
     private final EntityGraphRetriever       retrieverNoRelation;
     private final JMXCassandraConnect jmxCassandraConnect = new JMXCassandraConnect();
-    private final CassandraClient cassandraClient = new CassandraClient();
+    private final CassandraClient cassandraClient = new CassandraClient().getInstance();
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
