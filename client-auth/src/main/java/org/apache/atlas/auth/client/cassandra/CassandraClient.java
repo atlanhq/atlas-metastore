@@ -1,6 +1,8 @@
 package org.apache.atlas.auth.client.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -10,6 +12,15 @@ import java.net.InetSocketAddress;
 public class CassandraClient {
     private static final Logger LOG = LoggerFactory.getLogger(CassandraClient.class);
     Configuration configuration;
+
+    {
+        try {
+            configuration = ApplicationProperties.get();
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     private static volatile CqlSession session;
 
     public void updateTableGCGraceSeconds(int gcGraceSeconds) {
