@@ -1718,8 +1718,12 @@ public class EntityGraphRetriever {
                     ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
                     break;
                 case STRUCT:
-                    edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(attribute.getName());
-                    ret = mapVertexToStruct(entityVertex, edgeLabel, null, entityExtInfo, isMinExtInfo);
+                    if (RequestContext.get().NEW_FLOW) {
+                        ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
+                    } else {
+                        edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(attribute.getName());
+                        ret = mapVertexToStruct(entityVertex, edgeLabel, null, entityExtInfo, isMinExtInfo);
+                    }
                     break;
                 case OBJECT_ID_TYPE:
                     if (includeReferences) {
@@ -1885,7 +1889,7 @@ public class EntityGraphRetriever {
                 for (Map.Entry<String, Object> entry : currentMap.entrySet()) {
                     String mapKey    = entry.getKey();
                     Object keyValue  = entry.getValue();
-                    Object mapValue  = mapVertexToCollectionEntry(entityVertex, mapValueType, keyValue, attribute.getRelationshipEdgeLabel(),
+                    Object mapValue  = mapVertexToCollectionEntry(attribute.getVertexPropertyName(), entityVertex, mapValueType, keyValue, attribute.getRelationshipEdgeLabel(),
                                                                   entityExtInfo, isOwnedAttribute, attribute.getRelationshipEdgeDirection(), isMinExtInfo, includeReferences);
                     if (mapValue != null) {
                         ret.put(mapKey, mapValue);
@@ -1931,7 +1935,7 @@ public class EntityGraphRetriever {
                 continue;
             }
 
-            Object arrValue = mapVertexToCollectionEntry(entityVertex, arrayElementType, element, edgeLabel,
+            Object arrValue = mapVertexToCollectionEntry(attribute.getVertexPropertyName(), entityVertex, arrayElementType, element, edgeLabel,
                                                          entityExtInfo, isOwnedAttribute, edgeDirection, isMinExtInfo, includeReferences);
 
             if (arrValue != null) {
@@ -1942,7 +1946,8 @@ public class EntityGraphRetriever {
         return arrValues;
     }
 
-    private Object mapVertexToCollectionEntry(AtlasVertex entityVertex, AtlasType arrayElement, Object value,
+    private Object mapVertexToCollectionEntry(String propertyName,
+                                              AtlasVertex entityVertex, AtlasType arrayElement, Object value,
                                               String edgeLabel, AtlasEntityExtInfo entityExtInfo, boolean isOwnedAttribute,
                                               AtlasRelationshipEdgeDirection edgeDirection, final boolean isMinExtInfo, boolean includeReferences) throws AtlasBaseException {
         Object ret = null;
@@ -1959,8 +1964,13 @@ public class EntityGraphRetriever {
                 break;
 
             case STRUCT:
-                //ret = mapVertexToStruct(entityVertex, edgeLabel, (AtlasEdge) value, entityExtInfo, isMinExtInfo);
-                ret = value;
+                if (RequestContext.get().NEW_FLOW) {
+                    //ret = mapMapToStruct(propertyName, (String) value, entityExtInfo, isMinExtInfo);
+                    ret = value;
+                } else {
+                    ret = mapVertexToStruct(entityVertex, edgeLabel, (AtlasEdge) value, entityExtInfo, isMinExtInfo);
+                }
+
                 break;
 
             case OBJECT_ID_TYPE:

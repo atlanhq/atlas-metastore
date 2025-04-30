@@ -90,6 +90,7 @@ public class AuditFilter implements Filter {
         final String              user               = AtlasAuthorizationUtils.getCurrentUserName();
         final Set<String>         userGroups         = AtlasAuthorizationUtils.getCurrentUserGroups();
         final String              deleteType         = httpRequest.getParameter("deleteType");
+
         final boolean             skipFailedEntities = Boolean.parseBoolean(httpRequest.getParameter("skipFailedEntities"));
 
         try {
@@ -97,6 +98,13 @@ public class AuditFilter implements Filter {
 
             RequestContext.clear();
             RequestContext requestContext = RequestContext.get();
+
+            if (httpRequest.getParameter("_new") == null) {
+                requestContext.NEW_FLOW = true;
+            } else {
+                requestContext.NEW_FLOW = Boolean.parseBoolean(httpRequest.getParameter("_new"));
+            }
+
             requestContext.setUri(MetricUtils.matchCanonicalPattern(httpRequest.getRequestURI()).orElse(EMPTY));
             requestContext.setTraceId(internalRequestId);
             requestContext.setUser(user, userGroups);

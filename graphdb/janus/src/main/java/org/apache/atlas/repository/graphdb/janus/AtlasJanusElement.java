@@ -19,6 +19,7 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
@@ -73,7 +74,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             return null;
         }
 
-        if (isVertex()) {
+        if (RequestContext.get().NEW_FLOW && isVertex()) {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
             if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
@@ -85,8 +86,8 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 } else if (clazz.equals(Float.class) && ! (val instanceof Float)) {
                     return (T) Float.valueOf((String) val);
 
-                } else if (clazz.equals(Double.class) && ! (val instanceof Float)) {
-                    return (T) Float.valueOf((String) val);
+                } else if (clazz.equals(Double.class) && ! (val instanceof Double)) {
+                    return (T) Double.valueOf((String) val);
 
                 } else if (clazz.equals(Integer.class) && ! (val instanceof Integer)) {
                     return (T) Integer.valueOf((String) val);
@@ -131,7 +132,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public Set<String> getPropertyKeys() {
-        if (isVertex()) {
+        if (RequestContext.get().NEW_FLOW && isVertex()) {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             return vertex.getDynamicVertex().getPropertyKeys();
         } else {
@@ -141,7 +142,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void removeProperty(String propertyName) {
-        if (isVertex()) {
+        if (RequestContext.get().NEW_FLOW && isVertex()) {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             vertex.getDynamicVertex().removeProperty(propertyName);
             return;
@@ -192,7 +193,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                     removeProperty(propertyName);
                 }
             } else {
-                if (isVertex()) {
+                if (RequestContext.get().NEW_FLOW && isVertex()) {
                     AtlasJanusVertex vertex = (AtlasJanusVertex) this;
                     vertex.getDynamicVertex().setProperty(propertyName, value);
 
@@ -211,6 +212,10 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     protected boolean isVertex() {
         return this instanceof AtlasVertex;
+    }
+
+    protected boolean isStruct() {
+        return this instanceof AtlasJanusStruct;
     }
 
     private boolean isEdge() {
@@ -264,10 +269,8 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
-        if (isVertex()) {
+        if (RequestContext.get().NEW_FLOW && isVertex()) {
             return (List<V>) getProperty(propertyName, elementType);
-            //AtlasJanusVertex vertex = (AtlasJanusVertex) this;
-            //return  (List<V>) vertex.getDynamicVertex().getProperty(propertyName);
         }
 
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
@@ -283,10 +286,8 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> Set<V> getMultiValuedSetProperty(String propertyName, Class<V> elementType) {
-        if (isVertex()) {
+        if (RequestContext.get().NEW_FLOW && isVertex()) {
             return (Set<V>) getProperty(propertyName, elementType);
-            //AtlasJanusVertex vertex = (AtlasJanusVertex) this;
-            //return  (Set<V>) vertex.getDynamicVertex().getProperty(propertyName);
         }
 
         Set<V> value = new HashSet<>();

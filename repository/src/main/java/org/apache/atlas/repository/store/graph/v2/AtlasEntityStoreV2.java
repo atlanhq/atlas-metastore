@@ -1692,9 +1692,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("<== createOrUpdate()");
             }
-            // TODO: Move to commit graph section
-            List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream().map(x -> context.getVertex(x)).toList();
-            dynamicVertexRetrievalService.insertVertices(updatedVertexList);
+
+            if (RequestContext.get().NEW_FLOW) {
+                // TODO: Move to commit graph section
+                List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream().map(x -> context.getVertex(x)).toList();
+                dynamicVertexRetrievalService.insertVertices(updatedVertexList);
+            }
 
             return ret;
         } finally {
