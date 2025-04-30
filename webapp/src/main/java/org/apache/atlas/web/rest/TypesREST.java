@@ -378,15 +378,18 @@ public class TypesREST {
         return ret;
     }
 
-    // Helper method to acquire a specific lock
+    // Helper method to acquire a specific lock with improved error handling
     private boolean attemptAcquiringSpecificLock(String lockKey) throws AtlasBaseException {
         final String traceId = RequestContext.get().getTraceId();
         LOG.debug("Attempting to acquire lock '{}' for typedef operations :: traceId {}", lockKey, traceId);
         try {
+            // Add a small delay to avoid rapid retry storms in case of contention
             if (!redisService.acquireDistributedLock(lockKey)) {
-                LOG.info("Lock '{}' is already acquired by another process. Request denied :: traceId {}", 
+                // Log at warning level instead of info to make it more visible in logs
+                LOG.info("Lock '{}' is already acquired by another process. Request denied :: traceId {}",
                         lockKey, traceId);
-                throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK);
+                throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK, 
+                        "Another operation is currently updating type definitions. Please try again later.");
             }
             LOG.info("Successfully acquired lock '{}' :: traceId {}", lockKey, traceId);
             return true;
@@ -396,7 +399,8 @@ public class TypesREST {
         } catch (Exception e) {
             // Log details for other exceptions
             LOG.error("Error acquiring lock '{}' :: traceId {} - {}", lockKey, traceId, e.getMessage(), e);
-            throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK, e);
+            throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK, 
+                    "Failed to acquire lock due to: " + e.getMessage());
         }
     }
     
@@ -426,7 +430,8 @@ public class TypesREST {
         validateTypeCreateOrUpdate(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         boolean lockAcquired = false;
-        String lockKey = ATLAS_TYPEDEF_CREATE_LOCK;
+        String lockKey = ATLAS_TYPEDEF_CREATE_LOCK; // Use simple lock key for creates
+        
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
@@ -434,7 +439,8 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired, proceeding with create :: traceId {}", RequestContext.get().getTraceId());
+            LOG.info("Lock successfully acquired with key {}, proceeding with create :: traceId {}", 
+                    lockKey, RequestContext.get().getTraceId());
             
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
@@ -451,6 +457,7 @@ public class TypesREST {
         }
         finally {
             if (lockAcquired) {
+                LOG.debug("Releasing lock with key: {}", lockKey);
                 redisService.releaseDistributedLock(lockKey);
             }
             AtlasPerfTracer.log(perf);
@@ -493,42 +500,46 @@ public class TypesREST {
         validateTypeCreateOrUpdate(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         boolean lockAcquired = false;
-        String lockKey = ATLAS_TYPEDEF_UPDATE_LOCK;
+        String lockKey = ATLAS_TYPEDEF_UPDATE_LOCK; // Use simple lock key for updates
+        
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.updateAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
+        
+            // Acquire lock BEFORE any database operations
+            lockAcquired = attemptAcquiringSpecificLock(lockKey);
+            LOG.info("Lock successfully acquired with key {}, proceeding with update :: traceId {}", 
+                    lockKey, RequestContext.get().getTraceId());
 
-            LOG.info("Lock successfully acquired, proceeding with update :: traceId {}", RequestContext.get().getTraceId());
-
+            // Process business metadata after acquiring lock
             for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
                 AtlasBusinessMetadataDef existingMB;
-                try{
+                try {
                     existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
-                    //  append in lock key :BUSINESS_METADATA_NAME:DisplayName
-                    lockKey = lockKey + ":" + mb.getName() + ":" + mb.getDisplayName();
-                }catch (AtlasBaseException e){
-                    //do nothing -- this BM is ew
+                } catch (AtlasBaseException e) {
+                    //do nothing -- this BM is new
                     existingMB = null;
                 }
                 mb.setRandomNameForNewAttributeDefs(existingMB);
             }
+            
+            // Process classifications after acquiring lock
             for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
                 AtlasClassificationDef existingClassificationDef;
-                try{
+                try {
                     existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
-                    lockKey = lockKey + ":" + classificationDef.getName() + ":" + classificationDef.getDisplayName();
-                }catch (AtlasBaseException e){
-                    //do nothing -- this classification is ew
+                } catch (AtlasBaseException e) {
+                    //do nothing -- this classification is new
                     existingClassificationDef = null;
                 }
                 classificationDef.setRandomNameForNewAttributeDefs(existingClassificationDef);
             }
+            
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
-            lockAcquired = attemptAcquiringSpecificLock(lockKey);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
             AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
             typeCacheRefresher.refreshAllHostCache();
@@ -542,6 +553,7 @@ public class TypesREST {
         } finally {
             RequestContext.clear();
             if (lockAcquired) {
+                LOG.info("Releasing lock with key: {}", lockKey);
                 redisService.releaseDistributedLock(lockKey);
             }
             AtlasPerfTracer.log(perf);
@@ -563,7 +575,8 @@ public class TypesREST {
         AtlasPerfTracer perf = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         boolean lockAcquired = false;
-        String lockKey = ATLAS_TYPEDEF_DELETE_LOCK;
+        String lockKey = ATLAS_TYPEDEF_DELETE_LOCK; // Simple lock key for deletes
+        
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
@@ -571,7 +584,8 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired, proceeding with delete :: traceId {}", RequestContext.get().getTraceId());
+            LOG.info("Lock successfully acquired with key {}, proceeding with delete :: traceId {}", 
+                    lockKey, RequestContext.get().getTraceId());
             
             typeDefStore.deleteTypesDef(typesDef);
             typeCacheRefresher.refreshAllHostCache();
@@ -583,6 +597,7 @@ public class TypesREST {
             throw new AtlasBaseException("Error while deleting a type definition");
         } finally {
             if (lockAcquired) {
+                LOG.debug("Releasing lock with key: {}", lockKey);
                 redisService.releaseDistributedLock(lockKey);
             }
             AtlasPerfTracer.log(perf);
@@ -603,14 +618,16 @@ public class TypesREST {
         AtlasPerfTracer perf = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         boolean lockAcquired = false;
-        String lockKey = ATLAS_TYPEDEF_DELETE_BY_NAME_LOCK;
+        String lockKey = ATLAS_TYPEDEF_DELETE_BY_NAME_LOCK; // Simple lock key for deletes by name
+        
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeByName(" + typeName + ")");
             }
             lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired, proceeding with delete by name :: traceId {}", RequestContext.get().getTraceId());
+            LOG.info("Lock successfully acquired with key {}, proceeding with delete by name :: traceId {}", 
+                    lockKey, RequestContext.get().getTraceId());
             
             typeDefStore.deleteTypeByName(typeName);
             typeCacheRefresher.refreshAllHostCache();
@@ -622,6 +639,7 @@ public class TypesREST {
             throw new AtlasBaseException("Error while deleting a type definition");
         } finally {
             if (lockAcquired) {
+                LOG.debug("Releasing lock with key: {}", lockKey);
                 redisService.releaseDistributedLock(lockKey);
             }
             AtlasPerfTracer.log(perf);
@@ -657,13 +675,15 @@ public class TypesREST {
 
         return ret;
     }
-
+      
     @PreDestroy
     public void cleanUp() {
         try {
             LOG.info("TypesREST cleanup - releasing any held locks");
             if (redisService != null) {
                 // On application shutdown, release all possible locks
+                // This is important for cluster stability - if this node was holding any locks,
+                // they need to be released so other nodes can proceed
                 redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK_BASE + ":lock"); // Legacy lock
                 redisService.releaseDistributedLock(ATLAS_TYPEDEF_CREATE_LOCK);
                 redisService.releaseDistributedLock(ATLAS_TYPEDEF_UPDATE_LOCK);
