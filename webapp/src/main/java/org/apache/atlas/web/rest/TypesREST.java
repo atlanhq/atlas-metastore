@@ -471,13 +471,17 @@ public class TypesREST {
         AtlasPerfTracer perf = null;
         validateTypeCreateOrUpdate(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
+        boolean lockAcquired = false;
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.updateAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
+        
             attemptAcquiringLock();
+            lockAcquired = true;
+            LOG.info("Lock successfully acquired, proceeding with update :: traceId {}", RequestContext.get().getTraceId());
 
             for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
                 AtlasBusinessMetadataDef existingMB;
@@ -513,7 +517,9 @@ public class TypesREST {
             throw new AtlasBaseException("Error while updating a type definition");
         } finally {
             RequestContext.clear();
-            redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
+            if (lockAcquired) {
+                redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
+            }
             AtlasPerfTracer.log(perf);
         }
     }

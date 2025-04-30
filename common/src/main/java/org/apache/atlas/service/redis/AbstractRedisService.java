@@ -66,6 +66,9 @@ public abstract class AbstractRedisService implements RedisService {
             RLock lock = keyLockMap.get(key);
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
+                // Remove the lock from the map after releasing it to prevent memory leaks
+                keyLockMap.remove(key);
+                getLogger().debug("Released and removed lock for key: {}", key);
             }
         } catch (Exception e) {
             getLogger().error("Failed to release distributed lock for {}", key, e);
@@ -178,7 +181,25 @@ public abstract class AbstractRedisService implements RedisService {
     }
 
     @PreDestroy
-    public void flushLocks(){
-        keyLockMap.keySet().stream().forEach(k->keyLockMap.get(k).unlock());
+    public void flushLocks() {
+        try {
+            getLogger().info("Flushing all locks on shutdown, locks count: {}", keyLockMap.size());
+            keyLockMap.keySet().stream().forEach(k -> {
+                RLock lock = keyLockMap.get(k);
+                if (lock != null && lock.isHeldByCurrentThread()) {
+                    try {
+                        lock.unlock();
+                        getLogger().debug("Flushed lock for key: {}", k);
+                    } catch (Exception e) {
+                        getLogger().warn("Error unlocking key {} during shutdown", k, e);
+                    }
+                }
+            });
+            // Clear the map after unlocking all locks to prevent memory leaks
+            keyLockMap.clear();
+            getLogger().info("All locks flushed and cleared");
+        } catch (Exception e) {
+            getLogger().error("Error during lock flush on shutdown", e);
+        }
     }
 }
