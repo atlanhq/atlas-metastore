@@ -273,7 +273,12 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     @Override
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
         if (RequestContext.get().NEW_FLOW && isVertex()) {
-            return (List<V>) getProperty(propertyName, elementType);
+            Object val = getProperty(propertyName, elementType);
+            if (val == null) {
+                new ArrayList<>(0);
+            } else {
+                return (List<V>) val;
+            }
         }
 
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);

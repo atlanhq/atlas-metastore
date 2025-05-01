@@ -1234,7 +1234,7 @@ public class EntityGraphMapper {
                 return null;
             }
 
-            switch (ctx.getAttrType().getTypeCategory()) {
+            switch (ctx.getAttrType().getTypeCategory()) { // bulk
                 case PRIMITIVE:
                 case ENUM:
                     return mapPrimitiveValue(ctx, context);
