@@ -28,6 +28,8 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.*;
 import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasFullTextResult;
 import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasQueryType;
+import org.apache.atlas.model.glossary.relations.AtlasTermAssignmentHeader;
+import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
@@ -82,6 +84,7 @@ import static org.apache.atlas.SortOrder.ASCENDING;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
+import static org.apache.atlas.repository.graph.GraphHelper.getAllTagNames;
 import static org.apache.atlas.repository.graph.GraphHelper.parseLabelsString;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.BASIC_SEARCH_STATE_FILTER;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.TO_RANGE_LIST;
@@ -1172,8 +1175,21 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     String state = vertex.getProperty(Constants.STATE_PROPERTY_KEY, String.class);
                     Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);
                     header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
-
                     header.setAttributes(filterMapByKeys(vertex.getAllProperties(), resultAttributes));
+
+                    RequestContext context = RequestContext.get();
+                    boolean includeClassifications = context.includeClassifications();
+                    boolean includeClassificationNames = context.isIncludeClassificationNames();
+
+                    if (includeClassifications || includeClassificationNames) {
+                        List<AtlasClassification> tags = entityRetriever.getAllClassifications(entry.getKey());
+
+                        if (includeClassifications) {
+                            header.setClassifications(tags);
+                        }
+                        header.setClassificationNames(getAllTagNames(tags));
+                    }
+
                     ret.addEntity(header);
                 }
             }
@@ -1188,7 +1204,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 .filter(entry -> resultAttributes.contains("__"+entry.getKey()) || resultAttributes.contains(entry.getKey()))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
-    private void prepareSearchResultV1(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+    private void  prepareSearchResultV1(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         SearchParams searchParams = ret.getSearchParameters();
         try {
             if(LOG.isDebugEnabled()){
