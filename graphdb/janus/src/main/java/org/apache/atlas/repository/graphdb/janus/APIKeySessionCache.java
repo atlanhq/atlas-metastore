@@ -15,7 +15,7 @@ public class APIKeySessionCache {
     
     private static final long TTL_SECONDS = AtlasConfiguration.KEYCLOAK_TOKEN_INTROSPECT_CACHE_TTL_SECOND.getLong();
     private final Cache<String, Boolean> apiKeyCache;
-    private final Set<String> deniedApiKeys;
+    private final Set<String> deniedApiKeyTokens;
     
     private static APIKeySessionCache instance;
     
@@ -23,7 +23,7 @@ public class APIKeySessionCache {
         apiKeyCache = Caffeine.newBuilder()
                 .expireAfterWrite(TTL_SECONDS, TimeUnit.SECONDS)
                 .build();
-        deniedApiKeys = ConcurrentHashMap.newKeySet();
+        deniedApiKeyTokens = ConcurrentHashMap.newKeySet();
     }
     
     public static synchronized APIKeySessionCache getInstance() {
@@ -35,21 +35,22 @@ public class APIKeySessionCache {
     
     public void setCache(String apiKeyUsername) {
         apiKeyCache.put(apiKeyUsername, Boolean.TRUE);
-        LOG.debug("Cached API key for user: {}", apiKeyUsername);
     }
     
     public void addToDeniedCache(String apiKeyUsername) {
-        deniedApiKeys.add(apiKeyUsername);
-        LOG.debug("Added API key to denied cache: {}", apiKeyUsername);
+        deniedApiKeyTokens.add(apiKeyUsername);
     }
     
-    public boolean isValid(String apiKeyUsername) {
-        if (deniedApiKeys.contains(apiKeyUsername)) {
-            LOG.debug("API key found in denied cache: {}", apiKeyUsername);
+    public boolean isValid(String apiKeyUsername, String bearerToken) {
+        if (deniedApiKeyTokens.contains(bearerToken)) {
             return false;
         }
         
         Boolean isPresent = apiKeyCache.getIfPresent(apiKeyUsername);
         return isPresent != null && isPresent;
+    }
+
+    public boolean isDenied(String bearerToken) {
+        return deniedApiKeyTokens.contains(bearerToken);
     }
 }
