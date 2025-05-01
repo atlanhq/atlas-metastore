@@ -20,7 +20,9 @@ package org.apache.atlas.repository.graphdb.janus;
 import java.util.*;
 
 import com.datastax.oss.driver.shaded.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
@@ -37,6 +39,8 @@ import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Janus implementation of AtlasElement.
@@ -45,6 +49,7 @@ import org.janusgraph.core.JanusGraphElement;
  * that is stored.
  */
 public class AtlasJanusElement<T extends Element> implements AtlasElement {
+    private static final Logger LOG = LoggerFactory.getLogger(AtlasJanusElement.class);
 
     private T element;
     protected AtlasJanusGraph graph;
@@ -82,21 +87,28 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
                 Object val = vertex.getDynamicVertex().getProperty(propertyName);
 
-                if (clazz.equals(Long.class) && ! (val instanceof Long)) {
-                    return (T) Long.valueOf((String) val);
+                try {
+                    if (clazz.equals(Long.class) && ! (val instanceof Long)) {
+                        return (T) Long.valueOf((String) val);
 
-                } else if (clazz.equals(Float.class) && !(val instanceof Float)) {
-                    return (T) Float.valueOf((String) val);
+                    } else if (clazz.equals(Float.class) && !(val instanceof Float)) {
+                        return (T) Float.valueOf((String) val);
 
-                } else if (clazz.equals(Double.class) && !(val instanceof Double)) {
-                    return (T) Double.valueOf((String) val);
+                    } else if (clazz.equals(Double.class) && !(val instanceof Double)) {
+                        return (T) Double.valueOf((String) val);
 
-                } else if (clazz.equals(Integer.class) && !(val instanceof Integer)) {
-                    return (T) Integer.valueOf((String) val);
+                    } else if (clazz.equals(Integer.class) && !(val instanceof Integer)) {
+                        return (T) Integer.valueOf((String) val);
 
-                } else if (clazz.equals(Map.class) && !(val instanceof Map)) {
-                    return (T) AtlasType.fromJson((String) val, Map.class);
+                    } else if (clazz.equals(Map.class) && !(val instanceof Map)) {
+                        return (T) AtlasType.fromJson((String) val, Map.class);
+                    }
+                } catch (ClassCastException cce) {
+                    String errorMessage = String.format("Can not cast property %s from %s to %s", propertyName, val.getClass().getName(), clazz.getName());
+                    LOG.error(errorMessage);
+                    throw cce;
                 }
+
 
                 return (T) val;
             }

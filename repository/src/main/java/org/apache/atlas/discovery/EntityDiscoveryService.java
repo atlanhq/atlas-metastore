@@ -108,7 +108,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     private EntityGraphRetriever            entityRetriever;
 
-    @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
                                   AtlasGraph graph,
                                   GraphBackedSearchIndexer indexer,
@@ -116,21 +115,23 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                   UserProfileService userProfileService,
                                   StatsClient statsClient,
                                   EntityGraphRetriever entityRetriever) throws AtlasException {
-        this(typeRegistry, graph, indexer, searchTracker, userProfileService, statsClient);
-        this.entityRetriever          = entityRetriever;
+        this(typeRegistry, graph, indexer, searchTracker, userProfileService,  null, statsClient, entityRetriever);
     }
 
+    @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
                            AtlasGraph graph,
                            GraphBackedSearchIndexer indexer,
                            SearchTracker searchTracker,
                            UserProfileService userProfileService,
                             VertexRetrievalService vertexRetrievalService,
-                           StatsClient statsClient) throws AtlasException {
+                           StatsClient statsClient,
+                          EntityGraphRetriever entityRetriever) throws AtlasException {
         this.graph                    = graph;
         this.indexer                  = indexer;
         this.searchTracker            = searchTracker;
         this.gremlinQueryProvider     = AtlasGremlinQueryProvider.INSTANCE;
+        this.entityRetriever          = entityRetriever;
         this.typeRegistry             = typeRegistry;
         this.maxResultSetSize         = ApplicationProperties.get().getInt(Constants.INDEX_SEARCH_MAX_RESULT_SET_SIZE, 150);
         this.maxTypesLengthInIdxQuery = ApplicationProperties.get().getInt(Constants.INDEX_SEARCH_TYPES_MAX_QUERY_STR_LENGTH, 512);
@@ -143,16 +144,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.dslQueryExecutor = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
                 ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
                 : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
-    }
-
-    @Deprecated
-    public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
-                                  AtlasGraph graph,
-                                  GraphBackedSearchIndexer indexer,
-                                  SearchTracker searchTracker,
-                                  UserProfileService userProfileService,
-                                  StatsClient statsClient) throws AtlasException {
-        this(typeRegistry, graph, indexer, searchTracker, userProfileService,  null, statsClient);
     }
 
     @Override
