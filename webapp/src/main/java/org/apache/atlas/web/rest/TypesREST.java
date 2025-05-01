@@ -383,10 +383,22 @@ public class TypesREST {
         final String traceId = RequestContext.get().getTraceId();
         LOG.debug("Attempting to acquire lock '{}' for typedef operations :: traceId {}", lockKey, traceId);
         try {
-            // Add a small delay to avoid rapid retry storms in case of contention
-            if (!redisService.acquireDistributedLock(lockKey)) {
+            // Check if lock is already in keyLockMap (may happen if a previous operation failed to release)
+            // This is a defensive measure to handle cases where locks might not be properly released
+            try {
+                // Attempt to release any existing lock with same key before acquiring new one
+                redisService.releaseDistributedLock(lockKey);
+                LOG.info("Released potential previous lock with key '{}' :: traceId {}", lockKey, traceId);
+            } catch (Exception e) {
+                // Ignore errors - this is just a precautionary step
+                LOG.debug("No previous lock found or error releasing: {}", e.getMessage());
+            }
+            
+            // Try to acquire the lock
+            boolean acquired = redisService.acquireDistributedLock(lockKey);
+            if (!acquired) {
                 // Log at warning level instead of info to make it more visible in logs
-                LOG.info("Lock '{}' is already acquired by another process. Request denied :: traceId {}",
+                LOG.warn("Lock '{}' is already acquired by another process. Request denied :: traceId {}",
                         lockKey, traceId);
                 throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK, 
                         "Another operation is currently updating type definitions. Please try again later.");
@@ -438,15 +450,27 @@ public class TypesREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.createAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
-            lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired with key {}, proceeding with create :: traceId {}", 
-                    lockKey, RequestContext.get().getTraceId());
             
+            // Try to acquire the lock
+            try {
+                lockAcquired = attemptAcquiringSpecificLock(lockKey);
+                LOG.info("Lock successfully acquired with key {}, proceeding with create :: traceId {}", 
+                        lockKey, RequestContext.get().getTraceId());
+            } catch (AtlasBaseException e) {
+                LOG.error("Failed to acquire lock for create operation: {}", e.getMessage());
+                throw e;
+            }
+            
+            // Proceed with the create operation
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
             typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
             AtlasTypesDef atlasTypesDef = typeDefStore.createTypesDef(typesDef);
+
+            // Refresh cache
             typeCacheRefresher.refreshAllHostCache();
+            LOG.info("Cache refresh completed successfully after create operation");
+            
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.createAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -456,10 +480,25 @@ public class TypesREST {
             throw new AtlasBaseException("Error while creating a type definition");
         }
         finally {
+            // Always release the lock if it was acquired
             if (lockAcquired) {
-                LOG.debug("Releasing lock with key: {}", lockKey);
-                redisService.releaseDistributedLock(lockKey);
+                try {
+                    LOG.info("Releasing lock with key: {} :: traceId {}", lockKey, RequestContext.get().getTraceId());
+                    redisService.releaseDistributedLock(lockKey);
+                    LOG.debug("Lock released successfully: {}", lockKey);
+                } catch (Exception e) {
+                    LOG.error("Error releasing lock {}: {}", lockKey, e.getMessage(), e);
+                    // Continue since we can't do much about a failed lock release
+                }
             }
+            
+            // Clear the RequestContext and log performance trace
+            try {
+                RequestContext.clear();
+            } catch (Exception e) {
+                LOG.warn("Error clearing RequestContext: {}", e.getMessage());
+            }
+            
             AtlasPerfTracer.log(perf);
         }
     }
@@ -509,40 +548,53 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
         
-            // Acquire lock BEFORE any database operations
-            lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired with key {}, proceeding with update :: traceId {}", 
-                    lockKey, RequestContext.get().getTraceId());
+            // Try to acquire lock BEFORE any database operations
+            try {
+                lockAcquired = attemptAcquiringSpecificLock(lockKey);
+                LOG.info("Lock successfully acquired with key {}, proceeding with update :: traceId {}", 
+                        lockKey, RequestContext.get().getTraceId());
+            } catch (AtlasBaseException e) {
+                LOG.error("Failed to acquire lock for update operation: {}", e.getMessage());
+                throw e;
+            }
 
             // Process business metadata after acquiring lock
-            for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
-                AtlasBusinessMetadataDef existingMB;
-                try {
-                    existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
-                } catch (AtlasBaseException e) {
-                    //do nothing -- this BM is new
-                    existingMB = null;
+            try {
+                for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
+                    AtlasBusinessMetadataDef existingMB;
+                    try {
+                        existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
+                    } catch (AtlasBaseException e) {
+                        //do nothing -- this BM is new
+                        existingMB = null;
+                    }
+                    mb.setRandomNameForNewAttributeDefs(existingMB);
                 }
-                mb.setRandomNameForNewAttributeDefs(existingMB);
+                
+                // Process classifications after acquiring lock
+                for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
+                    AtlasClassificationDef existingClassificationDef;
+                    try {
+                        existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
+                    } catch (AtlasBaseException e) {
+                        //do nothing -- this classification is new
+                        existingClassificationDef = null;
+                    }
+                    classificationDef.setRandomNameForNewAttributeDefs(existingClassificationDef);
+                }
+            } catch (Exception e) {
+                LOG.error("Error processing business metadata or classifications: {}", e.getMessage(), e);
+                throw new AtlasBaseException("Error processing business metadata or classifications", e);
             }
             
-            // Process classifications after acquiring lock
-            for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
-                AtlasClassificationDef existingClassificationDef;
-                try {
-                    existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
-                } catch (AtlasBaseException e) {
-                    //do nothing -- this classification is new
-                    existingClassificationDef = null;
-                }
-                classificationDef.setRandomNameForNewAttributeDefs(existingClassificationDef);
-            }
-            
+            // Set RequestContext properties and perform update
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
+
             AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
             typeCacheRefresher.refreshAllHostCache();
+            LOG.info("Cache refresh completed successfully after update operation");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.updateAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -551,11 +603,25 @@ public class TypesREST {
             LOG.error("TypesREST.updateAtlasTypeDefs:: " + e.getMessage(), e);
             throw new AtlasBaseException("Error while updating a type definition");
         } finally {
-            RequestContext.clear();
+            // Always release the lock if it was acquired
             if (lockAcquired) {
-                LOG.info("Releasing lock with key: {}", lockKey);
-                redisService.releaseDistributedLock(lockKey);
+                try {
+                    LOG.info("Releasing lock with key: {} :: traceId {}", lockKey, RequestContext.get().getTraceId());
+                    redisService.releaseDistributedLock(lockKey);
+                    LOG.debug("Lock released successfully: {}", lockKey);
+                } catch (Exception e) {
+                    LOG.error("Error releasing lock {}: {}", lockKey, e.getMessage(), e);
+                    // Continue since we can't do much about a failed lock release
+                }
             }
+            
+            // Clear the RequestContext and log performance trace
+            try {
+                RequestContext.clear();
+            } catch (Exception e) {
+                LOG.warn("Error clearing RequestContext: {}", e.getMessage());
+            }
+            
             AtlasPerfTracer.log(perf);
         }
     }
@@ -583,12 +649,21 @@ public class TypesREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
-            lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired with key {}, proceeding with delete :: traceId {}", 
-                    lockKey, RequestContext.get().getTraceId());
             
+            // Try to acquire the lock
+            try {
+                lockAcquired = attemptAcquiringSpecificLock(lockKey);
+                LOG.info("Lock successfully acquired with key {}, proceeding with delete :: traceId {}", 
+                        lockKey, RequestContext.get().getTraceId());
+            } catch (AtlasBaseException e) {
+                LOG.error("Failed to acquire lock for delete operation: {}", e.getMessage());
+                throw e;
+            }
+
+            // Perform delete operation
             typeDefStore.deleteTypesDef(typesDef);
             typeCacheRefresher.refreshAllHostCache();
+            LOG.info("Cache refresh completed successfully after delete operation");
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -596,10 +671,25 @@ public class TypesREST {
             LOG.error("TypesREST.deleteAtlasTypeDefs:: " + e.getMessage(), e);
             throw new AtlasBaseException("Error while deleting a type definition");
         } finally {
+            // Always release the lock if it was acquired
             if (lockAcquired) {
-                LOG.debug("Releasing lock with key: {}", lockKey);
-                redisService.releaseDistributedLock(lockKey);
+                try {
+                    LOG.info("Releasing lock with key: {} :: traceId {}", lockKey, RequestContext.get().getTraceId());
+                    redisService.releaseDistributedLock(lockKey);
+                    LOG.debug("Lock released successfully: {}", lockKey);
+                } catch (Exception e) {
+                    LOG.error("Error releasing lock {}: {}", lockKey, e.getMessage(), e);
+                    // Continue since we can't do much about a failed lock release
+                }
             }
+            
+            // Clear the RequestContext and log performance trace
+            try {
+                RequestContext.clear();
+            } catch (Exception e) {
+                LOG.warn("Error clearing RequestContext: {}", e.getMessage());
+            }
+            
             AtlasPerfTracer.log(perf);
         }
     }
@@ -625,12 +715,24 @@ public class TypesREST {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeByName(" + typeName + ")");
             }
-            lockAcquired = attemptAcquiringSpecificLock(lockKey);
-            LOG.info("Lock successfully acquired with key {}, proceeding with delete by name :: traceId {}", 
-                    lockKey, RequestContext.get().getTraceId());
             
+            // Try to acquire the lock
+            try {
+                lockAcquired = attemptAcquiringSpecificLock(lockKey);
+                LOG.info("Lock successfully acquired with key {}, proceeding with delete by name :: traceId {}", 
+                        lockKey, RequestContext.get().getTraceId());
+            } catch (AtlasBaseException e) {
+                LOG.error("Failed to acquire lock for delete-by-name operation: {}", e.getMessage());
+                throw e;
+            }
+            
+            // Perform delete operation
             typeDefStore.deleteTypeByName(typeName);
+
+            // Refresh cache
             typeCacheRefresher.refreshAllHostCache();
+            LOG.info("Cache refresh completed successfully after delete-by-name operation");
+
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeByName:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -638,10 +740,25 @@ public class TypesREST {
             LOG.error("TypesREST.deleteAtlasTypeByName:: " + e.getMessage(), e);
             throw new AtlasBaseException("Error while deleting a type definition");
         } finally {
+            // Always release the lock if it was acquired
             if (lockAcquired) {
-                LOG.debug("Releasing lock with key: {}", lockKey);
-                redisService.releaseDistributedLock(lockKey);
+                try {
+                    LOG.info("Releasing lock with key: {} :: traceId {}", lockKey, RequestContext.get().getTraceId());
+                    redisService.releaseDistributedLock(lockKey);
+                    LOG.debug("Lock released successfully: {}", lockKey);
+                } catch (Exception e) {
+                    LOG.error("Error releasing lock {}: {}", lockKey, e.getMessage(), e);
+                    // Continue since we can't do much about a failed lock release
+                }
             }
+            
+            // Clear the RequestContext and log performance trace
+            try {
+                RequestContext.clear();
+            } catch (Exception e) {
+                LOG.warn("Error clearing RequestContext: {}", e.getMessage());
+            }
+            
             AtlasPerfTracer.log(perf);
         }
     }
@@ -678,21 +795,47 @@ public class TypesREST {
       
     @PreDestroy
     public void cleanUp() {
-        try {
-            LOG.info("TypesREST cleanup - releasing any held locks");
-            if (redisService != null) {
-                // On application shutdown, release all possible locks
-                // This is important for cluster stability - if this node was holding any locks,
-                // they need to be released so other nodes can proceed
+        LOG.info("TypesREST cleanup - releasing any held locks");
+        if (redisService != null) {
+            // On application shutdown, release all possible locks
+            // This is important for cluster stability - if this node was holding any locks,
+            // they need to be released so other nodes can proceed
+            try {
+                LOG.info("Releasing lock: {}", ATLAS_TYPEDEF_LOCK_BASE + ":lock");
                 redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK_BASE + ":lock"); // Legacy lock
-                redisService.releaseDistributedLock(ATLAS_TYPEDEF_CREATE_LOCK);
-                redisService.releaseDistributedLock(ATLAS_TYPEDEF_UPDATE_LOCK);
-                redisService.releaseDistributedLock(ATLAS_TYPEDEF_DELETE_LOCK);
-                redisService.releaseDistributedLock(ATLAS_TYPEDEF_DELETE_BY_NAME_LOCK);
-                LOG.info("TypesREST cleanup - all locks released");
+            } catch (Exception e) {
+                LOG.warn("Error releasing lock: " + ATLAS_TYPEDEF_LOCK_BASE + ":lock", e);
             }
-        } catch (Exception e) {
-            LOG.warn("Error during TypesREST cleanup", e);
+            
+            try {
+                LOG.info("Releasing lock: {}", ATLAS_TYPEDEF_CREATE_LOCK);
+                redisService.releaseDistributedLock(ATLAS_TYPEDEF_CREATE_LOCK);
+            } catch (Exception e) {
+                LOG.warn("Error releasing lock: " + ATLAS_TYPEDEF_CREATE_LOCK, e);
+            }
+            
+            try {
+                LOG.info("Releasing lock: {}", ATLAS_TYPEDEF_UPDATE_LOCK);
+                redisService.releaseDistributedLock(ATLAS_TYPEDEF_UPDATE_LOCK);
+            } catch (Exception e) {
+                LOG.warn("Error releasing lock: " + ATLAS_TYPEDEF_UPDATE_LOCK, e);
+            }
+            
+            try {
+                LOG.info("Releasing lock: {}", ATLAS_TYPEDEF_DELETE_LOCK);
+                redisService.releaseDistributedLock(ATLAS_TYPEDEF_DELETE_LOCK);
+            } catch (Exception e) {
+                LOG.warn("Error releasing lock: " + ATLAS_TYPEDEF_DELETE_LOCK, e);
+            }
+            
+            try {
+                LOG.info("Releasing lock: {}", ATLAS_TYPEDEF_DELETE_BY_NAME_LOCK);
+                redisService.releaseDistributedLock(ATLAS_TYPEDEF_DELETE_BY_NAME_LOCK);
+            } catch (Exception e) {
+                LOG.warn("Error releasing lock: " + ATLAS_TYPEDEF_DELETE_BY_NAME_LOCK, e);
+            }
+            
+            LOG.info("TypesREST cleanup - all locks released");
         }
     }
 }
