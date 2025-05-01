@@ -83,7 +83,7 @@ public class AtlasAuditService {
                 clientId = "unknown";
             }
         }
-        add(userName, operation, clientId, startTime, endTime, params, result, resultCount);
+        //add(userName, operation, clientId, startTime, endTime, params, result, resultCount);
     }
 
     public void add(String userName, AuditOperation operation, String clientId, Date startTime,

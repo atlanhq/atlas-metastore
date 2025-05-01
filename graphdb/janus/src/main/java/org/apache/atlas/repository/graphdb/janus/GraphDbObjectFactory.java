@@ -79,8 +79,7 @@ public final class GraphDbObjectFactory {
 
         AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
 
-        // TODO: flag based
-        if (RequestContext.get().NEW_FLOW) {
+        if (RequestContext.get().NEW_FLOW && !RequestContext.get().isShouldInvokeCassandraFlow()) {
             try {
                 DynamicVertex dynamicVertex = graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString());
                 if (dynamicVertex == null) {

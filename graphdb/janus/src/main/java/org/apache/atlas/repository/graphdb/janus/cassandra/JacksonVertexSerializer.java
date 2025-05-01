@@ -121,9 +121,9 @@ class JacksonVertexSerializer implements VertexSerializer {
                 return list;
             }
 
-            /* else if (node.isNumber()) {
+            /*else if (node.isNumber()) {
                 // Check if it's an integer or a floating-point number
-                /*if (node.isIntegralNumber()) {
+                if (node.isIntegralNumber()) {
                     String textValue = node.asText(); // Get the original string representation
                     try {
                         return Integer.parseInt(textValue);
@@ -150,7 +150,9 @@ class JacksonVertexSerializer implements VertexSerializer {
                         return node.asDouble();
                     }
                 }
-            } else if (node.isArray()) {
+            }*/
+
+            /* else if (node.isArray()) {
                 List<Object> list = new ArrayList<>();
                 ArrayNode arrayNode = (ArrayNode) node;
                 for (JsonNode element : arrayNode) {
