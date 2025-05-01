@@ -3,6 +3,7 @@ package org.apache.atlas.repository.graphdb.janus.cassandra;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
@@ -33,7 +34,9 @@ public class VertexRetrievalService {
      * @param session The Cassandra session
      */
     public VertexRetrievalService(CqlSession session, ObjectMapper objectMapper) {
-        this.repository = new CassandraVertexDataRepository(session,  objectMapper, "atlan_new_keyspace_2_1", "vertices");
+        this.repository = new CassandraVertexDataRepository(session,  objectMapper,
+                AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
+                AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString());
         this.serializer = new JacksonVertexSerializer(objectMapper);
         //AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
         this.defaultBatchSize = 10;

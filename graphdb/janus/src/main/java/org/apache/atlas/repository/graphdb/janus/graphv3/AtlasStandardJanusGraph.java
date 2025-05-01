@@ -28,6 +28,7 @@ import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.structure.Direction;
@@ -260,7 +261,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
                                 .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
                                 .build())
                 .withLocalDatacenter("datacenter1")
-                .withKeyspace("atlan_new_keyspace_2_1")
+                .withKeyspace(AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString())
                 .build();
     }
 

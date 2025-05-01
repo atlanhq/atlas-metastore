@@ -25,11 +25,7 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.AtlasException;
-import org.apache.atlas.ESAliasRequestBuilder;
-import org.apache.atlas.RequestContext;
+import org.apache.atlas.*;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.model.discovery.SearchParams;
@@ -201,7 +197,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                                 .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
                                 .build())
                 .withLocalDatacenter("datacenter1")
-                .withKeyspace("atlan_new_keyspace_2_1")
+                .withKeyspace(AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString())
                 .build();
     }
 
