@@ -17,12 +17,15 @@
  */
 package org.apache.atlas.repository.store.graph.v2;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.TimeBoundary;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.glossary.enums.AtlasTermAssignmentStatus;
@@ -50,11 +53,13 @@ import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.*;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.util.AccessControlUtils;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
-import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasMapType;
 import org.apache.atlas.type.AtlasRelationshipType;
@@ -87,7 +92,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.apache.atlas.AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS;
 import static org.apache.atlas.glossary.GlossaryUtils.TERM_ASSIGNMENT_ATTR_CONFIDENCE;
@@ -145,10 +149,24 @@ public class EntityGraphRetriever {
 
     private final boolean ignoreRelationshipAttr;
     private final AtlasGraph graph;
+    private TagDAO tagDAO;
 
     @Inject
+    public EntityGraphRetriever(TagDAO tagDAO, AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
+        this(graph, typeRegistry, false);
+        this.tagDAO = tagDAO;
+    }
+
     public EntityGraphRetriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         this(graph, typeRegistry, false);
+    }
+
+    public EntityGraphRetriever(EntityGraphRetriever retriever, boolean ignoreRelationshipAttr) {
+        this.tagDAO                 = retriever.tagDAO;
+        this.graph                  = retriever.graph;
+        this.graphHelper            = retriever.graphHelper;
+        this.typeRegistry           = retriever.typeRegistry;
+        this.ignoreRelationshipAttr = ignoreRelationshipAttr;
     }
 
     public EntityGraphRetriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean ignoreRelationshipAttr) {
@@ -156,7 +174,6 @@ public class EntityGraphRetriever {
         this.graphHelper            = new GraphHelper(graph);
         this.typeRegistry           = typeRegistry;
         this.ignoreRelationshipAttr = ignoreRelationshipAttr;
-
     }
 
     public AtlasEntity toAtlasEntity(String guid, boolean includeReferences) throws AtlasBaseException {
@@ -232,7 +249,7 @@ public class EntityGraphRetriever {
     public AtlasEntityHeader toAtlasEntityHeaderWithClassifications(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
         AtlasEntityHeader ret = toAtlasEntityHeader(entityVertex, attributes);
 
-        ret.setClassifications(getAllClassifications(entityVertex));
+        ret.setClassifications(handleGetAllClassifications(entityVertex));
 
         return ret;
     }
@@ -415,6 +432,11 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    public AtlasClassification toAtlasClassification(Tag tag) throws AtlasBaseException {
+        AtlasClassification classification = TagDAOCassandraImpl.toAtlasClassification(tag.getTagMetaJson());
+        return classification;
+    }
+
     public AtlasVertex getReferencedEntityVertex(AtlasEdge edge, AtlasRelationshipEdgeDirection relationshipDirection, AtlasVertex parentVertex) throws AtlasBaseException {
         AtlasVertex entityVertex = null;
 
@@ -581,9 +603,9 @@ public class EntityGraphRetriever {
     public String determinePropagationMode(Boolean currentRestrictPropagationThroughLineage, Boolean currentRestrictPropagationThroughHierarchy) throws AtlasBaseException {
         String propagationMode;
 
-        if (Boolean.TRUE.equals(currentRestrictPropagationThroughLineage) && Boolean.TRUE.equals(currentRestrictPropagationThroughHierarchy)) {
-            throw new AtlasBaseException("Both restrictPropagationThroughLineage and restrictPropagationThroughHierarchy cannot be true simultaneously.");
-        } else if (Boolean.TRUE.equals(currentRestrictPropagationThroughLineage)) {
+        validatePropagationRestrictionOptions(currentRestrictPropagationThroughLineage, currentRestrictPropagationThroughHierarchy);
+
+        if (Boolean.TRUE.equals(currentRestrictPropagationThroughLineage)) {
             propagationMode = CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE;
         } else if (Boolean.TRUE.equals(currentRestrictPropagationThroughHierarchy)) {
             propagationMode = CLASSIFICATION_PROPAGATION_MODE_RESTRICT_HIERARCHY;
@@ -593,6 +615,12 @@ public class EntityGraphRetriever {
 
         return propagationMode;
     }
+
+    public void validatePropagationRestrictionOptions(Boolean currentRestrictPropagationThroughLineage, Boolean currentRestrictPropagationThroughHierarchy) throws AtlasBaseException {
+        if (Boolean.TRUE.equals(currentRestrictPropagationThroughLineage) && Boolean.TRUE.equals(currentRestrictPropagationThroughHierarchy))
+            throw new AtlasBaseException("Both restrictPropagationThroughLineage and restrictPropagationThroughHierarchy cannot be true simultaneously.");
+    }
+
     public List<AtlasVertex> getImpactedVerticesV2(AtlasVertex entityVertex) {
         return getImpactedVerticesV2(entityVertex, (List<String>) null,false);
     }
@@ -623,9 +651,9 @@ public class EntityGraphRetriever {
 
         return ret;
     }
-    public List<AtlasVertex> getIncludedImpactedVerticesV2(AtlasVertex entityVertex, String relationshipGuidToExclude, String classificationId, List<String> edgeLabelsToCheck,Boolean toExclude) {
+    public List<AtlasVertex> getIncludedImpactedVerticesV2(AtlasVertex entityVertex, String relationshipGuidToExclude, List<String> edgeLabelsToCheck,Boolean toExclude) {
         List<String> vertexIds = new ArrayList<>();
-        traverseImpactedVerticesByLevel(entityVertex, relationshipGuidToExclude, classificationId, vertexIds, edgeLabelsToCheck,toExclude, null);
+        traverseImpactedVerticesByLevel(entityVertex, relationshipGuidToExclude, null, vertexIds, edgeLabelsToCheck,toExclude, null);
 
         List<AtlasVertex> ret = vertexIds.stream().map(x -> graph.getVertex(x))
                 .filter(vertex -> vertex != null)
@@ -843,6 +871,79 @@ public class EntityGraphRetriever {
         requestContext.endMetricRecord(metricRecorder);
     }
 
+    public void traverseImpactedVerticesByLevelV2(final AtlasVertex entityVertexStart, final String relationshipGuidToExclude,
+                                                 final String classificationId, final Set<String> result, List<String> edgeLabelsToCheck,Boolean toExclude, Set<String> verticesWithoutClassification) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder                          = RequestContext.get().startMetricRecord("traverseImpactedVerticesByLevel");
+        Set<String>                 visitedVerticesIds                          = new HashSet<>();
+        Set<String>                 verticesAtCurrentLevel                      = new HashSet<>();
+        Set<String>                 traversedVerticesIds                        = new HashSet<>();
+        Set<String>                 verticesWithOutClassification               = new HashSet<>();
+        RequestContext              requestContext                              = RequestContext.get();
+        boolean                     storeVerticesWithoutClassification          = verticesWithoutClassification == null ? false : true;
+
+        final ThreadFactory threadFactory = new ThreadFactoryBuilder()
+                .setNameFormat("Tasks-BFS-%d")
+                .setDaemon(true)
+                .build();
+
+        ExecutorService executorService = Executors.newFixedThreadPool(AtlasConfiguration.GRAPH_TRAVERSAL_PARALLELISM.getInt(), threadFactory);
+
+        //Add Source vertex to level 1
+        if (entityVertexStart != null) {
+            verticesAtCurrentLevel.add(entityVertexStart.getIdForDisplay());
+        }
+        /*
+            Steps in each level:
+                1. Add vertices to Visited Vertices set
+                2. Then fetch adjacent vertices of that vertex using getAdjacentVerticesIds
+                3. Use future to fetch it later as it is a Blocking call,so we want to execute it asynchronously
+                4. Then fetch the result from futures
+                5. It will return the adjacent vertices of the current level
+            After processing current level:
+                1. Add the adjacent vertices of current level to verticesToVisitNextLevel
+                2. Clear the processed vertices of current level
+                3. After that insert verticesToVisitNextLevel into current level
+           Continue the steps until all vertices are processed by checking if verticesAtCurrentLevel is empty
+         */
+        try {
+            while (!verticesAtCurrentLevel.isEmpty()) {
+                Set<String> verticesToVisitNextLevel = new HashSet<>();
+                List<CompletableFuture<Set<String>>> futures = verticesAtCurrentLevel.stream()
+                        .map(t -> {
+                            AtlasVertex entityVertex = graph.getVertex(t);
+                            visitedVerticesIds.add(entityVertex.getIdForDisplay());
+                            // If we want to store vertices without classification attached
+                            // Check if vertices has classification attached or not using function isClassificationAttached
+
+                            if(storeVerticesWithoutClassification && !verticesWithoutClassification.contains(entityVertex.getIdForDisplay())) {
+                                verticesWithOutClassification.add(entityVertex.getIdForDisplay());
+                            }
+
+                            return CompletableFuture.supplyAsync(() -> getAdjacentVerticesIds(entityVertex, classificationId,
+                                    relationshipGuidToExclude, edgeLabelsToCheck,toExclude, visitedVerticesIds), executorService);
+                        }).collect(Collectors.toList());
+
+                futures.stream().map(CompletableFuture::join).forEach(x -> {
+                    verticesToVisitNextLevel.addAll(x);
+                    traversedVerticesIds.addAll(x);
+                });
+
+                verticesAtCurrentLevel.clear();
+                verticesAtCurrentLevel.addAll(verticesToVisitNextLevel);
+            }
+        } finally {
+            executorService.shutdown();
+        }
+        result.addAll(traversedVerticesIds);
+
+        if(storeVerticesWithoutClassification) {
+            verticesWithoutClassification.clear();
+            verticesWithoutClassification.addAll(verticesWithOutClassification);
+        }
+
+        requestContext.endMetricRecord(metricRecorder);
+    }
+
     private Set<String> getAdjacentVerticesIds(AtlasVertex entityVertex,final String classificationId, final String relationshipGuidToExclude
             ,List<String> edgeLabelsToCheck,Boolean toExclude, Set<String> visitedVerticesIds) {
 
@@ -984,7 +1085,8 @@ public class EntityGraphRetriever {
                 mapRelationshipAttributes(entityVertex, entity, entityExtInfo, isMinExtInfo);
             }
 
-            mapClassifications(entityVertex, entity);
+            //mapClassifications(entityVertex, entity);
+            entity.setClassifications(tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay()));
         }
 
         return entity;
@@ -1207,11 +1309,16 @@ public class EntityGraphRetriever {
             RequestContext context = RequestContext.get();
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
-            if(includeClassifications){
-                ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
-            } else if (!includeClassifications && includeClassificationNames) {
-                ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
+
+            if(includeClassifications || includeClassificationNames){
+                List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+
+                if(includeClassifications){
+                    ret.setClassifications(tags);
+                }
+                ret.setClassificationNames(getAllTagNames(tags));
             }
+
             ret.setIsIncomplete(isIncomplete);
             ret.setLabels(getLabels(entityVertex));
 
@@ -1288,7 +1395,7 @@ public class EntityGraphRetriever {
         return ret;
     }
 
-    private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
+    public AtlasEntityHeader mapVertexToAtlasEntityHeaderWithPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithPrefetch");
         AtlasEntityHeader ret = new AtlasEntityHeader();
         try {
@@ -1312,11 +1419,16 @@ public class EntityGraphRetriever {
             RequestContext context = RequestContext.get();
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
-            if(includeClassifications){
-                ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
-            } else if (!includeClassifications && includeClassificationNames) {
-                ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
+
+            if(includeClassifications || includeClassificationNames){
+                List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+
+                if (includeClassifications) {
+                    ret.setClassifications(tags);
+                }
+                ret.setClassificationNames(getAllTagNames(tags));
             }
+
             ret.setIsIncomplete(isIncomplete);
             ret.setLabels(getLabels(entityVertex));
 
@@ -1519,7 +1631,31 @@ public class EntityGraphRetriever {
         entity.setBusinessAttributes(getBusinessMetadata(entityVertex));
     }
 
-    public List<AtlasClassification> getAllClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
+    public List<AtlasClassification> handleGetAllClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
+        if(getJanusOptimisationEnabled()) {
+            return getAllClassificationsV1(entityVertex);
+        } else {
+            return getAllClassificationsV2(entityVertex);
+        }
+    }
+
+    public List<AtlasClassification> getAllClassificationsV1(AtlasVertex entityVertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAllClassifications");
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Performing getAllClassifications");
+            }
+            return tagDAO.getTagsForVertex(entityVertex.getIdForDisplay());
+        } catch (Exception e) {
+            LOG.error("Error while getting all classifications", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+
+    public List<AtlasClassification> getAllClassificationsV2(AtlasVertex entityVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAllClassifications");
         try {
             if (LOG.isDebugEnabled()) {
@@ -1588,6 +1724,22 @@ public class EntityGraphRetriever {
             }
         } catch (Exception e) {
             LOG.error("Error while getting all classifications", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+    public List<AtlasClassification> getDirectClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getDirectClassifications");
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Performing getDirectClassifications");
+            }
+
+            return tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay());
+
+        } catch (Exception e) {
+            LOG.error("Error while getting direct classifications", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
