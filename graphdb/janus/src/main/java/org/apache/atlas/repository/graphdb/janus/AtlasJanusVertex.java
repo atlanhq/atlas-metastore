@@ -29,6 +29,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.AtlasVertexQuery;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.ArrayUtils;
@@ -46,6 +47,15 @@ import org.janusgraph.core.JanusGraphVertex;
  */
 public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> {
 
+    private DynamicVertex dynamicVertex;
+
+    public DynamicVertex getDynamicVertex() {
+        return dynamicVertex;
+    }
+
+    public void setDynamicVertex(DynamicVertex dynamicVertex) {
+        this.dynamicVertex = dynamicVertex;
+    }
 
     public AtlasJanusVertex(AtlasJanusGraph graph, Vertex source) {
         super(graph, source);
@@ -54,14 +64,22 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     @Override
     public <T> void addProperty(String propertyName, T value) {
         try {
-            getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+            if (RequestContext.get().NEW_FLOW && isVertex()) {
+                this.getDynamicVertex().addSetProperty(propertyName, value);
+
+                if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                    getWrappedElement().property(propertyName, value);
+                }
+            } else {
+                getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+            }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         }
     }
 
     @Override
-    public <T> void addListProperty(String propertyName, T value) {
+    public <T> void addListProperty(String propertyName, T value) { //TODO
         try {
             getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
         } catch(SchemaViolationException e) {

@@ -15,6 +15,9 @@
 package org.apache.atlas.repository.graphdb.janus.graphv3;
 
 import com.carrotsearch.hppc.LongArrayList;
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.google.common.base.Preconditions;
 import com.google.common.base.Predicate;
 import com.google.common.base.Predicates;
@@ -24,6 +27,8 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.ListMultimap;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Graph;
@@ -107,6 +112,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -127,6 +134,8 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
 
     private static final Logger log =
             LoggerFactory.getLogger(AtlasStandardJanusGraph.class);
+
+    String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
 
 
     static {
@@ -153,6 +162,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
     private final IDManager idManager;
     private final VertexIDAssigner idAssigner;
     private final TimestampProvider times;
+    private final CqlSession cqlSession;
 
     //Serializers
     protected final AtlasIndexSerializer indexSerializer;
@@ -202,6 +212,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
         this.schemaCache = configuration.getTypeCache(typeCacheRetrieval);
         this.times = configuration.getTimestampProvider();
         this.indexSelector = getConfiguration().getIndexSelectionStrategy();
+        this.cqlSession = initializeCassandraSession();
 
         isOpen = true;
         txCounter = new AtomicLong(0);
@@ -227,6 +238,30 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
         shutdownHook = new ShutdownThread(this);
         Runtime.getRuntime().addShutdownHook(shutdownHook);
         log.debug("Installed shutdown hook {}", shutdownHook, new Throwable("Hook creation trace"));
+    }
+
+    private CqlSession initializeCassandraSession() {
+        String hostname = null;
+        try {
+            hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+        return CqlSession.builder()
+                .addContactPoint(new InetSocketAddress(hostname, 9042))
+                .withConfigLoader(
+                        DriverConfigLoader.programmaticBuilder()
+                                .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(10))
+                                .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofSeconds(15))
+                                .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(15))
+                                .withDuration(DefaultDriverOption.CONTROL_CONNECTION_AGREEMENT_TIMEOUT, Duration.ofSeconds(20))
+                                .withDuration(DefaultDriverOption.REQUEST_TRACE_INTERVAL, Duration.ofMillis(500))
+                                .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
+                                .build())
+                .withLocalDatacenter("datacenter1")
+                .withKeyspace("atlan_new_keyspace_2_1")
+                .build();
     }
 
     public String getGraphName() {

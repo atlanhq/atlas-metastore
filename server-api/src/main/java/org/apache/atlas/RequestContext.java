@@ -41,6 +41,8 @@ public class RequestContext {
     private static final Logger METRICS = LoggerFactory.getLogger("METRICS");
     private static final Logger LOG = LoggerFactory.getLogger(RequestContext.class);
 
+    public boolean NEW_FLOW = true;
+
     private static final ThreadLocal<RequestContext> CURRENT_CONTEXT = new ThreadLocal<>();
     private static final Set<RequestContext>         ACTIVE_REQUESTS = new HashSet<>();
     private static final boolean                     isMetricsEnabled = METRICS.isDebugEnabled();
@@ -618,6 +620,8 @@ public class RequestContext {
     }
 
     public Collection<AtlasEntity> getDifferentialEntities() { return diffEntityCache.values(); }
+
+    public Set<String> getDifferentialGUIDS() { return diffEntityCache.keySet(); }
 
     public Map<String,AtlasEntity> getDifferentialEntitiesMap() { return diffEntityCache; }
 

@@ -1216,25 +1216,17 @@ public class EntityGraphMapper {
                 return null;
             }
 
-            switch (ctx.getAttrType().getTypeCategory()) {
+            switch (ctx.getAttrType().getTypeCategory()) { // bulk
                 case PRIMITIVE:
                 case ENUM:
                     return mapPrimitiveValue(ctx, context);
 
                 case STRUCT: {
-                    String    edgeLabel   = AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty());
-                    AtlasEdge currentEdge = graphHelper.getEdgeForLabel(ctx.getReferringVertex(), edgeLabel);
-                    AtlasEdge edge        = currentEdge != null ? currentEdge : null;
-
-                    ctx.setExistingEdge(edge);
-
-                    AtlasEdge newEdge = mapStructValue(ctx, context);
-
-                    if (currentEdge != null && !currentEdge.equals(newEdge)) {
-                        deleteDelegate.getHandler().deleteEdgeReference(currentEdge, ctx.getAttrType().getTypeCategory(), false, true, ctx.getReferringVertex());
+                    if (RequestContext.get().NEW_FLOW) {
+                        return mapToVertexByTypeCategoryForStructV2(ctx);
+                    } else {
+                        return mapToVertexByTypeCategoryForStruct(ctx, context);
                     }
-
-                    return newEdge;
                 }
 
                 case OBJECT_ID_TYPE: {
@@ -1343,6 +1335,35 @@ public class EntityGraphMapper {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private Object mapToVertexByTypeCategoryForStruct(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
+        String    edgeLabel   = AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty());
+        AtlasEdge currentEdge = graphHelper.getEdgeForLabel(ctx.getReferringVertex(), edgeLabel);
+        AtlasEdge edge        = currentEdge != null ? currentEdge : null;
+
+        ctx.setExistingEdge(edge);
+
+        AtlasEdge newEdge = mapStructValue(ctx, context);
+
+        if (currentEdge != null && !currentEdge.equals(newEdge)) {
+            deleteDelegate.getHandler().deleteEdgeReference(currentEdge, ctx.getAttrType().getTypeCategory(), false, true, ctx.getReferringVertex());
+        }
+
+        return newEdge;
+    }
+
+    private Object mapToVertexByTypeCategoryForStructV2(AttributeMutationContext ctx) throws AtlasBaseException {
+
+        AtlasStructType structType = typeRegistry.getStructTypeByName(ctx.getAttributeDef().getTypeName());
+        if (structType == null) {
+            structType = typeRegistry.getStructTypeByName(ctx.getCurrentElementType().getTypeName());
+        }
+        AtlasStruct struct = structType.getStructFromValue(ctx.getValue());
+
+        ctx.getReferringVertex().setProperty(ctx.getVertexProperty(), struct);
+
+        return struct;
     }
 
     private String mapSoftRefValue(AttributeMutationContext ctx, EntityMutationContext context) {
@@ -2761,7 +2782,12 @@ public class EntityGraphMapper {
             return ctx.getValue();
 
         case STRUCT:
-            return mapStructValue(ctx, context);
+            if (RequestContext.get().NEW_FLOW) {
+                //return ctx.getValue();
+                return mapToVertexByTypeCategoryForStructV2(ctx);
+            } else {
+                return mapStructValue(ctx, context);
+            }
 
         case OBJECT_ID_TYPE:
             AtlasEntityType instanceType = getInstanceType(ctx.getValue(), context);
@@ -3182,13 +3208,19 @@ public class EntityGraphMapper {
     private void setArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName, List<Object> allValues, List<Object> currentValues, Cardinality cardinality) {
         boolean isArrayOfPrimitiveType = elementType.getTypeCategory().equals(TypeCategory.PRIMITIVE);
         boolean isArrayOfEnum = elementType.getTypeCategory().equals(TypeCategory.ENUM);
+        boolean isArrayOfStruct = elementType.getTypeCategory().equals(TypeCategory.STRUCT);
 
         if (!isReference(elementType) || isSoftReference) {
-            if (isArrayOfPrimitiveType || isArrayOfEnum) {
-                vertex.removeProperty(vertexPropertyName);
-                if (CollectionUtils.isNotEmpty(allValues)) {
-                    for (Object value: allValues) {
-                        AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
+            if (isArrayOfPrimitiveType || isArrayOfEnum || isArrayOfStruct) {
+                if (RequestContext.get().NEW_FLOW) {
+                    AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
+
+                } else {
+                    vertex.removeProperty(vertexPropertyName);
+                    if (CollectionUtils.isNotEmpty(allValues)) {
+                        for (Object value: allValues) {
+                            AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
+                        }
                     }
                 }
             } else {
