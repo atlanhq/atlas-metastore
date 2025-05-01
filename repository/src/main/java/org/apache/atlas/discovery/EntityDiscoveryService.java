@@ -108,7 +108,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     private EntityGraphRetriever            entityRetriever;
 
-    @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
                                   AtlasGraph graph,
                                   GraphBackedSearchIndexer indexer,
@@ -120,6 +119,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.entityRetriever          = entityRetriever;
     }
 
+    @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
                            AtlasGraph graph,
                            GraphBackedSearchIndexer indexer,
