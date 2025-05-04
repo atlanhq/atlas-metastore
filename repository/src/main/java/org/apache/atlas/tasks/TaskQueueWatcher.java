@@ -167,7 +167,7 @@ public class TaskQueueWatcher implements Runnable {
 
         public List<AtlasTask> getTasks() {
             Map<String, Object> parameters = Map.of(
-                    "classificationName", "pA29bWAyFerMqOglcN7Chb"
+                    "classificationName", "x5fEiCEEhyoiCI2oXMVrlO"
             );
             AtlasTask newTask = new AtlasTask();
             newTask.setParameters(parameters);
@@ -175,7 +175,7 @@ public class TaskQueueWatcher implements Runnable {
             newTask.setCreatedBy("admin");
             newTask.setStatusPending();
             newTask.setAttemptCount(0);
-            newTask.setClassificationTypeName("pA29bWAyFerMqOglcN7Chb");
+            newTask.setClassificationTypeName("x5fEiCEEhyoiCI2oXMVrlO");
             newTask.setGuid("my-custom-guid-12345");
             newTask.setCreatedTime(new Date());
             newTask.setUpdatedTime(new Date());
