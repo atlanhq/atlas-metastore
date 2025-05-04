@@ -29,14 +29,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.PreDestroy;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLEANUP_CLASSIFICATION_PROPAGATION;
 
 public class TaskQueueWatcher implements Runnable {
     private static final Logger LOG = LoggerFactory.getLogger(TaskQueueWatcher.class);
@@ -167,8 +166,21 @@ public class TaskQueueWatcher implements Runnable {
         }
 
         public List<AtlasTask> getTasks() {
-            run();
-            return tasks;
+            Map<String, Object> parameters = Map.of(
+                    "classificationName", "pA29bWAyFerMqOglcN7Chb"
+            );
+            AtlasTask newTask = new AtlasTask();
+            newTask.setParameters(parameters);
+            newTask.setType(CLEANUP_CLASSIFICATION_PROPAGATION);
+            newTask.setCreatedBy("admin");
+            newTask.setStatusPending();
+            newTask.setAttemptCount(0);
+            newTask.setClassificationTypeName("pA29bWAyFerMqOglcN7Chb");
+            newTask.setGuid("my-custom-guid-12345");
+            newTask.setCreatedTime(new Date());
+            newTask.setUpdatedTime(new Date());
+
+            return new ArrayList<>(List.of(newTask));
         }
 
         public void clearTasks() {
