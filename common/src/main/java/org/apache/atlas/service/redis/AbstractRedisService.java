@@ -27,11 +27,10 @@ public abstract class AbstractRedisService implements RedisService {
     private static final String ATLAS_REDIS_MASTER_NAME = "atlas.redis.master_name";
     private static final String ATLAS_REDIS_LOCK_WAIT_TIME_MS = "atlas.redis.lock.wait_time.ms";
     private static final String ATLAS_REDIS_LOCK_WATCHDOG_TIMEOUT_MS = "atlas.redis.lock.watchdog_timeout.ms";
-    private static final String ATLAS_REDIS_LOCK_LEASE_TIME_MS = "atlas.redis.lock.lease_time.ms";
+    private static final String ATLAS_REDIS_LEASE_TIME_MS = "atlas.redis.lease_time.ms";
     private static final int DEFAULT_REDIS_WAIT_TIME_MS = 15_000;
     private static final int DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS = 600_000;
-    // Added default lease time of 30 seconds
-    private static final int DEFAULT_REDIS_LOCK_LEASE_TIME_MS = 30_000;
+    private static final int DEFAULT_REDIS_LEASE_TIME_MS = 60_000;
     private static final String ATLAS_METASTORE_SERVICE = "atlas-metastore-service";
 
     RedissonClient redisClient;
@@ -48,7 +47,7 @@ public abstract class AbstractRedisService implements RedisService {
         boolean isLockAcquired;
         try {
             RLock lock = redisClient.getFairLock(key);
-            isLockAcquired = lock.tryLock(waitTimeInMS,  leaseTimeInMS, TimeUnit.MILLISECONDS);
+            isLockAcquired = lock.tryLock(waitTimeInMS, leaseTimeInMS, TimeUnit.MILLISECONDS);
             if (isLockAcquired) {
                 keyLockMap.put(key, lock);
             } else {
@@ -61,20 +60,20 @@ public abstract class AbstractRedisService implements RedisService {
         return isLockAcquired;
     }
 
+
     @Override
     public void releaseDistributedLock(String key) {
-        if (!keyLockMap.containsKey(key)) {
-            return;
-        }
+            if (!keyLockMap.containsKey(key)) {
+                return;
+            }
         try {
             RLock lock = keyLockMap.get(key);
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
-            keyLockMap.remove(key);
+
         } catch (Exception e) {
             getLogger().error("Failed to release distributed lock for {}", key, e);
-            keyLockMap.remove(key);
         }
     }
 
@@ -112,7 +111,7 @@ public abstract class AbstractRedisService implements RedisService {
         keyLockMap = new ConcurrentHashMap<>();
         atlasConfig = ApplicationProperties.get();
         waitTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WAIT_TIME_MS, DEFAULT_REDIS_WAIT_TIME_MS);
-        leaseTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_LEASE_TIME_MS, DEFAULT_REDIS_LOCK_LEASE_TIME_MS);
+        leaseTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LEASE_TIME_MS, DEFAULT_REDIS_LEASE_TIME_MS);
         watchdogTimeoutInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WATCHDOG_TIMEOUT_MS, DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS);
         Config redisConfig = new Config();
         redisConfig.setLockWatchdogTimeout(watchdogTimeoutInMS);
