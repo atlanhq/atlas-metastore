@@ -23,7 +23,6 @@ import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.authorize.AtlasTypeAccessRequest;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
@@ -46,6 +45,7 @@ import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.model.typedef.AtlasBusinessMetadataDef.ATTR_OPTION_APPLICABLE_ENTITY_TYPES;
+import static org.apache.atlas.repository.Constants.TYPE_CATEGORY_PROPERTY_KEY;
 
 public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasBusinessMetadataDef> {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasBusinessMetadataDefStoreV2.class);
@@ -68,10 +68,10 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
         AtlasType type = typeRegistry.getType(businessMetadataDef.getName());
 
-        if (type.getTypeCategory() != TypeCategory.BUSINESS_METADATA) {
-            throw new AtlasBaseException(AtlasErrorCode.TYPE_MATCH_FAILED, businessMetadataDef.getName(),
-                    DataTypes.TypeCategory.BUSINESS_METADATA.name());
-        }
+//        if (type.getTypeCategory() != DataTypes.TypeCategory.BUSINESS_METADATA) {
+//            throw new AtlasBaseException(AtlasErrorCode.TYPE_MATCH_FAILED, businessMetadataDef.getName(),
+//                    DataTypes.TypeCategory.BUSINESS_METADATA.name());
+//        }
 
         AtlasAuthorizationUtils.verifyAccess(new AtlasTypeAccessRequest(AtlasPrivilege.TYPE_CREATE, businessMetadataDef), "create businessMetadata-def ", businessMetadataDef.getName());
 
@@ -82,13 +82,13 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
         }
 
         //validate uniqueness of display name for BM
-        if (type.getTypeCategory() == TypeCategory.BUSINESS_METADATA) {
+        /*if (type.getTypeCategory() == TypeCategory.BUSINESS_METADATA) {
             ret = typeDefStore.findTypeVertexByDisplayName(
                     businessMetadataDef.getDisplayName(), DataTypes.TypeCategory.BUSINESS_METADATA);
             if (ret != null) {
                 throw new AtlasBaseException(AtlasErrorCode.TYPE_WITH_DISPLAY_NAME_ALREADY_EXISTS, businessMetadataDef.getDisplayName());
             }
-        }
+        }*/
 
         ret = typeDefStore.createTypeVertex(businessMetadataDef);
 
@@ -161,7 +161,10 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(DataTypes.TypeCategory.BUSINESS_METADATA);
         while (vertices.hasNext()) {
-            ret.add(toBusinessMetadataDef(vertices.next()));
+            AtlasVertex typeVertex = vertices.next();
+            if (typeVertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, DataTypes.TypeCategory.class) == DataTypes.TypeCategory.BUSINESS_METADATA) {
+                ret.add(toBusinessMetadataDef(typeVertex));
+            }
         }
 
         if (LOG.isDebugEnabled()) {
@@ -182,7 +185,7 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, name);
         }
 
-        vertex.getProperty(Constants.TYPE_CATEGORY_PROPERTY_KEY, String.class);
+        vertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, String.class);
 
         AtlasBusinessMetadataDef ret = toBusinessMetadataDef(vertex);
 
@@ -256,9 +259,9 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
         AtlasType type = typeRegistry.getType(typeDef.getName());
 
-        if (type.getTypeCategory() != TypeCategory.BUSINESS_METADATA) {
+        /*if (type.getTypeCategory() != TypeCategory.BUSINESS_METADATA) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_MATCH_FAILED, typeDef.getName(), DataTypes.TypeCategory.BUSINESS_METADATA.name());
-        }
+        }*/
 
         AtlasVertex vertex = typeDefStore.findTypeVertexByNameAndCategory(name, DataTypes.TypeCategory.BUSINESS_METADATA);
 

@@ -42,6 +42,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.atlas.repository.Constants.TYPENAME_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.TYPE_CATEGORY_PROPERTY_KEY;
 
 /**
  * ClassificationDef store in v1 format.
@@ -128,6 +129,10 @@ class AtlasClassificationDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasClassif
 
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(TypeCategory.TRAIT);
         while (vertices.hasNext()) {
+            AtlasVertex typeVertex = vertices.next();
+            if (typeVertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, TypeCategory.class) == TypeCategory.TRAIT) {
+                ret.add(toClassificationDef(typeVertex));
+            }
             ret.add(toClassificationDef(vertices.next()));
         }
 

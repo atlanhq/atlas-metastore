@@ -28,6 +28,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.typesystem.types.DataTypes;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -37,6 +38,8 @@ import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+
+import static org.apache.atlas.repository.Constants.TYPE_CATEGORY_PROPERTY_KEY;
 
 /**
  * EntityDef store in v1 format.
@@ -113,7 +116,10 @@ public class AtlasEntityDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEntityDe
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(TypeCategory.CLASS);
 
         while (vertices.hasNext()) {
-            ret.add(toEntityDef(vertices.next()));
+            AtlasVertex typeVertex = vertices.next();
+            if (typeVertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, DataTypes.TypeCategory.class) == DataTypes.TypeCategory.CLASS) {
+                ret.add(toEntityDef(typeVertex));
+            }
         }
 
         if (LOG.isDebugEnabled()) {

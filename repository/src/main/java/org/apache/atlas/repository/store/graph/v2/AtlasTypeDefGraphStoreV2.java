@@ -172,7 +172,7 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
     Iterator<AtlasVertex> findTypeVerticesByCategory(TypeCategory category) {
 
         return (Iterator<AtlasVertex>) atlasGraph.query().has(VERTEX_TYPE_PROPERTY_KEY, VERTEX_TYPE)
-                .has(TYPE_CATEGORY_PROPERTY_KEY, category)
+                //.has(TYPE_CATEGORY_PROPERTY_KEY, category)
                 .vertices().iterator();
     }
 

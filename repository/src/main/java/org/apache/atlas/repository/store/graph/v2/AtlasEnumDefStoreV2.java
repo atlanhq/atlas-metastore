@@ -24,6 +24,7 @@ import org.apache.atlas.model.typedef.AtlasEnumDef.AtlasEnumElementDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.typesystem.types.DataTypes;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -35,6 +36,8 @@ import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+
+import static org.apache.atlas.repository.Constants.TYPE_CATEGORY_PROPERTY_KEY;
 
 /**
  * EnumDef store in v2 format.
@@ -101,7 +104,10 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
 
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(TypeCategory.ENUM);
         while (vertices.hasNext()) {
-            ret.add(toEnumDef(vertices.next()));
+            AtlasVertex typeVertex = vertices.next();
+            if (typeVertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, DataTypes.TypeCategory.class) == DataTypes.TypeCategory.ENUM) {
+                ret.add(toEnumDef(typeVertex));
+            }
         }
 
         if (LOG.isDebugEnabled()) {
