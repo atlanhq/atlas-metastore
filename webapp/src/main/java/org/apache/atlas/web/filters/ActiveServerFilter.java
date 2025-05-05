@@ -90,14 +90,16 @@ public class ActiveServerFilter implements Filter {
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse,
                          FilterChain filterChain) throws IOException, ServletException {
         // If maintenance mode is enabled, return a 503
-        if (FeatureFlagStore.evaluate(DISABLE_WRITE_FLAG, "true")) {
-            // Block all the POST, PUT, DELETE operations
-            HttpServletRequest request = (HttpServletRequest) servletRequest;
-            HttpServletResponse response = (HttpServletResponse) servletResponse;
-            if (isBlockedMethod(request.getMethod()) && !isWhitelistedAPI(request.getRequestURI())) {
-                LOG.error("Maintenance mode enabled. Blocking request: {}", request.getRequestURI());
-                sendMaintenanceModeResponse(response);
-                return; // Stop further processing
+        if (AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean()) {
+            if (FeatureFlagStore.evaluate(DISABLE_WRITE_FLAG, "true")) {
+                // Block all the POST, PUT, DELETE operations
+                HttpServletRequest request = (HttpServletRequest) servletRequest;
+                HttpServletResponse response = (HttpServletResponse) servletResponse;
+                if (isBlockedMethod(request.getMethod()) && !isWhitelistedAPI(request.getRequestURI())) {
+                    LOG.error("Maintenance mode enabled. Blocking request: {}", request.getRequestURI());
+                    sendMaintenanceModeResponse(response);
+                    return; // Stop further processing
+                }
             }
         }
         
