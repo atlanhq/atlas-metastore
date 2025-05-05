@@ -44,11 +44,9 @@ import java.lang.reflect.Type;
 public class AtlasJsonProvider extends JacksonJaxbJsonProvider {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasJsonProvider.class);
 
-    private static final ObjectMapper mapper = new ObjectMapper()
-                                                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
-
     public AtlasJsonProvider() {
-        super(mapper, JacksonJaxbJsonProvider.DEFAULT_ANNOTATIONS);
+        super(new ObjectMapper()
+                .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true), JacksonJaxbJsonProvider.DEFAULT_ANNOTATIONS);
 
         LOG.info("AtlasJsonProvider() instantiated");
     }

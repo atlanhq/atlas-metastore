@@ -17,6 +17,8 @@
  */
 package org.apache.atlas.discovery;
 
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
@@ -37,6 +39,8 @@ import org.apache.atlas.query.executors.DSLQueryExecutor;
 import org.apache.atlas.query.executors.ScriptEngineBasedExecutor;
 import org.apache.atlas.query.executors.TraversalBasedExecutor;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.cassandra.DynamicVertex;
+import org.apache.atlas.repository.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
@@ -55,6 +59,7 @@ import org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery;
 import org.apache.atlas.util.SearchPredicateUtil;
 import org.apache.atlas.util.SearchTracker;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.v1.model.instance.Id;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections4.IteratorUtils;
@@ -77,6 +82,7 @@ import static org.apache.atlas.SortOrder.ASCENDING;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
+import static org.apache.atlas.repository.graph.GraphHelper.parseLabelsString;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.BASIC_SEARCH_STATE_FILTER;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.TO_RANGE_LIST;
 
@@ -86,7 +92,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
 
     private final AtlasGraph                      graph;
-    private final EntityGraphRetriever            entityRetriever;
     private final AtlasGremlinQueryProvider       gremlinQueryProvider;
     private final AtlasTypeRegistry               typeRegistry;
     private final GraphBackedSearchIndexer        indexer;
@@ -98,7 +103,21 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final UserProfileService              userProfileService;
     private final SuggestionsProvider             suggestionsProvider;
     private final DSLQueryExecutor                dslQueryExecutor;
+    private final VertexRetrievalService vertexRetrievalService;
     private final StatsClient                     statsClient;
+
+    private EntityGraphRetriever            entityRetriever;
+
+    public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
+                                  AtlasGraph graph,
+                                  GraphBackedSearchIndexer indexer,
+                                  SearchTracker searchTracker,
+                                  UserProfileService userProfileService,
+                                  StatsClient statsClient,
+                                  EntityGraphRetriever entityRetriever) throws AtlasException {
+        this(typeRegistry, graph, indexer, searchTracker, userProfileService, statsClient);
+        this.entityRetriever          = entityRetriever;
+    }
 
     @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -106,9 +125,9 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                            GraphBackedSearchIndexer indexer,
                            SearchTracker searchTracker,
                            UserProfileService userProfileService,
+                            VertexRetrievalService vertexRetrievalService,
                            StatsClient statsClient) throws AtlasException {
         this.graph                    = graph;
-        this.entityRetriever          = new EntityGraphRetriever(this.graph, typeRegistry);
         this.indexer                  = indexer;
         this.searchTracker            = searchTracker;
         this.gremlinQueryProvider     = AtlasGremlinQueryProvider.INSTANCE;
@@ -119,10 +138,21 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.indexSearchPrefix        = AtlasGraphUtilsV2.getIndexSearchPrefix();
         this.userProfileService       = userProfileService;
         this.suggestionsProvider      = new SuggestionsProviderImpl(graph, typeRegistry);
-        this.statsClient              = statsClient;
-        this.dslQueryExecutor         = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
-                                            ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
-                                            : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
+        this.statsClient = statsClient;
+        this.vertexRetrievalService = vertexRetrievalService;
+        this.dslQueryExecutor = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
+                ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
+                : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
+    }
+
+    @Deprecated
+    public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
+                                  AtlasGraph graph,
+                                  GraphBackedSearchIndexer indexer,
+                                  SearchTracker searchTracker,
+                                  UserProfileService userProfileService,
+                                  StatsClient statsClient) throws AtlasException {
+        this(typeRegistry, graph, indexer, searchTracker, userProfileService,  null, statsClient);
     }
 
     @Override
@@ -278,7 +308,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
 
                     if (classificationNames != null) {
-                        List<String> traitNames = GraphHelper.getTraitNames(vertex);
+                        List<String> traitNames = GraphHelper.handleGetTraitNames(vertex);
 
                         if (CollectionUtils.isEmpty(traitNames) ||
                                 !CollectionUtils.containsAny(classificationNames, traitNames)) {
@@ -494,7 +524,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 AtlasEntityHeader entity = entityRetriever.toAtlasEntityHeader(atlasVertex, resultAttributes);
 
                 if(searchParameters.getIncludeClassificationAttributes()) {
-                    entity.setClassifications(entityRetriever.getAllClassifications(atlasVertex));
+                    entity.setClassifications(entityRetriever.handleGetAllClassifications(atlasVertex));
                 }
 
                 ret.addEntity(entity);
@@ -650,7 +680,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 AtlasEntityHeader entity = entityRetriever.toAtlasEntityHeader(vertex, searchParameters.getAttributes());
 
                 if (searchParameters.getIncludeClassificationAttributes()) {
-                    entity.setClassifications(entityRetriever.getAllClassifications(vertex));
+                    entity.setClassifications(entityRetriever.handleGetAllClassifications(vertex));
                 }
                 resultList.add(entity);
             }
@@ -977,6 +1007,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
         RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
 
+        RequestContext.get().setIncludeMeanings(!searchParams.isExcludeMeanings());
+        RequestContext.get().setIncludeClassifications(!searchParams.isExcludeClassifications());
+        RequestContext.get().setIncludeClassificationNames(searchParams.isIncludeClassificationNames());
+
         AtlasSearchResult ret = new AtlasSearchResult();
         AtlasIndexQuery indexQuery;
 
@@ -1072,6 +1106,98 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+        if (RequestContext.get().isShouldInvokeCassandraFlow()) {
+            fetchCollapsedResults = false;
+            prepareSearchResultV2(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
+        } else {
+            prepareSearchResultV1(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
+        }
+    }
+
+        private void prepareSearchResultV2(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+        SearchParams searchParams = ret.getSearchParameters();
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Preparing search results for ({})", ret.getSearchParameters());
+            }
+            Iterator<Result> iterator = indexQueryResult.getIterator();
+            boolean showSearchScore = searchParams.getShowSearchScore();
+            if (iterator == null) {
+                return;
+            }
+
+            final int BATCH_SIZE = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
+            List<String> batchIds = new ArrayList<>(BATCH_SIZE);
+            List<Result> batchResults = new ArrayList<>(BATCH_SIZE);
+
+            while (iterator.hasNext()) {
+
+                // Clear previous batch data
+                batchIds.clear();
+                batchResults.clear();
+
+                while (iterator.hasNext() && batchIds.size() < BATCH_SIZE) {
+                    Result result = iterator.next();
+                    AtlasVertex vertex = result.getVertex();
+                    if (vertex == null) {
+                        LOG.warn("vertex in null");
+                        continue;
+                    }
+                    String id = vertex.getIdForDisplay();
+                    batchIds.add(id);
+                    batchResults.add(result);
+                }
+
+                if (batchIds.isEmpty()) {
+                    // No more results to process
+                    break;
+                }
+
+                // Step 3: Fetch all properties for this batch from Cassandra in one call
+                Map<String, DynamicVertex> vertexPropertiesMap = vertexRetrievalService.retrieveVertices(batchIds);
+
+                if (vertexPropertiesMap == null || vertexPropertiesMap.isEmpty()) {
+                    // No properties found for this batch
+                    continue;
+                }
+                // Iterate through vertexPropertiesMap
+                // for each entry in vertexPropertiesMap create AtlasEntityHeader
+                for (Map.Entry<String, DynamicVertex> entry : vertexPropertiesMap.entrySet()) {
+                    DynamicVertex vertex = entry.getValue();
+                    AtlasEntityHeader header = new AtlasEntityHeader();
+                    header.setGuid(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
+                    header.setTypeName(vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class));
+                    header.setCreateTime(new Date((vertex.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class))));
+                    header.setCreatedBy(vertex.getProperty(CREATED_BY_KEY, String.class));
+                    header.setUpdateTime(new Date((vertex.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class))));
+                    header.setUpdatedBy(vertex.getProperty(MODIFIED_BY_KEY, String.class));
+                    header.setDisplayText(vertex.getProperty(TYPE_DISPLAYNAME_PROPERTY_KEY, String.class));
+                    header.setLabels(parseLabelsString(vertex.getProperty(LABELS_PROPERTY_KEY, String.class)));
+
+                    Integer value = vertex.getProperty(Constants.IS_INCOMPLETE_PROPERTY_KEY, Integer.class);
+                    Boolean isIncomplete = value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
+                    header.setIsIncomplete(isIncomplete);
+
+                    String state = vertex.getProperty(Constants.STATE_PROPERTY_KEY, String.class);
+                    Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);
+                    header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
+
+                    header.setAttributes(filterMapByKeys(vertex.getAllProperties(), resultAttributes));
+                    ret.addEntity(header);
+                }
+            }
+        } catch (Exception e) {
+            throw e;
+        }
+        scrubSearchResults(ret, searchParams.getSuppressLogs());
+    }
+
+    private Map<String, Object> filterMapByKeys(Map<String, Object> originalMap, Set<String> resultAttributes) {
+        return originalMap.entrySet().stream()
+                .filter(entry -> resultAttributes.contains("__"+entry.getKey()) || resultAttributes.contains(entry.getKey()))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+    }
+    private void prepareSearchResultV1(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         SearchParams searchParams = ret.getSearchParameters();
         try {
             if(LOG.isDebugEnabled()){
@@ -1083,6 +1209,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return;
             }
 
+
             while (iterator.hasNext()) {
                 Result result = iterator.next();
                 AtlasVertex vertex = result.getVertex();
@@ -1092,10 +1219,9 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     continue;
                 }
 
+
                 AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
-                if(RequestContext.get().includeClassifications()){
-                    header.setClassifications(entityRetriever.getAllClassifications(vertex));
-                }
+
                 if (showSearchScore) {
                     ret.addEntityScore(header.getGuid(), result.getScore());
                 }
@@ -1121,7 +1247,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
                         DirectIndexQueryResult indexQueryCollapsedResult = result.getCollapseVertices(collapseKey);
                         collapseRet.setApproximateCount(indexQueryCollapsedResult.getApproximateCount());
-                        prepareSearchResult(collapseRet, indexQueryCollapsedResult, collapseResultAttributes, false);
+                        prepareSearchResultV1(collapseRet, indexQueryCollapsedResult, collapseResultAttributes, false);
 
                         collapseRet.setSearchParameters(null);
                         collapse.put(collapseKey, collapseRet);
@@ -1140,7 +1266,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 ret.addEntity(header);
             }
         } catch (Exception e) {
-                throw e;
+            throw e;
         }
         scrubSearchResults(ret, searchParams.getSuppressLogs());
     }
