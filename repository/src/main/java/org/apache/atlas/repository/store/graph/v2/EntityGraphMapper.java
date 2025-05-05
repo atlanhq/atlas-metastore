@@ -2391,7 +2391,7 @@ public class EntityGraphMapper {
             RequestContext.get().endMetricRecord(metricRecorder);
             return;
         }
-
+        LOG.debug("==> Vertex Type While update product attr: {}", toVertexType);
         if (TYPE_PRODUCT.equals(toVertexType)) {
             String attrName = ctx.getAttribute().getRelationshipEdgeLabel().equals(OUTPUT_PORT_PRODUCT_EDGE_LABEL)
                     ? OUTPUT_PORT_GUIDS_ATTR
