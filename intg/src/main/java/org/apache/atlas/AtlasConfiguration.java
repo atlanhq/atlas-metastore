@@ -146,8 +146,8 @@ public enum AtlasConfiguration {
      * Cassabdra Configuration
      */
     ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
-    ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "atlan_new_keyspace_2_1"),
-    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "vertices");
+    ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "janusgraph_target"),
+    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets");
 
 
 

@@ -61,6 +61,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ImmutablePath;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Element;
+import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.io.IoCore;
 import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONMapper;
@@ -97,6 +98,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.atlas.AtlasErrorCode.INDEX_SEARCH_FAILED;
 import static org.apache.atlas.AtlasErrorCode.RELATIONSHIP_CREATE_INVALID_PARAMS;
@@ -296,9 +298,17 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
-        Vertex result = getGraph().addVertex();
+        Vertex result = getGraph().addVertex(T.id, generateRandomNormalVertexId());
 
         return GraphDbObjectFactory.createVertex(this, result);
+    }
+
+    public static long generateRandomNormalVertexId() {
+        long id;
+        do {
+            id = ThreadLocalRandom.current().nextLong(10000, 100000); // 5-digit numbers
+        } while (id % 8 != 0); // ensure it's a NormalVertex ID (divisible by 8)
+        return id;
     }
 
     @Override
