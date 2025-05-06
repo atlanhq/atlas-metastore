@@ -26,6 +26,7 @@ import org.apache.atlas.authorize.*;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder;
 import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.bulkimport.BulkImportResponse.ImportInfo;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.featureflag.FeatureFlagStore;
@@ -58,6 +59,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEnt
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.LineagePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
@@ -99,6 +101,7 @@ import java.util.stream.Collectors;
 import static java.lang.Boolean.FALSE;
 import static org.apache.atlas.AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
+import static org.apache.atlas.AtlasConfiguration.ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE;
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.authorize.AtlasPrivilege.*;
 import static org.apache.atlas.bulkimport.BulkImportResponse.ImportStatus.FAILED;
@@ -1732,7 +1735,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapper entityGraphMapper, boolean isPartialUpdate) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
-        this.graph.setEnableCache(RequestContext.get().isCacheEnabled());
+
         EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapper);
         EntityGraphDiscoveryContext discoveryContext = graphDiscoverer.discoverEntities();
         EntityMutationContext       context          = new EntityMutationContext(discoveryContext);
@@ -2072,6 +2075,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
                 preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
                 break;
+
+            case PROCESS_ENTITY_TYPE:
+                if(ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean()){
+                    preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
+                }
         }
 
         //  The default global pre-processor for all AssetTypes

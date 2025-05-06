@@ -13,7 +13,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+distro
 # Maven
 target*
 dependency-reduced-pom.xml
@@ -82,3 +82,5 @@ distro/solr/*.tgz
 
 # local models and configurations
 /deploy
+**.class
+*/bin

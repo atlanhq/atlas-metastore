@@ -22,12 +22,7 @@ name: Java CI with Maven
 on:
   push:
     branches:
-      - alpha
-      - beta
-      - development
-      - master
-      - lineageondemand
-      - optimise_classifications_fetch
+      - staging
 
 jobs:
   build:
@@ -99,7 +94,7 @@ jobs:
 
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v2
+        uses: docker/build-push-action@v3
         with:
           context: .
           file: ./Dockerfile
