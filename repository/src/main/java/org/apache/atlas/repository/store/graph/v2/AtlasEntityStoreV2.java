@@ -1691,7 +1691,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             if (RequestContext.get().NEW_FLOW) {
                 // TODO: Move to commit graph section
-                List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream().map(x -> context.getVertex(x)).toList();
+                List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
+                        .map(x -> context.getVertex(x))
+                        .filter(Objects::nonNull)
+                        .toList();
                 dynamicVertexRetrievalService.insertVertices(updatedVertexList);
             }
 
