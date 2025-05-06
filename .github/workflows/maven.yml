@@ -27,7 +27,8 @@ on:
       - development
       - master
       - lineageondemand
-      - optimise_classifications_fetch
+      - cassandrautils
+      - idonlymaster
 
 jobs:
   build:

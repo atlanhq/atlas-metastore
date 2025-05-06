@@ -45,13 +45,15 @@ public class MigrationImport extends ImportStrategy {
     private final AtlasGraphProvider graphProvider;
     private final AtlasTypeRegistry typeRegistry;
     private final AtlasEntityChangeNotifier entityChangeNotifier;
+    private final EntityGraphRetriever entityGraphRetriever;
 
     public MigrationImport(AtlasGraph graph, AtlasGraphProvider graphProvider,
-                           AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier) {
+                           AtlasTypeRegistry typeRegistry, AtlasEntityChangeNotifier entityChangeNotifier, EntityGraphRetriever entityGraphRetriever) {
         this.graph = graph;
         this.graphProvider = graphProvider;
         this.typeRegistry = typeRegistry;
         this.entityChangeNotifier = entityChangeNotifier;
+        this.entityGraphRetriever = entityGraphRetriever;
         LOG.info("MigrationImport: Using bulkLoading...");
     }
 
@@ -96,7 +98,7 @@ public class MigrationImport extends ImportStrategy {
                                                               DataMigrationStatusService dataMigrationStatusService) {
         AtlasGraph graphBulk = graphProvider.getBulkLoading();
 
-        EntityGraphRetriever entityGraphRetriever = new EntityGraphRetriever(this.graph, typeRegistry);
+        EntityGraphRetriever entityGraphRetriever = this.entityGraphRetriever;
         EntityGraphRetriever entityGraphRetrieverBulk = new EntityGraphRetriever(graphBulk, typeRegistry);
 
         AtlasEntityStoreV2 entityStore = createEntityStore(this.graph, typeRegistry);
@@ -121,15 +123,15 @@ public class MigrationImport extends ImportStrategy {
 
     private AtlasEntityStoreV2 createEntityStore(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
         FullTextMapperV2Nop fullTextMapperV2 = new FullTextMapperV2Nop();
-        DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null);
-        RestoreHandlerV1 restoreHandlerV1 = new RestoreHandlerV1(graph, typeRegistry);
+        DeleteHandlerDelegate deleteDelegate = new DeleteHandlerDelegate(graph, typeRegistry, null, null);
+        RestoreHandlerV1 restoreHandlerV1 = new RestoreHandlerV1(graph, typeRegistry, entityGraphRetriever);
 
-        AtlasRelationshipStore relationshipStore = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
+        AtlasRelationshipStore relationshipStore = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier, null);
         EntityGraphMapper entityGraphMapper = new EntityGraphMapper(deleteDelegate, restoreHandlerV1, typeRegistry,
-                graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null);
-        AtlasRelationshipStoreV2 atlasRelationshipStoreV2 = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier);
+                graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null, null, null);
+        AtlasRelationshipStoreV2 atlasRelationshipStoreV2 = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier, null);
 
-        return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null);
+        return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null, null);
     }
 
     private void shutdownEntityCreationManager(EntityCreationManager creationManager) {
@@ -142,6 +144,6 @@ public class MigrationImport extends ImportStrategy {
 
     private AtlasInstanceConverter getInstanceConverter(AtlasGraph graph) {
         AtlasFormatConverters formatConverters = new AtlasFormatConverters(typeRegistry);
-        return new AtlasInstanceConverter(graph, typeRegistry, formatConverters);
+        return new AtlasInstanceConverter(graph, typeRegistry, formatConverters, null);
     }
 }

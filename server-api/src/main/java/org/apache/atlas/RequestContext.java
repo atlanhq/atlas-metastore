@@ -18,6 +18,8 @@
 
 package org.apache.atlas;
 
+import org.apache.atlas.model.CassandraTagOperation;
+import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.instance.*;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.tasks.AtlasTask;
@@ -38,6 +40,8 @@ import static org.apache.atlas.model.instance.AtlasObjectId.KEY_GUID;
 public class RequestContext {
     private static final Logger METRICS = LoggerFactory.getLogger("METRICS");
     private static final Logger LOG = LoggerFactory.getLogger(RequestContext.class);
+
+    public boolean NEW_FLOW = true;
 
     private static final ThreadLocal<RequestContext> CURRENT_CONTEXT = new ThreadLocal<>();
     private static final Set<RequestContext>         ACTIVE_REQUESTS = new HashSet<>();
@@ -115,8 +119,14 @@ public class RequestContext {
     private boolean delayTagNotifications = false;
     private boolean skipHasLineageCalculation = false;
     private boolean isInvokedByIndexSearch = false;
+
+    private boolean shouldInvokeCassandraFlow = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
+
+    // Track Cassandra operations for rollback
+    private final Map<String, Stack<CassandraTagOperation>> cassandraTagOperations = new HashMap<>();
+    private final List<ESDeferredOperation> esDeferredOperations = new ArrayList<>();
 
     Map<String, Object> tagsDiff = new HashMap<>();
 
@@ -183,6 +193,8 @@ public class RequestContext {
         this.delayTagNotifications = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
+        esDeferredOperations.clear();
+        this.cassandraTagOperations.clear();
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -609,6 +621,8 @@ public class RequestContext {
 
     public Collection<AtlasEntity> getDifferentialEntities() { return diffEntityCache.values(); }
 
+    public Set<String> getDifferentialGUIDS() { return diffEntityCache.keySet(); }
+
     public Map<String,AtlasEntity> getDifferentialEntitiesMap() { return diffEntityCache; }
 
     public Collection<AtlasEntityHeader> getUpdatedEntities() {
@@ -813,6 +827,15 @@ public class RequestContext {
         return isInvokedByIndexSearch;
     }
 
+    public boolean isShouldInvokeCassandraFlow() {
+        return shouldInvokeCassandraFlow;
+    }
+
+    public void setShouldInvokeCassandraFlow(boolean shouldInvokeCassandraFlow) {
+        this.shouldInvokeCassandraFlow = shouldInvokeCassandraFlow;
+    }
+
+
     public class EntityGuidPair {
         private final Object entity;
         private final String guid;
@@ -888,4 +911,21 @@ public class RequestContext {
     public boolean isEdgeLabelAlreadyProcessed(String processEdgeLabel) {
         return edgeLabels.contains(processEdgeLabel);
     }
+
+    public void addCassandraTagOperation(String entityGuid, CassandraTagOperation operation) {
+        cassandraTagOperations.computeIfAbsent(entityGuid, k -> new Stack<>()).push(operation);
+    }
+
+    public Map<String, Stack<CassandraTagOperation>> getCassandraTagOperations() {
+        return cassandraTagOperations;
+    }
+
+    public void addESDeferredOperation(ESDeferredOperation op) {
+        esDeferredOperations.add(op);
+    }
+
+    public List<ESDeferredOperation> getESDeferredOperations() {
+        return esDeferredOperations;
+    }
+
 }

@@ -17,15 +17,15 @@
  */
 package org.apache.atlas.repository.graphdb.janus;
 
+import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
-import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.AtlasException;
-import org.apache.atlas.ESAliasRequestBuilder;
-import org.apache.atlas.RequestContext;
+import org.apache.atlas.*;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.model.discovery.SearchParams;
@@ -43,6 +43,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
 import org.apache.atlas.type.AtlasType;
@@ -60,6 +61,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ImmutablePath;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Element;
+import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.io.IoCore;
 import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONMapper;
@@ -88,12 +90,15 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.atlas.AtlasErrorCode.INDEX_SEARCH_FAILED;
 import static org.apache.atlas.AtlasErrorCode.RELATIONSHIP_CREATE_INVALID_PARAMS;
@@ -124,6 +129,14 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     private final RestClient esUiClusterClient;
     private final RestClient esNonUiClusterClient;
+
+    private String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
+    private final CqlSession cqlSession;
+    private final VertexRetrievalService dynamicVertexRetrievalService;
+
+    public VertexRetrievalService getDynamicVertexRetrievalService() {
+        return dynamicVertexRetrievalService;
+    }
 
     private final ThreadLocal<GremlinGroovyScriptEngine> scriptEngine = ThreadLocal.withInitial(() -> {
         DefaultImportCustomizer.Builder builder = DefaultImportCustomizer.build()
@@ -162,6 +175,32 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.elasticsearchClient = elasticsearchClient;
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
+        this.cqlSession = initializeCassandraSession();
+        this.dynamicVertexRetrievalService = new VertexRetrievalService(cqlSession, new ObjectMapper());
+    }
+
+    private CqlSession initializeCassandraSession() {
+        String hostname = null;
+        try {
+            hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+        return CqlSession.builder()
+                .addContactPoint(new InetSocketAddress(hostname, 9042))
+                .withConfigLoader(
+                        DriverConfigLoader.programmaticBuilder()
+                                .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(10))
+                                .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofSeconds(15))
+                                .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(15))
+                                .withDuration(DefaultDriverOption.CONTROL_CONNECTION_AGREEMENT_TIMEOUT, Duration.ofSeconds(20))
+                                .withDuration(DefaultDriverOption.REQUEST_TRACE_INTERVAL, Duration.ofMillis(500))
+                                .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
+                                .build())
+                .withLocalDatacenter("datacenter1")
+                .withKeyspace(AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString())
+                .build();
     }
 
     @Override
@@ -259,9 +298,17 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
-        Vertex result = getGraph().addVertex();
+        Vertex result = getGraph().addVertex(T.id, generateRandomNormalVertexId());
 
         return GraphDbObjectFactory.createVertex(this, result);
+    }
+
+    public static long generateRandomNormalVertexId() {
+        long id;
+        do {
+            id = ThreadLocalRandom.current().nextLong(10000, 100000); // 5-digit numbers
+        } while (id % 8 != 0); // ensure it's a NormalVertex ID (divisible by 8)
+        return id;
     }
 
     @Override

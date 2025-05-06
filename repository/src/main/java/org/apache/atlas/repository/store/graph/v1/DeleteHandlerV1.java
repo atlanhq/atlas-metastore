@@ -80,6 +80,7 @@ import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_ADD;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_REFRESH_PROPAGATION;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_ENTITY_GUID;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
@@ -103,10 +104,11 @@ public abstract class DeleteHandlerV1 {
     private   final AtlasGraph           graph;
     private   final TaskUtil             taskUtil;
 
-    public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete, TaskManagement taskManagement) {
+    public DeleteHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean shouldUpdateInverseReference, boolean softDelete,
+                           TaskManagement taskManagement, EntityGraphRetriever entityRetriever) {
         this.typeRegistry                  = typeRegistry;
         this.graphHelper                   = new GraphHelper(graph);
-        this.entityRetriever               = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever               = entityRetriever;
         this.shouldUpdateInverseReferences = shouldUpdateInverseReference;
         this.softDelete                    = softDelete;
         this.taskManagement                = taskManagement;
@@ -142,7 +144,7 @@ public abstract class DeleteHandlerV1 {
                 AtlasEntityHeader entityHeader = vertexInfo.getEntity();
 
                 if (requestContext.isPurgeRequested()) {
-                    entityHeader.setClassifications(entityRetriever.getAllClassifications(vertexInfo.getVertex()));
+                    entityHeader.setClassifications(entityRetriever.handleGetAllClassifications(vertexInfo.getVertex()));
                 }
 
                 requestContext.recordEntityDelete(entityHeader);
@@ -1344,6 +1346,22 @@ public abstract class DeleteHandlerV1 {
         String              entityGuid  = GraphHelper.getGuid(entityVertex);
         Map<String, Object> taskParams  = ClassificationTask.toParameters(entityGuid, classificationVertexId, relationshipGuid);
         AtlasTask           task        = taskManagement.createTask(taskType, currentUser, taskParams, classificationVertexId, classificationTypeName, entityGuid);
+
+        AtlasGraphUtilsV2.addEncodedProperty(entityVertex, PENDING_TASKS_PROPERTY_KEY, task.getGuid());
+
+        RequestContext.get().queueTask(task);
+    }
+
+    public void createAndQueueTaskWithoutCheckV2(String taskType, AtlasVertex entityVertex, String classificationTypeName, String relationshipGuid) throws AtlasBaseException {
+        String              currentUser = RequestContext.getCurrentUser();
+        String              entityGuid  = GraphHelper.getGuid(entityVertex);
+
+        Map<String, Object> taskParams  = new HashMap<String, Object>() {{
+            put(PARAM_ENTITY_GUID, entityGuid);
+            put(TASK_CLASSIFICATION_TYPENAME, classificationTypeName);
+        }};
+
+        AtlasTask task = taskManagement.createTaskV2(taskType, currentUser, taskParams, classificationTypeName, entityGuid);
 
         AtlasGraphUtilsV2.addEncodedProperty(entityVertex, PENDING_TASKS_PROPERTY_KEY, task.getGuid());
 
