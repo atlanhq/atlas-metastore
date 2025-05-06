@@ -23,6 +23,7 @@ import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.SearchFilter;
 import org.apache.atlas.model.typedef.*;
+import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graph.TypeCacheRefresher;
 import org.apache.atlas.repository.util.FilterUtil;
 import org.apache.atlas.service.redis.RedisService;
@@ -44,10 +45,15 @@ import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import java.io.IOException;
+import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.locks.Lock;
 
 /**
  * REST interface for CRUD operations on type definitions
@@ -390,6 +396,25 @@ public class TypesREST {
         }
     }
 
+    private Lock attemptAcquiringLockV2() throws AtlasBaseException {
+        final String traceId = RequestContext.get().getTraceId();
+        try {
+
+            Lock lock = redisService.acquireDistributedLockV2(ATLAS_TYPEDEF_LOCK);
+            if (lock == null) {
+                LOG.info("Lock is already acquired. Returning now :: traceId {}", traceId);
+                throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK);
+            }
+            LOG.info("successfully acquired lock :: traceId {}", traceId);
+            return lock;
+        } catch (AtlasBaseException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.error("Error while acquiring lock on type-defs :: traceId " + traceId + " ." + e.getMessage(), e);
+            throw new AtlasBaseException("Error while acquiring a lock on type-defs");
+        }
+    }
+
     /* Bulk API operation */
 
     /**
@@ -471,14 +496,14 @@ public class TypesREST {
         AtlasPerfTracer perf = null;
         validateTypeCreateOrUpdate(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
+        Lock lock = null;
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.updateAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
-            attemptAcquiringLock();
-
+            lock = attemptAcquiringLockV2();
             for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
                 AtlasBusinessMetadataDef existingMB;
                 try{
@@ -503,7 +528,42 @@ public class TypesREST {
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
             AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
-            typeCacheRefresher.refreshAllHostCache();
+            ExecutorService executor = Executors.newSingleThreadExecutor();
+            executor.submit(() -> {
+                try {
+                    int maxRetries = 3;
+                    int retryCount = 0;
+                    boolean success = false;
+
+                    while (!success && retryCount < maxRetries) {
+                        try {
+                            typeCacheRefresher.refreshAllHostCache();
+                            LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef refreshed successfully on attempt {}", retryCount + 1);
+                            success = true;
+                        } catch (IOException | URISyntaxException | RepositoryException e) {
+                            retryCount++;
+                            if (retryCount >= maxRetries) {
+                                LOG.error("TypesRest.updateAtlasTypeDefs:: Failed to refresh typedef after {} attempts", maxRetries, e);
+                                throw new RuntimeException("Failed to refresh typedef after " + maxRetries + " attempts", e);
+                            }
+
+                            // Exponential backoff: wait longer between each retry
+                            long waitTimeMs = 1000 * (long)Math.pow(2, retryCount - 1);
+                            LOG.warn("TypesRest.updateAtlasTypeDefs:: Retry attempt {} after {} ms", retryCount, waitTimeMs);
+
+                            try {
+                                Thread.sleep(waitTimeMs);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                throw new RuntimeException("Retry interrupted", ie);
+                            }
+                        }
+                    }
+                } finally {
+                    executor.shutdown();
+                }
+            });
+            LOG.info("TypesRest.updateAtlasTypeDefs:: Done");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.updateAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -512,6 +572,9 @@ public class TypesREST {
             LOG.error("TypesREST.updateAtlasTypeDefs:: " + e.getMessage(), e);
             throw new AtlasBaseException("Error while updating a type definition");
         } finally {
+            if (lock != null) {
+                redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
+            }
             RequestContext.clear();
             AtlasPerfTracer.log(perf);
         }
