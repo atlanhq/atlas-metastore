@@ -33,7 +33,6 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.typesystem.types.DataTypes;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -46,8 +45,6 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Objects;
-
-import static org.apache.atlas.repository.Constants.TYPE_CATEGORY_PROPERTY_KEY;
 
 /**
  * RelationshipDef store in v1 format.
@@ -161,10 +158,7 @@ public class AtlasRelationshipDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasRe
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(TypeCategory.RELATIONSHIP);
 
         while (vertices.hasNext()) {
-            AtlasVertex typeVertex = vertices.next();
-            if (typeVertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, DataTypes.TypeCategory.class) == DataTypes.TypeCategory.RELATIONSHIP) {
-                ret.add(toRelationshipDef(typeVertex));
-            }
+            ret.add(toRelationshipDef(vertices.next()));
         }
 
         if (LOG.isDebugEnabled()) {

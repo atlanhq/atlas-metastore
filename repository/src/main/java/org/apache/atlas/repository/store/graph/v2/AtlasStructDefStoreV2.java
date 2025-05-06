@@ -27,7 +27,6 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasConstraintDef;
-import org.apache.atlas.typesystem.types.DataTypes;
 import org.apache.atlas.v1.model.typedef.AttributeDefinition;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -50,7 +49,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-import static org.apache.atlas.repository.Constants.TYPE_CATEGORY_PROPERTY_KEY;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 
 /**
@@ -132,10 +130,7 @@ public class AtlasStructDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasStructDe
 
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(TypeCategory.STRUCT);
         while (vertices.hasNext()) {
-            AtlasVertex typeVertex = vertices.next();
-            if (typeVertex.getProperty(TYPE_CATEGORY_PROPERTY_KEY, DataTypes.TypeCategory.class) == DataTypes.TypeCategory.STRUCT) {
-                ret.add(toStructDef(typeVertex));
-            }
+            ret.add(toStructDef(vertices.next()));
         }
 
         if (LOG.isDebugEnabled()) {
