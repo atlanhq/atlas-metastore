@@ -1086,7 +1086,7 @@ public class EntityGraphRetriever {
             }
 
             //mapClassifications(entityVertex, entity);
-            entity.setClassifications(tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay()));
+//            entity.setClassifications(tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay()));
         }
 
         return entity;
@@ -2635,12 +2635,6 @@ public class EntityGraphRetriever {
         }
         relationship.setVersion(version);
 
-        Integer provenanceType = GraphHelper.getProvenanceType(edge);
-        if (provenanceType == null) {
-            provenanceType = Integer.valueOf(0);
-        }
-        relationship.setProvenanceType(provenanceType);
-        relationship.setHomeId(GraphHelper.getHomeId(edge));
 
         relationship.setStatus(GraphHelper.getEdgeStatus(edge));
 
