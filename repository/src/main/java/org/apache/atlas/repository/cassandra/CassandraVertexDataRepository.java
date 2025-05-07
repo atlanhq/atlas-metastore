@@ -7,8 +7,6 @@ import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.collect.Lists;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -52,10 +50,14 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     }
 
     /**
-     * Fetches vertex JSON data as strings.
+     * Fetches vertices directly as DynamicVertex objects without intermediate JSON serialization/deserialization.
+     * This is the most efficient method for retrieving vertices from the database.
+     *
+     * @param vertexIds List of vertex IDs to fetch
+     * @return Map of vertex ID to DynamicVertex object
      */
     @Override
-    public Map<String, String> fetchVerticesJsonData(List<String> vertexIds) throws AtlasBaseException {
+    public Map<String, DynamicVertex> fetchVerticesDirectly(List<String> vertexIds) throws AtlasBaseException {
         if (vertexIds == null || vertexIds.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -72,67 +74,35 @@ class CassandraVertexDataRepository implements VertexDataRepository {
             return Collections.emptyMap();
         }
 
+        Map<String, DynamicVertex> results = new HashMap<>();
+        
         // Split large batches into smaller ones to avoid Cassandra limitations
         if (sanitizedIds.size() > MAX_IN_CLAUSE_ITEMS) {
-            return fetchLargeBatch(sanitizedIds);
+            List<List<String>> batches = Lists.partition(sanitizedIds, MAX_IN_CLAUSE_ITEMS);
+            
+            // Process each batch
+            for (List<String> batch : batches) {
+                try {
+                    Map<String, DynamicVertex> batchResults = fetchSingleBatchDirectly(batch);
+                    results.putAll(batchResults);
+                } catch (Exception e) {
+                    LOG.error("Error fetching batch of vertex data directly", e);
+                    // Continue with other batches even if one fails
+                }
+            }
         } else {
-            return fetchSingleBatch(sanitizedIds);
+            results = fetchSingleBatchDirectly(sanitizedIds);
         }
-    }
-
-    /**
-     * Fetches vertex data as parsed JsonNodes instead of raw strings.
-     * This is more efficient when the caller needs to work with the JSON directly.
-     *
-     * @param vertexIds List of vertex IDs to fetch
-     * @return Map of vertex ID to parsed JsonNode
-     */
-    @Override
-    public Map<String, JsonNode> fetchVerticesAsJsonNodes(List<String> vertexIds) throws AtlasBaseException {
-        Map<String, String> vertexJsonDataLookup = fetchVerticesJsonData(vertexIds);
-        Map<String, JsonNode> vertexJsonNodesLookup = new HashMap<>(vertexJsonDataLookup.size());
-
-        for (Map.Entry<String, String> entry : vertexJsonDataLookup.entrySet()) {
-            try {
-                JsonNode node = objectMapper.readTree(entry.getValue());
-                vertexJsonNodesLookup.put(entry.getKey(), node);
-            } catch (JsonProcessingException e) {
-                LOG.warn("Failed to parse JSON for vertex ID {}: {}", entry.getKey(), e.getMessage());
-                throw new AtlasBaseException("Failed to parse JSON for vertex ID: " + entry.getKey(), e);
-            }
-        }
-
-        return vertexJsonNodesLookup;
-    }
-
-    /**
-     * Fetches a large batch of vertices by splitting into smaller batches.
-     */
-    private Map<String, String> fetchLargeBatch(List<String> vertexIds) {
-        Map<String, String> results = new HashMap<>();
-        List<List<String>> batches = Lists.partition(vertexIds, MAX_IN_CLAUSE_ITEMS);
-
-        // Process each batch
-        for (List<String> batch : batches) {
-            try {
-                Map<String, String> batchResults = fetchSingleBatch(batch);
-                results.putAll(batchResults);
-            } catch (Exception e) {
-                LOG.error("Error fetching batch of vertex data", e);
-                // Continue with other batches even if one fails
-            }
-        }
-
+        
         return results;
     }
 
     /**
-     * Fetches a single batch of vertices with retry logic.
-     * Parses JSON data into JsonNode trees using Jackson.
+     * Fetches a single batch of vertices directly as DynamicVertex objects.
+     * Avoids the JSON string parsing overhead.
      */
-    private Map<String, String> fetchSingleBatch(List<String> vertexIds) throws AtlasBaseException {
+    private Map<String, DynamicVertex> fetchSingleBatchDirectly(List<String> vertexIds) throws AtlasBaseException {
         try {
-
             // Get or prepare the statement for this batch size
             PreparedStatement statement = getPreparedStatementForBatchSize(vertexIds.size());
 
@@ -143,32 +113,47 @@ class CassandraVertexDataRepository implements VertexDataRepository {
             }
 
             // Set query timeout and other options
-            boundStatement = boundStatement
-                    .setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
+            boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
 
             // Execute the query
             ResultSet resultSet = session.execute(boundStatement);
 
-            // Process the results and parse JSON with Jackson
-            Map<String, String> results = new HashMap<>();
-
+            // Process the results directly into DynamicVertex objects
+            Map<String, DynamicVertex> results = new HashMap<>(vertexIds.size());
 
             for (Row row : resultSet) {
                 String id = row.getString("id");
                 String jsonData = row.getString("json_data");
-                results.put(id, jsonData);
+                
+                try {
+                    // Parse the JSON directly to a Map
+                    Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
+                    
+                    // Create a DynamicVertex with all properties from the Map
+                    DynamicVertex vertex = new DynamicVertex(props);
+                    
+                    // Ensure ID is set in the vertex properties
+                    if (!vertex.hasProperty("id")) {
+                        vertex.setProperty("id", id);
+                    }
+                    
+                    results.put(id, vertex);
+                } catch (Exception e) {
+                    LOG.warn("Failed to convert JSON to DynamicVertex for ID {}: {}", id, e.getMessage());
+                    // Skip this vertex but continue processing others
+                }
             }
 
             return results;
 
         } catch (QueryValidationException e) {
             // These are non-recoverable errors with the query itself
-            LOG.error("Invalid query error fetching vertex data: {}", e.getMessage());
+            LOG.error("Invalid query error fetching vertex data directly: {}", e.getMessage());
             throw new AtlasBaseException("Invalid query: " + e.getMessage(), e);
         } catch (Exception e) {
             // For unexpected errors
-            LOG.error("Unexpected error fetching vertex data", e);
-            throw new AtlasBaseException("Failed to fetch vertex data: " + e.getMessage(), e);
+            LOG.error("Unexpected error fetching vertex data directly", e);
+            throw new AtlasBaseException("Failed to fetch vertex data directly: " + e.getMessage(), e);
         }
     }
 
