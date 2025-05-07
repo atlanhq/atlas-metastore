@@ -1,7 +1,6 @@
 package org.apache.atlas.repository.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -22,7 +21,6 @@ public class VertexRetrievalService {
     private static final Logger LOG = LoggerFactory.getLogger(VertexRetrievalService.class);
 
     private final VertexDataRepository repository;
-    private final JacksonVertexSerializer serializer;
     private final int defaultBatchSize;
 
     /**
@@ -33,9 +31,8 @@ public class VertexRetrievalService {
     @Inject
     public VertexRetrievalService(CqlSession session) {
         ObjectMapper objectMapper = new ObjectMapper();
-        this.repository = new CassandraVertexDataRepository(session,  objectMapper, AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
+        this.repository = new CassandraVertexDataRepository(session, objectMapper, AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
                 AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString());
-        this.serializer = new JacksonVertexSerializer(objectMapper);
         this.defaultBatchSize = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
     }
 
@@ -67,36 +64,11 @@ public class VertexRetrievalService {
             int endIndex = Math.min(i + batchSize, vertexIds.size());
             List<String> batch = vertexIds.subList(i, endIndex);
 
-            // Use the JsonNode-based method for more efficient processing
-            Map<String, JsonNode> jsonNodeMap = repository.fetchVerticesAsJsonNodes(batch);
-            Map<String, DynamicVertex> batchResults = convertJsonNodesToVertices(jsonNodeMap);
-
+            // Use direct loading approach
+            Map<String, DynamicVertex> batchResults = repository.fetchVerticesDirectly(batch);
             results.putAll(batchResults);
         }
 
         return results;
-    }
-
-    /**
-     * Converts pre-parsed JsonNodes to DynamicVertex objects.
-     * This is more efficient as it avoids parsing the JSON string again.
-     */
-    private Map<String, DynamicVertex> convertJsonNodesToVertices(Map<String, JsonNode> jsonNodeMap) {
-        Map<String, DynamicVertex> vertexMap = new HashMap<>();
-
-        for (Map.Entry<String, JsonNode> entry : jsonNodeMap.entrySet()) {
-            String id = entry.getKey();
-            JsonNode jsonNode = entry.getValue();
-
-            try {
-                // Use the direct JsonNode deserialization method
-                DynamicVertex vertex = serializer.deserializeFromNode(jsonNode);
-                vertexMap.put(id, vertex);
-            } catch (Exception e) {
-                LOG.error("Error converting JsonNode to DynamicVertex for ID: {}", id, e);
-            }
-        }
-
-        return vertexMap;
     }
 }
