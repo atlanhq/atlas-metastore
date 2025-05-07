@@ -1190,6 +1190,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                         header.setClassificationNames(getAllTagNames(tags));
                     }
 
+                    if(context.includeMeanings()) {
+                        List<AtlasTermAssignmentHeader> termAssignmentHeaders = Optional.ofNullable(vertex.getProperty("meanings"))
+                                .map(meanings -> (List<AtlasTermAssignmentHeader>) meanings)
+                                .orElse(Collections.emptyList());
+                        header.setMeanings(termAssignmentHeaders);
+                        header.setMeaningNames(
+                                termAssignmentHeaders.stream().map(AtlasTermAssignmentHeader::getDisplayText)
+                                        .collect(Collectors.toList()));
+                    }
                     ret.addEntity(header);
                 }
             }
