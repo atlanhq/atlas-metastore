@@ -514,7 +514,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.debug("Property {} is mapped to index field name {}", attribute.getQualifiedName(), attribute.getIndexFieldName());
                         }
                     } else {
-                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        }
                     }
                 }
             }
