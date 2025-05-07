@@ -1086,7 +1086,7 @@ public class EntityGraphRetriever {
             }
 
             //mapClassifications(entityVertex, entity);
-//            entity.setClassifications(tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay()));
+            entity.setClassifications(tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay()));
         }
 
         return entity;
