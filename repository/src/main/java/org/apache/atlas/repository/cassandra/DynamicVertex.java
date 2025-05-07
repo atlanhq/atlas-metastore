@@ -20,6 +20,36 @@ public class DynamicVertex {
     private final Map<String, Object> properties = new HashMap<>();
 
     /**
+     * Default constructor.
+     */
+    public DynamicVertex() {
+    }
+
+    /**
+     * Constructor with initial properties.
+     *
+     * @param properties The initial properties to set
+     */
+    public DynamicVertex(Map<String, Object> properties) {
+        if (properties != null) {
+            this.properties.putAll(properties);
+        }
+    }
+
+    /**
+     * Sets all properties from a Map.
+     *
+     * @param properties The properties to set
+     * @return This DynamicVertex instance for method chaining
+     */
+    public DynamicVertex setAllProperties(Map<String, Object> properties) {
+        if (properties != null) {
+            this.properties.putAll(properties);
+        }
+        return this;
+    }
+
+    /**
      * Gets a property value by its key.
      *
      * @param key The property key
