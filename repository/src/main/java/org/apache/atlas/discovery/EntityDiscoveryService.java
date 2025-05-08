@@ -1101,7 +1101,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
-        if (RequestContext.get().isShouldInvokeCassandraFlow()) {
+        if (RequestContext.get().NEW_FLOW) {
             fetchCollapsedResults = false;
             prepareSearchResultV2(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
         } else {

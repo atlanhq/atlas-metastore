@@ -412,13 +412,6 @@ public class DiscoveryREST {
                 }
             }
 
-            if (CollectionUtils.isNotEmpty(parameters.getUtmTags())) {
-                parameters.setShouldInvokeVanillaCassandraFlow(parameters.getUtmTags().stream().anyMatch("page_assets"::equalsIgnoreCase) &&
-                        parameters.getUtmTags().stream().anyMatch("project_webapp"::equalsIgnoreCase));
-            }
-
-            RequestContext.get().setShouldInvokeCassandraFlow(parameters.isShouldInvokeVanillaCassandraFlow());
-
             if (StringUtils.isEmpty(parameters.getQuery())) {
                 AtlasBaseException abe = new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid search query");
                 if (enableSearchLogging && parameters.isSaveSearchLog()) {

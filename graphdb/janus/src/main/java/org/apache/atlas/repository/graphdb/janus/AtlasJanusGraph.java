@@ -20,7 +20,6 @@ package org.apache.atlas.repository.graphdb.janus;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -298,7 +297,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
-        Vertex result = getGraph().addVertex(T.id, generateRandomNormalVertexId());
+        Vertex result = getGraph().addVertex();
 
         return GraphDbObjectFactory.createVertex(this, result);
     }
