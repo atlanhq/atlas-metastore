@@ -53,6 +53,7 @@ import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.*;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.util.AccessControlUtils;
@@ -2237,10 +2238,17 @@ public class EntityGraphRetriever {
                 return null;
             }
 
+            // need to validate why there is check to set dynamic vertex only if RequestContext.get().isShouldInvokeCassandraFlow(): false
             AtlasVertex referenceVertex = edge.getInVertex();
 
+            // as dynamic vertex is not set above: forcefully set here
+           hardLoadDynamicVertex(referenceVertex);
+
             if (StringUtils.equals(getIdFromVertex(referenceVertex), getIdFromVertex(entityVertex))) {
+                // need to validate why there is check to set dynamic vertex only if RequestContext.get().isShouldInvokeCassandraFlow(): false
                 referenceVertex = edge.getOutVertex();
+                // as dynamic vertex is not set above: forcefully set here
+                hardLoadDynamicVertex(referenceVertex);
             }
 
             if (referenceVertex != null) {
@@ -2283,6 +2291,27 @@ public class EntityGraphRetriever {
 
         return ret;
     }
+
+
+    private void hardLoadDynamicVertex(AtlasVertex referenceVertex) {
+        // as dynamic vertex is not set above: forcefully set here
+        if (referenceVertex instanceof AtlasJanusVertex && RequestContext.get().isShouldInvokeCassandraFlow()) {
+            AtlasJanusVertex janusVertex = (AtlasJanusVertex) referenceVertex;
+            if (janusVertex.getDynamicVertex() == null) {
+                try {
+                    DynamicVertex dynamicVertex = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService().retrieveVertex(referenceVertex.getIdForDisplay());
+                    if (dynamicVertex == null) {
+                        dynamicVertex = new DynamicVertex();
+                    }
+                    ((AtlasJanusVertex) referenceVertex).setDynamicVertex(dynamicVertex);
+
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
+        }
+    }
+
 
     private AtlasStruct mapVertexToStruct(AtlasVertex entityVertex, String edgeLabel, AtlasEdge edge, AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToStruct");
