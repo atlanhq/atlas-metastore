@@ -3,12 +3,11 @@ package org.apache.atlas.repository.graphdb.janus.cassandra;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
-import org.elasticsearch.common.Strings;
-import org.janusgraph.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -36,10 +35,15 @@ public class VertexRetrievalService {
      */
     @Inject
     public VertexRetrievalService(CqlSession session) {
-        ObjectMapper objectMapper= new ObjectMapper();
-        this.repository = new CassandraVertexDataRepository(session,  objectMapper,
+        ObjectMapper objectMapper = new ObjectMapper();
+
+        this.repository = new CassandraVertexDataRepository(session, objectMapper,
                 AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
                 AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString());
+
+        SimpleModule module = new SimpleModule("NumbersAsStringModule");
+        module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
+        objectMapper.registerModule(module);
         this.serializer = new JacksonVertexSerializer(objectMapper);
         this.defaultBatchSize = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
     }

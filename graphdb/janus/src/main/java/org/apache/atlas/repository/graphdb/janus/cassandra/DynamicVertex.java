@@ -63,9 +63,32 @@ public class DynamicVertex {
      */
     @SuppressWarnings("unchecked")
     public <T> T getProperty(String key, Class<T> clazz) {
-        Object value = properties.get(key);
-        if (value != null && clazz.isInstance(value)) {
-            return (T) value;
+        Object val = properties.get(key);
+        if (val != null ) {
+            try {
+                if (clazz.equals(Long.class) && ! (val instanceof Long)) {
+                    return (T) Long.valueOf((String) val);
+
+                } else if (clazz.equals(Float.class) && !(val instanceof Float)) {
+                    return (T) Float.valueOf((String) val);
+
+                } else if (clazz.equals(Double.class) && !(val instanceof Double)) {
+                    return (T) Double.valueOf((String) val);
+
+                } else if (clazz.equals(Integer.class) && !(val instanceof Integer)) {
+                    return (T) Integer.valueOf((String) val);
+
+                } else if (clazz.equals(Map.class) && !(val instanceof Map)) {
+                    return (T) AtlasType.fromJson((String) val, Map.class);
+                }
+            } catch (ClassCastException cce) {
+                String errorMessage = String.format("Can not cast property %s from %s to %s", key, val.getClass().getName(), clazz.getName());
+                LOG.error(errorMessage);
+                throw cce;
+            }
+
+
+            return (T) val;
         }
         return null;
     }

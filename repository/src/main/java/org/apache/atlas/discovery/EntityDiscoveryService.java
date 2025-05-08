@@ -1199,7 +1199,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
 
                     if(context.includeMeanings()) {
-                        List<AtlasTermAssignmentHeader> termAssignmentHeaders = Optional.ofNullable(vertex.getProperty("meanings"))
+                        List<AtlasTermAssignmentHeader> termAssignmentHeaders = Optional.ofNullable(vertex.getProperty("meanings", List.class))
                                 .map(meanings -> (List<AtlasTermAssignmentHeader>) meanings)
                                 .orElse(Collections.emptyList());
                         header.setMeanings(termAssignmentHeaders);

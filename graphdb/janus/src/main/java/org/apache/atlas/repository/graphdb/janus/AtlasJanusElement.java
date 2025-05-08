@@ -85,32 +85,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
             if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
-                Object val = vertex.getDynamicVertex().getProperty(propertyName);
-
-                try {
-                    if (clazz.equals(Long.class) && ! (val instanceof Long)) {
-                        return (T) Long.valueOf((String) val);
-
-                    } else if (clazz.equals(Float.class) && !(val instanceof Float)) {
-                        return (T) Float.valueOf((String) val);
-
-                    } else if (clazz.equals(Double.class) && !(val instanceof Double)) {
-                        return (T) Double.valueOf((String) val);
-
-                    } else if (clazz.equals(Integer.class) && !(val instanceof Integer)) {
-                        return (T) Integer.valueOf((String) val);
-
-                    } else if (clazz.equals(Map.class) && !(val instanceof Map)) {
-                        return (T) AtlasType.fromJson((String) val, Map.class);
-                    }
-                } catch (ClassCastException cce) {
-                    String errorMessage = String.format("Can not cast property %s from %s to %s", propertyName, val.getClass().getName(), clazz.getName());
-                    LOG.error(errorMessage);
-                    throw cce;
-                }
-
-
-                return (T) val;
+                return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
             }
         }
 
