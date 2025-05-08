@@ -1,7 +1,10 @@
 package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 
+import org.apache.atlas.type.AtlasType;
 import org.apache.commons.collections.MapUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -16,7 +19,26 @@ import java.util.Set;
  */
 public class DynamicVertex {
 
+    private static final Logger LOG = LoggerFactory.getLogger(DynamicVertex.class);
+
     private final Map<String, Object> properties = new HashMap<>();
+
+    /**
+     * Default constructor.
+     */
+    public DynamicVertex() {
+    }
+
+    /**
+     * Constructor with initial properties.
+     *
+     * @param properties The initial properties to set
+     */
+    public DynamicVertex(Map<String, Object> properties) {
+        if (properties != null) {
+            this.properties.putAll(properties);
+        }
+    }
 
     public boolean hasProperties() {
         return !MapUtils.isEmpty(properties);
@@ -35,7 +57,7 @@ public class DynamicVertex {
     /**
      * Gets a property value as a specific type.
      *
-     * @param key The property key
+     * @param key   The property key
      * @param clazz The expected class type
      * @return The property value cast to the specified type, or null if not found or not compatible
      */
@@ -48,10 +70,11 @@ public class DynamicVertex {
         return null;
     }
 
+
     /**
      * Sets a property value.
      *
-     * @param key The property key
+     * @param key   The property key
      * @param value The property value
      * @return This DynamicVertex instance for method chaining
      */
@@ -65,7 +88,7 @@ public class DynamicVertex {
 
         Set<Object> values;
 
-        if (currentValue == null){
+        if (currentValue == null) {
             values = new HashSet<>(1);
         } else if (currentValue instanceof List) {
             values = new HashSet<>((List) currentValue);

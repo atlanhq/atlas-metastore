@@ -10,13 +10,6 @@ import java.util.Map;
  * Repository interface for vertex data access.
  */
 interface VertexDataRepository  {
-    /**
-     * Fetches JSON data for multiple vertices by their IDs.
-     *
-     * @param vertexIds The list of vertex IDs to fetch
-     * @return A map of vertex ID to JSON data string
-     */
-    Map<String, String> fetchVerticesJsonData(List<String> vertexIds) throws AtlasBaseException;
 
     /**
      * Fetches vertex data as parsed JsonElements instead of raw strings.
@@ -25,9 +18,8 @@ interface VertexDataRepository  {
      * @param vertexIds List of vertex IDs to fetch
      * @return Map of vertex ID to parsed JsonElement
      */
-    Map<String, JsonNode> fetchVerticesAsJsonNodes(List<String> vertexIds) throws AtlasBaseException;
 
-    JsonNode fetchVertexAsJsonNode(String vertexId) throws AtlasBaseException;
+    Map<String, DynamicVertex> fetchVerticesDirectly(List<String> vertexIds) throws AtlasBaseException;
 
     void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException;
 }

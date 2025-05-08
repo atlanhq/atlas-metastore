@@ -176,7 +176,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
         this.cqlSession = initializeCassandraSession();
-        this.dynamicVertexRetrievalService = new VertexRetrievalService(cqlSession, new ObjectMapper());
+        this.dynamicVertexRetrievalService = new VertexRetrievalService(cqlSession);
     }
 
     private CqlSession initializeCassandraSession() {

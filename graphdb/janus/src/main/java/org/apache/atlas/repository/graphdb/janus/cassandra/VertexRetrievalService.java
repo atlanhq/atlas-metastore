@@ -21,6 +21,7 @@ import java.util.*;
  * Coordinates the retrieval process and delegates to specialized components.
  */
 
+@Service
 public class VertexRetrievalService {
     private static final Logger LOG = LoggerFactory.getLogger(VertexRetrievalService.class);
 
@@ -33,13 +34,14 @@ public class VertexRetrievalService {
      *
      * @param session The Cassandra session
      */
-    public VertexRetrievalService(CqlSession session, ObjectMapper objectMapper) {
+    @Inject
+    public VertexRetrievalService(CqlSession session) {
+        ObjectMapper objectMapper= new ObjectMapper();
         this.repository = new CassandraVertexDataRepository(session,  objectMapper,
                 AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
                 AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString());
         this.serializer = new JacksonVertexSerializer(objectMapper);
-        //AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
-        this.defaultBatchSize = 10;
+        this.defaultBatchSize = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
     }
 
     /**
@@ -90,10 +92,8 @@ public class VertexRetrievalService {
             int endIndex = Math.min(i + batchSize, vertexIds.size());
             List<String> batch = vertexIds.subList(i, endIndex);
 
-            // Use the JsonNode-based method for more efficient processing
-            Map<String, JsonNode> jsonNodeMap = repository.fetchVerticesAsJsonNodes(batch);
-            Map<String, DynamicVertex> batchResults = convertJsonNodesToVertices(jsonNodeMap);
-
+            // Use direct loading approach
+            Map<String, DynamicVertex> batchResults = repository.fetchVerticesDirectly(batch);
             results.putAll(batchResults);
         }
 
