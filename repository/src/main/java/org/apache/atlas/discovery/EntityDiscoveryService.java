@@ -41,12 +41,13 @@ import org.apache.atlas.query.executors.DSLQueryExecutor;
 import org.apache.atlas.query.executors.ScriptEngineBasedExecutor;
 import org.apache.atlas.query.executors.TraversalBasedExecutor;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.cassandra.DynamicVertex;
-import org.apache.atlas.repository.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.userprofile.UserProfileService;
@@ -1123,12 +1124,14 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             final int BATCH_SIZE = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
             List<String> batchIds = new ArrayList<>(BATCH_SIZE);
             List<Result> batchResults = new ArrayList<>(BATCH_SIZE);
+            Map<String, AtlasVertex> vertexLookup = new HashMap<>(BATCH_SIZE);
 
             while (iterator.hasNext()) {
 
                 // Clear previous batch data
                 batchIds.clear();
                 batchResults.clear();
+                vertexLookup.clear();
 
                 while (iterator.hasNext() && batchIds.size() < BATCH_SIZE) {
                     Result result = iterator.next();
@@ -1139,6 +1142,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
                     String id = vertex.getIdForDisplay();
                     batchIds.add(id);
+                    vertexLookup.putIfAbsent(id, vertex);
                     batchResults.add(result);
                 }
 
@@ -1158,9 +1162,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 // for each entry in vertexPropertiesMap create AtlasEntityHeader
                 for (Map.Entry<String, DynamicVertex> entry : vertexPropertiesMap.entrySet()) {
                     DynamicVertex vertex = entry.getValue();
+                    String typeName = vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class);
                     AtlasEntityHeader header = new AtlasEntityHeader();
                     header.setGuid(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
-                    header.setTypeName(vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class));
+                    header.setTypeName(typeName);
                     header.setCreateTime(new Date((vertex.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class))));
                     header.setCreatedBy(vertex.getProperty(CREATED_BY_KEY, String.class));
                     header.setUpdateTime(new Date((vertex.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class))));
@@ -1175,7 +1180,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     String state = vertex.getProperty(Constants.STATE_PROPERTY_KEY, String.class);
                     Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);
                     header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
-                    header.setAttributes(filterMapByKeys(vertex.getAllProperties(), resultAttributes));
+
+                    Map<String ,Object> propertiesRetrieved = vertex.getAllProperties();
+
+                    header.setAttributes(filterMapByKeys(propertiesRetrieved, resultAttributes));
 
                     RequestContext context = RequestContext.get();
                     boolean includeClassifications = context.includeClassifications();
@@ -1199,6 +1207,29 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                 termAssignmentHeaders.stream().map(AtlasTermAssignmentHeader::getDisplayText)
                                         .collect(Collectors.toList()));
                     }
+
+                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+                    for (Map<String, AtlasAttribute> attrs : entityType.getRelationshipAttributes().values()) {
+                        for (AtlasAttribute attr : attrs.values()) {
+
+                            if (propertiesRetrieved.containsKey(attr.getName())){
+                                continue;
+                            }
+
+                            if (resultAttributes.contains(attr.getName())){
+                                AtlasJanusVertex atlasVertex = (AtlasJanusVertex) vertexLookup.get(entry.getKey());
+                                atlasVertex.setDynamicVertex(vertex);
+                                Object attrValue = entityRetriever.getVertexAttribute(vertexLookup.get(entry.getKey()), attr);
+
+                                if (attrValue != null) {
+                                    header.setAttribute(attr.getName(), attrValue);
+                                }
+                            }
+
+                        }
+                    }
+
+
                     ret.addEntity(header);
                 }
             }
