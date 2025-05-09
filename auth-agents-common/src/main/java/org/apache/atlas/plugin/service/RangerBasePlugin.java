@@ -44,6 +44,7 @@ import org.apache.atlas.plugin.policyengine.RangerResourceACLs;
 import org.apache.atlas.plugin.policyevaluator.RangerPolicyEvaluator;
 import org.apache.atlas.plugin.store.ServiceDefsUtil;
 import org.apache.atlas.plugin.util.*;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -73,6 +74,7 @@ public class RangerBasePlugin {
 	private       RangerUserStore             userStore;
 	private final List<RangerChainedPlugin>   chainedPlugins;
 	private 	  AtlasTypeRegistry 		  typeRegistry = null;
+	private       VertexRetrievalService      vertexRetrievalService = null;
 
 
 	public RangerBasePlugin(String serviceType, String appId) {
@@ -86,6 +88,12 @@ public class RangerBasePlugin {
 	public RangerBasePlugin(String serviceType, String serviceName, AtlasTypeRegistry typeRegistry) {
 		this(new RangerPluginConfig(serviceType, serviceName, null, null, null, null));
 		this.typeRegistry = typeRegistry;
+	}
+
+	public RangerBasePlugin(String serviceType, String serviceName, AtlasTypeRegistry typeRegistry, VertexRetrievalService vertexRetrievalService) {
+		this(new RangerPluginConfig(serviceType, serviceName, null, null, null, null));
+		this.typeRegistry = typeRegistry;
+		this.vertexRetrievalService = vertexRetrievalService;
 	}
 
 	public RangerBasePlugin(RangerPluginConfig pluginConfig) {
@@ -230,7 +238,7 @@ public class RangerBasePlugin {
 		}
 
 		if (!pluginConfig.getPolicyEngineOptions().disablePolicyRefresher) {
-			refresher = new PolicyRefresher(this);
+			refresher = new PolicyRefresher(this, vertexRetrievalService);
 			LOG.info("Created PolicyRefresher Thread(" + refresher.getName() + ")");
 			refresher.setDaemon(true);
 			refresher.startRefresher();

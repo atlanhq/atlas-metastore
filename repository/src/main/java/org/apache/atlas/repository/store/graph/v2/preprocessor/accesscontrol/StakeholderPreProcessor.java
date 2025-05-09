@@ -43,6 +43,8 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -86,7 +88,13 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         super(graph, typeRegistry, entityRetriever, entityStore);
 
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+            VertexRetrievalService vertexRetrievalService = null;
+            if (graph instanceof AtlasJanusGraph) {
+                vertexRetrievalService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+            } else {
+                LOG.warn("Graph instance is not AtlasJanusGraph. VertexRetrievalService will be null for EntityDiscoveryService in StakeholderPreProcessor.");
+            }
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, vertexRetrievalService, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }

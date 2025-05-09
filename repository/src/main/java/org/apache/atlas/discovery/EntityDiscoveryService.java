@@ -112,23 +112,13 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     private EntityGraphRetriever            entityRetriever;
 
-    public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
-                                  AtlasGraph graph,
-                                  GraphBackedSearchIndexer indexer,
-                                  SearchTracker searchTracker,
-                                  UserProfileService userProfileService,
-                                  StatsClient statsClient,
-                                  EntityGraphRetriever entityRetriever) throws AtlasException {
-        this(typeRegistry, graph, indexer, searchTracker, userProfileService,  null, statsClient, entityRetriever);
-    }
-
     @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
                            AtlasGraph graph,
                            GraphBackedSearchIndexer indexer,
                            SearchTracker searchTracker,
                            UserProfileService userProfileService,
-                            VertexRetrievalService vertexRetrievalService,
+                           VertexRetrievalService vertexRetrievalService,
                            StatsClient statsClient,
                           EntityGraphRetriever entityRetriever) throws AtlasException {
         this.graph                    = graph;
@@ -1101,8 +1091,8 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
-        if (RequestContext.get().NEW_FLOW) {
-            fetchCollapsedResults = false;
+        if (RequestContext.get().NEW_FLOW && this.vertexRetrievalService != null) {
+            fetchCollapsedResults = false; // V2 doesn't use this flag in this context
             prepareSearchResultV2(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
         } else {
             prepareSearchResultV1(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);

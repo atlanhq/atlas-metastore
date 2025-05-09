@@ -24,6 +24,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 
 import java.util.*;
 
@@ -45,8 +46,9 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private EntityGraphRetriever retrieverNoRelation = null;
 
     public DataProductPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
-                                   AtlasGraph graph, AtlasEntityStore entityStore) {
-        super(typeRegistry, entityRetriever, graph);
+                                   AtlasGraph graph, AtlasEntityStore entityStore,
+                                   VertexRetrievalService vertexRetrievalService) {
+        super(typeRegistry, entityRetriever, graph, vertexRetrievalService);
         this.updatedPolicyResources = new HashMap<>();
         this.entityStore = entityStore;
         this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);

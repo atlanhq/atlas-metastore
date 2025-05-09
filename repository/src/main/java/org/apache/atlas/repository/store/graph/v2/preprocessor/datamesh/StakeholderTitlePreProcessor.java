@@ -24,6 +24,8 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 
 import java.util.List;
 import java.util.Optional;
@@ -64,7 +66,13 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
         this.entityRetriever = entityRetriever;
 
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+            VertexRetrievalService vertexRetrievalService = null;
+            if (graph instanceof AtlasJanusGraph) {
+                vertexRetrievalService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+            } else {
+                LOG.warn("Graph instance is not AtlasJanusGraph. VertexRetrievalService will be null for EntityDiscoveryService in StakeholderTitlePreProcessor.");
+            }
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, vertexRetrievalService, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }

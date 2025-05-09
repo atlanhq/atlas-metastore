@@ -1,4 +1,3 @@
-
 /**
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
@@ -174,11 +173,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
         this.dynamicVertexRetrievalService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
-
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexRetrievalService, null, entityRetriever);
         } catch (AtlasException e) {
-            e.printStackTrace();
+            LOG.error("Failed to initialize EntityDiscoveryService in AtlasEntityStoreV2 constructor", e);
         }
 
     }
@@ -2018,23 +2016,28 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         switch (typeName) {
             case ATLAS_GLOSSARY_ENTITY_TYPE:
+                // Expects: (AtlasTypeRegistry, EntityGraphRetriever, AtlasGraph)
                 preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph));
                 break;
 
             case ATLAS_GLOSSARY_TERM_ENTITY_TYPE:
+                // Extends AbstractGlossaryPreProcessor, expects: (AtlasTypeRegistry, EntityGraphRetriever, AtlasGraph, TaskManagement)
                 preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement));
                 break;
 
             case ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE:
+                // Extends AbstractGlossaryPreProcessor, expects: (AtlasTypeRegistry, EntityGraphRetriever, AtlasGraph, TaskManagement, EntityGraphMapper)
                 preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper));
                 break;
 
             case DATA_DOMAIN_ENTITY_TYPE:
-                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph));
+                // Pass dynamicVertexRetrievalService
+                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexRetrievalService));
                 break;
 
             case DATA_PRODUCT_ENTITY_TYPE:
-                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this));
+                // Pass dynamicVertexRetrievalService, keeping existing 'this' for AtlasEntityStore
+                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this, this.dynamicVertexRetrievalService));
                 break;
 
             case QUERY_ENTITY_TYPE:
