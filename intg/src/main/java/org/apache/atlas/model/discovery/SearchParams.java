@@ -18,8 +18,8 @@ public class SearchParams {
     boolean suppressLogs;
     boolean excludeMeanings;
     boolean excludeClassifications;
-    boolean enableFullRestriction;
     boolean fetchSources;
+    boolean enableFullRestriction;
 
     boolean includeClassificationNames = false;
 
