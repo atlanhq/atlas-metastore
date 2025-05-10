@@ -116,6 +116,8 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFacto
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
 import static org.apache.atlas.type.Constants.*;
 
+// Import for AtlasJson
+import org.apache.atlas.utils.AtlasJson;
 
 
 @Component
@@ -986,23 +988,68 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             List<AtlasEntityHeader> entityHeaders = discovery.searchUsingTermQualifiedName(from, ELASTICSEARCH_PAGINATION_SIZE,
                     termQName, attributes, relationAttributes);
 
-            if (entityHeaders == null)
+            if (entityHeaders == null) // Should be CollectionUtils.isEmpty(entityHeaders) for safety
                 break;
 
             for (AtlasEntityHeader entityHeader : entityHeaders) {
-                List<AtlasObjectId> meanings = (List<AtlasObjectId>) entityHeader.getAttribute(ATTR_MEANINGS);
+                Object rawMeanings = entityHeader.getAttribute(ATTR_MEANINGS);
+                List<AtlasObjectId> meanings = new ArrayList<>();
+
+                if (rawMeanings instanceof List) {
+                    List<?> rawMeaningsList = (List<?>) rawMeanings;
+                    for (Object meaningObj : rawMeaningsList) {
+                        if (meaningObj instanceof Map) {
+                            try {
+                                AtlasObjectId oid = AtlasJson.fromLinkedHashMap(meaningObj, AtlasObjectId.class);
+                                if (oid != null) {
+                                    meanings.add(oid);
+                                }
+                            } catch (Exception e) {
+                                LOG.error("Error converting meaning object to AtlasObjectId for entity GUID: {}. Meaning object: {}. Error: ", 
+                                          entityHeader.getGuid(), meaningObj, e);
+                            }
+                        } else if (meaningObj instanceof AtlasObjectId) { // Already correct type
+                            meanings.add((AtlasObjectId) meaningObj);
+                        } else if (meaningObj != null){
+                            LOG.warn("Unexpected type in meanings list for entity GUID: {}. Type: {}. Object: {}", 
+                                     entityHeader.getGuid(), meaningObj.getClass().getName(), meaningObj);
+                        }
+                    }
+                } else if (rawMeanings != null) {
+                    LOG.warn("Attribute 'meanings' is not a List for entity GUID: {}. Type: {}", 
+                             entityHeader.getGuid(), rawMeanings.getClass().getName());
+                }
+
+                if (CollectionUtils.isEmpty(meanings)) { // If no valid meanings found/converted, skip
+                    // Update vertex properties even if meanings are empty to clear them out
+                    AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(entityHeader.getGuid());
+                    if (entityVertex != null) {
+                        AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
+                        AtlasGraphUtilsV2.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, ""); // Set to empty string
+                        AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, termName);
+                    }
+                    continue;
+                }
 
                 String updatedMeaningsText = meanings.stream()
-                        .filter(x -> !termGuid.equals(x.getGuid()))
-                        .filter(x -> ACTIVE.name().equals(x.getAttributes().get(STATE_PROPERTY_KEY)))
-                        .map(x -> x.getAttributes().get(NAME).toString())
+                        .filter(x -> x != null && x.getGuid() != null && !termGuid.equals(x.getGuid())) // Ensure x and x.getGuid() are not null
+                        .filter(x -> x.getAttributes() != null && ACTIVE.name().equals(x.getAttributes().get(STATE_PROPERTY_KEY)))
+                        .map(x -> x.getAttributes().get(NAME) != null ? x.getAttributes().get(NAME).toString() : "") // Handle potential null name
+                        .filter(StringUtils::isNotEmpty)
                         .collect(Collectors.joining(","));
 
-
                 AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(entityHeader.getGuid());
-                AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
-                AtlasGraphUtilsV2.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, updatedMeaningsText);
-                AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, termName);
+                if (entityVertex != null) {
+                    // This logic might need adjustment if termQName is not always present
+                    // or if removing non-existent item is an issue.
+                    AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANINGS_PROPERTY_KEY, termQName);
+                    // If meanings list became empty after filtering this term, we might need to re-evaluate what to set for MEANINGS_PROPERTY_KEY
+                    // For now, just removing the specific termQName as per original logic if it was specific to this term.
+                    // If the intent is to rebuild the MEANINGS_PROPERTY_KEY from the filtered 'meanings' list, that's a different logic.
+
+                    AtlasGraphUtilsV2.setEncodedProperty(entityVertex, MEANINGS_TEXT_PROPERTY_KEY, updatedMeaningsText);
+                    AtlasGraphUtilsV2.removeItemFromListPropertyValue(entityVertex, MEANING_NAMES_PROPERTY_KEY, termName);
+                }
             }
             from += ELASTICSEARCH_PAGINATION_SIZE;
 

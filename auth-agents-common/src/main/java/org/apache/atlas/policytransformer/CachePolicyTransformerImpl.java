@@ -85,6 +85,8 @@ import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGOR
 import static org.apache.atlas.repository.util.AccessControlUtils.getIsPolicyEnabled;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyCategory;
 
+import org.apache.atlas.utils.AtlasJson;
+
 @Component
 public class CachePolicyTransformerImpl {
     private static final Logger LOG = LoggerFactory.getLogger(CachePolicyTransformerImpl.class);
@@ -562,17 +564,54 @@ public class CachePolicyTransformerImpl {
             return null;
         }
 
-        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+        Object rawConditionsObject = atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
 
-        for (AtlasStruct condition : conditions) {
-            RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
-
-            rangerCondition.setType((String) condition.getAttribute("policyConditionType"));
-            rangerCondition.setValues((List<String>) condition.getAttribute("policyConditionValues"));
-
-            ret.add(rangerCondition);
+        if (!(rawConditionsObject instanceof List)) {
+            LOG.error("Attribute {} in AtlasEntityHeader {} (QN: {}) was not a List, but was: {}. Returning null.",
+                    ATTR_POLICY_CONDITIONS, atlasPolicy.getGuid(), atlasPolicy.getAttribute(QUALIFIED_NAME),
+                    rawConditionsObject != null ? rawConditionsObject.getClass().getName() : "null");
+            return null;
         }
-        return ret;
+
+        List<?> conditionList = (List<?>) rawConditionsObject;
+
+        for (Object conditionObj : conditionList) {
+            if (conditionObj instanceof Map) {
+                try {
+                    AtlasStruct conditionStruct = AtlasJson.fromLinkedHashMap(conditionObj, AtlasStruct.class);
+
+                    if (conditionStruct != null) {
+                        RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
+                        
+                        // Directly attempt to get and cast attributes
+                        // The try-catch block will handle potential ClassCastExceptions or NullPointers if attributes are missing/wrong type
+                        rangerCondition.setType((String) conditionStruct.getAttribute("policyConditionType"));
+                        rangerCondition.setValues((List<String>) conditionStruct.getAttribute("policyConditionValues"));
+                        
+                        // Basic check to ensure type was actually set if it's mandatory
+                        if (rangerCondition.getType() == null) {
+                            LOG.warn("policyConditionType was null after attempting to read from AtlasStruct for policy QN: {}. Condition map: {}. Skipping.", 
+                                     atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj);
+                            continue;
+                        }
+                        ret.add(rangerCondition);
+                    } else {
+                        LOG.warn("AtlasJson.fromLinkedHashMap returned null for a condition object for policy QN: {}. Object: {}",
+                                atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj);
+                    }
+                } catch (ClassCastException cce) {
+                     LOG.error("ClassCastException while processing attributes from converted AtlasStruct for policy QN: {}. Condition map: {}. Error: ",
+                              atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj, cce);
+                } catch (Exception e) {
+                    LOG.error("Error converting/processing policy condition using AtlasJson.fromLinkedHashMap for policy QN: {}. Condition map: {}. Error: ",
+                              atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj, e);
+                }
+            } else {
+                LOG.warn("Expected a Map element in policy conditions list for policy QN: {}, but got: {}. Skipping this element.",
+                        atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj != null ? conditionObj.getClass().getName() : "null");
+            }
+        }
+        return ret.isEmpty() ? null : ret;
     }
 
     private List<RangerValiditySchedule> getPolicyValiditySchedule(AtlasEntityHeader atlasPolicy) {
