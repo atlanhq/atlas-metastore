@@ -1181,6 +1181,9 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     header.setAttributes(filterMapByKeys(propertiesRetrieved, allRequiredAttrs));
 
                     RequestContext context = RequestContext.get();
+                    AtlasJanusVertex atlasVertex = (AtlasJanusVertex) vertexLookup.get(entry.getKey());
+                    atlasVertex.setDynamicVertex(vertex);
+
                     boolean includeClassifications = context.includeClassifications();
                     boolean includeClassificationNames = context.isIncludeClassificationNames();
 
@@ -1203,17 +1206,11 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                         .collect(Collectors.toList()));
                     }
 
-                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
-                    for (Map<String, AtlasAttribute> attrs : entityType.getRelationshipAttributes().values()) {
+
+                    for (Map<String, AtlasAttribute> attrs : type.getRelationshipAttributes().values()) {
                         for (AtlasAttribute attr : attrs.values()) {
 
-                            if (propertiesRetrieved.containsKey(attr.getName())){
-                                continue;
-                            }
-
                             if (resultAttributes.contains(attr.getName())){
-                                AtlasJanusVertex atlasVertex = (AtlasJanusVertex) vertexLookup.get(entry.getKey());
-                                atlasVertex.setDynamicVertex(vertex);
                                 Object attrValue = entityRetriever.getVertexAttribute(vertexLookup.get(entry.getKey()), attr);
 
                                 if (attrValue != null) {
