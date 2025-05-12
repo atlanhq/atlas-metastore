@@ -92,6 +92,8 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 try {
                     if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
                         return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
+                    } else {
+                        return null;
                     }
                 } finally {
                     RequestContext.get().endMetricRecord(recorder1);
