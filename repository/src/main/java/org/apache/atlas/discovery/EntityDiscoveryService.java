@@ -1173,7 +1173,12 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
                     Map<String ,Object> propertiesRetrieved = vertex.getAllProperties();
 
-                    header.setAttributes(filterMapByKeys(propertiesRetrieved, resultAttributes));
+
+                    AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
+                    Set<String> allRequiredAttrs = new HashSet<>(type.getHeaderAttributes().keySet());
+                    allRequiredAttrs.addAll(resultAttributes);
+
+                    header.setAttributes(filterMapByKeys(propertiesRetrieved, allRequiredAttrs));
 
                     RequestContext context = RequestContext.get();
                     boolean includeClassifications = context.includeClassifications();
