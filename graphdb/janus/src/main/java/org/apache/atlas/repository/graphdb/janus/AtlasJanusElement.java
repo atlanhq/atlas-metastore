@@ -227,7 +227,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     }
 
     protected boolean isVertex() {
-        return this instanceof AtlasVertex && !this.getPropertyKeys().contains("__type"); // exclude typeDef vertices
+        return this instanceof AtlasVertex && !this.element.keys().contains("__type"); // exclude typeDef vertices
     }
 
     private boolean isEdge() {
