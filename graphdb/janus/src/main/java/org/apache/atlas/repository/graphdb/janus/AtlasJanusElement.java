@@ -86,31 +86,43 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             }
 
             if (RequestContext.get().NEW_FLOW && isVertex()) {
+                AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("AtlasJanusElement.getProperty.newFlow");
                 AtlasJanusVertex vertex = (AtlasJanusVertex) this;
                 // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
-                if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
-                    return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
+                try {
+                    if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
+                        return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
+                    }
+                } finally {
+                    RequestContext.get().endMetricRecord(recorder1);
                 }
             }
 
             //add explicit logic to return null if the property does not exist
             //This is the behavior Atlas expects.  Janus throws an exception
             //in this scenario.
-            Property p = getWrappedElement().property(propertyName);
-            if (p.isPresent()) {
-                Object propertyValue= p.value();
-                if (propertyValue == null) {
-                    return null;
-                }
-                if (AtlasEdge.class == clazz) {
-                    return (T) graph.getEdge(propertyValue.toString());
-                }
-                if (AtlasVertex.class == clazz) {
-                    return (T) graph.getVertex(propertyValue.toString());
-                }
-                return (T) propertyValue;
 
+            AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("AtlasJanusElement.getProperty.oldFlow");
+            try {
+                Property p = getWrappedElement().property(propertyName);
+                if (p.isPresent()) {
+                    Object propertyValue= p.value();
+                    if (propertyValue == null) {
+                        return null;
+                    }
+                    if (AtlasEdge.class == clazz) {
+                        return (T) graph.getEdge(propertyValue.toString());
+                    }
+                    if (AtlasVertex.class == clazz) {
+                        return (T) graph.getVertex(propertyValue.toString());
+                    }
+                    return (T) propertyValue;
+
+                }
+            } finally {
+                RequestContext.get().endMetricRecord(recorder2);
             }
+
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
