@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.web.rest;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
@@ -54,6 +55,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
+import java.util.concurrent.TimeUnit;
 
 /**
  * REST interface for CRUD operations on type definitions
@@ -72,12 +74,20 @@ public class TypesREST {
     private final AtlasTypeDefStore typeDefStore;
     private final RedisService redisService;
     private final TypeCacheRefresher typeCacheRefresher;
+    private final ExecutorService cacheRefreshExecutor;
 
     @Inject
     public TypesREST(AtlasTypeDefStore typeDefStore, RedisService redisService, Configuration configuration, TypeCacheRefresher typeCacheRefresher) {
         this.typeDefStore = typeDefStore;
         this.redisService = redisService;
         this.typeCacheRefresher = typeCacheRefresher;
+        
+        this.cacheRefreshExecutor = Executors.newFixedThreadPool(AtlasConfiguration.MAX_THREADS_TYPE_UPDATE.getInt(), r -> {
+            Thread t = new Thread(r);
+            t.setName("Atlas-Cache-Refresh-" + t.getId());
+            t.setDaemon(true);
+            return t;
+        });
     }
 
     /**
@@ -398,20 +408,22 @@ public class TypesREST {
 
     private Lock attemptAcquiringLockV2() throws AtlasBaseException {
         final String traceId = RequestContext.get().getTraceId();
+        Lock lock = null;
         try {
 
-            Lock lock = redisService.acquireDistributedLockV2(ATLAS_TYPEDEF_LOCK);
+            lock = redisService.acquireDistributedLockV2(ATLAS_TYPEDEF_LOCK);
             if (lock == null) {
-                LOG.info("Lock is already acquired. Returning now :: traceId {}", traceId);
+                LOG.info("Lock is already acquired. for key {} : Returning now :: traceId {}", ATLAS_TYPEDEF_LOCK, traceId);
                 throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK);
             }
-            LOG.info("successfully acquired lock :: traceId {}", traceId);
+            LOG.info("Successfully acquired lock with key {} :: traceId {}", ATLAS_TYPEDEF_LOCK, traceId);
             return lock;
         } catch (AtlasBaseException e) {
+            redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
             throw e;
         } catch (Exception e) {
             LOG.error("Error while acquiring lock on type-defs :: traceId " + traceId + " ." + e.getMessage(), e);
-            throw new AtlasBaseException("Error while acquiring a lock on type-defs");
+            throw new AtlasBaseException("Error while acquiring a lock on type-defs", e);
         }
     }
 
@@ -528,41 +540,7 @@ public class TypesREST {
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
             AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
-            ExecutorService executor = Executors.newSingleThreadExecutor();
-            executor.submit(() -> {
-                try {
-                    int maxRetries = 3;
-                    int retryCount = 0;
-                    boolean success = false;
-
-                    while (!success && retryCount < maxRetries) {
-                        try {
-                            typeCacheRefresher.refreshAllHostCache();
-                            LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef refreshed successfully on attempt {}", retryCount + 1);
-                            success = true;
-                        } catch (IOException | URISyntaxException | RepositoryException e) {
-                            retryCount++;
-                            if (retryCount >= maxRetries) {
-                                LOG.error("TypesRest.updateAtlasTypeDefs:: Failed to refresh typedef after {} attempts", maxRetries, e);
-                                throw new RuntimeException("Failed to refresh typedef after " + maxRetries + " attempts", e);
-                            }
-
-                            // Exponential backoff: wait longer between each retry
-                            long waitTimeMs = 1000 * (long)Math.pow(2, retryCount - 1);
-                            LOG.warn("TypesRest.updateAtlasTypeDefs:: Retry attempt {} after {} ms", retryCount, waitTimeMs);
-
-                            try {
-                                Thread.sleep(waitTimeMs);
-                            } catch (InterruptedException ie) {
-                                Thread.currentThread().interrupt();
-                                throw new RuntimeException("Retry interrupted", ie);
-                            }
-                        }
-                    }
-                } finally {
-                    executor.shutdown();
-                }
-            });
+            refreshAllHostCache(RequestContext.get().getTraceId());
             LOG.info("TypesRest.updateAtlasTypeDefs:: Done");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
@@ -678,8 +656,70 @@ public class TypesREST {
         return ret;
     }
 
+    private void refreshAllHostCache(String traceId){
+        if (AtlasConfiguration.ENABLE_ASYNC_TYPE_UPDATE.getBoolean()){
+            cacheRefreshExecutor.submit(() -> {
+                RequestContext.get().setTraceId(traceId);
+                try {
+                    int maxRetries = 5;
+                    int retryCount = 0;
+                    boolean success = false;
+
+                    while (!success && retryCount < maxRetries) {
+                        try {
+                            typeCacheRefresher.refreshAllHostCache();
+                            LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef refreshed successfully on attempt {}", retryCount + 1);
+                            success = true;
+                        } catch (IOException | URISyntaxException | RepositoryException e) {
+                            retryCount++;
+                            if (retryCount >= maxRetries) {
+                                LOG.error("TypesRest.updateAtlasTypeDefs:: Failed to refresh typedef after {} attempts", maxRetries, e);
+                                break;
+                            }
+
+                            // Exponential backoff: wait longer between each retry
+                            long waitTimeMs = 1000 * (long)Math.pow(2, retryCount - 1);
+                            LOG.warn("TypesRest.updateAtlasTypeDefs:: Retry attempt {} after {} ms", retryCount, waitTimeMs);
+
+                            try {
+                                Thread.sleep(waitTimeMs);
+                            } catch (InterruptedException ie) {
+                                Thread.currentThread().interrupt();
+                                LOG.warn("Retry interrupted", ie);
+                                break;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    LOG.error("Unexpected error in async cache refresh", e);
+                }
+            });
+        } else {
+            try {
+                typeCacheRefresher.refreshAllHostCache();
+            } catch (IOException | URISyntaxException | RepositoryException e) {
+                LOG.error("Error while refreshing all host cache", e);
+            }
+        }
+    }
+
     @PreDestroy
     public void cleanUp() {
+        if (cacheRefreshExecutor != null) {
+            try {
+                LOG.info("Shutting down cache refresh executor");
+                cacheRefreshExecutor.shutdown();
+                if (!cacheRefreshExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
+                    LOG.warn("Cache refresh executor did not terminate in time - forcing shutdown");
+                    cacheRefreshExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOG.warn("Interrupted while waiting for cache refresh executor to shut down", e);
+                cacheRefreshExecutor.shutdownNow();
+            }
+        }
+
         this.redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
     }
 }

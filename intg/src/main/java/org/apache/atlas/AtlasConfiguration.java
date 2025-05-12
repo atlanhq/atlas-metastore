@@ -146,8 +146,10 @@ public enum AtlasConfiguration {
     OTEL_SERVICE_NAME(" OTEL_SERVICE_NAME", "atlas"),
     OTEL_EXPORTER_OTLP_ENDPOINT("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
     ATLAS_BULK_API_MAX_ENTITIES_ALLOWED("atlas.bulk.api.max.entities.allowed", 10000),
-    ATLAS_BULK_API_ENABLE_JANUS_OPTIMISATION("atlas.bulk.api.enable.janus.optimization", false);
+    ATLAS_BULK_API_ENABLE_JANUS_OPTIMISATION("atlas.bulk.api.enable.janus.optimization", false),
 
+    ENABLE_ASYNC_TYPE_UPDATE("atlas.types.update.async.enable", false),
+    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 3);
 
 
     private static final Configuration APPLICATION_PROPERTIES;
