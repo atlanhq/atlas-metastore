@@ -1091,7 +1091,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
-        if (RequestContext.get().NEW_FLOW && this.vertexRetrievalService != null) {
+        if (RequestContext.get().NEW_FLOW) {
             fetchCollapsedResults = false; // V2 doesn't use this flag in this context
             prepareSearchResultV2(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
         } else {
@@ -1100,6 +1100,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
         private void prepareSearchResultV2(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+            AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("prepareSearchResultV2");
         SearchParams searchParams = ret.getSearchParameters();
         try {
             if (LOG.isDebugEnabled()) {
@@ -1221,14 +1222,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                         }
                     }
 
-
                     ret.addEntity(header);
                 }
             }
+            scrubSearchResults(ret, searchParams.getSuppressLogs());
         } catch (Exception e) {
             throw e;
+        }finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
         }
-        scrubSearchResults(ret, searchParams.getSuppressLogs());
     }
 
     private Map<String, Object> filterMapByKeys(Map<String, Object> originalMap, Set<String> resultAttributes) {
