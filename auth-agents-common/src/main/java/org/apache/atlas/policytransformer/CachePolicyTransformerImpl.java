@@ -770,7 +770,11 @@ public class CachePolicyTransformerImpl {
         policy.setValiditySchedules(getPolicyValiditySchedule(atlasPolicy));
 
         if (atlasPolicy.hasAttribute(ATTR_POLICY_PRIORITY)) {
-            policy.setPolicyPriority((Integer) atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY));
+            if (atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY) instanceof String) {
+                policy.setPolicyPriority(Integer.parseInt((String) atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY)));
+            } else if (atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY) instanceof Integer) {
+                policy.setPolicyPriority((Integer) atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY));
+            }
         }
 
         return policy;
