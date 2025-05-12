@@ -30,6 +30,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
 import org.codehaus.jettison.json.JSONException;
@@ -77,35 +78,41 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <T> T getProperty(String propertyName, Class<T> clazz) {
-        if (excludeProperties.contains(propertyName)) {
-            return null;
-        }
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getProperty");
+        try {
 
-        if (RequestContext.get().NEW_FLOW && isVertex()) {
-            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
-            // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
-            if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
-                return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
-            }
-        }
-
-        //add explicit logic to return null if the property does not exist
-        //This is the behavior Atlas expects.  Janus throws an exception
-        //in this scenario.
-        Property p = getWrappedElement().property(propertyName);
-        if (p.isPresent()) {
-            Object propertyValue= p.value();
-            if (propertyValue == null) {
+            if (excludeProperties.contains(propertyName)) {
                 return null;
             }
-            if (AtlasEdge.class == clazz) {
-                return (T) graph.getEdge(propertyValue.toString());
-            }
-            if (AtlasVertex.class == clazz) {
-                return (T) graph.getVertex(propertyValue.toString());
-            }
-            return (T) propertyValue;
 
+            if (RequestContext.get().NEW_FLOW && isVertex()) {
+                AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+                // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
+                if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
+                    return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
+                }
+            }
+
+            //add explicit logic to return null if the property does not exist
+            //This is the behavior Atlas expects.  Janus throws an exception
+            //in this scenario.
+            Property p = getWrappedElement().property(propertyName);
+            if (p.isPresent()) {
+                Object propertyValue= p.value();
+                if (propertyValue == null) {
+                    return null;
+                }
+                if (AtlasEdge.class == clazz) {
+                    return (T) graph.getEdge(propertyValue.toString());
+                }
+                if (AtlasVertex.class == clazz) {
+                    return (T) graph.getVertex(propertyValue.toString());
+                }
+                return (T) propertyValue;
+
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
         return null;
     }
@@ -178,6 +185,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void setProperty(String propertyName, Object value) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.setProperty");
         try {
             if (value == null) {
                 Object existingVal = getProperty(propertyName, Object.class);
@@ -199,6 +207,8 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
     }
 

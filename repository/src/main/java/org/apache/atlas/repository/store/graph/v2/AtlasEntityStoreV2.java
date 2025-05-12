@@ -1735,12 +1735,15 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
             if (RequestContext.get().NEW_FLOW) {
+                MetricRecorder recorder = RequestContext.get().startMetricRecord("callInsertVertices");
                 // TODO: Move to commit graph section
                 List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
                         .map(x -> context.getVertex(x))
                         .filter(Objects::nonNull)
                         .toList();
                 dynamicVertexRetrievalService.insertVertices(updatedVertexList);
+
+                RequestContext.get().endMetricRecord(recorder);
             }
 
             return ret;

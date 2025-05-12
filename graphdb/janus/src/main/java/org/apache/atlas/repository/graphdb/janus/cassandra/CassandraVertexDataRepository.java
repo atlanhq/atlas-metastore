@@ -14,6 +14,7 @@ import com.google.common.collect.Lists;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -58,23 +59,29 @@ class CassandraVertexDataRepository implements VertexDataRepository {
 
     @Override
     public void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException {
-        StringBuilder batchQuery = new StringBuilder();
-        batchQuery.append("BEGIN BATCH ");
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("insertVertices");
 
-        for (String vertexId : serialisedVertices.keySet()) {
-            int bucket = calculateBucket(vertexId);
-            String insert = String.format(INSERT_VERTEX,
-                    keyspace,
-                    tableName,
-                    bucket,
-                    vertexId,
-                    serialisedVertices.get(vertexId),
-                    RequestContext.get().getRequestTime());
-            batchQuery.append(insert).append(";");
+        try {
+            StringBuilder batchQuery = new StringBuilder();
+            batchQuery.append("BEGIN BATCH ");
+
+            for (String vertexId : serialisedVertices.keySet()) {
+                int bucket = calculateBucket(vertexId);
+                String insert = String.format(INSERT_VERTEX,
+                        keyspace,
+                        tableName,
+                        bucket,
+                        vertexId,
+                        serialisedVertices.get(vertexId),
+                        RequestContext.get().getRequestTime());
+                batchQuery.append(insert).append(";");
+            }
+
+            batchQuery.append("APPLY BATCH;");
+            session.execute(batchQuery.toString());
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
-
-        batchQuery.append("APPLY BATCH;");
-        session.execute(batchQuery.toString());
     }
 
     /**
@@ -111,8 +118,14 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     }
 
     private int calculateBucket(String vertexId) {
-        int numBuckets = 2 << 5; // 2^5=32
-        return (int) (Long.parseLong(vertexId) % numBuckets);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
+
+        try {
+            int numBuckets = 2 << 5; // 2^5=32
+            return (int) (Long.parseLong(vertexId) % numBuckets);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     /**
@@ -124,6 +137,7 @@ class CassandraVertexDataRepository implements VertexDataRepository {
      */
     @Override
     public Map<String, DynamicVertex> fetchVerticesDirectly(List<String> vertexIds) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("fetchVerticesDirectly");
         if (vertexIds == null || vertexIds.isEmpty()) {
             return Collections.emptyMap();
         }
@@ -160,6 +174,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
             results = fetchSingleBatchDirectly(sanitizedIds);
         }
 
+        RequestContext.get().endMetricRecord(recorder);
+
         return results;
     }
 
@@ -168,7 +184,9 @@ class CassandraVertexDataRepository implements VertexDataRepository {
      * Avoids the JSON string parsing overhead.
      */
     private Map<String, DynamicVertex> fetchSingleBatchDirectly(List<String> vertexIds) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly");
         try {
+            AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly.getPreparedStatement");
             // Get or prepare the statement for this batch size
             PreparedStatement statement = getPreparedStatementForBatchSize(vertexIds.size());
 
@@ -180,9 +198,12 @@ class CassandraVertexDataRepository implements VertexDataRepository {
 
             // Set query timeout and other options
             boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
+            RequestContext.get().endMetricRecord(recorder1);
 
+            AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly.execute");
             // Execute the query
             ResultSet resultSet = session.execute(boundStatement);
+            RequestContext.get().endMetricRecord(recorder2);
 
             // Process the results directly into DynamicVertex objects
             Map<String, DynamicVertex> results = new HashMap<>(vertexIds.size());
@@ -192,8 +213,10 @@ class CassandraVertexDataRepository implements VertexDataRepository {
                 String jsonData = row.getString("json_data");
 
                 try {
+                    AtlasPerfMetrics.MetricRecorder recorder3 = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly.readValue");
                     // Parse the JSON directly to a Map
                     Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
+                    RequestContext.get().endMetricRecord(recorder3);
 
                     // Create a DynamicVertex with all properties from the Map
                     DynamicVertex vertex = new DynamicVertex(props);
@@ -220,7 +243,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
             // For unexpected errors
             LOG.error("Unexpected error fetching vertex data directly", e);
             throw new AtlasBaseException("Failed to fetch vertex data directly: " + e.getMessage(), e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
     }
-
 }
