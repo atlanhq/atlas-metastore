@@ -275,7 +275,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public List<String> getListProperty(String propertyName) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty");
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getListProperty");
         try {
             List<String> value =  getProperty(propertyName, List.class);
             return value;
@@ -289,14 +289,17 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty");
         try {
             if (RequestContext.get().NEW_FLOW && isVertex()) {
+                AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty.newFlow");
                 Object val = getProperty(propertyName, elementType);
                 if (val == null) {
                     new ArrayList<>(0);
                 } else {
                     return (List<V>) val;
                 }
+                RequestContext.get().endMetricRecord(recorder1);
             }
 
+            AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty.oldFlow");
             Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
             List<V> value = new ArrayList<>();
@@ -305,6 +308,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 Object   currentPropertyValue = currentProperty.value();
                 value.add((V) currentPropertyValue);
             }
+            RequestContext.get().endMetricRecord(recorder2);
             return value;
         } finally {
             RequestContext.get().endMetricRecord(recorder);
