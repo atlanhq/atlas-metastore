@@ -1880,12 +1880,17 @@ public class EntityGraphRetriever {
 
             switch (attrType.getTypeCategory()) { // indexsearch && bulk
                 case PRIMITIVE:
+                    AtlasPerfMetrics.MetricRecorder recorder0 = RequestContext.get().startMetricRecord("mapVertexToAttribute.PRIMITIVE");
                     ret = mapVertexToPrimitive(entityVertex, attribute.getVertexPropertyName(), attribute.getAttributeDef());
+                    RequestContext.get().endMetricRecord(recorder0);
                     break;
                 case ENUM:
+                    AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("mapVertexToAttribute.ENUM.getEncodedProperty");
                     ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
+                    RequestContext.get().endMetricRecord(recorder1);
                     break;
                 case STRUCT:
+                    AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("mapVertexToAttribute.STRUCT");
                     if (RequestContext.get().NEW_FLOW) {
                         Object val = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
                         if (val instanceof String) {
@@ -1898,8 +1903,10 @@ public class EntityGraphRetriever {
                         edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(attribute.getName());
                         ret = mapVertexToStruct(entityVertex, edgeLabel, null, entityExtInfo, isMinExtInfo);
                     }
+                    RequestContext.get().endMetricRecord(recorder2);
                     break;
                 case OBJECT_ID_TYPE:
+                    AtlasPerfMetrics.MetricRecorder recorder3 = RequestContext.get().startMetricRecord("mapVertexToAttribute.OBJECT_ID_TYPE");
                     if (includeReferences) {
                         if (attribute.getDefinedInType().getTypeCategory() == TypeCategory.STRUCT) {
                             //Struct attribute having ObjectId as type
@@ -1910,8 +1917,10 @@ public class EntityGraphRetriever {
                     } else {
                         ret = null;
                     }
+                    RequestContext.get().endMetricRecord(recorder3);
                     break;
                 case ARRAY: {
+                    AtlasPerfMetrics.MetricRecorder recorder4 = RequestContext.get().startMetricRecord("mapVertexToAttribute.ARRAY");
                     final boolean skipAttribute;
 
                     if (!includeReferences) {
@@ -1931,9 +1940,11 @@ public class EntityGraphRetriever {
                             ret = mapVertexToArray(entityVertex, entityExtInfo, isOwnedAttribute, attribute, isMinExtInfo, includeReferences, ignoreInactive);
                         }
                     }
+                    RequestContext.get().endMetricRecord(recorder4);
                 }
                 break;
                 case MAP: {
+                    AtlasPerfMetrics.MetricRecorder recorder5 = RequestContext.get().startMetricRecord("mapVertexToAttribute.MAP");
                     final boolean skipAttribute;
 
                     if (!includeReferences) {
@@ -1953,6 +1964,7 @@ public class EntityGraphRetriever {
                             ret = mapVertexToMap(entityVertex, entityExtInfo, isOwnedAttribute, attribute, isMinExtInfo, includeReferences);
                         }
                     }
+                    RequestContext.get().endMetricRecord(recorder5);
                 }
                 break;
                 case CLASSIFICATION:
