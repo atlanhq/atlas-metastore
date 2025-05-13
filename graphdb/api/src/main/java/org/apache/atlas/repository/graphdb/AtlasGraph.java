@@ -118,6 +118,8 @@ public interface AtlasGraph<V, E> {
      */
     AtlasVertex<V, E> getVertex(String vertexId);
 
+    AtlasVertex<V, E> getJanusVertex(String vertexId);
+
     /**
      * Gets the names of the indexes on edges
      * type.

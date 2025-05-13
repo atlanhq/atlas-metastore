@@ -45,7 +45,7 @@ import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
+import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
@@ -64,12 +64,16 @@ import org.apache.atlas.util.SearchTracker;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.v1.model.instance.Id;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
 import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections4.IteratorUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
+
+
+import org.janusgraph.graphdb.relations.CacheEdge;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -1016,15 +1020,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
             indexQuery = graph.elasticsearchQuery(indexName);
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
-            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(ret.getSearchParameters());
             if (indexQueryResult == null) {
                 return null;
             }
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
             prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
-
             ret.setAggregations(indexQueryResult.getAggregationMap());
             ret.setApproximateCount(indexQuery.vertexTotals());
+
         } catch (Exception e) {
             LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
             throw e;
@@ -1090,7 +1094,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
     }
 
-    private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+    private void prepareSearchResult(AtlasSearchResult ret,  DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         if (RequestContext.get().NEW_FLOW) {
             fetchCollapsedResults = false; // V2 doesn't use this flag in this context
             prepareSearchResultV2(ret, indexQueryResult, resultAttributes, fetchCollapsedResults);
@@ -1099,14 +1103,16 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
     }
 
-        private void prepareSearchResultV2(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
-            AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("prepareSearchResultV2");
+    private void prepareSearchResultV2(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("prepareSearchResultV2");
         SearchParams searchParams = ret.getSearchParameters();
         try {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Preparing search results for ({})", ret.getSearchParameters());
             }
             Iterator<Result> iterator = indexQueryResult.getIterator();
+            ;
+
             boolean showSearchScore = searchParams.getShowSearchScore();
             if (iterator == null) {
                 return;
@@ -1115,25 +1121,20 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             final int BATCH_SIZE = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
             List<String> batchIds = new ArrayList<>(BATCH_SIZE);
             List<Result> batchResults = new ArrayList<>(BATCH_SIZE);
-            Map<String, AtlasVertex> vertexLookup = new HashMap<>(BATCH_SIZE);
+            //Map<String, AtlasEntityHeader> vertexIdHeader = new HashMap<>();
+           // Map<String, Map<String, Set<String>>> vertexIdRelations = new HashMap<>();
 
             while (iterator.hasNext()) {
 
                 // Clear previous batch data
                 batchIds.clear();
                 batchResults.clear();
-                vertexLookup.clear();
+
 
                 while (iterator.hasNext() && batchIds.size() < BATCH_SIZE) {
                     Result result = iterator.next();
-                    AtlasVertex vertex = result.getVertex();
-                    if (vertex == null) {
-                        LOG.warn("vertex in null");
-                        continue;
-                    }
-                    String id = vertex.getIdForDisplay();
+                    String id = result.getVertexId().toString();
                     batchIds.add(id);
-                    vertexLookup.putIfAbsent(id, vertex);
                     batchResults.add(result);
                 }
 
@@ -1172,7 +1173,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);
                     header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
 
-                    Map<String ,Object> propertiesRetrieved = vertex.getAllProperties();
+                    Map<String, Object> propertiesRetrieved = vertex.getAllProperties();
 
 
                     AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
@@ -1182,8 +1183,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     header.setAttributes(filterMapByKeys(propertiesRetrieved, allRequiredAttrs));
 
                     RequestContext context = RequestContext.get();
-                    AtlasJanusVertex atlasVertex = (AtlasJanusVertex) vertexLookup.get(entry.getKey());
-                    atlasVertex.setDynamicVertex(vertex);
 
                     boolean includeClassifications = context.includeClassifications();
                     boolean includeClassificationNames = context.isIncludeClassificationNames();
@@ -1197,7 +1196,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                         header.setClassificationNames(getAllTagNames(tags));
                     }
 
-                    if(context.includeMeanings()) {
+                    if (context.includeMeanings()) {
                         List<AtlasTermAssignmentHeader> termAssignmentHeaders = Optional.ofNullable(vertex.getProperty("meanings", List.class))
                                 .map(meanings -> (List<AtlasTermAssignmentHeader>) meanings)
                                 .orElse(Collections.emptyList());
@@ -1208,29 +1207,82 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
 
 
-                    for (Map<String, AtlasAttribute> attrs : type.getRelationshipAttributes().values()) {
-                        for (AtlasAttribute attr : attrs.values()) {
+                  //  AtlasVertex atlasVertex = graph.getJanusVertex(entry.getKey());
+                 //   ((AtlasJanusVertex) atlasVertex).setDynamicVertex(vertex);
 
-                            if (resultAttributes.contains(attr.getName())){
-                                Object attrValue = entityRetriever.getVertexAttribute(vertexLookup.get(entry.getKey()), attr);
+                    // this is relationName and assets linked to it
+                    //  Map<String, Set<String>> edgeVertices = mapEdges(entry.getKey(), resultAttributes, entityRetriever.fetchEdgeNames(type));
 
-                                if (attrValue != null) {
-                                    header.setAttribute(attr.getName(), attrValue);
-                                }
-                            }
+                    //    vertexIdHeader.putIfAbsent(entry.getKey(), header);
+                    //     vertexIdRelations.putIfAbsent(entry.getKey(), edgeVertices);
 
-                        }
-                    }
-
-                    ret.addEntity(header);
+                     ret.addEntity(header);
                 }
+
             }
+
+            // just one cassandra call to retrieve all relation vertices
+//            List<String> relationVertexIds = vertexIdRelations.values().stream()
+//                    .flatMap(innerMap -> innerMap.values().stream())
+//                    .flatMap(Set::stream)
+//                    .collect(Collectors.toList());
+//
+//            Map<String, DynamicVertex> vertexRelationsPropertiesMap = vertexRetrievalService.retrieveVertices(relationVertexIds);
+//
+//            for (Map.Entry<String, String> entry : vertexIdHeader.entrySet()) {
+//                AtlasEntityHeader header = entry.getValue();
+//                Map<String, Set<String>> relationsMap = vertexIdRelations.get(entry.getKey());
+//                for (Map.Entry<String, Set<String>> relationsEntry = relationsMap) {
+//                    String attribute = relationsEntry.getKey();
+            // TODO: don;t know here what is the type of attribute Object, array or struct
+//                    header.setAttribu;
+//                }
+//            }
+
             scrubSearchResults(ret, searchParams.getSuppressLogs());
         } catch (Exception e) {
             throw e;
-        }finally {
+        } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private Map<String, Set<String>> mapEdges(String vertexId, Set<String> attributes, Map<String, Set<String>> relationshipsLookup)  {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapEdges");
+        try {
+            GraphTraversal t = graph.V(vertexId).bothE();
+            Set<AtlasJanusEdge> janusEdges = ((AtlasJanusGraphTraversal) t).getAtlasEdgeSet();
+
+            Map<String, Set<String>> relationVertices = new HashMap<>();
+            janusEdges.stream().filter(Objects::nonNull).forEach(janusEdge -> attributes.forEach(attribute -> {
+
+                if (janusEdge.getLabel().contains(attribute)) {
+                    relationVertices.putIfAbsent(attribute, new HashSet<>());
+                    relationVertices.get(attribute).add(getRelationVertexId(janusEdge, vertexId));
+                    return;
+                }
+
+                String edgeTypeName = janusEdge.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+
+                if (MapUtils.isNotEmpty(relationshipsLookup) && relationshipsLookup.containsKey(edgeTypeName) && relationshipsLookup.get(edgeTypeName).contains(attribute)) {
+                    relationVertices.putIfAbsent(attribute, new HashSet<>());
+                    relationVertices.get(attribute).add(getRelationVertexId(janusEdge, vertexId));
+                }
+            }));
+
+            return relationVertices;
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    private String getRelationVertexId(AtlasJanusEdge janusEdge, String sourceVertexId) {
+        String startVertexId = ((CacheEdge) janusEdge.getWrappedElement()).getVertex(0).id().toString();
+        if (sourceVertexId.equals(startVertexId)) {
+            // get end vertex
+            startVertexId = ((CacheEdge) janusEdge.getWrappedElement()).getVertex(1).id().toString();
+        }
+        return startVertexId;
     }
 
     private Map<String, Object> filterMapByKeys(Map<String, Object> originalMap, Set<String> resultAttributes) {

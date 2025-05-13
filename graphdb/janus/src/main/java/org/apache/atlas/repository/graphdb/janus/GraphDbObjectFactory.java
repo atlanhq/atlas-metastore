@@ -95,6 +95,21 @@ public final class GraphDbObjectFactory {
     }
 
     /**
+     * Creates an AtlasJanusVertex that corresponds to the given Gremlin Vertex.
+     *
+     * @param graph The graph that contains the vertex
+     * @param source the Gremlin vertex
+     */
+    public static AtlasJanusVertex createJanusVertex(AtlasJanusGraph graph, Vertex source) {
+        if (source == null) {
+            return null;
+        }
+
+        AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
+        return ret;
+    }
+
+    /**
      * @param propertyKey The Gremlin propertyKey.
      *
      */

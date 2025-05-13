@@ -472,6 +472,15 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     @Override
+    public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getJanusVertex(String vertexId) {
+        Iterator<Vertex> it     = getGraph().vertices(vertexId);
+        Vertex           vertex = getSingleElement(it, vertexId);
+
+        return GraphDbObjectFactory.createJanusVertex(this, vertex);
+    }
+
+
+    @Override
     public Iterable<AtlasVertex<AtlasJanusVertex, AtlasJanusEdge>> getVertices(String key, Object value) {
         AtlasGraphQuery<AtlasJanusVertex, AtlasJanusEdge> query = query();
 

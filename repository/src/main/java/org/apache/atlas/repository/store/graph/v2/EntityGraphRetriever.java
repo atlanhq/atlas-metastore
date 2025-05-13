@@ -1194,7 +1194,7 @@ public class EntityGraphRetriever {
         }
     }
 
-    private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
+    public Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
         Map<String, Map<String, AtlasAttribute>> relationships = entityType.getRelationshipAttributes();
         Map<String, Set<String>> edgeNames = new HashMap<>();
         relationships.forEach((k,v) -> {
@@ -1230,8 +1230,9 @@ public class EntityGraphRetriever {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
-
     }
+
+
     private void updateAttrValue( Map<String, Object> propertiesMap, VertexProperty<Object> property){
         Object value = propertiesMap.get(property.key());
         if (value instanceof List) {

@@ -653,6 +653,11 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
         }
 
         @Override
+        public Long getVertexId() {
+            return LongEncoding.decode(hit.getId());
+        }
+
+        @Override
         public double getScore() {
             return hit.getScore();
         }
@@ -694,6 +699,11 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
             long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
             return graph.getVertex(String.valueOf(vertexId));
+        }
+
+        @Override
+        public Long getVertexId() {
+            return  LongEncoding.decode(String.valueOf(hit.get("_id")));
         }
 
         @Override
