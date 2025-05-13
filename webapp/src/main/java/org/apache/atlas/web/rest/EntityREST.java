@@ -816,6 +816,7 @@ public class EntityREST {
     @Path("/bulk")
     @Timed
     public EntityMutationResponse createOrUpdate(AtlasEntitiesWithExtInfo entities,
+                                                 @QueryParam("_new") @DefaultValue("true") boolean useNewFlow,
                                                  @QueryParam("replaceClassifications") @DefaultValue("false") boolean replaceClassifications,
                                                  @QueryParam("replaceTags") @DefaultValue("false") boolean replaceTags,
                                                  @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
@@ -823,7 +824,7 @@ public class EntityREST {
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
                                                  @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
     ) throws AtlasBaseException {
-
+        RequestContext.get().NEW_FLOW = useNewFlow;
         if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
             throw new AtlasBaseException(BAD_REQUEST, "Only one of [replaceClassifications, replaceTags, appendTags] can be true");
         }

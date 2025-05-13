@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.janusgraph.core.EdgeLabel;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
@@ -71,11 +72,24 @@ public final class GraphDbObjectFactory {
      * @param source the Gremlin vertex
      */
     public static AtlasJanusVertex createVertex(AtlasJanusGraph graph, Vertex source) {
-
         if (source == null) {
             return null;
         }
-        return new AtlasJanusVertex(graph, source);
+
+        AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
+
+        // TODO: flag based
+        try {
+            DynamicVertex dynamicVertex = graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString());
+            if (dynamicVertex == null) {
+                dynamicVertex = new DynamicVertex();
+            }
+            ret.setDynamicVertex(dynamicVertex);
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+        return ret;
     }
 
     /**

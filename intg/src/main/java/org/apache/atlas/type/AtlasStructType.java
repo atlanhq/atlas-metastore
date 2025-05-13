@@ -705,7 +705,7 @@ public class AtlasStructType extends AtlasType {
         return Collections.unmodifiableMap(ret);
     }
 
-    private AtlasStruct getStructFromValue(Object val) {
+    public AtlasStruct getStructFromValue(Object val) {
         final AtlasStruct ret;
 
         if (val instanceof AtlasStruct) {
@@ -723,7 +723,8 @@ public class AtlasStructType extends AtlasType {
             if (map == null) {
                 ret = null;
             } else {
-                ret = new AtlasStruct((Map) val);
+                ret = new AtlasStruct(map, this.allAttributes, true);
+                ret.setTypeName(this.getTypeName());
             }
         } else {
             ret = null;
