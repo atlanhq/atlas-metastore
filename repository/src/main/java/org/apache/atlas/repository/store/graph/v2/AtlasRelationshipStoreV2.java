@@ -952,16 +952,20 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     public static void recordRelationshipMutation(RelationshipMutation relationshipMutation, AtlasEdge edge, EntityGraphRetriever entityRetriever) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("recordRelationshipMutation");
+        /*AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("recordRelationshipMutation");
         if (Objects.isNull(edge))
             throw new IllegalStateException("edge cannot be null");
+
         final AtlasRelationship relationship = entityRetriever.mapEdgeToAtlasRelationship(edge);
+
         if (relationshipMutation.equals(RelationshipMutation.RELATIONSHIP_HARD_DELETE))
             relationship.setStatus(AtlasRelationship.Status.PURGED);
+
         AtlasRelationshipStoreV2.setEdgeVertexIdsInContext(edge);
+
         RequestContext.get().saveRelationshipsMutationContext(relationshipMutation.name(), relationship);
 
-        RequestContext.get().endMetricRecord(recorder);
+        RequestContext.get().endMetricRecord(recorder);*/
     }
 
     private void addRelationshipMetadataForNotificationEvent(Set<AtlasRelationship> relationships) {
