@@ -62,6 +62,7 @@ import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.AtlasConfiguration.NOTIFICATION_RELATIONSHIPS_ENABLED;
+import static org.apache.atlas.AtlasConfiguration.SUPPORTED_RELATIONSHIP_EVENTS;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.BOTH;
 import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.NONE;
@@ -100,6 +101,8 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     private static final String ES_DOC_ID_MAP_KEY = "esDocIdMap";
 
     private static final String UD_RELATIONSHIP_TYPE_NAME = "UserDefRelationship";
+
+    private static final List<String> ALLOWED_RELATIONSHIP_TYPES_FOR_ES_FILTERING = Arrays.asList(AtlasConfiguration.SUPPORTED_RELATIONSHIP_EVENTS.getStringArray());
 
     private static Set<String> EXCLUDE_MUTATION_REL_TYPE_NAMES = new HashSet<String>() {{
         add(REL_DOMAIN_TO_DOMAINS);
@@ -961,7 +964,9 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         if (relationshipMutation.equals(RelationshipMutation.RELATIONSHIP_HARD_DELETE))
             relationship.setStatus(AtlasRelationship.Status.PURGED);
 
-        AtlasRelationshipStoreV2.setEdgeVertexIdsInContext(edge);
+        if (ALLOWED_RELATIONSHIP_TYPES_FOR_ES_FILTERING.contains(relationship.getLabel())) {
+            AtlasRelationshipStoreV2.setEdgeVertexIdsInContext(edge);
+        }
 
         RequestContext.get().saveRelationshipsMutationContext(relationshipMutation.name(), relationship);
 
