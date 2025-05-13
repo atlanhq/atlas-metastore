@@ -275,30 +275,40 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public List<String> getListProperty(String propertyName) {
-        List<String> value =  getProperty(propertyName, List.class);
-        return value;
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty");
+        try {
+            List<String> value =  getProperty(propertyName, List.class);
+            return value;
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     @Override
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
-        if (RequestContext.get().NEW_FLOW && isVertex()) {
-            Object val = getProperty(propertyName, elementType);
-            if (val == null) {
-                new ArrayList<>(0);
-            } else {
-                return (List<V>) val;
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty");
+        try {
+            if (RequestContext.get().NEW_FLOW && isVertex()) {
+                Object val = getProperty(propertyName, elementType);
+                if (val == null) {
+                    new ArrayList<>(0);
+                } else {
+                    return (List<V>) val;
+                }
             }
-        }
 
-        Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
+            Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
-        List<V> value = new ArrayList<>();
-        while (it.hasNext()) {
-            Property currentProperty      = it.next();
-            Object   currentPropertyValue = currentProperty.value();
-            value.add((V) currentPropertyValue);
+            List<V> value = new ArrayList<>();
+            while (it.hasNext()) {
+                Property currentProperty      = it.next();
+                Object   currentPropertyValue = currentProperty.value();
+                value.add((V) currentPropertyValue);
+            }
+            return value;
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
-        return value;
     }
 
     @Override

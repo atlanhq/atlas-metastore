@@ -1767,6 +1767,7 @@ public final class GraphHelper {
 
 
     public static List<AtlasEdge> getCollectionElementsUsingRelationship(AtlasVertex vertex, AtlasAttribute attribute, String edgeLabel) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getCollectionElementsUsingRelationship");
         List<AtlasEdge>                ret;
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getEdgesForLabel(vertex, edgeLabel, edgeDirection);
@@ -1775,6 +1776,7 @@ public final class GraphHelper {
 
         sortCollectionElements(attribute, ret);
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 

@@ -2121,8 +2121,10 @@ public class EntityGraphRetriever {
                 continue;
             }
 
+            AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("mapVertexToCollectionEntry");
             Object arrValue = mapVertexToCollectionEntry(arrayElementType, entityVertex, arrayElementType, element, edgeLabel,
                                                          entityExtInfo, isOwnedAttribute, edgeDirection, isMinExtInfo, includeReferences);
+            RequestContext.get().endMetricRecord(recorder);
 
             if (arrValue != null) {
                 arrValues.add(arrValue);
@@ -2239,6 +2241,7 @@ public class EntityGraphRetriever {
     private AtlasObjectId mapVertexToObjectId(AtlasVertex entityVertex, String edgeLabel, AtlasEdge edge,
                                               AtlasEntityExtInfo entityExtInfo, boolean isOwnedAttribute,
                                               AtlasRelationshipEdgeDirection edgeDirection, final boolean isMinExtInfo) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("mapVertexToObjectId");
         AtlasObjectId ret = null;
 
         if (edge == null) {
@@ -2295,6 +2298,7 @@ public class EntityGraphRetriever {
             }
         }
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
