@@ -992,7 +992,7 @@ public class EntityGraphMapper {
         }
 
         if (MapUtils.isNotEmpty(struct.getAttributes())) {
-            MetricRecorder metric = RequestContext.get().startMetricRecord("mapAttributes");
+            MetricRecorder metric = RequestContext.get().startMetricRecord("graphMapper.mapAttributes");
 
             List<String> timestampAutoUpdateAttributes = new ArrayList<>();
             List<String> userAutoUpdateAttributes = new ArrayList<>();

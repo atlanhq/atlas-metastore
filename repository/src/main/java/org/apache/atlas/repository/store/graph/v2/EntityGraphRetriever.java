@@ -1600,7 +1600,7 @@ public class EntityGraphRetriever {
     }
 
     private void mapAttributes(AtlasVertex entityVertex, AtlasStruct struct, AtlasEntityExtInfo entityExtInfo, boolean isMinExtInfo, boolean includeReferences) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapAttributes");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retriever.mapAttributes");
         AtlasType objType = typeRegistry.getType(struct.getTypeName());
 
         if (!(objType instanceof AtlasStructType)) {
