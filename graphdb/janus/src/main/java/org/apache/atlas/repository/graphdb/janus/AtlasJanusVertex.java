@@ -82,11 +82,22 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     }
 
     @Override
-    public <T> void addListProperty(String propertyName, T value) { //TODO
+    public <T> void addListProperty(String propertyName, T value) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.addListProperty");
         try {
+            if (RequestContext.get().NEW_FLOW && isVertex()) {
+                this.getDynamicVertex().addListProperty(propertyName, value);
+
+                if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                    getWrappedElement().property(propertyName, value);
+                }
+            }
+
             getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
         }
     }
 
@@ -177,6 +188,10 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     public <T> Collection<T> getPropertyValues(String propertyName, Class<T> clazz) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.getPropertyValues");
         try {
+            if (RequestContext.get().NEW_FLOW && isVertex()) {
+                return (Collection<T>) getProperty(propertyName, clazz);
+            }
+
             Collection<T> result = new ArrayList<T>();
             Iterator<VertexProperty<T>> it = getWrappedElement().properties(propertyName);
             while (it.hasNext()) {
