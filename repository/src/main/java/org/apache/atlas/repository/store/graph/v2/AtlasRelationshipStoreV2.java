@@ -464,6 +464,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     private AtlasEdge createRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean existingRelationshipCheck, boolean skipAuth) throws AtlasBaseException {
         AtlasEdge ret;
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("createRelationship");
 
         try {
             validateRelationship(end1Vertex, end2Vertex, relationship);
@@ -533,6 +534,8 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         } catch (RepositoryException e) {
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         }
+
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 

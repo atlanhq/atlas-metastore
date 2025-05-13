@@ -143,6 +143,7 @@ public final class GraphHelper {
     }
 
     public AtlasEdge addEdge(AtlasVertex fromVertex, AtlasVertex toVertex, String edgeLabel) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("GraphHelper.addEdge");
         AtlasEdge ret;
 
         if (LOG.isDebugEnabled()) {
@@ -169,6 +170,7 @@ public final class GraphHelper {
             }
         }
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 

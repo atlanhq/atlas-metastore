@@ -1642,6 +1642,7 @@ public class EntityGraphMapper {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> mapObjectIdValue({})", ctx);
         }
+        MetricRecorder recorder = RequestContext.get().startMetricRecord("mapObjectIdValue");
 
         AtlasEdge ret = null;
 
@@ -1683,6 +1684,7 @@ public class EntityGraphMapper {
             LOG.debug("<== mapObjectIdValue({})", ctx);
         }
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -5270,6 +5272,7 @@ public class EntityGraphMapper {
     private void recordEntityUpdate(AtlasVertex vertex, AttributeMutationContext ctx, boolean isAdd) throws AtlasBaseException {
         if (vertex != null) {
             RequestContext req = RequestContext.get();
+            MetricRecorder recorder = req.startMetricRecord("recordEntityUpdate");
 
             //AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex);
             AtlasEntityHeader header = new AtlasEntityHeader(getTypeName(vertex));
@@ -5325,6 +5328,8 @@ public class EntityGraphMapper {
             } finally {
                 req.endMetricRecord(recorderInverseMutatedDetails);
             }
+
+            req.endMetricRecord(recorder);
         }
     }
 

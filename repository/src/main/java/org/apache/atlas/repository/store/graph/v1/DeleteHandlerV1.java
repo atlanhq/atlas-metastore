@@ -1262,6 +1262,8 @@ public abstract class DeleteHandlerV1 {
     }
 
     public void handleBlockedClassifications(AtlasEdge edge, Set<AtlasClassification> blockedClassifications) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder= RequestContext.get().startMetricRecord("handleBlockedClassifications");
+
         if (blockedClassifications != null) {
             List<AtlasVertex> propagatableClassifications  = getPropagatableClassifications(edge);
             List<String>      currBlockedClassificationIds = getBlockedClassificationIds(edge);
@@ -1297,6 +1299,8 @@ public abstract class DeleteHandlerV1 {
                 }
             }
         }
+
+        RequestContext.get().endMetricRecord(recorder);
     }
 
     private List<AtlasVertex> getVerticesForIds(List<AtlasVertex> vertices, List<String> vertexIds) {
