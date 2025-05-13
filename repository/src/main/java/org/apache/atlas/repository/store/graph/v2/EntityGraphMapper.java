@@ -2847,6 +2847,7 @@ public class EntityGraphMapper {
 
     private void setAssignedGuid(Object val, EntityMutationContext context) {
         if (val != null) {
+            MetricRecorder recorder = RequestContext.get().startMetricRecord("setAssignedGuid");
             Map<String, String> guidAssignements = context.getGuidAssignments();
 
             if (val instanceof AtlasObjectId) {
@@ -2895,6 +2896,7 @@ public class EntityGraphMapper {
                     mapObjId.put(AtlasObjectId.KEY_GUID, assignedGuid);
                 }
             }
+            RequestContext.get().endMetricRecord(recorder);
         }
     }
 
