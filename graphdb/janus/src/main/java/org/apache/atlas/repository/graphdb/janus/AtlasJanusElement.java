@@ -290,13 +290,16 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         try {
             if (RequestContext.get().NEW_FLOW && isVertex()) {
                 AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty.newFlow");
-                Object val = getProperty(propertyName, elementType);
-                if (val == null) {
-                    new ArrayList<>(0);
-                } else {
-                    return (List<V>) val;
+                try {
+                    Object val = getProperty(propertyName, elementType);
+                    if (val == null) {
+                        return new ArrayList<>(0);
+                    } else {
+                        return (List<V>) val;
+                    }
+                } finally {
+                    RequestContext.get().endMetricRecord(recorder1);
                 }
-                RequestContext.get().endMetricRecord(recorder1);
             }
 
             AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty.oldFlow");
