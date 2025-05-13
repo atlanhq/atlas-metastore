@@ -959,16 +959,16 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         if (Objects.isNull(edge))
             throw new IllegalStateException("edge cannot be null");
 
-        final AtlasRelationship relationship = entityRetriever.mapEdgeToAtlasRelationship(edge);
+        if (ALLOWED_RELATIONSHIP_TYPES_FOR_ES_FILTERING.contains(edge.getLabel())) {
+            final AtlasRelationship relationship = entityRetriever.mapEdgeToAtlasRelationship(edge);
 
-        if (relationshipMutation.equals(RelationshipMutation.RELATIONSHIP_HARD_DELETE))
-            relationship.setStatus(AtlasRelationship.Status.PURGED);
+            if (relationshipMutation.equals(RelationshipMutation.RELATIONSHIP_HARD_DELETE))
+                relationship.setStatus(AtlasRelationship.Status.PURGED);
 
-        if (ALLOWED_RELATIONSHIP_TYPES_FOR_ES_FILTERING.contains(relationship.getLabel())) {
             AtlasRelationshipStoreV2.setEdgeVertexIdsInContext(edge);
-        }
 
-        RequestContext.get().saveRelationshipsMutationContext(relationshipMutation.name(), relationship);
+            RequestContext.get().saveRelationshipsMutationContext(relationshipMutation.name(), relationship);
+        }
 
         RequestContext.get().endMetricRecord(recorder);
     }
