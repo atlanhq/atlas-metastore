@@ -14,6 +14,7 @@ import org.apache.atlas.plugin.model.RangerPolicy;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.solr.common.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -44,6 +45,7 @@ import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 public class AccessorsExtractor {
 
     private static final Logger LOG = LoggerFactory.getLogger(AccessorsExtractor.class);
+    private static final PoliciesStore policiesStore = PoliciesStore.getInstance();
 
     private static final Set<String> ENTITY_ACTIONS = new HashSet<String>(){{
         add(ENTITY_READ.getType());
@@ -93,7 +95,7 @@ public class AccessorsExtractor {
 
         String action = request.getAction().getType();
 
-        List<RangerPolicy> abacPolicies = PoliciesStore.getRelevantPolicies(null, null, "atlas_abac", Arrays.asList(action), null, true);
+        List<RangerPolicy> abacPolicies = policiesStore.getRelevantPolicies(null, null, "atlas_abac", Arrays.asList(action), null, true);
 
         List<RangerPolicy> matchedPolicies = getAccessorsInMemoryForAbacPolicies(request, abacPolicies);
 
@@ -106,8 +108,6 @@ public class AccessorsExtractor {
         List<RangerPolicy> matchedPolicies = new ArrayList<>();
         String action = request.getAction().getType();
 
-        ObjectMapper mapper = new ObjectMapper();
-
         if (ENTITY_ACTIONS.contains(action)) {
             AtlasEntityAccessRequest entityAccessRequest = (AtlasEntityAccessRequest) request;
 
@@ -118,23 +118,11 @@ public class AccessorsExtractor {
             }
 
             for (RangerPolicy policy : abacPolicies) {
-                String filterCriteria = policy.getPolicyFilterCriteria();
-                if (filterCriteria != null && !filterCriteria.isEmpty() ) {
-
-                    JsonNode filterCriteriaNode = null;
-                    try {
-                        filterCriteriaNode = mapper.readTree(policy.getPolicyFilterCriteria());
-                    } catch (JsonProcessingException e) {
-                        e.printStackTrace();
-                    }
-
-                    if (filterCriteriaNode != null && filterCriteriaNode.get("entity") != null) {
-                        JsonNode entityFilterCriteriaNode = filterCriteriaNode.get("entity");
-                        boolean matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entity, vertex);
-
-                        if (matched) {
-                            matchedPolicies.add(policy);
-                        }
+                JsonNode entityFilterCriteriaNode = policy.getPolicyParsedFilterCriteria("entity");
+                if (entityFilterCriteriaNode != null) {
+                    boolean matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entity, vertex);
+                    if (matched) {
+                        matchedPolicies.add(policy);
                     }
                 }
             }
@@ -155,29 +143,14 @@ public class AccessorsExtractor {
             }
 
             for (RangerPolicy policy : abacPolicies) {
-                String filterCriteria = policy.getPolicyFilterCriteria();
-                if (filterCriteria != null && !filterCriteria.isEmpty() ) {
-
-                    JsonNode filterCriteriaNode = null;
-                    try {
-                        filterCriteriaNode = mapper.readTree(policy.getPolicyFilterCriteria());
-                    } catch (JsonProcessingException e) {
-                        e.printStackTrace();
-                    }
-
-                    if (filterCriteriaNode != null && filterCriteriaNode.get("endOneEntity") != null) {
-                        JsonNode entityFilterCriteriaNode = filterCriteriaNode.get("endOneEntity");
-                        boolean matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entityOne, vertexOne);
-
-                        if (matched) {
-                            entityFilterCriteriaNode = filterCriteriaNode.get("endTwoEntity");
-                            matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entityTwo, vertexTwo);
-                        }
-
-                        if (matched) {
-                            matchedPolicies.add(policy);
-                        }
-                    }
+                JsonNode entityFilterCriteriaNode = policy.getPolicyParsedFilterCriteria("endOneEntity");
+                boolean matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entityOne, vertexOne);
+                if (matched) {
+                    entityFilterCriteriaNode = policy.getPolicyParsedFilterCriteria("endTwoEntity");
+                    matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entityTwo, vertexTwo);
+                }
+                if (matched) {
+                    matchedPolicies.add(policy);
                 }
             }
         }
