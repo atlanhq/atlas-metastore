@@ -1114,7 +1114,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
 
             final int BATCH_SIZE = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
-            List<String> batchIds = new ArrayList<>(BATCH_SIZE);
             Map<String, Result> batchResults = new HashMap<>(BATCH_SIZE);
             Map<String, AtlasEntityHeader> vertexIdHeader = new HashMap<>();
             Map<String, Map<String, Set<String>>> vertexIdRelations = new HashMap<>();
@@ -1122,24 +1121,22 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             while (iterator.hasNext()) {
 
                 // Clear previous batch data
-                batchIds.clear();
                 batchResults.clear();
 
 
-                while (iterator.hasNext() && batchIds.size() < BATCH_SIZE) {
+                while (iterator.hasNext() && batchResults.size() < BATCH_SIZE) {
                     Result result = iterator.next();
                     String id = result.getVertexId().toString();
-                    batchIds.add(id);
                     batchResults.putIfAbsent(id, result);
                 }
 
-                if (batchIds.isEmpty()) {
+                if (batchResults.isEmpty()) {
                     // No more results to process
                     break;
                 }
 
                 // Step 3: Fetch all properties for this batch from Cassandra in one call
-                Map<String, DynamicVertex> vertexPropertiesMap = vertexRetrievalService.retrieveVertices(batchIds);
+                Map<String, DynamicVertex> vertexPropertiesMap = vertexRetrievalService.retrieveVertices(new ArrayList<>(batchResults.keySet()));
 
                 if (vertexPropertiesMap == null || vertexPropertiesMap.isEmpty()) {
                     // No properties found for this batch
@@ -1202,18 +1199,12 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                         .collect(Collectors.toList()));
                     }
 
-
-                    AtlasVertex atlasVertex = graph.getJanusVertex(entry.getKey());
-                    ((AtlasJanusVertex) atlasVertex).setDynamicVertex(vertex);
-
                     // 1. get all edges related to asset from lean graph
                     // 2.  map edge labels retrieved from janusgraph to user requested attributes
                     // perform projections on #1
                     Map<String, Set<String>> edgeVertices = mapEdges(entry.getKey(), resultAttributes, entityRetriever.fetchEdgeNames(type));
                     vertexIdHeader.putIfAbsent(entry.getKey(), header);
                     vertexIdRelations.putIfAbsent(entry.getKey(), edgeVertices);
-
-
 
                     if (showSearchScore) {
                         ret.addEntityScore(header.getGuid(), result.getScore());
