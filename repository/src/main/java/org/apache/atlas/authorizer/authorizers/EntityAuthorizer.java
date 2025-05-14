@@ -1,8 +1,6 @@
 package org.apache.atlas.authorizer.authorizers;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorize.AtlasAccessResult;
 import org.apache.atlas.authorizer.store.PoliciesStore;
@@ -27,6 +25,7 @@ import static org.apache.atlas.authorizer.ABACAuthorizerUtils.POLICY_TYPE_DENY;
 public class EntityAuthorizer {
 
     private static final Logger LOG = LoggerFactory.getLogger(EntityAuthorizer.class);
+    private static final PoliciesStore policiesStore = PoliciesStore.getInstance();
 
     public static AtlasAccessResult isAccessAllowedInMemory(AtlasEntityHeader entity, String action) {
 
@@ -52,7 +51,7 @@ public class EntityAuthorizer {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("isAccessAllowedInMemory."+policyType);
         AtlasAccessResult result;
 
-        List<RangerPolicy> policies = PoliciesStore.getRelevantPolicies(null, null, "atlas_abac", Arrays.asList(action), policyType);
+        List<RangerPolicy> policies = policiesStore.getRelevantPolicies(null, null, "atlas_abac", Arrays.asList(action), policyType);
         result = evaluateABACPoliciesInMemory(policies, entity);
 
         RequestContext.get().endMetricRecord(recorder);
@@ -63,20 +62,11 @@ public class EntityAuthorizer {
         AtlasAccessResult result = new AtlasAccessResult(false);
 
         AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entity.getGuid());
-        ObjectMapper mapper = new ObjectMapper();
 
         for (RangerPolicy policy : abacPolicies) {
-            String filterCriteria = policy.getPolicyFilterCriteria();
-
             boolean matched = false;
-            JsonNode filterCriteriaNode = null;
-            try {
-                filterCriteriaNode = mapper.readTree(filterCriteria);
-            } catch (JsonProcessingException e) {
-                e.printStackTrace();
-            }
-            if (filterCriteriaNode != null && filterCriteriaNode.get("entity") != null) {
-                JsonNode entityFilterCriteriaNode = filterCriteriaNode.get("entity");
+            JsonNode entityFilterCriteriaNode = policy.getPolicyParsedFilterCriteria("entity");
+            if (entityFilterCriteriaNode != null) {
                 matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entity, vertex);
             }
             if (matched) {
@@ -95,7 +85,7 @@ public class EntityAuthorizer {
         String condition = data.get("condition").asText();
         JsonNode criterion = data.get("criterion");
 
-        if (criterion.size() == 0) {
+        if (criterion == null || !criterion.isArray() || criterion.isEmpty() ) {
             return false;
         }
         boolean result = true;
@@ -196,17 +186,17 @@ public class EntityAuthorizer {
                 }
                 break;
             case "STARTS_WITH":
-                if (AuthorizerCommon.listStartsWith(attributeValue, entityAttributeValues)) {
+                if (AuthorizerCommonUtil.listStartsWith(attributeValue, entityAttributeValues)) {
                     return true;
                 }
                 break;
             case "LIKE":
-                if (AuthorizerCommon.listMatchesWith(attributeValue, entityAttributeValues)) {
+                if (AuthorizerCommonUtil.listMatchesWith(attributeValue, entityAttributeValues)) {
                     return true;
                 }
                 break;
             case "ENDS_WITH":
-                if (AuthorizerCommon.listEndsWith(attributeValue, entityAttributeValues)) {
+                if (AuthorizerCommonUtil.listEndsWith(attributeValue, entityAttributeValues)) {
                     return true;
                 }
                 break;

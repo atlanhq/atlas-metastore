@@ -21,8 +21,15 @@ package org.apache.atlas.plugin.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.apache.commons.collections.CollectionUtils;
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.xml.bind.annotation.XmlAccessType;
 import javax.xml.bind.annotation.XmlAccessorType;
@@ -42,6 +49,8 @@ to avoid the circular dependency when ABAC authorizer was implemented.
 @XmlRootElement
 @XmlAccessorType(XmlAccessType.FIELD)
 public class RangerPolicy extends RangerBaseModelObject implements java.io.Serializable {
+    private static final ObjectMapper mapper = new ObjectMapper();
+
     public static final String POLICY_TYPE_ACCESS    = "ACCESS";
     public static final String POLICY_TYPE_DATAMASK  = "DATA_MASK";
     public static final String POLICY_TYPE_ROWFILTER = "ROW_FILTER";
@@ -64,6 +73,7 @@ public class RangerPolicy extends RangerBaseModelObject implements java.io.Seria
     public static final String POLICY_PRIORITY_NAME_OVERRIDE = "OVERRIDE";
 
     public static final Comparator<RangerPolicy> POLICY_ID_COMPARATOR = new PolicyIdComparator();
+    private static final Logger LOG = LoggerFactory.getLogger(RangerPolicy.class);
 
     // For future use
     private static final long serialVersionUID = 1L;
@@ -92,6 +102,7 @@ public class RangerPolicy extends RangerBaseModelObject implements java.io.Seria
     private Map<String, String> 			  attributes;
     private String 			                  policyFilterCriteria;
     private String 			                  policyResourceCategory;
+    private JsonNode                          filterCriteriaNode;
 
     public RangerPolicy() {
         this(null, null, null, null, null, null, null, null, null, null, null);
@@ -573,6 +584,25 @@ public class RangerPolicy extends RangerBaseModelObject implements java.io.Seria
         toString(sb);
 
         return sb.toString();
+    }
+
+    public JsonNode getPolicyParsedFilterCriteria(String rootKey) {
+        // only parse json once
+        if (this.filterCriteriaNode == null) {
+            if (StringUtils.isEmpty(this.policyFilterCriteria)) {
+                return null;
+            }
+            try {
+                this.filterCriteriaNode = mapper.readTree(this.policyFilterCriteria);
+            } catch (JsonProcessingException e) {
+                LOG.error("ABAC_AUTH: parsing filterCriteria failed for policy={}, filterCriteria={}", this.getGuid(), this.policyFilterCriteria);
+            }
+        }
+
+        if (filterCriteriaNode != null && filterCriteriaNode.get(rootKey) != null) {
+            return filterCriteriaNode.get(rootKey);
+        }
+        return null;
     }
 
     public StringBuilder toString(StringBuilder sb) {
