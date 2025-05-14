@@ -1735,7 +1735,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
             if (RequestContext.get().NEW_FLOW) {
-                MetricRecorder recorder = RequestContext.get().startMetricRecord("callInsertVertices");
+                MetricRecorder recorder = RequestContext.get().startMetricRecord("atlasEntityStoreV2.callInsertVertices");
                 // TODO: Move to commit graph section
                 List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
                         .map(x -> context.getVertex(x))
@@ -2238,6 +2238,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         } catch (Exception e) {
             LOG.error("Delete vertices request failed", e);
             throw new AtlasBaseException(e);
+        }
+
+        if (RequestContext.get().NEW_FLOW) {
+            dynamicVertexRetrievalService.insertVertices(RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList());
+            dynamicVertexRetrievalService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
         }
 
         return response;

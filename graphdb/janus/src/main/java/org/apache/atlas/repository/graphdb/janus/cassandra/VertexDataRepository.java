@@ -22,4 +22,6 @@ interface VertexDataRepository  {
     Map<String, DynamicVertex> fetchVerticesDirectly(List<String> vertexIds) throws AtlasBaseException;
 
     void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException;
+
+    void dropVertices(List<String> vertexIds) throws AtlasBaseException;
 }
