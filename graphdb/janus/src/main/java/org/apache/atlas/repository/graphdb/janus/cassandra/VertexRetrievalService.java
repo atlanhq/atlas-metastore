@@ -8,6 +8,7 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -60,12 +61,23 @@ public class VertexRetrievalService {
     }
 
     public void insertVertices(List<AtlasVertex> vertices) throws AtlasBaseException {
+        if (CollectionUtils.isEmpty(vertices)) {
+            return;
+        }
+
         Map<String, String> toInsert = new HashMap<>(vertices.size());
         vertices.stream()
                 .filter(x -> ((AtlasJanusVertex) x).getDynamicVertex().hasProperties())
                 .forEach(x -> toInsert.put(x.getIdForDisplay(), serializer.serialize(((AtlasJanusVertex) x).getDynamicVertex())));
 
         repository.insertVertices(toInsert);
+    }
+
+    public void dropVertices(List<String> vertexIds) throws AtlasBaseException {
+        if (CollectionUtils.isEmpty(vertexIds)) {
+            return;
+        }
+        repository.dropVertices(vertexIds);
     }
 
     /**

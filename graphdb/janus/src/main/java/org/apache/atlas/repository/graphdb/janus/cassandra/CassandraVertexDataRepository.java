@@ -84,6 +84,28 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         }
     }
 
+    @Override
+    public void dropVertices(List<String> vertexIds) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("dropVertices");
+        try {
+            StringBuilder batchQuery = new StringBuilder();
+            batchQuery.append("BEGIN BATCH ");
+            for (String vertexId : vertexIds) {
+                int bucket = calculateBucket(vertexId);
+                String insert = String.format(DROP_VERTEX,
+                        keyspace,
+                        tableName,
+                        bucket,
+                        vertexId);
+                batchQuery.append(insert).append(";");
+            }
+            batchQuery.append("APPLY BATCH;");
+            session.execute(batchQuery.toString());
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
     /**
      * Gets a prepared statement for a specific batch size, creating it if needed.
      */
