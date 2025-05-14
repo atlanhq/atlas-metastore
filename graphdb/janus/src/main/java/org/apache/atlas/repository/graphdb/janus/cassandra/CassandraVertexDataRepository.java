@@ -40,7 +40,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     private final ObjectMapper objectMapper;
 
     private static String INSERT_VERTEX = "INSERT into %s.%s (bucket, id, json_data, updated_at) values (%s, '%s', '%s', %s)";
-    //private static String INSERT_VERTEX = "INSERT into %s.%s (id, json_data, updated_at) values ('%s', '%s', %s)";
+
+    private static String DROP_VERTEX = "DELETE from %s.%s where bucket = %s AND id = '%s'";
 
     /**
      * Creates a new enhanced Cassandra repository.
