@@ -1099,150 +1099,248 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
     }
 
+    private Map<String, Object> filterMapByKeys(Map<String, Object> originalMap, Set<String> resultAttributes) {
+        if (originalMap == null || originalMap.isEmpty() || resultAttributes == null || resultAttributes.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        
+        // Estimate capacity to avoid resize operations
+        Map<String, Object> filteredMap = new HashMap<>((int)(originalMap.size() * 0.75));
+        
+        for (Map.Entry<String, Object> entry : originalMap.entrySet()) {
+            String key = entry.getKey();
+            // Check if the key exists directly or with "__" prefix
+            if (resultAttributes.contains(key) || resultAttributes.contains("__" + key)) {
+                filteredMap.put(key, entry.getValue());
+            }
+        }
+        
+        return filteredMap;
+    }
+
     private void prepareSearchResultV2(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("prepareSearchResultV2");
         SearchParams searchParams = ret.getSearchParameters();
+        
         try {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Preparing search results for ({})", ret.getSearchParameters());
             }
+            
             Iterator<Result> iterator = indexQueryResult.getIterator();
-
-            boolean showSearchScore = searchParams.getShowSearchScore();
             if (iterator == null) {
                 return;
             }
 
+            // Cache frequently accessed settings
+            boolean showSearchScore = searchParams.getShowSearchScore();
+            boolean showSearchMetadata = searchParams.getShowSearchMetadata();
+            boolean showHighlights = searchParams.getShowHighlights();
+            RequestContext context = RequestContext.get();
+            boolean includeClassifications = context.includeClassifications();
+            boolean includeClassificationNames = context.isIncludeClassificationNames();
+            boolean includeMeanings = context.includeMeanings();
+            
             final int BATCH_SIZE = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
             Map<String, Result> batchResults = new HashMap<>(BATCH_SIZE);
             Map<String, AtlasEntityHeader> vertexIdHeader = new HashMap<>();
             Map<String, Map<String, Set<String>>> vertexIdRelations = new HashMap<>();
 
+            // Process vertices in batches but collect all relation IDs
             while (iterator.hasNext()) {
-
                 // Clear previous batch data
                 batchResults.clear();
-
-
+                
+                // Collect batch of results
                 while (iterator.hasNext() && batchResults.size() < BATCH_SIZE) {
                     Result result = iterator.next();
                     String id = result.getVertexId().toString();
                     batchResults.putIfAbsent(id, result);
                 }
-
+                
                 if (batchResults.isEmpty()) {
-                    // No more results to process
                     break;
                 }
-
-                // Step 3: Fetch all properties for this batch from Cassandra in one call
-                Map<String, DynamicVertex> vertexPropertiesMap = vertexRetrievalService.retrieveVertices(new ArrayList<>(batchResults.keySet()));
-
+                
+                // Fetch vertex properties in batch
+                List<String> batchVertexIds = new ArrayList<>(batchResults.keySet());
+                Map<String, DynamicVertex> vertexPropertiesMap = vertexRetrievalService.retrieveVertices(batchVertexIds);
+                
                 if (vertexPropertiesMap == null || vertexPropertiesMap.isEmpty()) {
-                    // No properties found for this batch
                     continue;
                 }
-                // Iterate through vertexPropertiesMap
-                // for each entry in vertexPropertiesMap create AtlasEntityHeader
-                for (Map.Entry<String, DynamicVertex> entry : vertexPropertiesMap.entrySet()) {
-                    DynamicVertex vertex = entry.getValue();
-                    Result result = batchResults.get(entry.getKey());
+                
+                // Process each vertex in the batch
+                for (String vertexId : batchVertexIds) {
+                    DynamicVertex vertex = vertexPropertiesMap.get(vertexId);
+                    if (vertex == null) {
+                        continue;
+                    }
+                    
+                    Result result = batchResults.get(vertexId);
                     String typeName = vertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class);
+                    if (typeName == null) {
+                        continue;
+                    }
+                    
+                    AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
+                    
+                    // Create entity header
                     AtlasEntityHeader header = new AtlasEntityHeader();
-                    header.setGuid(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
+                    String guid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+                    header.setGuid(guid);
                     header.setTypeName(typeName);
-                    header.setCreateTime(new Date((vertex.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class))));
+                    
+                    // Set timestamp properties
+                    Long createTime = vertex.getProperty(TIMESTAMP_PROPERTY_KEY, Long.class);
+                    if (createTime != null) {
+                        header.setCreateTime(new Date(createTime));
+                    }
+                    
                     header.setCreatedBy(vertex.getProperty(CREATED_BY_KEY, String.class));
-                    header.setUpdateTime(new Date((vertex.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class))));
+                    
+                    Long updateTime = vertex.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class);
+                    if (updateTime != null) {
+                        header.setUpdateTime(new Date(updateTime));
+                    }
+                    
                     header.setUpdatedBy(vertex.getProperty(MODIFIED_BY_KEY, String.class));
                     header.setDisplayText(vertex.getProperty(TYPE_DISPLAYNAME_PROPERTY_KEY, String.class));
                     header.setLabels(parseLabelsString(vertex.getProperty(LABELS_PROPERTY_KEY, String.class)));
-
+                    
+                    // Set incomplete flag
                     Integer value = vertex.getProperty(Constants.IS_INCOMPLETE_PROPERTY_KEY, Integer.class);
-                    Boolean isIncomplete = value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
-                    header.setIsIncomplete(isIncomplete);
-
+                    header.setIsIncomplete(value != null && value.equals(INCOMPLETE_ENTITY_VALUE));
+                    
+                    // Set entity status
                     String state = vertex.getProperty(Constants.STATE_PROPERTY_KEY, String.class);
-                    Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);
-                    header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
-
+                    if (state != null) {
+                        Id.EntityState entityState = Id.EntityState.valueOf(state);
+                        header.setStatus((entityState == Id.EntityState.DELETED) ? AtlasEntity.Status.DELETED : AtlasEntity.Status.ACTIVE);
+                    } else {
+                        header.setStatus(AtlasEntity.Status.ACTIVE);
+                    }
+                    
+                    // Set attributes efficiently
                     Map<String, Object> propertiesRetrieved = vertex.getAllProperties();
-
-
-                    AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
-                    Set<String> allRequiredAttrs = new HashSet<>(type.getHeaderAttributes().keySet());
+                    Set<String> allRequiredAttrs = new HashSet<>();
+                    if (type != null) {
+                        allRequiredAttrs.addAll(type.getHeaderAttributes().keySet());
+                    }
                     allRequiredAttrs.addAll(resultAttributes);
 
+                    // includes primitives, structs, meanings and enums
                     header.setAttributes(filterMapByKeys(propertiesRetrieved, allRequiredAttrs));
-
-                    RequestContext context = RequestContext.get();
-
-                    boolean includeClassifications = context.includeClassifications();
-                    boolean includeClassificationNames = context.isIncludeClassificationNames();
-
+                    
+                    // Handle classifications if needed
+                    // this is additional cassandra call per asset in a batch
                     if (includeClassifications || includeClassificationNames) {
-                        List<AtlasClassification> tags = entityRetriever.getAllClassifications(entry.getKey());
-
+                        List<AtlasClassification> tags = entityRetriever.getAllClassifications(vertexId);
                         if (includeClassifications) {
                             header.setClassifications(tags);
                         }
-                        header.setClassificationNames(getAllTagNames(tags));
+                        if (includeClassificationNames) {
+                            header.setClassificationNames(getAllTagNames(tags));
+                        }
                     }
-
-                    if (context.includeMeanings()) {
-                        List<AtlasTermAssignmentHeader> termAssignmentHeaders = Optional.ofNullable(vertex.getProperty("meanings", List.class))
-                                .map(meanings -> (List<AtlasTermAssignmentHeader>) meanings)
-                                .orElse(Collections.emptyList());
-                        header.setMeanings(termAssignmentHeaders);
-                        header.setMeaningNames(
-                                termAssignmentHeaders.stream().map(AtlasTermAssignmentHeader::getDisplayText)
-                                        .collect(Collectors.toList()));
+                    
+                    // Handle meanings if needed
+                    if (includeMeanings) {
+                        Object meaningsObj = vertex.getProperty("meanings", List.class);
+                        if (meaningsObj instanceof List) {
+                            List<AtlasTermAssignmentHeader> termAssignmentHeaders = (List<AtlasTermAssignmentHeader>) meaningsObj;
+                            header.setMeanings(termAssignmentHeaders);
+                            
+                            if (!termAssignmentHeaders.isEmpty()) {
+                                List<String> meaningNames = new ArrayList<>(termAssignmentHeaders.size());
+                                for (AtlasTermAssignmentHeader term : termAssignmentHeaders) {
+                                    String displayText = term.getDisplayText();
+                                    if (displayText != null) {
+                                        meaningNames.add(displayText);
+                                    }
+                                }
+                                header.setMeaningNames(meaningNames);
+                            }
+                        }
                     }
-
-                    // 1. get all edges related to asset from lean graph
-                    // 2.  map edge labels retrieved from janusgraph to user requested attributes
-                    // perform projections on #1
-                    Map<String, Set<String>> edgeVertices = mapEdges(entry.getKey(), resultAttributes, entityRetriever.fetchEdgeNames(type));
-                    vertexIdHeader.putIfAbsent(entry.getKey(), header);
-                    vertexIdRelations.putIfAbsent(entry.getKey(), edgeVertices);
-
+                    
+                    // Map and store relationships for later processing
+                    Map<String, Set<String>> edgeVertices = mapEdges(vertexId, resultAttributes, 
+                                                             type != null ? entityRetriever.fetchEdgeNames(type) : Collections.emptyMap());
+                    
+                    // Store for later relation processing
+                    vertexIdHeader.put(vertexId, header);
+                    if (!edgeVertices.isEmpty()) {
+                        vertexIdRelations.put(vertexId, edgeVertices);
+                    }
+                    
+                    // Add search metadata
                     if (showSearchScore) {
-                        ret.addEntityScore(header.getGuid(), result.getScore());
+                        ret.addEntityScore(guid, result.getScore());
                     }
-
-                    if (searchParams.getShowSearchMetadata()) {
-                        ret.addHighlights(header.getGuid(), result.getHighLights());
-                        ret.addSort(header.getGuid(), result.getSort());
-                    } else if (searchParams.getShowHighlights()) {
-                        ret.addHighlights(header.getGuid(), result.getHighLights());
+                    
+                    if (showSearchMetadata) {
+                        ret.addHighlights(guid, result.getHighLights());
+                        ret.addSort(guid, result.getSort());
+                    } else if (showHighlights) {
+                        ret.addHighlights(guid, result.getHighLights());
                     }
+                    
                     ret.addEntity(header);
                 }
             }
-
-            // just one cassandra call to retrieve all relation vertices of all batches
-            List<String> relationVertexIds = vertexIdRelations.values().stream()
-                    .flatMap(innerMap -> innerMap.values().stream())
-                    .flatMap(Set::stream)
-                    .collect(Collectors.toList());
-
-            Map<String, DynamicVertex> vertexRelationsPropertiesMap = vertexRetrievalService.retrieveVertices(relationVertexIds);
-
-            for (Map.Entry<String, AtlasEntityHeader> entry : vertexIdHeader.entrySet()) {
-                AtlasEntityHeader header = entry.getValue();
-                Map<String, Set<String>> relationsMap = vertexIdRelations.get(entry.getKey());
-                for (Map.Entry<String, Set<String>> attributeNameRelationsEntry : relationsMap.entrySet()) {
-                    String attribute = attributeNameRelationsEntry.getKey();
-                    String typeName = header.getTypeName();
-                    Set<String> vertexIDs = attributeNameRelationsEntry.getValue();
-                    Object attributeValue = mapAttributesFromCassandra(attribute, typeName, vertexIDs, vertexRelationsPropertiesMap);
-                    header.setAttribute(attribute, attributeValue);
-                   ret.addEntity(header);
+            
+            // Collect and process all relation vertex IDs with a single Cassandra call
+            if (!vertexIdRelations.isEmpty()) {
+                // Extract all relation vertex IDs from all batches
+                Set<String> relationVertexIdSet = new HashSet<>();
+                for (Map<String, Set<String>> relations : vertexIdRelations.values()) {
+                    for (Set<String> vertexIds : relations.values()) {
+                        relationVertexIdSet.addAll(vertexIds);
+                    }
+                }
+                
+                List<String> relationVertexIds = new ArrayList<>(relationVertexIdSet);
+                
+                if (!relationVertexIds.isEmpty()) {
+                    // Single Cassandra call for all relation vertices
+                    Map<String, DynamicVertex> vertexRelationsPropertiesMap = 
+                        vertexRetrievalService.retrieveVertices(relationVertexIds);
+                    
+                    // Process all entity relations
+                    for (Map.Entry<String, AtlasEntityHeader> entry : vertexIdHeader.entrySet()) {
+                        String vertexId = entry.getKey();
+                        Map<String, Set<String>> relationsMap = vertexIdRelations.get(vertexId);
+                        if (relationsMap == null) {
+                            continue;
+                        }
+                        
+                        AtlasEntityHeader header = entry.getValue();
+                        String typeName = header.getTypeName();
+                        
+                        for (Map.Entry<String, Set<String>> attributeNameRelationsEntry : relationsMap.entrySet()) {
+                            String attribute = attributeNameRelationsEntry.getKey();
+                            Set<String> vertexIDs = attributeNameRelationsEntry.getValue();
+                            
+                            // Map attribute values from Cassandra data
+                            Object attributeValue = mapAttributesFromCassandra(
+                                attribute, 
+                                typeName, 
+                                vertexIDs, 
+                                vertexRelationsPropertiesMap
+                            );
+                            
+                            if (attributeValue != null) {
+                                header.setAttribute(attribute, attributeValue);
+                            }
+                        }
+                    }
                 }
             }
-
+            
             scrubSearchResults(ret, searchParams.getSuppressLogs());
         } catch (Exception e) {
+            LOG.error("Error preparing search results", e);
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
@@ -1250,96 +1348,141 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     }
 
     private Object mapAttributesFromCassandra(String attributeName, String typeName, Set<String> vertexIDs, Map<String, DynamicVertex> vertexRelationsPropertiesMap) throws AtlasBaseException {
+        if (vertexIDs == null || vertexIDs.isEmpty() || StringUtils.isEmpty(attributeName) || StringUtils.isEmpty(typeName)) {
+            return null;
+        }
+
+        // Cache frequently accessed properties
         AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
-        TypeCategory typeCategory = type.getRelationshipAttributes().get(attributeName).entrySet().iterator().next().getValue().getAttributeType().getTypeCategory();
+        if (type == null) {
+            LOG.warn("Entity type {} not found in type registry", typeName);
+            return null;
+        }
+
+        // Find relationship attribute type
+        Map<String, AtlasAttribute> relationshipAttributes = type.getRelationshipAttributes().get(attributeName);
+        if (MapUtils.isEmpty(relationshipAttributes)) {
+            return null;
+        }
+
+        AtlasAttribute relationAttribute = null;
+        TypeCategory typeCategory = null;
+        
+        // Get the attribute and its type category
+        for (Map.Entry<String, AtlasAttribute> entry : type.getRelationshipAttributes().get(attributeName).entrySet()) {
+            AtlasAttribute attribute = entry.getValue();
+            if (attributeName.equals(attribute.getName())) {
+                relationAttribute = attribute;
+                typeCategory = attribute.getAttributeType().getTypeCategory();
+                break;
+            }
+        }
+        
+        if (relationAttribute == null || typeCategory == null) {
+            LOG.warn("Unable to find relationship attribute {} for type {}", attributeName, typeName);
+            return null;
+        }
+
+        // Get unique attributes for object ID creation
         Map<String, AtlasAttribute> uniqueAttributes = type.getUniqAttributes();
-        Set<String> projectionKeys = RequestContext.get().getRelationAttrsForSearch();
-        projectionKeys.addAll(uniqueAttributes.keySet());
+        
+        // Prepare projection keys in one go instead of adding them in multiple places
+        Set<String> projectionKeys = new HashSet<>(RequestContext.get().getRelationAttrsForSearch());
+        if (MapUtils.isNotEmpty(uniqueAttributes)) {
+            projectionKeys.addAll(uniqueAttributes.keySet());
+        }
+
+        // Process based on type category
         switch (typeCategory) {
             case ARRAY:
+                // Preallocate the list based on number of vertices
                 List<Object> list = new ArrayList<>(vertexIDs.size());
-                vertexIDs.stream().forEach(vertexID -> {
+                for (String vertexID : vertexIDs) {
                     DynamicVertex dynamicVertex = vertexRelationsPropertiesMap.get(vertexID);
                     if (dynamicVertex != null) {
                         Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
                         list.add(filterMapByKeys(propertiesRetrieved, projectionKeys));
                     }
-                });
-                return list;
+                }
+                return list.isEmpty() ? null : list;
+
             case MAP:
-                if (vertexIDs.size() > 1) {
-                    throw new AtlasBaseException("Something went wrong while processing structs");
-                }
-                if (vertexIDs.size() == 1) {
-                    String vertexId = vertexIDs.iterator().next();
-                    DynamicVertex dynamicVertex = vertexRelationsPropertiesMap.get(vertexId);
-                    if (dynamicVertex != null) {
-                        Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
-                        return filterMapByKeys(propertiesRetrieved, projectionKeys);
-                    }
-                }
             case STRUCT:
-                AtlasStruct struct = new AtlasStruct(typeName);
-                if (vertexIDs.size() > 1) {
-                    throw new AtlasBaseException("Something went wrong while processing structs");
+                // Both map and struct handle a single vertex similarly
+                if (vertexIDs.size() != 1) {
+                    LOG.warn("Expected single vertex ID for {}/{} but got {}", typeCategory, attributeName, vertexIDs.size());
+                    return null;
                 }
-                if (vertexIDs.size() == 1) {
-                    String vertexId = vertexIDs.iterator().next();
-                    DynamicVertex dynamicVertex = vertexRelationsPropertiesMap.get(vertexId);
-                    if (dynamicVertex != null) {
-                        Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
-                        // perform projections
-                        struct.setAttributes(filterMapByKeys(propertiesRetrieved, projectionKeys));
-                        return struct;
-                    }
+
+                String vertexId = vertexIDs.iterator().next();
+                DynamicVertex dynamicVertex = vertexRelationsPropertiesMap.get(vertexId);
+                if (dynamicVertex == null) {
+                    return null;
                 }
+
+                Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
+                Map<String, Object> filteredProperties = filterMapByKeys(propertiesRetrieved, projectionKeys);
+                
+                if (typeCategory == TypeCategory.STRUCT) {
+                    // For struct, wrap in AtlasStruct
+                    AtlasStruct struct = new AtlasStruct(typeName);
+                    struct.setAttributes(filteredProperties);
+                    return struct;
+                }
+                
+                // For MAP, return the filtered properties directly
+                return filteredProperties;
+
             case OBJECT_ID_TYPE:
-                AtlasObjectId objectId = null;
-                if (vertexIDs.size() > 1) {
-                    throw new AtlasBaseException("Something went wrong while processing object ids");
+                // Handle object ID type
+                if (vertexIDs.size() != 1) {
+                    LOG.warn("Expected single vertex ID for OBJECT_ID_TYPE/{} but got {}", attributeName, vertexIDs.size());
+                    return null;
                 }
-                if (vertexIDs.size() == 1) {
-                    String vertexId = vertexIDs.iterator().next();
-                    DynamicVertex dynamicVertex = vertexRelationsPropertiesMap.get(vertexId);
-                    if (dynamicVertex != null) {
-                        Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
-                        Map<String, Object> uniqueAttributesMap = new HashMap<>();
-                        for (AtlasAttribute attribute : uniqueAttributes.values()) {
-                            Object attrValue = propertiesRetrieved.get(attribute.getName());
-                            if (attrValue != null) {
-                                uniqueAttributesMap.put(attribute.getName(), attrValue);
-                            }
+
+                vertexId = vertexIDs.iterator().next();
+                dynamicVertex = vertexRelationsPropertiesMap.get(vertexId);
+                if (dynamicVertex == null) {
+                    return null;
+                }
+
+                propertiesRetrieved = dynamicVertex.getAllProperties();
+                
+                // Get GUID directly without null checks since it's a critical property
+                Object guidObj = propertiesRetrieved.get(GUID_PROPERTY_KEY);
+                if (guidObj == null) {
+                    LOG.warn("No GUID found for vertex ID {}", vertexId);
+                    return null;
+                }
+                
+                String guid = guidObj.toString();
+                
+                // Create unique attributes map reusing the filtered properties map
+                Map<String, Object> uniqueAttributesMap = new HashMap<>();
+                if (MapUtils.isNotEmpty(uniqueAttributes)) {
+                    for (AtlasAttribute attribute : uniqueAttributes.values()) {
+                        String attrName = attribute.getName();
+                        Object attrValue = propertiesRetrieved.get(attrName);
+                        if (attrValue != null) {
+                            uniqueAttributesMap.put(attrName, attrValue);
                         }
-                        objectId = new AtlasObjectId(propertiesRetrieved.get(GUID_PROPERTY_KEY).toString(), typeName, uniqueAttributesMap, filterMapByKeys(propertiesRetrieved, RequestContext.get().getRelationAttrsForSearch()));
-                        return objectId;
                     }
                 }
+                
+                return new AtlasObjectId(guid, typeName, uniqueAttributesMap, 
+                                         filterMapByKeys(propertiesRetrieved, RequestContext.get().getRelationAttrsForSearch()));
 
             default:
-                LOG.error("Something went wrong while processing the attribute {}", attributeName + " of type " + typeName);
+                LOG.warn("Unsupported type category {} for attribute {}/{}", typeCategory, typeName, attributeName);
                 return null;
-
         }
-
-    }
-
-    private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType,  Map<String, Map<String, AtlasAttribute>> relationships) {
-
-        Map<String, Set<String>> edgeNames = new HashMap<>();
-        relationships.forEach((k, v) -> {
-            v.forEach((k1, v1) -> {
-                edgeNames.putIfAbsent(k1, new HashSet<>());
-                edgeNames.get(k1).add(k);
-            });
-        });
-        return edgeNames;
     }
 
 
     private Map<String, Set<String>> mapEdges(String vertexId, Set<String> attributes, Map<String, Set<String>> relationshipsLookup)  {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapEdges");
         try {
-            GraphTraversal t = graph.V(vertexId).bothE();
+            GraphTraversal t = graph.V(vertexId).bothE().has(STATE_PROPERTY_KEY, ACTIVE);
             Set<AtlasJanusEdge> janusEdges = ((AtlasJanusGraphTraversal) t).getAtlasEdgeSet();
 
             Map<String, Set<String>> relationVertices = new HashMap<>();
@@ -1374,11 +1517,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         return startVertexId;
     }
 
-    private Map<String, Object> filterMapByKeys(Map<String, Object> originalMap, Set<String> resultAttributes) {
-        return originalMap.entrySet().stream()
-                .filter(entry -> resultAttributes.contains("__"+entry.getKey()) || resultAttributes.contains(entry.getKey()))
-                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-    }
     private void  prepareSearchResultV1(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         SearchParams searchParams = ret.getSearchParameters();
         try {
