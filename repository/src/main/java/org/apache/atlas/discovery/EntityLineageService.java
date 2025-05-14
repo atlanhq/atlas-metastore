@@ -40,7 +40,6 @@ import org.apache.atlas.model.lineage.AtlasLineageInfo.LineageDirection;
 import org.apache.atlas.model.lineage.AtlasLineageInfo.LineageRelation;
 import org.apache.atlas.model.lineage.AtlasLineageOnDemandInfo.LineageInfoOnDemand;
 import org.apache.atlas.repository.Constants;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -91,7 +90,7 @@ public class EntityLineageService implements AtlasLineageService {
     /**
      * String[] => [Input edge Label, Output Edge Label]
      */
-    public static final HashMap<String, String[]> LINEAGE_MAP = new HashMap<String, String[]>(){{
+    public static final HashMap<String, String[]> LINEAGE_MAP = new HashMap<String, String[]>(2){{
         put(DATASET_PROCESS_LINEAGE, new String[]{PROCESS_INPUTS_EDGE, PROCESS_OUTPUTS_EDGE});
         put(CONNECTION_PROCESS_LINEAGE, new String[]{CONNECTION_PROCESS_INPUTS_EDGE, CONNECTION_PROCESS_OUTPUTS_EDGE});
     }};
@@ -235,7 +234,7 @@ public class EntityLineageService implements AtlasLineageService {
             this.isDataProduct = isDataProduct;
         }
 
-        public boolean CheckIfConnectorVertex(String lineageType){
+        public boolean checkIfConnectorVertex(String lineageType){
             if(isDataSet || isConnection){
                 return false;
             }
@@ -244,28 +243,22 @@ public class EntityLineageService implements AtlasLineageService {
     }
 
     private EntityValidationResult validateAndGetEntityTypeMap(String guid) throws AtlasBaseException {
-        String  typeName = entityRetriever.getEntityVertex(guid).getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+        String typeName = entityRetriever.getEntityVertex(guid).getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
         AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(typeName);
         if (entityType == null) {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, typeName);
         }
 
-        boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
+        Set<String> allTypes = entityType.getTypeAndAllSuperTypes();
+
+        boolean isProcess = allTypes.contains(PROCESS_SUPER_TYPE);
         boolean isDataProduct = entityType.getTypeName().equals(DATA_PRODUCT_ENTITY_TYPE);
-        boolean isConnectionProcess = false;
-        boolean isDataSet  = false;
-        boolean isConnection = false;
-        if (!isProcess) {
-            isConnectionProcess = entityType.getTypeAndAllSuperTypes().contains(CONNECTION_PROCESS_ENTITY_TYPE);
-            if(!isConnectionProcess){
-                isDataSet = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
-                if (!isDataSet) {
-                    isConnection = entityType.getTypeAndAllSuperTypes().contains(CONNECTION_ENTITY_TYPE);
-                    if(!isConnection){
-                        throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
-                    }
-                }
-            }
+        boolean isConnectionProcess = allTypes.contains(CONNECTION_PROCESS_ENTITY_TYPE);
+        boolean isDataSet  = allTypes.contains(DATA_SET_SUPER_TYPE);
+        boolean isConnection = allTypes.contains(CONNECTION_ENTITY_TYPE);
+
+        if (!isConnectionProcess && !isDataSet && !isConnection) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
         }
 
         return new EntityValidationResult(isProcess, isDataSet, isConnection, isConnectionProcess, isDataProduct);
@@ -355,7 +348,7 @@ public class EntityLineageService implements AtlasLineageService {
         AtomicInteger outputEntitiesTraversed = new AtomicInteger(0);
         AtomicInteger traversalOrder = new AtomicInteger(1);
 
-        if (!entityValidationResult.CheckIfConnectorVertex(lineageType)) {
+        if (!entityValidationResult.checkIfConnectorVertex(lineageType)) {
             AtlasVertex datasetVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
             if (direction == AtlasLineageOnDemandInfo.LineageDirection.INPUT || direction == AtlasLineageOnDemandInfo.LineageDirection.BOTH)
                 traverseEdgesOnDemand(datasetVertex, true, depth, level, new HashSet<>(), atlasLineageOnDemandContext, ret, guid, inputEntitiesTraversed, traversalOrder, entityValidationResult);
@@ -531,7 +524,7 @@ public class EntityLineageService implements AtlasLineageService {
 
         EntityValidationResult entityValidationResult = validateAndGetEntityTypeMap(baseGuid);
 
-        boolean isNotConnecterVertex =  !entityValidationResult.CheckIfConnectorVertex(lineageType);
+        boolean isNotConnecterVertex =  !entityValidationResult.checkIfConnectorVertex(lineageType);
         enqueueNeighbours(baseVertex, entityValidationResult, lineageListContext, traversalQueue, visitedVertices, skippedVertices, lineageParentsForEntityMap, lineageChildrenForEntityMap);
 
         int currentDepth = 0;
@@ -604,7 +597,7 @@ public class EntityLineageService implements AtlasLineageService {
         String lineageInputLabel = RequestContext.get().getLineageInputLabel();
         String lineageOutputLabel = RequestContext.get().getLineageOutputLabel();
         String lineageType = lineageListContext.getLineageType();
-        boolean isConnectorVertex =  entityValidationResult.CheckIfConnectorVertex(lineageType);
+        boolean isConnectorVertex =  entityValidationResult.checkIfConnectorVertex(lineageType);
         if (!isConnectorVertex)
             edges = currentVertex.getEdges(IN, isInputDirection(lineageListContext) ? lineageOutputLabel : lineageInputLabel).iterator();
         else
