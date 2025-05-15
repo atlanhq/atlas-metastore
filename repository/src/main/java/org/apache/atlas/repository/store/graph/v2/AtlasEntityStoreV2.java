@@ -37,6 +37,7 @@ import org.apache.atlas.model.instance.AtlasEntity.Status;
 import org.apache.atlas.model.notification.AtlasDistributedTaskNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
+import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
@@ -1748,11 +1749,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                 RequestContext.get().endMetricRecord(recorder);
 
-                Map<String, Map<String, Object>> forEs = new HashMap<>();
-                updatedVertexList.stream()
-                        .map(x -> ((AtlasJanusVertex) x ))
-                        .forEach(x -> forEs.put(x.getIdForDisplay(), x.getDynamicVertex().getAllProperties()));
-
                 // TODO Assumption is that SOFT deleted assets will be present in RequestContext.get().getDifferentialGUIDS()
                 //RequestContext.get().getVerticesToSoftDelete().stream().
 
@@ -1761,7 +1757,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         .map(x -> LongEncoding.encode((Long) x.getId()))
                         .toList();
 
-                ESConnector.syncToEs(forEs, true, docIdsToDelete);
+                ESConnector.syncToEs(getESPropertiesForUpdateFromVertices(updatedVertexList), true, docIdsToDelete);
             }
 
             return ret;
@@ -1770,6 +1766,47 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             AtlasPerfTracer.log(perf);
         }
+    }
+
+    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(List<AtlasVertex> vertices) {
+        MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices");
+        if (CollectionUtils.isEmpty(vertices)) {
+            return null;
+        }
+        Map<String, Map<String, Object>> ret = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            Map<String, Object> properties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
+            Map<String, Object> propertiesToUpdate = new HashMap<>();
+            AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
+
+            getEligibleProperties(properties, type).forEach(x -> propertiesToUpdate.put(x, properties.get(x)));
+            ret.put(vertex.getIdForDisplay(), propertiesToUpdate);
+        }
+
+        RequestContext.get().endMetricRecord(recorder);
+
+        return ret;
+    }
+
+    private List<String> getEligibleProperties(Map<String, Object> properties, AtlasEntityType type) {
+        return properties.keySet().stream().filter(x -> isEligibleForESSync(x, type.getAttribute(x))).toList();
+    }
+
+    private boolean isEligibleForESSync(String propertyName, AtlasAttribute attribute) {
+        return  ((attribute != null  && isPrimitiveAttribute(attribute.getAttributeType()))
+                || propertyName.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) ;
+    }
+
+    private boolean isPrimitiveAttribute (AtlasType attributeType) {
+        boolean ret = attributeType.getTypeCategory() == TypeCategory.PRIMITIVE || attributeType.getTypeCategory() == TypeCategory.ENUM;
+
+        if (!ret)
+            ret = attributeType.getTypeCategory() == TypeCategory.ARRAY && (
+                   ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.PRIMITIVE
+                || ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.ENUM);
+
+        return ret;
     }
 
     private void executePreProcessor(EntityMutationContext context) throws AtlasBaseException {
@@ -2259,14 +2296,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
         if (RequestContext.get().NEW_FLOW) {
-            dynamicVertexRetrievalService.insertVertices(RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList());
-            dynamicVertexRetrievalService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
+            List<AtlasVertex> verticesToUpdate = RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList();
 
-            Map<String, Map<String, Object>> forEs = new HashMap<>();
-            RequestContext.get().getVerticesToSoftDelete()
-                    .stream()
-                    .map(x -> ((AtlasJanusVertex) x ))
-                    .forEach(x -> forEs.put(x.getIdForDisplay(), x.getDynamicVertex().getAllProperties()));
+            dynamicVertexRetrievalService.insertVertices(verticesToUpdate);
+            dynamicVertexRetrievalService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
 
             List<String> docIdsToDelete = RequestContext.get().getVerticesToHardDelete()
                     .stream()
@@ -2274,7 +2307,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     .map(x -> LongEncoding.encode((Long) x.getId()))
                     .toList();
 
-            ESConnector.syncToEs(forEs, true, docIdsToDelete);
+            ESConnector.syncToEs(getESPropertiesForUpdateFromVertices(verticesToUpdate),
+                    true,
+                    docIdsToDelete);
         }
 
         return response;
