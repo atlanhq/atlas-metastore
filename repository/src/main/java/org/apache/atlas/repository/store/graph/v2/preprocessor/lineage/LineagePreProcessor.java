@@ -387,17 +387,38 @@ public class LineagePreProcessor implements PreProcessor {
     }
 
     private boolean hasActiveConnectionProcesses(AtlasVertex connectionVertex) {
-        Iterator<AtlasEdge> edges = connectionVertex.getEdges(AtlasEdgeDirection.BOTH, new String[]{"__ConnectionProcess.inputs", "__ConnectionProcess.outputs"}).iterator();
+        // First, check incoming edges (connection used as output)
+        Iterable<AtlasEdge> inEdges = connectionVertex.getEdges(
+                AtlasEdgeDirection.IN, "__ConnectionProcess.outputs");
 
-        while (edges.hasNext()) {
-            AtlasEdge edge = edges.next();
-            if (getStatus(edge) == ACTIVE) {
-                AtlasVertex processVertex = edge.getOutVertex().equals(connectionVertex) ? edge.getInVertex() : edge.getOutVertex();
-                if (getStatus(processVertex) == ACTIVE && getTypeName(processVertex).equals(CONNECTION_PROCESS_ENTITY_TYPE)) {
-                    return true;
-                }
+        for (AtlasEdge edge : inEdges) {
+            if (getStatus(edge) != ACTIVE) {
+                continue;
+            }
+
+            AtlasVertex processVertex = edge.getOutVertex(); // From process to connection
+            if (getStatus(processVertex) == ACTIVE &&
+                    CONNECTION_PROCESS_ENTITY_TYPE.equals(getTypeName(processVertex))) {
+                return true;
             }
         }
+
+        // If not found, check outgoing edges (connection used as input)
+        Iterable<AtlasEdge> outEdges = connectionVertex.getEdges(
+                AtlasEdgeDirection.OUT, "__ConnectionProcess.inputs");
+
+        for (AtlasEdge edge : outEdges) {
+            if (getStatus(edge) != ACTIVE) {
+                continue;
+            }
+
+            AtlasVertex processVertex = edge.getInVertex(); // From connection to process
+            if (getStatus(processVertex) == ACTIVE &&
+                    CONNECTION_PROCESS_ENTITY_TYPE.equals(getTypeName(processVertex))) {
+                return true;
+            }
+        }
+
         return false;
     }
 }
