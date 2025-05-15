@@ -84,32 +84,18 @@ public class ESConnector {
         writeTagProperties(entitiesMap, false);
     }
 
-    /**
-     * Updates and writes tag properties for multiple entities to Elasticsearch index.
-     *
-     * This method processes the provided entities map to prepare an Elasticsearch bulk
-     * request for updating tag properties and denormalized attributes. The modifications
-     * include attributes specified in the {@code DENORM_ATTRS} field and a modification
-     * timestamp. The bulk request is then executed using a low-level client.
-     *
-     * @param entitiesMap A map where the keys represent the entity vertex IDs (as strings),
-     *                    and the values are maps containing the attributes to be updated
-     *                    for each entity.
-     * @param upsert A boolean flag that indicates whether the update operation should upsert
-     *               (create new doc if not found) the document in the Elasticsearch index.
-     */
-    public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
+    public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
-
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-            for (String assetVertexId : entitiesMap.keySet()) {
-                Map<String, Object> entry = entitiesMap.get(assetVertexId);
-                Map<String, Object> toUpdate = new HashMap<>();
+            for (String assetVertexId : entitiesMapForUpdate.keySet()) {
+                Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
+                Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+                //Map<String, Object> toUpdate = new HashMap<>();
 
-                DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
-                toUpdate.put("__modificationTimestamp", System.currentTimeMillis());
+                //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
+                toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
 
                 long vertexId = Long.valueOf(assetVertexId);
@@ -128,6 +114,12 @@ public class ESConnector {
                 bulkRequestBody.append("}\n");
             }
 
+            for (String docId: docIdsToDelete) {
+                bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
+                bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
+                bulkRequestBody.append("}\n");
+            }
+
             Request request = new Request("POST", "/_bulk");
             request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
 
@@ -140,6 +132,24 @@ public class ESConnector {
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+
+    /**
+     * Updates and writes tag properties for multiple entities to Elasticsearch index.
+     *
+     * This method processes the provided entities map to prepare an Elasticsearch bulk
+     * request for updating tag properties and denormalized attributes. The modifications
+     * include attributes specified in the {@code DENORM_ATTRS} field and a modification
+     * timestamp. The bulk request is then executed using a low-level client.
+     *
+     * @param entitiesMap A map where the keys represent the entity vertex IDs (as strings),
+     *                    and the values are maps containing the attributes to be updated
+     *                    for each entity.
+     * @param upsert A boolean flag that indicates whether the update operation should upsert
+     *               (create new doc if not found) the document in the Elasticsearch index.
+     */
+    public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
+        syncToEs(entitiesMap, upsert, null);
     }
 
     public static Map<String, Map<String, Object>> getTagAttributes(Collection<AtlasVertex> vertices) {

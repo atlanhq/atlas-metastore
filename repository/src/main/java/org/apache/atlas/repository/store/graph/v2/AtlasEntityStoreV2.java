@@ -46,6 +46,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
@@ -89,6 +90,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -96,6 +98,7 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.InputStream;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.lang.Boolean.FALSE;
@@ -1744,6 +1747,21 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 dynamicVertexRetrievalService.insertVertices(updatedVertexList);
 
                 RequestContext.get().endMetricRecord(recorder);
+
+                Map<String, Map<String, Object>> forEs = new HashMap<>();
+                updatedVertexList.stream()
+                        .map(x -> ((AtlasJanusVertex) x ))
+                        .forEach(x -> forEs.put(x.getIdForDisplay(), x.getDynamicVertex().getAllProperties()));
+
+                // TODO Assumption is that SOFT deleted assets will be present in RequestContext.get().getDifferentialGUIDS()
+                //RequestContext.get().getVerticesToSoftDelete().stream().
+
+                List<String> docIdsToDelete = RequestContext.get().getVerticesToHardDelete().stream()
+                        .map(x -> ((AtlasJanusVertex) x ))
+                        .map(x -> LongEncoding.encode((Long) x.getId()))
+                        .toList();
+
+                ESConnector.syncToEs(forEs, true, docIdsToDelete);
             }
 
             return ret;
@@ -2243,6 +2261,20 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         if (RequestContext.get().NEW_FLOW) {
             dynamicVertexRetrievalService.insertVertices(RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList());
             dynamicVertexRetrievalService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
+
+            Map<String, Map<String, Object>> forEs = new HashMap<>();
+            RequestContext.get().getVerticesToSoftDelete()
+                    .stream()
+                    .map(x -> ((AtlasJanusVertex) x ))
+                    .forEach(x -> forEs.put(x.getIdForDisplay(), x.getDynamicVertex().getAllProperties()));
+
+            List<String> docIdsToDelete = RequestContext.get().getVerticesToHardDelete()
+                    .stream()
+                    .map(x -> ((AtlasJanusVertex) x ))
+                    .map(x -> LongEncoding.encode((Long) x.getId()))
+                    .toList();
+
+            ESConnector.syncToEs(forEs, true, docIdsToDelete);
         }
 
         return response;
