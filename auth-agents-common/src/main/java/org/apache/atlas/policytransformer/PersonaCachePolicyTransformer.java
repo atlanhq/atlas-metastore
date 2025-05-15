@@ -25,6 +25,7 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
@@ -101,7 +102,8 @@ public class PersonaCachePolicyTransformer extends AbstractCachePolicyTransforme
                 header.setAttribute(ATTR_POLICY_RESOURCES_CATEGORY, templatePolicy.getPolicyResourceCategory());
                 header.setAttribute(ATTR_POLICY_IS_ENABLED, getIsPolicyEnabled(atlasPolicy));
                 header.setAttribute(ATTR_NAME, "transformed_policy_persona");
-                header.setAttribute(ATTR_POLICY_CONDITIONS, templatePolicy.getPolicyConditions());
+
+                header.setAttribute(ATTR_POLICY_CONDITIONS, buildPolicyConditions(atlasPolicy, templatePolicy));
 
                 if (POLICY_SERVICE_NAME_ABAC.equals(policyServiceName)) {
                     if (policyFilterCriteria != null && !policyFilterCriteria.isEmpty()) {
@@ -180,4 +182,46 @@ public class PersonaCachePolicyTransformer extends AbstractCachePolicyTransforme
 
         return false;
     }
+
+    private List<AtlasStruct> buildPolicyConditions(AtlasEntityHeader atlasPolicy, PolicyTransformerTemplate.TemplatePolicy templatePolicy) {
+        List<AtlasStruct> combinedConditions = new ArrayList<>();
+
+        try {
+            List<AtlasStruct> atlasConditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+            if (CollectionUtils.isNotEmpty(atlasConditions)) {
+                combinedConditions.addAll(atlasConditions);
+            }
+
+            List<AtlasStruct> templateConditions = templatePolicy.getPolicyConditions();
+            if (CollectionUtils.isNotEmpty(templateConditions)) {
+                combinedConditions.addAll(templateConditions);
+            }
+
+            addExcludeEntityTypesCondition(atlasPolicy, combinedConditions);
+
+        } catch (Exception e) {
+            LOG.warn("Error processing policy conditions: {}", e.getMessage());
+            LOG.warn("Exception while processing policy conditions", e);
+        }
+
+        return combinedConditions;
+    }
+
+    private void addExcludeEntityTypesCondition(AtlasEntityHeader atlasPolicy, List<AtlasStruct> conditions) {
+        try {
+            List<String> excludeTypes = (List<String>) atlasPolicy.getAttribute("excludeTypes");
+
+            if (CollectionUtils.isNotEmpty(excludeTypes)) {
+                AtlasStruct excludeTypeCondition = new AtlasStruct("PolicyCondition");
+                excludeTypeCondition.setAttribute("policyConditionType", "excludeEntityTypes");
+                excludeTypeCondition.setAttribute("policyConditionValues", excludeTypes);
+
+                conditions.add(excludeTypeCondition);
+                LOG.info("Added excludeEntityTypes condition with values: {}", excludeTypes);
+            }
+        } catch (ClassCastException e) {
+            LOG.warn("Invalid excludeTypes format in policy {}: {}", atlasPolicy.getGuid(), e.getMessage());
+        }
+    }
+
 }
