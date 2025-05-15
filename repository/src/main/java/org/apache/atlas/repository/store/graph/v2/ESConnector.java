@@ -8,6 +8,8 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
@@ -86,38 +88,45 @@ public class ESConnector {
 
     public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+        if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
+            return;
+        }
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-            for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
-                Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
-                //Map<String, Object> toUpdate = new HashMap<>();
+            if (entitiesMapForUpdate != null) {
+                for (String assetVertexId : entitiesMapForUpdate.keySet()) {
+                    Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
+                    Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+                    //Map<String, Object> toUpdate = new HashMap<>();
 
-                //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
-                toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
+                    //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
+                    toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
 
-                long vertexId = Long.valueOf(assetVertexId);
-                String docId = LongEncoding.encode(vertexId);
-                bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
+                    long vertexId = Long.valueOf(assetVertexId);
+                    String docId = LongEncoding.encode(vertexId);
+                    bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
 
-                bulkRequestBody.append("{");
+                    bulkRequestBody.append("{");
 
-                String attrsToUpdate = AtlasType.toJson(toUpdate);
-                bulkRequestBody.append("\"doc\":" + attrsToUpdate);
+                    String attrsToUpdate = AtlasType.toJson(toUpdate);
+                    bulkRequestBody.append("\"doc\":" + attrsToUpdate);
 
-                if (upsert) {
-                    bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
+                    if (upsert) {
+                        bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
+                    }
+
+                    bulkRequestBody.append("}\n");
                 }
-
-                bulkRequestBody.append("}\n");
             }
 
-            for (String docId: docIdsToDelete) {
-                bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
-                bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
-                bulkRequestBody.append("}\n");
+            if (docIdsToDelete != null) {
+                for (String docId : docIdsToDelete) {
+                    bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
+                    bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
+                    bulkRequestBody.append("}\n");
+                }
             }
 
             Request request = new Request("POST", "/_bulk");
