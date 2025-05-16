@@ -28,16 +28,21 @@ import org.apache.atlas.GraphTransactionInterceptor;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.TypeCategory;
+import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.Status;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
+import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
-import org.apache.atlas.repository.store.graph.v2.TransactionInterceptHelper;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasMapType;
+import org.apache.atlas.util.BeanUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.v1.model.instance.Id;
 import org.apache.atlas.v1.model.instance.Referenceable;
@@ -99,6 +104,8 @@ public final class GraphHelper {
     private long    retrySleepTimeMillis = 1000;
     private boolean removePropagations = true;
 
+    private static TagDAO tagDAO = null;
+
     public GraphHelper(AtlasGraph graph) {
         this.graph = graph;
         try {
@@ -112,6 +119,34 @@ public final class GraphHelper {
 
     public static boolean isTermEntityEdge(AtlasEdge edge) {
         return StringUtils.equals(edge.getLabel(), TERM_ASSIGNMENT_LABEL);
+    }
+
+    public static TagDAO getTagDAO() throws AtlasBaseException {
+        if (tagDAO == null) {
+            try {
+                // Get the TagDAO from Spring context using BeanUtil
+                tagDAO = BeanUtil.getBean(TagDAO.class);
+
+                // Fallback if Spring context is not available (like in unit tests)
+                if (tagDAO == null) {
+                    LOG.warn("Could not get TagDAO from Spring context, creating a new instance");
+                    synchronized (GraphHelper.class) {
+                        if (tagDAO == null) {
+                            tagDAO = new TagDAOCassandraImpl();
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // Handle the case when Spring context is not initialized or available
+                LOG.warn("Error getting TagDAO from Spring context, creating a new instance", e);
+                synchronized (GraphHelper.class) {
+                    if (tagDAO == null) {
+                        tagDAO = new TagDAOCassandraImpl();
+                    }
+                }
+            }
+        }
+        return tagDAO;
     }
 
     public AtlasEdge addClassificationEdge(AtlasVertex entityVertex, AtlasVertex classificationVertex, boolean isPropagated) throws AtlasBaseException {
@@ -335,11 +370,27 @@ public final class GraphHelper {
         return ret;
     }
 
+    public static boolean getRemovePropagations(Map<String, Object> classificationPropertiesMap) {
+        boolean ret = false;
+
+        Boolean enabled = (Boolean) classificationPropertiesMap.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY);
+
+        ret = (enabled == null) ? true : enabled;
+
+        return ret;
+    }
+
     public static boolean getRestrictPropagation(AtlasVertex classificationVertex, String propertyName) {
         if (classificationVertex == null) {
             return false;
         }
         Boolean restrictPropagation = AtlasGraphUtilsV2.getEncodedProperty(classificationVertex, propertyName, Boolean.class);
+
+        return restrictPropagation != null && restrictPropagation;
+    }
+
+    public static boolean getRestrictPropagation(Map<String, Object> classificationPropertiesMap, String propertyName) {
+        Boolean restrictPropagation = (Boolean) classificationPropertiesMap.get(propertyName);
 
         return restrictPropagation != null && restrictPropagation;
     }
@@ -350,6 +401,14 @@ public final class GraphHelper {
 
     public static boolean getRestrictPropagationThroughHierarchy(AtlasVertex classificationVertex) {
         return getRestrictPropagation(classificationVertex,CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
+    }
+
+    public static boolean getRestrictPropagationThroughLineage(Map<String, Object> classificationPropertiesMap) {
+        return getRestrictPropagation(classificationPropertiesMap, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
+    }
+
+    public static boolean getRestrictPropagationThroughHierarchy(Map<String, Object> classificationPropertiesMap) {
+        return getRestrictPropagation(classificationPropertiesMap, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
     }
 
     public void repairTagVertex(AtlasEdge edge, AtlasVertex classificationVertex) {
@@ -800,8 +859,20 @@ public final class GraphHelper {
     }
 
     public static void updateModificationMetadata(AtlasVertex vertex) {
-        AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-        AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
+        int maxRetries = 2; // Number of retries
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+                AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
+                break;
+            } catch (Exception e) {
+                e.printStackTrace();
+                LOG.info("Attemp : {} , Exception while updating metadata attributes: {}", attempt,e.getMessage());
+                if (attempt == maxRetries) {
+                    throw e;
+                }
+            }
+        }
     }
     public static void updateMetadataAttributes(AtlasVertex vertex, List<String> attributes, String metadataType) {
         if (attributes != null && attributes.size() > 0) {
@@ -827,30 +898,34 @@ public final class GraphHelper {
         return traitName;
     }
 
-    public static List<String> getTraitNames(AtlasVertex entityVertex) {
-        return getTraitNames(entityVertex, false);
+    public static List<String> handleGetTraitNames(AtlasVertex entityVertex) {
+        return handleGetTraitNames(entityVertex, false);
     }
 
     public static List<String> getPropagatedTraitNames(AtlasVertex entityVertex) {
-        return getTraitNames(entityVertex, true);
-    }
-    public static List<String> getAllTraitNamesFromAttribute(AtlasVertex entityVertex) {
-        List<String>     ret   = new ArrayList<>();
-        List<String>    traitNames = entityVertex.getMultiValuedProperty(TRAIT_NAMES_PROPERTY_KEY, String.class);
-        if (traitNames != null) {
-            ret.addAll(traitNames);
-        }
-        List<String>    propagatedTraitNames = entityVertex.getMultiValuedProperty(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, String.class);
-        if (propagatedTraitNames != null) {
-            ret.addAll(propagatedTraitNames);
-        }
-        return ret;
-    }
-    public static List<String> getAllTraitNames(AtlasVertex entityVertex) {
-        return getTraitNames(entityVertex, null);
+        return handleGetTraitNames(entityVertex, true);
     }
 
-    public static List<String> getTraitNames(AtlasVertex entityVertex, Boolean propagated) {
+    public static List<String> getAllTagNames(List<AtlasClassification> tags) {
+        return tags.stream().map(AtlasStruct::getTypeName).collect(Collectors.toList());
+    }
+    public static List<String> getAllTraitNames(AtlasVertex entityVertex) {
+        return handleGetTraitNames(entityVertex, null);
+    }
+
+    public static boolean getJanusOptimisationEnabled() {
+        return StringUtils.isNotEmpty(FeatureFlagStore.getFlag("ENABLE_JANUS_OPTIMISATION"));
+    }
+
+    public static List<String> handleGetTraitNames(AtlasVertex entityVertex, Boolean propagated) {
+        if (getJanusOptimisationEnabled()) {
+            return getTraitNamesV2(entityVertex, propagated);
+        } else {
+            return getTraitNamesV1(entityVertex, propagated);
+        }
+    }
+
+    public static List<String> getTraitNamesV1(AtlasVertex entityVertex, Boolean propagated) {
         List<String>     ret   = new ArrayList<>();
         AtlasVertexQuery query = entityVertex.query().direction(AtlasEdgeDirection.OUT).label(CLASSIFICATION_LABEL);
 
@@ -870,6 +945,27 @@ public final class GraphHelper {
             }
         }
 
+        return ret;
+    }
+
+    public static List<String> getTraitNamesV2(AtlasVertex entityVertex, Boolean propagated) {
+        List<String>     ret   = new ArrayList<>();
+        try {
+            TagDAO tagDAOCassandra = getTagDAO();
+            if (!propagated) {
+                ret = tagDAOCassandra.getAllDirectTagsForVertex(entityVertex.getIdForDisplay())
+                                     .stream()
+                                     .map(AtlasClassification::getTypeName)
+                                     .collect(Collectors.toList());
+            } else {
+                ret = tagDAOCassandra.findByVertexIdAndPropagated(entityVertex.getIdForDisplay())
+                                     .stream()
+                                     .map(AtlasClassification::getTypeName)
+                                     .collect(Collectors.toList());
+            }
+        } catch (AtlasBaseException e) {
+            e.printStackTrace();
+        }
         return ret;
     }
 
