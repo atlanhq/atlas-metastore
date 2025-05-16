@@ -61,7 +61,7 @@ public class AtlanExcludeResourceByType extends RangerAbstractConditionEvaluator
         }
 
         boolean ret = true;
-        RangerAccessRequest readOnlyRequest = request.getReadOnlyCopy();
+        RangerAccessRequest	readOnlyRequest = request.getReadOnlyCopy();
 
         Set<Object> entityTypes = new HashSet<>();
         Object entityType = readOnlyRequest.getResource().getValue(RESOURCE_ENTITY_TYPE);

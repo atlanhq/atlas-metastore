@@ -290,7 +290,7 @@ public class EntityGraphRetriever {
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
         boolean enableJanusOptimisation =
                 AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_RELATIONS.getBoolean()
-                         && RequestContext.get().isInvokedByIndexSearch();
+                         && RequestContext.get().isInvokedByIndexSearchOrBulk();
         Map<String, Object> referenceVertexProperties  = null;
         if (entityType != null) {
             Map<String, Object> uniqueAttributes = new HashMap<>();
@@ -385,7 +385,7 @@ public class EntityGraphRetriever {
             ret = new AtlasClassification(classificationName);
             Map<String, Object> referenceProperties = Collections.emptyMap();
             boolean enableJanusOptimisation = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean()
-                    && RequestContext.get().isInvokedByIndexSearch();
+                    && RequestContext.get().isInvokedByIndexSearchOrBulk();
             String strValidityPeriods;
 
             if (enableJanusOptimisation) {
@@ -1168,7 +1168,7 @@ public class EntityGraphRetriever {
         boolean isS3Bucket = StringUtils.isNotEmpty(typeName)
                 && typeName.equals("S3Bucket");
 
-        boolean shouldPrefetch = RequestContext.get().isInvokedByIndexSearch()
+        boolean shouldPrefetch = RequestContext.get().isInvokedByIndexSearchOrBulk()
                 && !isS3Bucket
                 && AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION.getBoolean();
 
@@ -1405,7 +1405,7 @@ public class EntityGraphRetriever {
             LOG.debug("Mapping system attributes for type {}", entity.getTypeName());
         }
 
-        boolean enableJanusOptimization = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean() && RequestContext.get().isInvokedByIndexSearch();
+        boolean enableJanusOptimization = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean() && RequestContext.get().isInvokedByIndexSearchOrBulk();
 
         try {
 
@@ -1496,7 +1496,7 @@ public class EntityGraphRetriever {
 
         AtlasStructType structType = (AtlasStructType) objType;
         Map<String,Object> referenceProperties = Collections.emptyMap();
-        boolean enableJanusOptimisation = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean() && RequestContext.get().isInvokedByIndexSearch();
+        boolean enableJanusOptimisation = AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED.getBoolean() && RequestContext.get().isInvokedByIndexSearchOrBulk();
 
         if (enableJanusOptimisation){
             referenceProperties = preloadProperties(entityVertex, structType, structType.getAllAttributes().keySet(), false);
@@ -1527,7 +1527,7 @@ public class EntityGraphRetriever {
             }
 
             // use optimised path only for indexsearch and when flag is enabled!
-            if (ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS.getBoolean() && RequestContext.get().isInvokedByIndexSearch()) {
+            if (ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS.getBoolean() && RequestContext.get().isInvokedByIndexSearchOrBulk()) {
                 // Fetch classification vertices directly
                 List<Map<String, Object>> classificationProperties = new ArrayList<>();
                 List<AtlasClassification> ret = new ArrayList<>();
