@@ -1615,7 +1615,8 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 Map<AtlasAttribute.AtlasRelationshipEdgeDirection, Set<String>> attributesByDirection = new HashMap<>();
                 attributesByDirection.put(AtlasAttribute.AtlasRelationshipEdgeDirection.IN, new HashSet<>());
                 attributesByDirection.put(AtlasAttribute.AtlasRelationshipEdgeDirection.OUT, new HashSet<>());
-                // attributesByDirection.put(Direction.BOTH, new HashSet<>());
+                // glossary has some attributes that has BOTH as direction
+                 attributesByDirection.put(AtlasAttribute.AtlasRelationshipEdgeDirection.BOTH, new HashSet<>());
 
                 Map<String, Map<String, AtlasAttribute>>  typeRelationAttributes =  entityType.getRelationshipAttributes();
                 // Find direction for each attribute
@@ -1644,7 +1645,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 // Process edges for each direction
                 for (AtlasAttribute.AtlasRelationshipEdgeDirection direction : AtlasAttribute.AtlasRelationshipEdgeDirection.values()) {
                     Set<String> directionAttributes = attributesByDirection.get(direction);
-                    if (direction.equals(AtlasAttribute.AtlasRelationshipEdgeDirection.BOTH) || !directionAttributes.isEmpty()) {
+                    if (!directionAttributes.isEmpty()) {
                         processEdgesByDirection(typeVertexIds,
                                 directionAttributes, direction, vertexHeaders, resultMap);
                     }
@@ -1680,7 +1681,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 break;
             case BOTH:
             default:
-                //traversal = graph.V(vertexIds).bothE().has(STATE_PROPERTY_KEY, ACTIVE);
+                traversal = graph.V(vertexIds).bothE().has(STATE_PROPERTY_KEY, ACTIVE);
                 break;
         }
         
