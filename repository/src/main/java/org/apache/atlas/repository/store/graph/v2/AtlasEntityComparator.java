@@ -271,6 +271,31 @@ public class AtlasEntityComparator {
 
         return businessMetadata;
     }
+
+    public Map<String, Map<String, Object>> getBusinessMetadataFromEntityAttribute(AtlasEntity entity, AtlasEntityType entityType) {
+        Map<String, Map<String, Object>> businessMetadata = new HashMap<>();
+
+        if (entity == null || entity.getAttributes() == null || entityType == null) {
+            return businessMetadata;
+        }
+
+        for (String attrName : entity.getAttributes().keySet()) {
+            AtlasAttribute attributeDefinition = entityType.getAttribute(attrName);
+
+            if (attributeDefinition instanceof AtlasBusinessMetadataType.AtlasBusinessAttribute) {
+                Object entityAttrValue = entity.getAttribute(attrName);
+
+                if (entityAttrValue != null) {
+                    String bmTypeName = attributeDefinition.getDefinedInDef().getName();
+                    Map<String, Object> bmAttributes = businessMetadata.computeIfAbsent(bmTypeName, k -> new HashMap<>());
+                    bmAttributes.put(attributeDefinition.getName(), entityAttrValue);
+                }
+            }
+        }
+
+        return businessMetadata;
+    }
+
     public static class AtlasEntityDiffResult {
         private final AtlasEntity diffEntity;
         private final boolean     hasDifference;
