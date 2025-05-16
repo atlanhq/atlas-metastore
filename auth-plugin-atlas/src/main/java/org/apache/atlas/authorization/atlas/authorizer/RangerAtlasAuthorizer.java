@@ -52,6 +52,9 @@ import org.apache.atlas.plugin.policyengine.RangerAccessResult;
 import org.apache.atlas.plugin.policyresourcematcher.RangerPolicyResourceMatcher;
 import org.apache.atlas.plugin.service.RangerBasePlugin;
 import org.apache.atlas.plugin.util.RangerPerfTracer;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
 
 import java.util.Collection;
 import java.util.Collections;
@@ -873,11 +876,34 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
     class RangerAtlasPlugin extends RangerBasePlugin {
         RangerAtlasPlugin() {
-            super("atlas", "atlas");
+            super("atlas", "atlas", null, getVertexRetrievalServiceInstance());
         }
 
         RangerAtlasPlugin(AtlasTypeRegistry typeRegistry) {
-            super("atlas", "atlas", typeRegistry);
+            super("atlas", "atlas", typeRegistry, getVertexRetrievalServiceInstance());
+        }
+
+        private static VertexRetrievalService getVertexRetrievalServiceInstance() {
+            VertexRetrievalService vrs = null;
+            try {
+                AtlasGraph graph = new AtlasJanusGraph();
+
+                if (graph instanceof AtlasJanusGraph) {
+                    vrs = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+                    if (vrs != null) {
+                        if (LOG.isInfoEnabled()) {
+                            LOG.info("RangerAtlasPlugin: Successfully obtained VertexRetrievalService instance.");
+                        }
+                    } else {
+                        LOG.error("RangerAtlasPlugin: AtlasJanusGraph instance provided a null VertexRetrievalService. Policy processing for 'atlas' service may fail.");
+                    }
+                } else {
+                    LOG.error("RangerAtlasPlugin: Graph instance is not of type AtlasJanusGraph. Cannot obtain VertexRetrievalService.");
+                }
+            } catch (Throwable t) {
+                LOG.error("RangerAtlasPlugin: Exception while trying to obtain VertexRetrievalService instance. Policy processing for 'atlas' service may fail.", t);
+            }
+            return vrs;
         }
     }
 
