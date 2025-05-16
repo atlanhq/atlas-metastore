@@ -22,7 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.SortOrder;
 import org.apache.atlas.annotation.Timed;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -33,6 +33,7 @@ import org.apache.atlas.model.searchlog.SearchLogSearchParams;
 import org.apache.atlas.model.searchlog.SearchLogSearchResult;
 import org.apache.atlas.model.searchlog.SearchRequestLogData.SearchRequestLogDataBuilder;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.searchlog.SearchLoggingManagement;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
@@ -391,7 +392,7 @@ public class DiscoveryREST {
     @Timed
     public AtlasSearchResult indexSearch(@Context HttpServletRequest servletRequest, IndexSearchParams parameters) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
-        RequestContext.get().setIsInvokedByIndexSearch(true);
+        RequestContext.get().setIsInvokedByIndexSearchOrBulk(true);
         long startTime = System.currentTimeMillis();
 
         RequestContext.get().setIncludeMeanings(!parameters.isExcludeMeanings());

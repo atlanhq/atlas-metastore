@@ -25,6 +25,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.authorize.*;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.TypeCategory;
@@ -829,7 +830,6 @@ public class EntityREST {
         }
 
         AtlasPerfTracer perf = null;
-        RequestContext.get().setEnableCache(false);
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
         try {
 
@@ -858,6 +858,10 @@ public class EntityREST {
                     .setReplaceBusinessAttributes(replaceBusinessAttributes)
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
                     .build();
+
+            if (AtlasConfiguration.ATLAS_BULK_API_ENABLE_JANUS_OPTIMISATION.getBoolean()){
+                RequestContext.get().setIsInvokedByIndexSearchOrBulk(true);
+            }
             return entitiesStore.createOrUpdate(entityStream, context);
         } finally {
             AtlasPerfTracer.log(perf);
