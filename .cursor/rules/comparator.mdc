@@ -1,0 +1,575 @@
+---
+description: Entity update flow entity comparator logic to calculate diff
+globs: 
+alwaysApply: false
+---
+# Entity Comparison Mechanism in Atlas Metastore
+
+## Overview
+
+The entity comparison mechanism in Atlas Metastore is a critical component of the `POST entity/bulk` operation, enabling efficient updates by identifying and processing only the changed attributes of entities. This document provides a detailed breakdown of the `AtlasEntityComparator.getDiffResult` implementation, which is responsible for comparing an updated entity with its stored version and generating a differential entity containing only the changed attributes.
+
+## Core Components
+
+### AtlasEntityComparator
+
+The `AtlasEntityComparator` class provides methods to compare entities and generate differential results:
+
+```java
+public class AtlasEntityComparator {
+    private final AtlasTypeRegistry    typeRegistry;
+    private final EntityGraphRetriever entityRetriever;
+    private final Map<String, String>  guidRefMap;
+    private BulkRequestContext context;
+
+    // Constructor and methods...
+}
+```
+
+Key components:
+- `typeRegistry`: Provides access to type definitions for attribute validation
+- `entityRetriever`: Retrieves entity attributes from graph vertices
+- `guidRefMap`: Maps temporary GUIDs to permanent GUIDs during entity creation
+- `context`: Contains flags for handling classifications, tags, and business attributes
+
+### AtlasEntityDiffResult
+
+The result of the comparison is encapsulated in an `AtlasEntityDiffResult` object:
+
+```java
+public static class AtlasEntityDiffResult {
+    private final AtlasEntity diffEntity;
+    private final boolean     hasDifference;
+    private final boolean     hasDifferenceOnlyInCustomAttributes;
+    private final boolean     hasDifferenceOnlyInBusinessAttributes;
+
+    // Constructor and methods...
+}
+```
+
+This class provides:
+- `diffEntity`: An entity containing only the changed attributes
+- `hasDifference`: Indicates whether any differences were found
+- `hasDifferenceOnlyInCustomAttributes`: Indicates if differences are limited to custom attributes
+- `hasDifferenceOnlyInBusinessAttributes`: Indicates if differences are limited to business attributes
+
+## getDiffResult Implementation
+
+The `getDiffResult` method is the core of the comparison mechanism, with three overloaded versions:
+
+```java
+// Compare with stored entity
+public AtlasEntityDiffResult getDiffResult(AtlasEntity updatedEntity, AtlasEntity storedEntity, boolean findOnlyFirstDiff) throws AtlasBaseException {
+    return getDiffResult(updatedEntity, storedEntity, null, findOnlyFirstDiff);
+}
+
+// Compare with stored vertex
+public AtlasEntityDiffResult getDiffResult(AtlasEntity updatedEntity, AtlasVertex storedVertex, boolean findOnlyFirstDiff) throws AtlasBaseException {
+    return getDiffResult(updatedEntity, null, storedVertex, findOnlyFirstDiff);
+}
+
+// Main implementation
+private AtlasEntityDiffResult getDiffResult(AtlasEntity updatedEntity, AtlasEntity storedEntity, AtlasVertex storedVertex, boolean findOnlyFirstDiff) throws AtlasBaseException {
+    // Implementation details...
+}
+```
+
+The main implementation compares different sections of the entity:
+1. Regular attributes
+2. Relationship attributes
+3. Classifications/tags
+4. Custom attributes
+5. Business attributes
+
+## Comparison Process
+
+### 1. Initialization
+
+The method begins by initializing a new entity to hold the differences and retrieving type information:
+
+```java
+AtlasEntity diffEntity = new AtlasEntity(updatedEntity.getTypeName());
+AtlasEntityType entityType = typeRegistry.getEntityTypeByName(updatedEntity.getTypeName());
+Map<String, AtlasAttribute> entityTypeAttributes = entityType.getAllAttributes();
+Map<String, Map<String, AtlasAttribute>> entityTypeRelationshipAttributes = entityType.getRelationshipAttributes();
+
+int sectionsWithDiff = 0;
+boolean hasDiffInAttributes = false;
+boolean hasDiffInRelationshipAttributes = false;
+boolean hasDiffInCustomAttributes = false;
+boolean hasDiffInBusinessAttributes = false;
+
+diffEntity.setGuid(updatedEntity.getGuid());
+```
+
+### 2. Regular Attribute Comparison
+
+The method compares each regular attribute of the updated entity with its stored value:
+
+```java
+if (MapUtils.isNotEmpty(updatedEntity.getAttributes())) {
+    for (Map.Entry<String, Object> entry : updatedEntity.getAttributes().entrySet()) {
+        String attrName = entry.getKey();
+        AtlasAttribute attribute = entityTypeAttributes.get(attrName);
+
+        if (attribute == null) { // no such attribute
+            continue;
+        }
+
+        // Handle default values for null attributes
+        TypeCategory category = attribute.getAttributeType().getTypeCategory();
+        boolean isDefaultValueNotNull = !attribute.getAttributeDef().getIsDefaultValueNull();
+        Object newVal;
+
+        if (entry.getValue() == null && isDefaultValueNotNull) {
+            switch (category) {
+                case PRIMITIVE:
+                    newVal = attribute.getAttributeType().createDefaultValue();
+                    break;
+                case ARRAY:
+                    newVal = new ArrayList<>();
+                    break;
+                case MAP:
+                    newVal = MapUtils.EMPTY_MAP;
+                    break;
+                default:
+                    newVal = entry.getValue();
+            }
+        } else {
+            newVal = entry.getValue();
+        }
+
+        // Get current value from stored entity or vertex
+        Object currVal = (storedEntity != null) ? storedEntity.getAttribute(attrName) : entityRetriever.getEntityAttribute(storedVertex, attribute);
+
+        // Compare values using type-specific equality check
+        if (!attribute.getAttributeType().areEqualValues(currVal, newVal, guidRefMap)) {
+            hasDiffInAttributes = true;
+            diffEntity.setAttribute(attrName, newVal);
+
+            if (findOnlyFirstDiff) {
+                return new AtlasEntityDiffResult(diffEntity, true, false, false);
+            }
+        }
+    }
+
+    if (hasDiffInAttributes) {
+        sectionsWithDiff++;
+    }
+}
+```
+
+Key aspects of this comparison:
+- Type-specific equality checks using `areEqualValues`
+- Special handling for null values with non-null defaults
+- Early return if only the first difference is needed
+- Tracking of which sections have differences
+
+### 3. Relationship Attribute Comparison
+
+The method then compares relationship attributes:
+
+```java
+if (MapUtils.isNotEmpty(updatedEntity.getRelationshipAttributes())) {
+    for (Map.Entry<String, Object> entry : updatedEntity.getRelationshipAttributes().entrySet()) {
+        String attrName = entry.getKey();
+
+        if (!entityTypeRelationshipAttributes.containsKey(attrName)) {
+            continue;
+        }
+
+        Object newVal = entry.getValue();
+        String relationshipType = AtlasEntityUtil.getRelationshipType(newVal);
+        AtlasAttribute attribute = entityType.getRelationshipAttribute(attrName, relationshipType);
+        Object currVal = (storedEntity != null) ? storedEntity.getRelationshipAttribute(attrName) : entityRetriever.getEntityAttribute(storedVertex, attribute);
+
+        if (!attribute.getAttributeType().areEqualValues(currVal, newVal, guidRefMap)) {
+            hasDiffInRelationshipAttributes = true;
+            diffEntity.setRelationshipAttribute(attrName, newVal);
+
+            if (findOnlyFirstDiff) {
+                return new AtlasEntityDiffResult(diffEntity, true, false, false);
+            }
+        }
+    }
+
+    if (hasDiffInRelationshipAttributes) {
+        sectionsWithDiff++;
+    }
+}
+```
+
+Key aspects:
+- Relationship type resolution using `getRelationshipType`
+- Relationship-specific attribute retrieval
+- Same equality check mechanism as regular attributes
+
+### 4. Classification/Tag Comparison
+
+The method handles classifications based on context flags:
+
+```java
+if (context.isReplaceClassifications() || context.isReplaceTags() || context.isAppendTags()) {
+    List<AtlasClassification> newVal = updatedEntity.getClassifications();
+    List<AtlasClassification> currVal = (storedEntity != null) ? storedEntity.getClassifications() : entityRetriever.getAllClassifications(storedVertex);
+
+    if (context.isReplaceClassifications()) {
+        if (!Objects.equals(currVal, newVal)) {
+            diffEntity.setClassifications(newVal);
+            sectionsWithDiff++;
+
+            if (findOnlyFirstDiff) {
+                return new AtlasEntityDiffResult(diffEntity, true, false, false);
+            }
+        }
+    } else {
+        Map<String, List<AtlasClassification>> diff;
+
+        if (context.isReplaceTags()) {
+            diff = AtlasEntityUtils.getTagsDiffForReplace(updatedEntity.getGuid(),
+                    updatedEntity.getClassifications(),
+                    currVal);
+        } else {
+            diff = AtlasEntityUtils.getTagsDiffForAppend(updatedEntity.getGuid(),
+                    updatedEntity.getAddOrUpdateClassifications(),
+                    currVal,
+                    updatedEntity.getRemoveClassifications());
+        }
+
+        if (MapUtils.isNotEmpty(diff) && (diff.containsKey(PROCESS_DELETE) || diff.containsKey(PROCESS_UPDATE) || diff.containsKey(PROCESS_ADD))) {
+            sectionsWithDiff++;
+            RequestContext.get().addTagsDiff(updatedEntity.getGuid(), diff);
+
+            if (findOnlyFirstDiff) {
+                return new AtlasEntityDiffResult(diffEntity, true, false, false);
+            }
+        }
+    }
+}
+```
+
+Key aspects:
+- Different handling based on operation mode (replace vs. append)
+- Specialized diff calculation for tags using `getTagsDiffForReplace` or `getTagsDiffForAppend`
+- Storage of tag differences in the request context for later processing
+
+### 5. Custom Attribute Comparison
+
+The method compares custom attributes:
+
+```java
+if (updatedEntity.getCustomAttributes() != null) {
+    // event coming from hook does not have custom attributes, such events must not remove existing attributes
+    // UI sends empty object in case of intended removal.
+    Map<String, String> newCustomAttributes = updatedEntity.getCustomAttributes();
+    Map<String, String> currCustomAttributes = (storedEntity != null) ? storedEntity.getCustomAttributes() : getCustomAttributes(storedVertex);
+
+    if (!Objects.equals(currCustomAttributes, newCustomAttributes)) {
+        diffEntity.setCustomAttributes(newCustomAttributes);
+        hasDiffInCustomAttributes = true;
+        sectionsWithDiff++;
+
+        if (findOnlyFirstDiff && sectionsWithDiff > 1) {
+            return new AtlasEntityDiffResult(diffEntity, true, false, false);
+        }
+    }
+}
+```
+
+Key aspects:
+- Special handling for events from hooks vs. UI
+- Simple equality check using `Objects.equals`
+- Tracking if differences are limited to custom attributes
+
+### 6. Business Attribute Comparison
+
+Finally, the method compares business attributes if replacement is enabled:
+
+```java
+if (context.isReplaceBusinessAttributes()) {
+    Map<String, Map<String, Object>> newBusinessMetadata = updatedEntity.getBusinessAttributes() == null
+            ? getBusinessMetadataFromEntityAttribute(updatedEntity, entityType)
+            : updatedEntity.getBusinessAttributes();
+    Map<String, Map<String, Object>> currBusinessMetadata = (storedEntity != null)
+            ? storedEntity.getBusinessAttributes()
+            : entityRetriever.getBusinessMetadata(storedVertex);
+
+    if (!Objects.equals(currBusinessMetadata, newBusinessMetadata)) {
+        diffEntity.setBusinessAttributes(newBusinessMetadata);
+        hasDiffInBusinessAttributes = true;
+        sectionsWithDiff++;
+
+        if (findOnlyFirstDiff && sectionsWithDiff > 1) {
+            return new AtlasEntityDiffResult(diffEntity, true, false, false);
+        }
+    }
+}
+```
+
+Key aspects:
+- Extraction of business metadata from entity attributes if not explicitly provided
+- Simple equality check using `Objects.equals`
+- Tracking if differences are limited to business attributes
+
+### 7. Result Generation
+
+The method concludes by creating and returning an `AtlasEntityDiffResult`:
+
+```java
+return new AtlasEntityDiffResult(diffEntity, sectionsWithDiff > 0, sectionsWithDiff == 1 && hasDiffInCustomAttributes, sectionsWithDiff == 1 && hasDiffInBusinessAttributes);
+```
+
+The result includes:
+- The differential entity containing only changed attributes
+- Whether any differences were found
+- Whether differences are limited to custom attributes
+- Whether differences are limited to business attributes
+
+## Business Metadata Extraction
+
+The `getBusinessMetadataFromEntityAttribute` method extracts business metadata from entity attributes:
+
+```java
+public Map<String, Map<String, Object>> getBusinessMetadataFromEntityAttribute(AtlasEntity entity, AtlasEntityType entityType) {
+    Map<String, Map<String, Object>> businessMetadata = new HashMap<>();
+
+    if (entity == null || entity.getAttributes() == null || entityType == null) {
+        return businessMetadata;
+    }
+
+    for (String attrName : entity.getAttributes().keySet()) {
+        AtlasAttribute attributeDefinition = entityType.getAttribute(attrName);
+
+        if (attributeDefinition instanceof AtlasBusinessMetadataType.AtlasBusinessAttribute) {
+            Object entityAttrValue = entity.getAttribute(attrName);
+
+            if (entityAttrValue != null) {
+                String bmTypeName = attributeDefinition.getDefinedInDef().getName();
+                Map<String, Object> bmAttributes = businessMetadata.computeIfAbsent(bmTypeName, k -> new HashMap<>());
+                bmAttributes.put(attributeDefinition.getName(), entityAttrValue);
+            }
+        }
+    }
+
+    return businessMetadata;
+}
+```
+
+This method:
+- Identifies attributes that are business attributes
+- Organizes them by business metadata type
+- Creates a nested map structure for business metadata
+
+## Usage in Entity Bulk Operations
+
+The `AtlasEntityComparator.getDiffResult` method is used in the `AtlasEntityStoreV2.createOrUpdate` method to optimize bulk operations:
+
+```java
+// From AtlasEntityStoreV2.java
+AtlasEntityComparator entityComparator = new AtlasEntityComparator(typeRegistry, entityRetriever, context.getGuidAssignments(), context);
+AtlasEntityComparator.AtlasEntityDiffResult diffResult = entityComparator.getDiffResult(entity, vertex, false);
+
+if (!diffResult.hasDifference()) {
+    context.addSkippedEntity(entity);
+    continue;
+}
+```
+
+This usage:
+- Creates a comparator with the necessary context
+- Compares each entity with its stored vertex
+- Skips entities that have no differences
+- Processes only entities with changes
+
+## Type-Specific Equality Checks
+
+The comparison relies on type-specific equality checks implemented in various `AtlasType` subclasses:
+
+### Primitive Types
+
+```java
+// From AtlasPrimitiveType.java
+@Override
+public boolean areEqualValues(Object val1, Object val2, Map<String, String> guidAssignments) {
+    if (val1 == null) {
+        return val2 == null;
+    }
+
+    if (val2 == null) {
+        return false;
+    }
+
+    if (val1.equals(val2)) {
+        return true;
+    }
+
+    // Handle type conversions for numeric types
+    if (val1 instanceof Number && val2 instanceof Number) {
+        Number num1 = (Number) val1;
+        Number num2 = (Number) val2;
+
+        if (getTypeName().equals(AtlasBaseTypeDef.ATLAS_TYPE_INT)) {
+            return num1.intValue() == num2.intValue();
+        } else if (getTypeName().equals(AtlasBaseTypeDef.ATLAS_TYPE_FLOAT)) {
+            return num1.floatValue() == num2.floatValue();
+        } else if (getTypeName().equals(AtlasBaseTypeDef.ATLAS_TYPE_DOUBLE)) {
+            return num1.doubleValue() == num2.doubleValue();
+        } else if (getTypeName().equals(AtlasBaseTypeDef.ATLAS_TYPE_LONG)) {
+            return num1.longValue() == num2.longValue();
+        } else if (getTypeName().equals(AtlasBaseTypeDef.ATLAS_TYPE_SHORT)) {
+            return num1.shortValue() == num2.shortValue();
+        } else if (getTypeName().equals(AtlasBaseTypeDef.ATLAS_TYPE_BYTE)) {
+            return num1.byteValue() == num2.byteValue();
+        }
+    }
+
+    // Handle string comparisons
+    if (val1 instanceof String && val2 instanceof String) {
+        return ((String) val1).equalsIgnoreCase((String) val2);
+    }
+
+    return false;
+}
+```
+
+### Array Types
+
+```java
+// From AtlasArrayType.java
+@Override
+public boolean areEqualValues(Object val1, Object val2, Map<String, String> guidAssignments) {
+    if (val1 == null) {
+        return val2 == null;
+    }
+
+    if (val2 == null) {
+        return false;
+    }
+
+    Collection c1 = getCollectionFromValue(val1);
+    Collection c2 = getCollectionFromValue(val2);
+
+    if (c1 == null || c2 == null) {
+        return false;
+    }
+
+    if (c1.size() != c2.size()) {
+        return false;
+    }
+
+    Iterator i1 = c1.iterator();
+    Iterator i2 = c2.iterator();
+
+    while (i1.hasNext() && i2.hasNext()) {
+        Object e1 = i1.next();
+        Object e2 = i2.next();
+
+        if (!elementType.areEqualValues(e1, e2, guidAssignments)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+### Map Types
+
+```java
+// From AtlasMapType.java
+@Override
+public boolean areEqualValues(Object val1, Object val2, Map<String, String> guidAssignments) {
+    if (val1 == null) {
+        return val2 == null;
+    }
+
+    if (val2 == null) {
+        return false;
+    }
+
+    Map m1 = getMapFromValue(val1);
+    Map m2 = getMapFromValue(val2);
+
+    if (m1 == null || m2 == null) {
+        return false;
+    }
+
+    if (m1.size() != m2.size()) {
+        return false;
+    }
+
+    for (Object key : m1.keySet()) {
+        Object v1 = m1.get(key);
+        Object v2 = m2.get(key);
+
+        if (!valueType.areEqualValues(v1, v2, guidAssignments)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+```
+
+### Entity Types
+
+```java
+// From AtlasObjectIdType.java
+@Override
+public boolean areEqualValues(Object val1, Object val2, Map<String, String> guidAssignments) {
+    if (val1 == null) {
+        return val2 == null;
+    }
+
+    if (val2 == null) {
+        return false;
+    }
+
+    AtlasObjectId objId1 = getObjectId(val1);
+    AtlasObjectId objId2 = getObjectId(val2);
+
+    if (objId1 == null || objId2 == null) {
+        return false;
+    }
+
+    String guid1 = objId1.getGuid();
+    String guid2 = objId2.getGuid();
+
+    if (StringUtils.equals(guid1, guid2)) {
+        return true;
+    }
+
+    if (MapUtils.isNotEmpty(guidAssignments)) {
+        if (StringUtils.isNotEmpty(guid1) && StringUtils.isNotEmpty(guid2)) {
+            if (guidAssignments.containsKey(guid1) && StringUtils.equals(guidAssignments.get(guid1), guid2)) {
+                return true;
+            }
+
+            if (guidAssignments.containsKey(guid2) && StringUtils.equals(guidAssignments.get(guid2), guid1)) {
+                return true;
+            }
+        }
+    }
+
+    return StringUtils.equals(objId1.getTypeName(), objId2.getTypeName()) &&
+           Objects.equals(objId1.getUniqueAttributes(), objId2.getUniqueAttributes());
+}
+```
+
+## Performance Considerations
+
+The entity comparison mechanism includes several optimizations:
+
+1. **Early Return**: If `findOnlyFirstDiff` is true, the method returns as soon as the first difference is found, avoiding unnecessary comparisons.
+
+2. **Differential Processing**: Only changed attributes are included in the result, reducing the amount of data processed in subsequent steps.
+
+3. **Section Tracking**: The method tracks which sections have differences, allowing for specialized handling of entities with changes only in custom or business attributes.
+
+4. **Type-Specific Equality**: Each type implements its own equality check, optimized for that type's characteristics.
+
+5. **GUID Assignment Handling**: The comparison accounts for temporary GUIDs assigned during entity creation, ensuring that references to the same entity are recognized even if the GUID has changed.
+
+## Conclusion
+
+The entity comparison mechanism in Atlas Metastore is a sophisticated system that enables efficient bulk operations by identifying and processing only the changed attributes of entities. The `AtlasEntityComparator.getDiffResult` method performs a detailed comparison of various entity sections, using type-specific equality checks and context-aware processing to generate accurate differential results. This mechanism is a critical component of the `POST entity/bulk` operation, contributing to the overall performance and scalability of the Atlas Metastore platform.

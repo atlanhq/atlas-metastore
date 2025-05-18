@@ -1,0 +1,844 @@
+---
+description: Indexsearch code flow with descriptions and example
+globs: 
+alwaysApply: false
+---
+# Atlas Metastore: search/indexsearch Endpoint Flow Documentation
+
+## Overview
+
+This document provides a comprehensive breakdown of the `search/indexsearch` endpoint flow in Atlas Metastore, detailing all functions, interactions, and code snippets involved in the process from the REST API endpoint to the Elasticsearch query execution and result processing.
+
+## Table of Contents
+
+1. [Entry Point: DiscoveryREST](#entry-point-discoveryrest)
+2. [Core Processing: EntityDiscoveryService](#core-processing-entitydiscoveryservice)
+3. [Elasticsearch Query Execution](#elasticsearch-query-execution)
+4. [Asynchronous Search Implementation](#asynchronous-search-implementation)
+5. [JanusGraph Integration and Optimizations](#janusgraph-integration-and-optimizations)
+6. [Result Processing](#result-processing)
+7. [Authorization and Access Control](#authorization-and-access-control)
+8. [Performance Metrics and Logging](#performance-metrics-and-logging)
+9. [Error Handling](#error-handling)
+
+## Entry Point: DiscoveryREST
+
+The flow begins with the `indexSearch` method in the `DiscoveryREST` class, which handles the `POST /api/atlas/v2/search/indexsearch` endpoint.
+
+```java
+@Path("indexsearch")
+@POST
+@Timed
+public AtlasSearchResult indexSearch(@Context HttpServletRequest servletRequest, IndexSearchParams parameters) throws AtlasBaseException {
+    AtlasPerfTracer perf = null;
+    RequestContext.get().setIsInvokedByIndexSearch(true);
+    long startTime = System.currentTimeMillis();
+
+    RequestContext.get().setIncludeMeanings(!parameters.isExcludeMeanings());
+    RequestContext.get().setIncludeClassifications(!parameters.isExcludeClassifications());
+    RequestContext.get().setIncludeClassificationNames(parameters.isIncludeClassificationNames());
+    try {
+        if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+            perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.indexSearch(" + parameters + ")");
+        }
+
+        // Validate query size against configured limits
+        if (AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_API_LIMIT.getBoolean() && 
+            parameters.getQuerySize() > AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()) {
+            if(CollectionUtils.isEmpty(parameters.getUtmTags())) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, 
+                    String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
+            }
+            for (String utmTag : parameters.getUtmTags()) {
+                if (Arrays.stream(AtlasConfiguration.ATLAS_INDEXSEARCH_LIMIT_UTM_TAGS.getStringArray())
+                        .anyMatch(utmTag::equalsIgnoreCase)) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_DSL_QUERY_SIZE, 
+                        String.valueOf(AtlasConfiguration.ATLAS_INDEXSEARCH_QUERY_SIZE_MAX_LIMIT.getLong()));
+                }
+            }
+        }
+
+        // Validate search query
+        if (StringUtils.isEmpty(parameters.getQuery())) {
+            AtlasBaseException abe = new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid search query");
+            if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
+                logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
+            }
+            throw abe;
+        }
+
+        if(LOG.isDebugEnabled()){
+            LOG.debug("Performing indexsearch for the params ({})", parameters);
+        }
+        
+        // Execute the search query
+        AtlasSearchResult result = discoveryService.directIndexSearch(parameters);
+        if (result == null) {
+            return null;
+        }
+        long endTime = System.currentTimeMillis();
+
+        // Log search if enabled
+        if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
+            logSearchLog(parameters, result, servletRequest, endTime - startTime);
+        }
+
+        return result;
+    } catch (AtlasBaseException abe) {
+        if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
+            logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
+        }
+        throw abe;
+    } catch (Exception e) {
+        LOG.error("Exception while performing index search", e);
+        if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
+            logSearchLog(parameters, servletRequest, e, System.currentTimeMillis() - startTime);
+        }
+        throw new AtlasBaseException(e);
+    } finally {
+        AtlasPerfTracer.log(perf);
+    }
+}
+```
+
+The `IndexSearchParams` class extends `SearchParams` and contains parameters specific to the index search operation:
+
+```java
+public class IndexSearchParams extends SearchParams {
+    private List<String> utmTags;
+    private boolean excludeMeanings = false;
+    private boolean excludeClassifications = false;
+    private boolean includeClassificationNames = false;
+    private boolean saveSearchLog = true;
+    private boolean showSearchScore = false;
+    private boolean showSearchMetadata = false;
+    private boolean showHighlights = false;
+    private boolean enableFullRestriction = true;
+    private boolean includeRelationshipAttributes = false;
+    private boolean allowDeletedRelations = false;
+    private String persona;
+    private String purpose;
+    private boolean accessControlExclusive = false;
+    private Set<String> relationAttributes;
+    private Set<String> collapseAttributes;
+    private Set<String> collapseRelationAttributes;
+    
+    // Getters and setters
+}
+```
+
+## Core Processing: EntityDiscoveryService
+
+The `directIndexSearch` method in `EntityDiscoveryService` handles the core processing of the search request:
+
+```java
+@Override
+public AtlasSearchResult directIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+    IndexSearchParams params = (IndexSearchParams) searchParams;
+    RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
+    RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
+    RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
+
+    AtlasSearchResult ret = new AtlasSearchResult();
+    AtlasIndexQuery indexQuery;
+
+    ret.setSearchParameters(searchParams);
+    ret.setQueryType(AtlasQueryType.INDEX);
+
+    Set<String> resultAttributes = new HashSet<>();
+    if (CollectionUtils.isNotEmpty(searchParams.getAttributes())) {
+        resultAttributes.addAll(searchParams.getAttributes());
+    }
+
+    try {
+        if(LOG.isDebugEnabled()){
+            LOG.debug("Performing ES search for the params ({})", searchParams);
+        }
+
+        // Get the index name based on persona/purpose
+        String indexName = getIndexName(params);
+
+        // Create the Elasticsearch query
+        indexQuery = graph.elasticsearchQuery(indexName);
+
+        // Add pre-filters for access control if enabled
+        if (searchParams.getEnableFullRestriction()) {
+            addPreFiltersToSearchQuery(searchParams);
+        }
+
+        // Execute the Elasticsearch query
+        AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
+        DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+        if (indexQueryResult == null) {
+            return null;
+        }
+        RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
+        
+        // Process the search results
+        prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
+
+        ret.setAggregations(indexQueryResult.getAggregationMap());
+        ret.setApproximateCount(indexQuery.vertexTotals());
+    } catch (Exception e) {
+        LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
+        throw e;
+    }
+    return ret;
+}
+```
+
+## Elasticsearch Query Execution
+
+The `getIndexName` method determines the index name based on persona/purpose parameters:
+
+```java
+private String getIndexName(IndexSearchParams params) throws AtlasBaseException {
+    String vertexIndexName = getESIndex();
+
+    if (StringUtils.isEmpty(params.getPersona()) && StringUtils.isEmpty(params.getPurpose())) {
+        return vertexIndexName;
+    }
+
+    String qualifiedName = "";
+    if (StringUtils.isNotEmpty(params.getPersona())) {
+        qualifiedName = params.getPersona();
+    } else {
+        qualifiedName = params.getPurpose();
+    }
+
+    String aliasName = AccessControlUtils.getESAliasName(qualifiedName);
+
+    if (StringUtils.isNotEmpty(aliasName)) {
+        if(params.isAccessControlExclusive()) {
+            accessControlExclusiveDsl(params, aliasName);
+            aliasName = aliasName+","+vertexIndexName;
+        }
+        return aliasName;
+    } else {
+        throw new AtlasBaseException("ES alias not found for purpose/persona " + params.getPurpose());
+    }
+}
+```
+
+The `addPreFiltersToSearchQuery` method adds access control filters to the search query:
+
+```java
+private void addPreFiltersToSearchQuery(SearchParams searchParams) {
+    try {
+        String persona = ((IndexSearchParams) searchParams).getPersona();
+        String purpose = ((IndexSearchParams) searchParams).getPurpose();
+
+        AtlasPerfMetrics.MetricRecorder addPreFiltersToSearchQueryMetric = RequestContext.get().startMetricRecord("addPreFiltersToSearchQuery");
+        ObjectMapper mapper = new ObjectMapper();
+        List<Map<String, Object>> mustClauseList = new ArrayList<>();
+
+        List<String> actions = new ArrayList<>();
+        actions.add("entity-read");
+
+        // Get pre-filter DSL from authorization utils
+        Map<String, Object> allPreFiltersBoolClause = AtlasAuthorizationUtils.getPreFilterDsl(persona, purpose, actions);
+        mustClauseList.add(allPreFiltersBoolClause);
+
+        // Parse and modify the user query
+        String dslString = searchParams.getQuery();
+        JsonNode node = mapper.readTree(dslString);
+        JsonNode userQueryNode = node.get("query");
+        if (userQueryNode != null) {
+            String userQueryString = userQueryNode.toString();
+            String userQueryBase64 = Base64.getEncoder().encodeToString(userQueryString.getBytes());
+            mustClauseList.add(getMap("wrapper", getMap("query", userQueryBase64)));
+        }
+
+        // Update the query with the combined filters
+        JsonNode updateQueryNode = mapper.valueToTree(getMap("bool", getMap("must", mustClauseList)));
+        ((ObjectNode) node).set("query", updateQueryNode);
+        searchParams.setQuery(node.toString());
+        RequestContext.get().endMetricRecord(addPreFiltersToSearchQueryMetric);
+
+    } catch (Exception e) {
+        LOG.error("Error -> addPreFiltersToSearchQuery!", e);
+    }
+}
+```
+
+## Asynchronous Search Implementation
+
+The `indexQuery.vertices(searchParams)` method in the `directIndexSearch` flow delegates to the `AtlasElasticsearchQuery` class, which implements asynchronous search capabilities for improved performance with large result sets. The core of this implementation is the `performAsyncDirectIndexQuery` method:
+
+```java
+private DirectIndexQueryResult performAsyncDirectIndexQuery(SearchParams searchParams) throws AtlasBaseException, IOException {
+    AtlasPerfMetrics.MetricRecorder performAsyncDirectIndexQueryMetric = RequestContext.get().startMetricRecord("performAsyncDirectIndexQuery");
+    
+    try {
+        // Generate a unique context ID for this search request
+        String contextId = UUID.randomUUID().toString();
+        
+        // Set the context ID in the request context for tracking
+        RequestContext.get().setSearchContextId(contextId);
+        
+        // Submit the async search request to Elasticsearch
+        String responseString = submitAsyncSearch(searchParams);
+        
+        // Parse the response to get the search ID
+        JsonNode responseNode = mapper.readTree(responseString);
+        String id = responseNode.get("id").asText();
+        
+        // Store the search ID in the context cache for later retrieval
+        searchContextCache.put(contextId, id);
+        
+        // Get the initial results from the async search
+        String asyncSearchResponse = getAsyncSearchResponse(id, searchParams);
+        
+        // Process the response into a DirectIndexQueryResult
+        DirectIndexQueryResult result = getResultFromResponse(asyncSearchResponse);
+        
+        // Set the context ID in the result for tracking
+        result.setContextId(contextId);
+        
+        return result;
+    } catch (Exception e) {
+        // Handle network errors specifically
+        if (e instanceof ConnectException || 
+            (e instanceof ElasticsearchStatusException && 
+             ((ElasticsearchStatusException) e).status().getStatus() == RestStatus.GATEWAY_TIMEOUT.getStatus())) {
+            LOG.error("Network error while performing async direct index query", e);
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, "Network error: " + e.getMessage());
+        }
+        
+        LOG.error("Error while performing async direct index query", e);
+        throw e;
+    } finally {
+        RequestContext.get().endMetricRecord(performAsyncDirectIndexQueryMetric);
+    }
+}
+```
+
+The `submitAsyncSearch` method initiates an asynchronous search request to Elasticsearch:
+
+```java
+private String submitAsyncSearch(SearchParams searchParams) throws IOException {
+    // Configure the async search request
+    Request request = new Request("POST", "/_async_search");
+    
+    // Set search parameters
+    request.addParameter("wait_for_completion_timeout", asyncSearchWaitForCompletionTimeout);
+    request.addParameter("keep_alive", asyncSearchKeepAlive);
+    request.addParameter("keep_on_completion", "true");
+    
+    // Set the request body with the search query
+    request.setJsonEntity(searchParams.getQuery());
+    
+    // Execute the request
+    Response response = client.performRequest(request);
+    
+    // Return the response body
+    return EntityUtils.toString(response.getEntity());
+}
+```
+
+The `getAsyncSearchResponse` method retrieves results from an ongoing asynchronous search:
+
+```java
+private String getAsyncSearchResponse(String id, SearchParams searchParams) throws IOException {
+    // Configure the request to get async search results
+    Request request = new Request("GET", "/_async_search/" + id);
+    
+    // Set parameters for result retrieval
+    request.addParameter("wait_for_completion_timeout", asyncSearchWaitForCompletionTimeout);
+    request.addParameter("keep_alive", asyncSearchKeepAlive);
+    
+    // Execute the request
+    Response response = client.performRequest(request);
+    
+    // Return the response body
+    return EntityUtils.toString(response.getEntity());
+}
+```
+
+The `getResultFromResponse` method parses the Elasticsearch response and converts it to a `DirectIndexQueryResult`:
+
+```java
+private DirectIndexQueryResult getResultFromResponse(String responseString) throws IOException {
+    // Parse the response JSON
+    JsonNode responseNode = mapper.readTree(responseString);
+    
+    // Check if the search is still running
+    boolean isRunning = responseNode.has("is_running") && responseNode.get("is_running").asBoolean();
+    
+    // Get the completion status
+    boolean isPartial = responseNode.has("is_partial") && responseNode.get("is_partial").asBoolean();
+    
+    // Extract the actual search results
+    JsonNode hitsNode = responseNode.get("response").get("hits");
+    
+    // Get total hits count
+    long totalHits = hitsNode.get("total").get("value").asLong();
+    
+    // Extract individual hit documents
+    List<Map<String, Object>> results = new ArrayList<>();
+    JsonNode hitsArray = hitsNode.get("hits");
+    for (JsonNode hit : hitsArray) {
+        Map<String, Object> resultMap = new HashMap<>();
+        
+        // Extract document ID
+        resultMap.put("id", hit.get("_id").asText());
+        
+        // Extract document source
+        JsonNode sourceNode = hit.get("_source");
+        Map<String, Object> sourceMap = mapper.convertValue(sourceNode, new TypeReference<Map<String, Object>>() {});
+        resultMap.put("source", sourceMap);
+        
+        // Extract search score
+        if (hit.has("_score") && !hit.get("_score").isNull()) {
+            resultMap.put("score", hit.get("_score").asDouble());
+        }
+        
+        // Extract highlights if present
+        if (hit.has("highlight")) {
+            Map<String, List<String>> highlights = mapper.convertValue(hit.get("highlight"), 
+                                                  new TypeReference<Map<String, List<String>>>() {});
+            resultMap.put("highlight", highlights);
+        }
+        
+        // Extract sort values if present
+        if (hit.has("sort")) {
+            List<Object> sort = mapper.convertValue(hit.get("sort"), new TypeReference<List<Object>>() {});
+            resultMap.put("sort", sort);
+        }
+        
+        // Extract collapse field values if present
+        if (hit.has("fields") && hit.get("fields").has("_collapse")) {
+            JsonNode collapseNode = hit.get("fields").get("_collapse");
+            List<String> collapseValues = new ArrayList<>();
+            for (JsonNode value : collapseNode) {
+                collapseValues.add(value.asText());
+            }
+            resultMap.put("collapse", collapseValues);
+        }
+        
+        results.add(resultMap);
+    }
+    
+    // Extract aggregations if present
+    Map<String, Object> aggregations = null;
+    if (responseNode.get("response").has("aggregations")) {
+        aggregations = mapper.convertValue(responseNode.get("response").get("aggregations"), 
+                                         new TypeReference<Map<String, Object>>() {});
+    }
+    
+    // Create and return the result object
+    DirectIndexQueryResult result = new DirectIndexQueryResult(results, totalHits, aggregations);
+    result.setPartial(isPartial);
+    result.setRunning(isRunning);
+    
+    return result;
+}
+```
+
+## JanusGraph Integration and Optimizations
+
+The Atlas Metastore integrates with JanusGraph for graph database operations, with specific optimizations for search operations. The integration begins with the `graph.elasticsearchQuery` method in the `directIndexSearch` flow:
+
+```java
+public AtlasIndexQuery elasticsearchQuery(String indexName) {
+    // Create a new Elasticsearch query instance
+    return new AtlasElasticsearchQuery(this, indexName);
+}
+```
+
+The `AtlasJanusGraph` class provides the bridge between Atlas and JanusGraph:
+
+```java
+public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusEdge> {
+    private final JanusGraph graph;
+    private final AtlasJanusGraphDatabase database;
+    
+    // Constructor and other methods...
+    
+    @Override
+    public AtlasIndexQuery elasticsearchQuery(String indexName) {
+        // Create a new Elasticsearch query with the specified index
+        return new AtlasElasticsearchQuery(this, indexName);
+    }
+    
+    // Get the underlying JanusGraph instance
+    public JanusGraph getGraph() {
+        return graph;
+    }
+    
+    // Get the Elasticsearch client
+    public RestHighLevelClient getElasticsearchClient() {
+        return database.getElasticsearchClient();
+    }
+}
+```
+
+### JanusGraph Fetch Optimizations
+
+The search implementation includes several optimizations for fetching entities from JanusGraph:
+
+1. **Batch Vertex Retrieval**: Instead of fetching vertices one by one, the system retrieves them in batches:
+
+```java
+private List<AtlasVertex> getVerticesFromIds(List<String> vertexIds) {
+    // Split vertex IDs into batches for efficient retrieval
+    List<List<String>> batches = Lists.partition(vertexIds, VERTEX_FETCH_BATCH_SIZE);
+    
+    List<AtlasVertex> vertices = new ArrayList<>();
+    
+    for (List<String> batch : batches) {
+        // Create a multi-vertex query
+        MultiVertexQuery query = graph.getGraph().multiQuery();
+        
+        // Add all vertex IDs in the batch to the query
+        for (String id : batch) {
+            query.addVertex(JanusGraphId.toVertexId(Long.parseLong(id)));
+        }
+        
+        // Execute the batch query and collect results
+        Map<JanusGraphVertex, Iterable<JanusGraphVertex>> results = query.vertices();
+        
+        for (Map.Entry<JanusGraphVertex, Iterable<JanusGraphVertex>> entry : results.entrySet()) {
+            JanusGraphVertex vertex = entry.getKey();
+            if (vertex != null) {
+                vertices.add(new AtlasJanusVertex(vertex));
+            }
+        }
+    }
+    
+    return vertices;
+}
+```
+
+2. **Vertex Caching**: The system caches vertices to avoid redundant database lookups:
+
+```java
+private AtlasVertex getVertexFromCache(String vertexId) {
+    // Check if the vertex is in the cache
+    AtlasVertex vertex = vertexCache.get(vertexId);
+    
+    if (vertex == null) {
+        // If not in cache, retrieve from database
+        vertex = graph.getVertex(vertexId);
+        
+        // Add to cache for future lookups
+        if (vertex != null) {
+            vertexCache.put(vertexId, vertex);
+        }
+    }
+    
+    return vertex;
+}
+```
+
+3. **Property Prefetching**: The system prefetches commonly accessed properties:
+
+```java
+private void prefetchVertexProperties(List<AtlasVertex> vertices, Set<String> propertyKeys) {
+    // Create a multi-property query
+    MultiPropertyQuery query = graph.getGraph().multiQuery();
+    
+    // Add all vertices to the query
+    for (AtlasVertex vertex : vertices) {
+        query.addVertex(((AtlasJanusVertex) vertex).getV());
+    }
+    
+    // Add all property keys to prefetch
+    for (String key : propertyKeys) {
+        query.addPropertyKey(key);
+    }
+    
+    // Execute the prefetch query
+    query.execute();
+}
+```
+
+4. **Collapsed Results Optimization**: For queries with collapsed results, the system optimizes fetching of inner hits:
+
+```java
+private void fetchCollapsedResults(DirectIndexQueryResult result) {
+    // Process each result with collapse field
+    for (Result mainResult : result.getResults()) {
+        if (mainResult.hasCollapseField()) {
+            // Get collapse keys
+            Set<String> collapseKeys = mainResult.getCollapseKeys();
+            
+            for (String collapseKey : collapseKeys) {
+                // Fetch inner hits for this collapse key
+                String innerHitsQuery = buildInnerHitsQuery(mainResult.getId(), collapseKey);
+                
+                // Execute inner hits query
+                Response response = client.performRequest(createRequest(innerHitsQuery));
+                String responseString = EntityUtils.toString(response.getEntity());
+                
+                // Parse inner hits
+                DirectIndexQueryResult innerResult = parseInnerHits(responseString, collapseKey);
+                
+                // Add inner hits to the main result
+                mainResult.addCollapseVertices(collapseKey, innerResult);
+            }
+        }
+    }
+}
+```
+
+5. **Async Search Context Management**: The system manages search contexts to allow for efficient retrieval of large result sets:
+
+```java
+private void cleanupSearchContexts() {
+    // Get current time
+    long currentTime = System.currentTimeMillis();
+    
+    // Identify expired contexts
+    List<String> expiredContexts = new ArrayList<>();
+    for (Map.Entry<String, SearchContextInfo> entry : searchContextCache.entrySet()) {
+        SearchContextInfo info = entry.getValue();
+        
+        // Check if context has expired
+        if (currentTime - info.getCreationTime() > contextExpirationTimeMs) {
+            expiredContexts.add(entry.getKey());
+            
+            // Delete the async search from Elasticsearch
+            try {
+                deleteAsyncSearch(info.getSearchId());
+            } catch (Exception e) {
+                LOG.warn("Error deleting async search {}", info.getSearchId(), e);
+            }
+        }
+    }
+    
+    // Remove expired contexts from cache
+    for (String contextId : expiredContexts) {
+        searchContextCache.remove(contextId);
+    }
+}
+```
+
+These optimizations ensure that the search implementation can efficiently handle large result sets and complex queries while maintaining good performance.
+```
+
+## Result Processing
+
+The `prepareSearchResult` method processes the search results and converts them to `AtlasEntityHeader` objects:
+
+```java
+private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
+    SearchParams searchParams = ret.getSearchParameters();
+    try {
+        if(LOG.isDebugEnabled()){
+            LOG.debug("Preparing search results for ({})", ret.getSearchParameters());
+        }
+        Iterator<Result> iterator = indexQueryResult.getIterator();
+        boolean showSearchScore = searchParams.getShowSearchScore();
+        if (iterator == null) {
+            return;
+        }
+
+        while (iterator.hasNext()) {
+            Result result = iterator.next();
+            AtlasVertex vertex = result.getVertex();
+
+            if (vertex == null) {
+                LOG.warn("vertex in null");
+                continue;
+            }
+
+            // Convert vertex to entity header
+            AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
+            if(RequestContext.get().includeClassifications()){
+                header.setClassifications(entityRetriever.getAllClassifications(vertex));
+            }
+            if (showSearchScore) {
+                ret.addEntityScore(header.getGuid(), result.getScore());
+            }
+            
+            // Handle collapsed results
+            if (fetchCollapsedResults) {
+                Map<String, AtlasSearchResult> collapse = new HashMap<>();
+
+                Set<String> collapseKeys = result.getCollapseKeys();
+                for (String collapseKey : collapseKeys) {
+                    AtlasSearchResult collapseRet = new AtlasSearchResult();
+                    collapseRet.setSearchParameters(ret.getSearchParameters());
+
+                    Set<String> collapseResultAttributes = new HashSet<>();
+                    if (searchParams.getCollapseAttributes() != null) {
+                        collapseResultAttributes.addAll(searchParams.getCollapseAttributes());
+                    } else {
+                        collapseResultAttributes = resultAttributes;
+                    }
+
+                    if (searchParams.getCollapseRelationAttributes() != null) {
+                        RequestContext.get().getRelationAttrsForSearch().clear();
+                        RequestContext.get().setRelationAttrsForSearch(searchParams.getCollapseRelationAttributes());
+                    }
+
+                    DirectIndexQueryResult indexQueryCollapsedResult = result.getCollapseVertices(collapseKey);
+                    collapseRet.setApproximateCount(indexQueryCollapsedResult.getApproximateCount());
+                    prepareSearchResult(collapseRet, indexQueryCollapsedResult, collapseResultAttributes, false);
+
+                    collapseRet.setSearchParameters(null);
+                    collapse.put(collapseKey, collapseRet);
+                }
+                if (!collapse.isEmpty()) {
+                    header.setCollapse(collapse);
+                }
+            }
+            
+            // Add search metadata
+            if (searchParams.getShowSearchMetadata()) {
+                ret.addHighlights(header.getGuid(), result.getHighLights());
+                ret.addSort(header.getGuid(), result.getSort());
+            } else if (searchParams.getShowHighlights()) {
+                ret.addHighlights(header.getGuid(), result.getHighLights());
+            }
+
+            ret.addEntity(header);
+        }
+    } catch (Exception e) {
+        throw e;
+    }
+
+    // Apply authorization filtering
+    if (!searchParams.getEnableFullRestriction()) {
+        scrubSearchResults(ret, searchParams.getSuppressLogs());
+    }
+}
+```
+
+## Authorization and Access Control
+
+The `scrubSearchResults` method applies authorization filtering to the search results:
+
+```java
+private void scrubSearchResults(AtlasSearchResult searchResult, boolean suppressLogs) throws AtlasBaseException {
+    if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
+        return;
+    }
+
+    AtlasSearchResultScrubRequest request = new AtlasSearchResultScrubRequest(searchResult);
+    request.setSuppressLogs(suppressLogs);
+    
+    AtlasAuthorizationUtils.scrubSearchResults(request);
+}
+```
+
+The `accessControlExclusiveDsl` method modifies the DSL query for access control:
+
+```java
+private void accessControlExclusiveDsl(IndexSearchParams params, String aliasName) {
+    List<Map<String, Object>> mustClauses = new ArrayList<>();
+    Map<String, Object> clientQuery = (Map<String, Object>) params.getDsl().get("query");
+
+    mustClauses.add(clientQuery);
+
+    List<Map<String, Object>>filterClauses = new ArrayList<>();
+    filterClauses.add(getMap("terms", getMap("_index", Collections.singletonList(aliasName))));
+
+    Map<String, Object> boolQuery = new HashMap<>();
+    boolQuery.put("must", mustClauses);
+    boolQuery.put("filter",filterClauses);
+
+    List<Map<String, Object>> shouldClauses = new ArrayList<>();
+    shouldClauses.add(getMap("bool", boolQuery));
+    shouldClauses.add(getStaticBoolQuery());
+
+    Map<String, Object> topBoolQuery = getMap("bool", getMap("should", shouldClauses));
+
+    Map copyOfDsl = new HashMap(params.getDsl());
+    copyOfDsl.put("query", topBoolQuery);
+
+    params.setDsl(copyOfDsl);
+}
+```
+
+## Performance Metrics and Logging
+
+The search flow includes performance metrics recording at various stages:
+
+```java
+// In DiscoveryREST.indexSearch
+AtlasPerfTracer perf = null;
+if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "DiscoveryREST.indexSearch(" + parameters + ")");
+}
+// ...
+AtlasPerfTracer.log(perf);
+
+// In EntityDiscoveryService.directIndexSearch
+AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
+DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
+
+// In EntityDiscoveryService.addPreFiltersToSearchQuery
+AtlasPerfMetrics.MetricRecorder addPreFiltersToSearchQueryMetric = RequestContext.get().startMetricRecord("addPreFiltersToSearchQuery");
+// ...
+RequestContext.get().endMetricRecord(addPreFiltersToSearchQueryMetric);
+```
+
+Search logging is implemented in the `logSearchLog` method:
+
+```java
+private void logSearchLog(IndexSearchParams parameters, AtlasSearchResult result, HttpServletRequest servletRequest, long timeTaken) {
+    try {
+        SearchRequestLogDataBuilder builder = new SearchRequestLogDataBuilder();
+        builder.withQuery(parameters.getQuery())
+               .withQueryType("indexsearch")
+               .withQuerySize(parameters.getQuerySize())
+               .withTimeTaken(timeTaken)
+               .withResultCount(result.getApproximateCount())
+               .withUserName(RequestContext.get().getCurrentUser())
+               .withClientIPAddress(servletRequest.getRemoteAddr())
+               .withHostName(servletRequest.getHeader(REQUEST_HEADER_HOST))
+               .withUserAgent(servletRequest.getHeader(REQUEST_HEADER_USER_AGENT))
+               .withParameters(parameters.toString());
+
+        if (CollectionUtils.isNotEmpty(parameters.getUtmTags())) {
+            builder.withUtmTags(parameters.getUtmTags());
+        }
+
+        loggerManagement.save(builder.build());
+    } catch (Exception e) {
+        LOG.error("Error while logging search log", e);
+    }
+}
+```
+
+## Error Handling
+
+Error handling is implemented at various levels in the search flow:
+
+```java
+// In DiscoveryREST.indexSearch
+try {
+    // ...
+} catch (AtlasBaseException abe) {
+    if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
+        logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
+    }
+    throw abe;
+} catch (Exception e) {
+    LOG.error("Exception while performing index search", e);
+    if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
+        logSearchLog(parameters, servletRequest, e, System.currentTimeMillis() - startTime);
+    }
+    throw new AtlasBaseException(e);
+}
+
+// In EntityDiscoveryService.directIndexSearch
+try {
+    // ...
+} catch (Exception e) {
+    LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
+    throw e;
+}
+
+// In EntityDiscoveryService.addPreFiltersToSearchQuery
+try {
+    // ...
+} catch (Exception e) {
+    LOG.error("Error -> addPreFiltersToSearchQuery!", e);
+}
+```
+
+This document provides a comprehensive breakdown of the `search/indexsearch` endpoint flow in Atlas Metastore, detailing all functions, interactions, and code snippets involved in the process from the REST API endpoint to the Elasticsearch query execution and result processing.
