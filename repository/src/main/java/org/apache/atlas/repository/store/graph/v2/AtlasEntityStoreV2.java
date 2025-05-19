@@ -1745,7 +1745,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         .map(x -> context.getVertex(x))
                         .filter(Objects::nonNull)
                         .toList();
-                dynamicVertexRetrievalService.insertVertices(updatedVertexList);
+
+                dynamicVertexRetrievalService.insertVertices(normalizeAttributes(updatedVertexList));
 
                 RequestContext.get().endMetricRecord(recorder);
 
@@ -1766,6 +1767,23 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             AtlasPerfTracer.log(perf);
         }
+    }
+
+    private Map<String, Map<String, Object>> normalizeAttributes(List<AtlasVertex> vertices) {
+        Map<String, Map<String, Object>> rt = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+            AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
+
+            Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
+
+            type.normalizeAttributeValuesForUpdate(allProperties);
+
+            rt.put(vertex.getIdForDisplay(), allProperties);
+        }
+
+        return rt;
     }
 
     private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(List<AtlasVertex> vertices) {
@@ -2298,7 +2316,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         if (RequestContext.get().NEW_FLOW) {
             List<AtlasVertex> verticesToUpdate = RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList();
 
-            dynamicVertexRetrievalService.insertVertices(verticesToUpdate);
+            dynamicVertexRetrievalService.insertVertices(normalizeAttributes(verticesToUpdate));
             dynamicVertexRetrievalService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
 
             List<String> docIdsToDelete = RequestContext.get().getVerticesToHardDelete()

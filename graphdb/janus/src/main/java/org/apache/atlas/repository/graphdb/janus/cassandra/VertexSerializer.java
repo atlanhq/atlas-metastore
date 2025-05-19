@@ -1,6 +1,8 @@
 package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 
+import java.util.Map;
+
 /**
  * Interface for serializing and deserializing vertex data.
  */
@@ -20,4 +22,9 @@ interface VertexSerializer {
      * @return A JSON string representation
      */
     String serialize(DynamicVertex vertex);
+
+
+    String serialize(Map<String, Object> object);
+
+
 }
