@@ -58,6 +58,16 @@ class JacksonVertexSerializer implements VertexSerializer {
         }
     }
 
+    @Override
+    public String serialize(Map<String, Object> object) {
+        try {
+            return objectMapper.writeValueAsString(object);
+        } catch (JsonProcessingException e) {
+            // Handle exception appropriately
+            throw new RuntimeException("Failed to serialize map data", e);
+        }
+    }
+
     /**
      * Deserializes a JsonNode directly into a DynamicVertex without going through string conversion.
      * This is more efficient when the JsonNode is already available.
