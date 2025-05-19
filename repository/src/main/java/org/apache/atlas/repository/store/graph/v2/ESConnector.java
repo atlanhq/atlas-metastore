@@ -8,8 +8,6 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
-import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.collections.MapUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
@@ -25,9 +23,14 @@ import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.Closeable;
 import java.io.IOException;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.CLASSIFICATION_TEXT_KEY;
@@ -36,7 +39,7 @@ import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPE
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
 
-public class ESConnector implements Closeable {
+public class ESConnector {
     private static final Logger LOG      = LoggerFactory.getLogger(ESConnector.class);
 
     private static RestClient lowLevelClient;
@@ -44,33 +47,37 @@ public class ESConnector implements Closeable {
     private static Set<String> DENORM_ATTRS;
     private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
 
-    public ESConnector() throws AtlasException {
-        lowLevelClient = initializeClient();
-        DENORM_ATTRS = initializeDenormAttributes();
-    }
-
-    private RestClient initializeClient() throws AtlasException {
+    static {
         try {
-            List<HttpHost> httpHosts = getHttpHosts();
-            RestClientBuilder builder = RestClient.builder(httpHosts.get(0))
-                    .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
+            if (lowLevelClient == null) {
+                try {
+                    LOG.info("ESBasedAuditRepo - setLowLevelClient!");
+                    List<HttpHost> httpHosts = getHttpHosts();
+
+                    RestClientBuilder builder = RestClient.builder(httpHosts.get(0));
+                    builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
                             .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
                             .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()));
 
-            return builder.build();
-        } catch (Exception e) {
-            throw new AtlasException("Failed to initialize Elasticsearch client", e);
-        }
-    }
+                    lowLevelClient = builder.build();
 
-    private Set<String> initializeDenormAttributes() {
-        Set<String> attrs = new HashSet<>();
-        attrs.add(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
-        attrs.add(PROPAGATED_CLASSIFICATION_NAMES_KEY);
-        attrs.add(CLASSIFICATION_TEXT_KEY);
-        attrs.add(TRAIT_NAMES_PROPERTY_KEY);
-        attrs.add(CLASSIFICATION_NAMES_KEY);
-        return Collections.unmodifiableSet(attrs);
+                    DENORM_ATTRS = new HashSet<>();
+                    DENORM_ATTRS.add(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY); //List
+                    DENORM_ATTRS.add(PROPAGATED_CLASSIFICATION_NAMES_KEY); //String
+                    DENORM_ATTRS.add(CLASSIFICATION_TEXT_KEY);//String
+
+                    DENORM_ATTRS.add(TRAIT_NAMES_PROPERTY_KEY); //List
+                    DENORM_ATTRS.add(CLASSIFICATION_NAMES_KEY); //String
+
+                } catch (AtlasException e) {
+                    LOG.error("Failed to initialize low level rest client for ES");
+                    throw new AtlasException(e);
+                }
+            }
+
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap) {
@@ -79,45 +86,38 @@ public class ESConnector implements Closeable {
 
     public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
-        if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
-            return;
-        }
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-            if (entitiesMapForUpdate != null) {
-                for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                    Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
-                    Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
-                    //Map<String, Object> toUpdate = new HashMap<>();
+            for (String assetVertexId : entitiesMapForUpdate.keySet()) {
+                Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
+                Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+                //Map<String, Object> toUpdate = new HashMap<>();
 
-                    //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
-                    toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
+                //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
+                toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
 
-                    long vertexId = Long.valueOf(assetVertexId);
-                    String docId = LongEncoding.encode(vertexId);
-                    bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
+                long vertexId = Long.valueOf(assetVertexId);
+                String docId = LongEncoding.encode(vertexId);
+                bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
 
-                    bulkRequestBody.append("{");
+                bulkRequestBody.append("{");
 
-                    String attrsToUpdate = AtlasType.toJson(toUpdate);
-                    bulkRequestBody.append("\"doc\":" + attrsToUpdate);
+                String attrsToUpdate = AtlasType.toJson(toUpdate);
+                bulkRequestBody.append("\"doc\":" + attrsToUpdate);
 
-                    if (upsert) {
-                        bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
-                    }
-
-                    bulkRequestBody.append("}\n");
+                if (upsert) {
+                    bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
                 }
+
+                bulkRequestBody.append("}\n");
             }
 
-            if (docIdsToDelete != null) {
-                for (String docId : docIdsToDelete) {
-                    bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
-                    bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
-                    bulkRequestBody.append("}\n");
-                }
+            for (String docId: docIdsToDelete) {
+                bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
+                bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
+                bulkRequestBody.append("}\n");
             }
 
             Request request = new Request("POST", "/_bulk");
@@ -205,12 +205,5 @@ public class ESConnector implements Closeable {
         }
 
         return ret;
-    }
-
-    @Override
-    public void close() throws IOException {
-        if (lowLevelClient != null) {
-            lowLevelClient.close();
-        }
     }
 }
