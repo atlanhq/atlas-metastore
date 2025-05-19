@@ -257,7 +257,7 @@ public class EntityLineageService implements AtlasLineageService {
         boolean isDataSet  = allTypes.contains(DATA_SET_SUPER_TYPE);
         boolean isConnection = allTypes.contains(CONNECTION_ENTITY_TYPE);
 
-        if (!isConnectionProcess && !isDataSet && !isConnection) {
+        if (!isConnectionProcess && !isProcess && !isDataSet && !isConnection) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
         }
 
