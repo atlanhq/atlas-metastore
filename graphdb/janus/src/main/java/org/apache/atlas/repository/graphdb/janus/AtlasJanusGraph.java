@@ -305,7 +305,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     public static long generateRandomNormalVertexId() {
         long id;
         do {
-            id = ThreadLocalRandom.current().nextLong(10000, 99999998); // 5-digit numbers
+            id = ThreadLocalRandom.current().nextLong(10000, 999999998);
         } while (id % 8 != 0); // ensure it's a NormalVertex ID (divisible by 8)
         return id;
     }
