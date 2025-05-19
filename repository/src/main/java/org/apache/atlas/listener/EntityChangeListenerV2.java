@@ -94,6 +94,7 @@ public interface EntityChangeListenerV2 {
      * @throws AtlasBaseException if the listener notification fails
      */
     void onClassificationsUpdated(AtlasEntity entity, List<AtlasClassification> classifications) throws AtlasBaseException;
+    void onClassificationsUpdatedV2(AtlasEntity entity, List<AtlasClassification> classifications, boolean forceInline) throws AtlasBaseException;
 
     /**
      * This is upon deleting classifications from an entity.
@@ -185,4 +186,6 @@ public interface EntityChangeListenerV2 {
      * @throws AtlasBaseException if the listener notification fails
      */
     void onBusinessAttributesUpdated(AtlasEntity entity, Map<String, Map<String, Object>> updatedBusinessAttributes) throws AtlasBaseException;
+
+    void onClassificationsDeletedV2(AtlasEntity entity, List<AtlasClassification> deletedClassifications, boolean forceInline) throws AtlasBaseException;
 }
