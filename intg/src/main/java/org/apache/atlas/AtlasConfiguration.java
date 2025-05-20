@@ -115,6 +115,8 @@ public enum AtlasConfiguration {
 
     PERSONA_POLICY_ASSET_MAX_LIMIT("atlas.persona.policy.asset.maxlimit", 1000),
     ENABLE_KEYCLOAK_TOKEN_INTROSPECTION("atlas.canary.keycloak.token-introspection", false),
+    KEYCLOAK_TOKEN_INTROSPECT_CACHE_TTL_SECOND("atlas.keycloak.token-introspection.cache.ttl", 60),
+    KEYCLOAK_INTROSPECTION_USE_CACHE("atlas.keycloak.introspection.use.cache", false),
     HERACLES_CLIENT_PAGINATION_SIZE("atlas.heracles.admin.resource-pagination-size", 100),
     HERACLES_API_SERVER_URL("atlas.heracles.api.service.url", "http://heracles-service.heracles.svc.cluster.local"),
 
@@ -141,6 +143,19 @@ public enum AtlasConfiguration {
     OTEL_SERVICE_NAME(" OTEL_SERVICE_NAME", "atlas"),
     OTEL_EXPORTER_OTLP_ENDPOINT("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317"),
     ATLAS_BULK_API_MAX_ENTITIES_ALLOWED("atlas.bulk.api.max.entities.allowed", 10000),
+
+    ENABLE_ASYNC_TYPE_UPDATE("atlas.types.update.async.enable", false),
+    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 3),
+
+    // Classification propagation thread pool configuration
+    CLASSIFICATION_PROPAGATION_CORE_POOL_SIZE("atlas.classification.propagation.core.pool.size", 32),
+    CLASSIFICATION_PROPAGATION_MAX_POOL_SIZE("atlas.classification.propagation.max.pool.size", 200),
+    CLASSIFICATION_PROPAGATION_QUEUE_CAPACITY("atlas.classification.propagation.queue.capacity", 1000),
+    CLASSIFICATION_PROPAGATION_KEEP_ALIVE_SECONDS("atlas.classification.propagation.keep.alive.seconds", 300),
+
+    // ES and Cassandra batch operation configurations
+    ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
+    CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
 
     /**
      * Cassabdra Configuration

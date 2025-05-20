@@ -207,71 +207,114 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     }
 
     /**
-     * Fetches a single batch of vertices directly as DynamicVertex objects.
-     * Avoids the JSON string parsing overhead.
+     * Fetches a single batch of vertices directly as DynamicVertex objects using a single Cassandra call,
+     * even if IDs span multiple buckets.
+     * Uses "WHERE bucket_id IN (...) AND id IN (...)" approach.
      */
-    private Map<String, DynamicVertex> fetchSingleBatchDirectly(List<String> vertexIds) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly");
-        try {
-            AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly.getPreparedStatement");
-            // Get or prepare the statement for this batch size
-            PreparedStatement statement = getPreparedStatementForBatchSize(vertexIds.size());
+    private Map<String, DynamicVertex> fetchSingleBatchDirectly(List<String> vertexIdsInBatch) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder mainRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly_SingleCallStrategy");
+        Map<String, DynamicVertex> results = new HashMap<>();
 
-            // Bind values
-            BoundStatement boundStatement = statement.bind();
-            for (int i = 0; i < vertexIds.size(); i++) {
-                boundStatement = boundStatement.setString(i, vertexIds.get(i));
-            }
+        if (vertexIdsInBatch == null || vertexIdsInBatch.isEmpty()) {
+            RequestContext.get().endMetricRecord(mainRecorder);
+            return Collections.emptyMap();
+        }
 
-            // Set query timeout and other options
-            boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
-            RequestContext.get().endMetricRecord(recorder1);
+        // 1. Determine unique bucket_ids and unique, sanitized vertex_ids for the current batch.
+        //    Also, store the original mapping to validate/use results.
+        Map<String, Integer> vertexIdToItsBucketMap = new HashMap<>();
+        Set<Integer> uniqueBucketIdsInBatch = new HashSet<>();
+        List<String> uniqueSanitizedVertexIdsInBatch = new ArrayList<>(); // Order matters for binding to IN clause
 
-            AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly.execute");
-            // Execute the query
-            ResultSet resultSet = session.execute(boundStatement);
-            RequestContext.get().endMetricRecord(recorder2);
-
-            // Process the results directly into DynamicVertex objects
-            Map<String, DynamicVertex> results = new HashMap<>(vertexIds.size());
-
-            for (Row row : resultSet) {
-                String id = row.getString("id");
-                String jsonData = row.getString("json_data");
-
+        for (String vertexId : vertexIdsInBatch) {
+            if (StringUtils.isNotBlank(vertexId)) {
                 try {
-                    AtlasPerfMetrics.MetricRecorder recorder3 = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly.readValue");
-                    // Parse the JSON directly to a Map
-                    Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
-                    RequestContext.get().endMetricRecord(recorder3);
-
-                    // Create a DynamicVertex with all properties from the Map
-                    DynamicVertex vertex = new DynamicVertex(props);
-
-                    // Ensure ID is set in the vertex properties
-                    if (!vertex.hasProperty("id")) {
-                        vertex.setProperty("id", id);
+                    int bucket = calculateBucket(vertexId);
+                    if (!vertexIdToItsBucketMap.containsKey(vertexId)) { // Ensure each original vertexId is processed once for uniqueness
+                        vertexIdToItsBucketMap.put(vertexId, bucket);
+                        uniqueSanitizedVertexIdsInBatch.add(vertexId); // Add to list for IN clause
+                        uniqueBucketIdsInBatch.add(bucket);             // Add to set for IN clause
                     }
-
-                    results.put(id, vertex);
-                } catch (Exception e) {
-                    LOG.warn("Failed to convert JSON to DynamicVertex for ID {}: {}", id, e.getMessage());
-                    // Skip this vertex but continue processing others
+                } catch (NumberFormatException e) {
+                    LOG.warn("Skipping vertexId '{}' as it's not a valid long for bucket calculation (single call strategy).", vertexId);
                 }
             }
+        }
 
+        if (uniqueSanitizedVertexIdsInBatch.isEmpty() || uniqueBucketIdsInBatch.isEmpty()) {
+            RequestContext.get().endMetricRecord(mainRecorder);
+            return Collections.emptyMap();
+        }
+
+        try {
+            // 2. Construct the dynamic query string
+            StringBuilder queryBuilder = new StringBuilder("SELECT id, json_data FROM ")
+                    .append(keyspace).append(".").append(tableName)
+                    .append(" WHERE bucket IN (");
+            for (int i = 0; i < uniqueBucketIdsInBatch.size(); i++) {
+                queryBuilder.append(i == 0 ? "?" : ", ?");
+            }
+            queryBuilder.append(") AND id IN (");
+            for (int i = 0; i < uniqueSanitizedVertexIdsInBatch.size(); i++) {
+                queryBuilder.append(i == 0 ? "?" : ", ?");
+            }
+            queryBuilder.append(")");
+
+            String cqlQuery = queryBuilder.toString();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Executing single Cassandra call for batch: Query={}, Buckets={}, IDs={}", cqlQuery, uniqueBucketIdsInBatch.size(), uniqueSanitizedVertexIdsInBatch.size());
+            }
+
+            // Prepare the statement (dynamically, less efficient for reuse than cached)
+            PreparedStatement preparedStatement = session.prepare(cqlQuery);
+            BoundStatement boundStatement = preparedStatement.bind();
+
+            int bindIndex = 0;
+            for (Integer bucketId : uniqueBucketIdsInBatch) {
+                boundStatement = boundStatement.setInt(bindIndex++, bucketId);
+            }
+            for (String vertexId : uniqueSanitizedVertexIdsInBatch) {
+                boundStatement = boundStatement.setString(bindIndex++, vertexId);
+            }
+
+            boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
+            ResultSet resultSet = session.execute(boundStatement);
+
+            // 3. Process results.
+            for (Row row : resultSet) {
+                String id = row.getString("id");
+
+                if (vertexIdToItsBucketMap.containsKey(id)) {
+                    String jsonData = row.getString("json_data");
+                    try {
+                        AtlasPerfMetrics.MetricRecorder deserializeRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly_DeserializeJson");
+                        Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
+                        RequestContext.get().endMetricRecord(deserializeRecorder);
+
+                        DynamicVertex vertex = new DynamicVertex(props);
+                        if (!vertex.hasProperty("id")) { // Ensure ID is present
+                            vertex.setProperty("id", id);
+                        }
+                        results.put(id, vertex);
+                    } catch (JsonProcessingException e) {
+                        LOG.warn("Failed to parse JSON for DynamicVertex ID {}: {}", id, e.getMessage());
+                    } catch (Exception e) { // Catch broader exceptions during DynamicVertex creation
+                        LOG.warn("Failed to convert or process data for DynamicVertex ID {}: {}", id, e.getMessage());
+                    }
+                } else {
+                    LOG.warn("Fetched vertex ID {} which was not in the original request map for this specific batch processing. Ignoring.", id);
+                }
+            }
             return results;
 
         } catch (QueryValidationException e) {
-            // These are non-recoverable errors with the query itself
-            LOG.error("Invalid query error fetching vertex data directly: {}", e.getMessage());
-            throw new AtlasBaseException("Invalid query: " + e.getMessage(), e);
+            LOG.error("Invalid query error during single call batch fetch strategy:  Error=\'{}\'.", e.getMessage(), e);
+            throw new AtlasBaseException("Invalid query for single call batch fetch: " + e.getMessage(), e);
         } catch (Exception e) {
-            // For unexpected errors
-            LOG.error("Unexpected error fetching vertex data directly", e);
-            throw new AtlasBaseException("Failed to fetch vertex data directly: " + e.getMessage(), e);
+            LOG.error("Unexpected error during single call batch fetch strategy", e);
+            throw new AtlasBaseException("Failed to fetch vertex data in single call strategy: " + e.getMessage(), e);
         } finally {
-            RequestContext.get().endMetricRecord(recorder);
+            RequestContext.get().endMetricRecord(mainRecorder);
         }
     }
 }

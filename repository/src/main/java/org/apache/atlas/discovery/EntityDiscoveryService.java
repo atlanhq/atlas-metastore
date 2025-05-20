@@ -1116,7 +1116,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
                 AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
                 if(RequestContext.get().includeClassifications()){
-                    header.setClassifications(entityRetriever.getAllClassificationsV2(vertex));
+                    header.setClassifications(entityRetriever.handleGetAllClassifications(vertex));
                 }
                 if (showSearchScore) {
                     ret.addEntityScore(header.getGuid(), result.getScore());

@@ -12,6 +12,7 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
+
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
@@ -100,36 +101,30 @@ public class ESConnector {
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-            if (entitiesMapForUpdate != null) {
-                for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                    Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+            for (String assetVertexId : entitiesMapForUpdate.keySet()) {
+                Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+                toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
-                    toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
+                long vertexId = Long.valueOf(assetVertexId);
+                String docId = LongEncoding.encode(vertexId);
+                bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
 
+                bulkRequestBody.append("{");
 
-                    long vertexId = Long.valueOf(assetVertexId);
-                    String docId = LongEncoding.encode(vertexId);
-                    bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
+                String attrsToUpdate = AtlasType.toJson(toUpdate);
+                bulkRequestBody.append("\"doc\":" + attrsToUpdate);
 
-                    bulkRequestBody.append("{");
-
-                    String attrsToUpdate = AtlasType.toJson(toUpdate);
-                    bulkRequestBody.append("\"doc\":" + attrsToUpdate);
-
-                    if (upsert) {
-                        bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
-                    }
-
-                    bulkRequestBody.append("}\n");
+                if (upsert) {
+                    bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
                 }
+
+                bulkRequestBody.append("}\n");
             }
 
-            if (docIdsToDelete != null) {
-                for (String docId : docIdsToDelete) {
-                    bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
-                    bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
-                    bulkRequestBody.append("}\n");
-                }
+            for (String docId: docIdsToDelete) {
+                bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
+                bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
+                bulkRequestBody.append("}\n");
             }
 
             Request request = new Request("POST", "/_bulk");

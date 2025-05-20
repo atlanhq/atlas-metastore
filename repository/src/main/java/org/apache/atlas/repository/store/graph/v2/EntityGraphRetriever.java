@@ -17,9 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v2;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
@@ -56,8 +54,8 @@ import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
+import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.repository.util.AccessControlUtils;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -1086,8 +1084,11 @@ public class EntityGraphRetriever {
                 mapRelationshipAttributes(entityVertex, entity, entityExtInfo, isMinExtInfo);
             }
 
-            //mapClassifications(entityVertex, entity);
-            entity.setClassifications(tagDAO.getAllDirectTagsForVertex(entityVertex.getIdForDisplay()));
+            if(getJanusOptimisationEnabled()) {
+                entity.setClassifications(tagDAO.getTagsForVertex(entityVertex.getIdForDisplay()));
+            } else {
+                mapClassifications(entityVertex, entity);
+            }
         }
 
         return entity;
@@ -1635,19 +1636,34 @@ public class EntityGraphRetriever {
 
     public List<AtlasClassification> handleGetAllClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
         if(getJanusOptimisationEnabled()) {
-            return getAllClassificationsV1(entityVertex);
+            return getAllClassifications_V2(entityVertex);
         } else {
-            return getAllClassificationsV2(entityVertex);
+            return getAllClassifications_V1(entityVertex);
         }
     }
 
-    public List<AtlasClassification> getAllClassificationsV1(AtlasVertex entityVertex) throws AtlasBaseException {
+    public List<AtlasClassification> getAllClassifications_V2(AtlasVertex entityVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAllClassifications");
         try {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Performing getAllClassifications");
+            if (LOG.isDebugEnabled())
+                LOG.debug("Performing getAllClassifications_V2");
+
+            List<AtlasClassification> classifications = tagDAO.getTagsForVertex(entityVertex.getIdForDisplay());
+
+            // Map each classification's attributes with defaults
+            if (CollectionUtils.isNotEmpty(classifications)) {
+                classifications = classifications.stream()
+                        .map(classification -> {
+                            try {
+                                return TagAttributeMapper.mapClassificationAttributesWithDefaults(classification, typeRegistry);
+                            } catch (AtlasBaseException e) {
+                                LOG.error("Error mapping classification attributes with defaults for classification: {}", classification.getTypeName(), e);
+                                return classification;
+                            }
+                        })
+                        .collect(Collectors.toList());
             }
-            return tagDAO.getTagsForVertex(entityVertex.getIdForDisplay());
+            return classifications;
         } catch (Exception e) {
             LOG.error("Error while getting all classifications", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
@@ -1672,7 +1688,7 @@ public class EntityGraphRetriever {
     }
 
 
-    public List<AtlasClassification> getAllClassificationsV2(AtlasVertex entityVertex) throws AtlasBaseException {
+    public List<AtlasClassification> getAllClassifications_V1(AtlasVertex entityVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getAllClassifications");
         try {
             if (LOG.isDebugEnabled()) {

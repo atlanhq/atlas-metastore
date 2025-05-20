@@ -42,6 +42,7 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasMapType;
+import org.apache.atlas.util.BeanUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.v1.model.instance.Id;
 import org.apache.atlas.v1.model.instance.Referenceable;
@@ -122,9 +123,26 @@ public final class GraphHelper {
 
     public static TagDAO getTagDAO() throws AtlasBaseException {
         if (tagDAO == null) {
-            synchronized (GraphHelper.class) {
+            try {
+                // Get the TagDAO from Spring context using BeanUtil
+                tagDAO = BeanUtil.getBean(TagDAO.class);
+
+                // Fallback if Spring context is not available (like in unit tests)
                 if (tagDAO == null) {
-                    tagDAO = new TagDAOCassandraImpl(); // Replace with the actual implementation
+                    LOG.warn("Could not get TagDAO from Spring context, creating a new instance");
+                    synchronized (GraphHelper.class) {
+                        if (tagDAO == null) {
+                            tagDAO = new TagDAOCassandraImpl();
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                // Handle the case when Spring context is not initialized or available
+                LOG.warn("Error getting TagDAO from Spring context, creating a new instance", e);
+                synchronized (GraphHelper.class) {
+                    if (tagDAO == null) {
+                        tagDAO = new TagDAOCassandraImpl();
+                    }
                 }
             }
         }
@@ -344,23 +362,17 @@ public final class GraphHelper {
 
     public static boolean getRemovePropagations(AtlasVertex classificationVertex) {
         boolean ret = false;
-
         if (classificationVertex != null) {
             Boolean enabled = AtlasGraphUtilsV2.getEncodedProperty(classificationVertex, CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY, Boolean.class);
-
-            ret = (enabled == null) ? true : enabled;
+            ret = enabled == null || enabled;
         }
-
         return ret;
     }
 
     public static boolean getRemovePropagations(Map<String, Object> classificationPropertiesMap) {
-        boolean ret = false;
-
+        boolean ret;
         Boolean enabled = (Boolean) classificationPropertiesMap.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY);
-
-        ret = (enabled == null) ? true : enabled;
-
+        ret = enabled == null || enabled;
         return ret;
     }
 
@@ -369,7 +381,6 @@ public final class GraphHelper {
             return false;
         }
         Boolean restrictPropagation = AtlasGraphUtilsV2.getEncodedProperty(classificationVertex, propertyName, Boolean.class);
-
         return restrictPropagation != null && restrictPropagation;
     }
 
@@ -850,14 +861,14 @@ public final class GraphHelper {
                 AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
                 break;
             } catch (Exception e) {
-                e.printStackTrace();
-                LOG.info("Attemp : {} , Exception while updating metadata attributes: {}", attempt,e.getMessage());
+                LOG.error("Attempt : {} , Exception while updating metadata attributes.", attempt, e);
                 if (attempt == maxRetries) {
                     throw e;
                 }
             }
         }
     }
+
     public static void updateMetadataAttributes(AtlasVertex vertex, List<String> attributes, String metadataType) {
         if (attributes != null && attributes.size() > 0) {
             for (String attributeName: attributes) {
