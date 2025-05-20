@@ -37,7 +37,7 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
@@ -55,13 +55,13 @@ public class GlossaryPreProcessor implements PreProcessor {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         try{
-            VertexRetrievalService vertexRetrievalService = null;
+            DynamicVertexService dynamicVertexService = null;
             if (graph instanceof AtlasJanusGraph) {
-                vertexRetrievalService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+                dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
             } else {
-                LOG.warn("Graph instance is not AtlasJanusGraph. VertexRetrievalService will be null for EntityDiscoveryService in GlossaryPreProcessor.");
+                LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in GlossaryPreProcessor.");
             }
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, vertexRetrievalService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
         } catch (Exception e) {
             e.printStackTrace();
         }

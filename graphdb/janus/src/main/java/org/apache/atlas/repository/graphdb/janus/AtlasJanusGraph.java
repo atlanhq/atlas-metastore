@@ -42,7 +42,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
 import org.apache.atlas.type.AtlasType;
@@ -81,6 +81,7 @@ import org.janusgraph.core.schema.JanusGraphManagement;
 import org.janusgraph.core.schema.Parameter;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.graphdb.database.StandardJanusGraph;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -96,6 +97,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -131,10 +133,10 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     private String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
     private final CqlSession cqlSession;
-    private final VertexRetrievalService dynamicVertexRetrievalService;
+    private final DynamicVertexService dynamicVertexService;
 
-    public VertexRetrievalService getDynamicVertexRetrievalService() {
-        return dynamicVertexRetrievalService;
+    public DynamicVertexService getDynamicVertexRetrievalService() {
+        return dynamicVertexService;
     }
 
     private final ThreadLocal<GremlinGroovyScriptEngine> scriptEngine = ThreadLocal.withInitial(() -> {
@@ -175,7 +177,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
         this.cqlSession = initializeCassandraSession();
-        this.dynamicVertexRetrievalService = new VertexRetrievalService(cqlSession);
+        this.dynamicVertexService = new DynamicVertexService(cqlSession);
     }
 
     private CqlSession initializeCassandraSession() {

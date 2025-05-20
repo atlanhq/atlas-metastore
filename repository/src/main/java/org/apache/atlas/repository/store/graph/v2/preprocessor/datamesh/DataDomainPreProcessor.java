@@ -34,7 +34,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
@@ -56,8 +56,8 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     private Map<String, String> updatedDomainQualifiedNames;
 
     public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
-                                  AtlasGraph graph, VertexRetrievalService vertexRetrievalService) {
-        super(typeRegistry, entityRetriever, graph, vertexRetrievalService);
+                                  AtlasGraph graph, DynamicVertexService dynamicVertexService) {
+        super(typeRegistry, entityRetriever, graph, dynamicVertexService);
         this.updatedPolicyResources = new HashMap<>();
         this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);
         this.updatedDomainQualifiedNames = new HashMap<>();

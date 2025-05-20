@@ -1,9 +1,6 @@
 package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -23,12 +20,13 @@ import java.util.*;
  */
 
 @Service
-public class VertexRetrievalService {
-    private static final Logger LOG = LoggerFactory.getLogger(VertexRetrievalService.class);
+public class DynamicVertexService {
+    private static final Logger LOG = LoggerFactory.getLogger(DynamicVertexService.class);
 
     private final VertexDataRepository repository;
     private final JacksonVertexSerializer serializer;
-    private final int defaultBatchSize;
+
+    private static final int defaultBatchSize = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
 
     /**
      * Creates a new BatchVertexRetrievalService with custom configuration.
@@ -36,18 +34,9 @@ public class VertexRetrievalService {
      * @param session The Cassandra session
      */
     @Inject
-    public VertexRetrievalService(CqlSession session) {
-        ObjectMapper objectMapper = new ObjectMapper();
-
-        this.repository = new CassandraVertexDataRepository(session, objectMapper,
-                AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString(),
-                AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString());
-
-        SimpleModule module = new SimpleModule("NumbersAsStringModule");
-        module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
-        objectMapper.registerModule(module);
-        this.serializer = new JacksonVertexSerializer(objectMapper);
-        this.defaultBatchSize = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
+    public DynamicVertexService(CqlSession session) {
+        this.repository = new CassandraVertexDataRepository(session);
+        this.serializer = new JacksonVertexSerializer();
     }
 
     /**
@@ -126,28 +115,5 @@ public class VertexRetrievalService {
         }
 
         return results;
-    }
-
-    /**
-     * Converts pre-parsed JsonNodes to DynamicVertex objects.
-     * This is more efficient as it avoids parsing the JSON string again.
-     */
-    private Map<String, DynamicVertex> convertJsonNodesToVertices(Map<String, JsonNode> jsonNodeMap) {
-        Map<String, DynamicVertex> vertexMap = new HashMap<>();
-
-        for (Map.Entry<String, JsonNode> entry : jsonNodeMap.entrySet()) {
-            String id = entry.getKey();
-            JsonNode jsonNode = entry.getValue();
-
-            try {
-                // Use the direct JsonNode deserialization method
-                DynamicVertex vertex = serializer.deserializeFromNode(jsonNode);
-                vertexMap.put(id, vertex);
-            } catch (Exception e) {
-                LOG.error("Error converting JsonNode to DynamicVertex for ID: {}", id, e);
-            }
-        }
-
-        return vertexMap;
     }
 }

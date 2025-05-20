@@ -26,7 +26,6 @@ import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasObjectId;
@@ -35,7 +34,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
@@ -87,13 +86,13 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
         this.taskManagement = taskManagement;
 
         try {
-            VertexRetrievalService vertexRetrievalService = null;
+            DynamicVertexService dynamicVertexService = null;
             if (graph instanceof AtlasJanusGraph) {
-                vertexRetrievalService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+                dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
             } else {
-                LOG.warn("Graph instance is not AtlasJanusGraph. VertexRetrievalService will be null for EntityDiscoveryService in AbstractGlossaryPreProcessor.");
+                LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in AbstractGlossaryPreProcessor.");
             }
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, vertexRetrievalService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }

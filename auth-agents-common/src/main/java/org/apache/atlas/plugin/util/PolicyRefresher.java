@@ -24,7 +24,7 @@ import com.google.gson.GsonBuilder;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.authz.admin.client.AtlasAuthAdminClient;
 import org.apache.atlas.policytransformer.CachePolicyTransformerImpl;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -53,7 +53,7 @@ public class PolicyRefresher extends Thread {
 	private final AtlasAuthAdminClient			 atlasAuthAdminClient;
 	private final RangerRolesProvider            rolesProvider;
 	private final RangerUserStoreProvider		 userStoreProvider;
-	private final VertexRetrievalService         vertexRetrievalService;
+	private final DynamicVertexService 			 dynamicVertexService;
 	private final long                           pollingIntervalMs;
 	private final String                         cacheFileName;
 	private final String                         cacheDir;
@@ -68,7 +68,7 @@ public class PolicyRefresher extends Thread {
 	private       boolean                        enableDeltaBasedRefresh;
 
 
-	public PolicyRefresher(RangerBasePlugin plugIn, VertexRetrievalService vertexRetrievalService) {
+	public PolicyRefresher(RangerBasePlugin plugIn, DynamicVertexService dynamicVertexService) {
 		if(LOG.isDebugEnabled()) {
 			LOG.debug("==> PolicyRefresher(serviceName=" + plugIn.getServiceName() + ").PolicyRefresher()");
 		}
@@ -81,7 +81,7 @@ public class PolicyRefresher extends Thread {
 		this.serviceType = plugIn.getServiceType();
 		this.serviceName = plugIn.getServiceName();
 		this.cacheDir    = pluginConfig.get(propertyPrefix + ".policy.cache.dir");
-		this.vertexRetrievalService = vertexRetrievalService;
+		this.dynamicVertexService = dynamicVertexService;
 
 		String appId         = StringUtils.isEmpty(plugIn.getAppId()) ? serviceType : plugIn.getAppId();
 		String cacheFilename = String.format("%s_%s.json", appId, serviceName);
@@ -316,7 +316,7 @@ public class PolicyRefresher extends Thread {
 			if (serviceName.equals("atlas") && plugIn.getTypeRegistry() != null && lastUpdatedTimeInMillis == -1) {
 				LOG.info("PolicyRefresher(serviceName=" + serviceName + "): loading all policies for first time");
 				RangerRESTUtils restUtils = new RangerRESTUtils();
-				CachePolicyTransformerImpl transformer = new CachePolicyTransformerImpl(plugIn.getTypeRegistry(), this.vertexRetrievalService);
+				CachePolicyTransformerImpl transformer = new CachePolicyTransformerImpl(plugIn.getTypeRegistry(), this.dynamicVertexService);
 
 				svcPolicies = transformer.getPoliciesAll(serviceName,
 							restUtils.getPluginId(serviceName, plugIn.getAppId()),

@@ -43,7 +43,7 @@ import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.Result;
 import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.userprofile.UserProfileService;
@@ -66,7 +66,6 @@ import org.apache.commons.collections4.IteratorUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
-import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 
@@ -79,7 +78,6 @@ import javax.inject.Inject;
 import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.*;
@@ -109,7 +107,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final UserProfileService              userProfileService;
     private final SuggestionsProvider             suggestionsProvider;
     private final DSLQueryExecutor                dslQueryExecutor;
-    private final VertexRetrievalService          vertexRetrievalService;
+    private final DynamicVertexService            dynamicVertexService;
     private final StatsClient                     statsClient;
     // Cache for type to edge names mapping to avoid repeated calls across methods
     private final Map<String, Map<String, Set<String>>> typeEdgeNamesCache;
@@ -122,7 +120,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                            GraphBackedSearchIndexer indexer,
                            SearchTracker searchTracker,
                            UserProfileService userProfileService,
-                           VertexRetrievalService vertexRetrievalService,
+                           DynamicVertexService dynamicVertexService,
                            StatsClient statsClient,
                           EntityGraphRetriever entityRetriever) throws AtlasException {
         this.graph                    = graph;
@@ -138,7 +136,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.userProfileService       = userProfileService;
         this.suggestionsProvider      = new SuggestionsProviderImpl(graph, typeRegistry);
         this.statsClient = statsClient;
-        this.vertexRetrievalService = vertexRetrievalService;
+        this.dynamicVertexService = dynamicVertexService;
         this.dslQueryExecutor = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
                 ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
                 : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
@@ -1242,7 +1240,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 
                 // Fetch vertex properties in batch
                 List<String> batchVertexIds = new ArrayList<>(batchResults.keySet());
-                Map<String, DynamicVertex> vertexPropertiesMap = vertexRetrievalService.retrieveVertices(batchVertexIds);
+                Map<String, DynamicVertex> vertexPropertiesMap = dynamicVertexService.retrieveVertices(batchVertexIds);
                 
                 if (vertexPropertiesMap == null || vertexPropertiesMap.isEmpty()) {
                     continue;
@@ -1384,7 +1382,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 if (!relationVertexIds.isEmpty()) {
                     // Single Cassandra call for all relation vertices
                     Map<String, DynamicVertex> vertexRelationsPropertiesMap = 
-                        vertexRetrievalService.retrieveVertices(relationVertexIds);
+                        dynamicVertexService.retrieveVertices(relationVertexIds);
                     
                     // Process all entity relations
                     for (Map.Entry<String, Map<String, Set<String>>> entry : edgeVertices.entrySet()) {
