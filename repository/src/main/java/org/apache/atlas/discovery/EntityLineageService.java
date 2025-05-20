@@ -249,16 +249,22 @@ public class EntityLineageService implements AtlasLineageService {
             throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, typeName);
         }
 
-        Set<String> allTypes = entityType.getTypeAndAllSuperTypes();
-
-        boolean isProcess = allTypes.contains(PROCESS_SUPER_TYPE);
+        boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
         boolean isDataProduct = entityType.getTypeName().equals(DATA_PRODUCT_ENTITY_TYPE);
-        boolean isConnectionProcess = allTypes.contains(CONNECTION_PROCESS_ENTITY_TYPE);
-        boolean isDataSet  = allTypes.contains(DATA_SET_SUPER_TYPE);
-        boolean isConnection = allTypes.contains(CONNECTION_ENTITY_TYPE);
-
-        if (!isConnectionProcess && !isProcess && !isDataSet && !isConnection) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
+        boolean isConnectionProcess = false;
+        boolean isDataSet  = false;
+        boolean isConnection = false;
+        if (!isProcess) {
+            isConnectionProcess = entityType.getTypeAndAllSuperTypes().contains(CONNECTION_PROCESS_ENTITY_TYPE);
+            if(!isConnectionProcess){
+                isDataSet = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
+                if (!isDataSet) {
+                    isConnection = entityType.getTypeAndAllSuperTypes().contains(CONNECTION_ENTITY_TYPE);
+                    if(!isConnection){
+                        throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, typeName);
+                    }
+                }
+            }
         }
 
         return new EntityValidationResult(isProcess, isDataSet, isConnection, isConnectionProcess, isDataProduct);
