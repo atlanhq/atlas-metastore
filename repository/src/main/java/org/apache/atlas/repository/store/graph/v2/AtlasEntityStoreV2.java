@@ -47,6 +47,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
@@ -1657,7 +1658,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     if (diffResult.hasDifference()) {
                         if (storeDifferentialAudits) {
                             diffResult.getDiffEntity().setGuid(entity.getGuid());
-                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity());
+                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity(), storedVertex);
                         }
 
                         if (diffResult.hasDifferenceOnlyInCustomAttributes()) {
@@ -1726,7 +1727,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             ret.setGuidAssignments(context.getGuidAssignments());
 
             for (AtlasEntity entity: context.getCreatedEntities()) {
-                RequestContext.get().cacheDifferentialEntity(entity);
+                RequestContext.get().cacheDifferentialEntity(entity, context.getVertex(entity.getGuid()));
             }
             // Notify the change listeners
             entityChangeNotifier.onEntitiesMutated(ret, RequestContext.get().isImportInProgress());
@@ -1735,7 +1736,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 LOG.debug("<== createOrUpdate()");
             }
 
-            if (RequestContext.get().NEW_FLOW) {
+           /* if (RequestContext.get().NEW_FLOW) {
                 MetricRecorder recorder = RequestContext.get().startMetricRecord("atlasEntityStoreV2.callInsertVertices");
                 // TODO: Move to commit graph section
                 List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
@@ -1756,7 +1757,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         .toList();
 
                 ESConnector.syncToEs(getESPropertiesForUpdateFromVertices(updatedVertexList), true, docIdsToDelete);
-            }
+            }*/
 
             return ret;
         } finally {
@@ -2310,7 +2311,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(e);
         }
 
-        if (RequestContext.get().NEW_FLOW) {
+        /*if (RequestContext.get().NEW_FLOW) {
             List<AtlasVertex> verticesToUpdate = RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList();
 
             dynamicVertexService.insertVertices(normalizeAttributes(verticesToUpdate));
@@ -2325,7 +2326,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             ESConnector.syncToEs(getESPropertiesForUpdateFromVertices(verticesToUpdate),
                     true,
                     docIdsToDelete);
-        }
+        }*/
 
         return response;
     }

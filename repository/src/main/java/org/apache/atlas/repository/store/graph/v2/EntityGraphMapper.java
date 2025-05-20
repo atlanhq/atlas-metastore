@@ -44,6 +44,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
@@ -5326,7 +5327,8 @@ public class EntityGraphMapper {
                     }
                 }
 
-                req.cacheDifferentialEntity(entity);
+                // passing atlasVertex null since only relation was updated & no update of metadata of asset
+                req.cacheDifferentialEntity(entity, null);
             } finally {
                 req.endMetricRecord(recorderInverseMutatedDetails);
             }
@@ -5781,7 +5783,7 @@ public class EntityGraphMapper {
         AtlasEntity diffEntity = createDifferentialEntity(
                 vertex, effectiveCompliantGUIDs, effectiveNonCompliantGUIDs, existingCompliant, existingNonCompliant, totalPolicyCount);
 
-        RequestContext.get().cacheDifferentialEntity(diffEntity);
+        RequestContext.get().cacheDifferentialEntity(diffEntity, vertex);
         return vertex;
     }
 
@@ -6015,7 +6017,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(NON_COMPLIANT_ASSET_POLICY_GUIDS, nonCompliantPolicies);
 
         // Cache the differential entity for further processing
-        RequestContext.get().cacheDifferentialEntity(diffEntity);
+        RequestContext.get().cacheDifferentialEntity(diffEntity, assetVertex);
 
         return assetVertex;
     }
@@ -6028,7 +6030,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(ASSET_POLICIES_COUNT, complaint.size() + nonComplaint.size());
 
         RequestContext requestContext = RequestContext.get();
-        requestContext.cacheDifferentialEntity(diffEntity);
+        requestContext.cacheDifferentialEntity(diffEntity, ev);
     }
 
     private void cacheDifferentialMeshEntity(AtlasVertex ev, Set<String> existingValues) {
@@ -6037,7 +6039,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(DOMAIN_GUIDS_ATTR, existingValues);
 
         RequestContext requestContext = RequestContext.get();
-        requestContext.cacheDifferentialEntity(diffEntity);
+        requestContext.cacheDifferentialEntity(diffEntity, ev);
     }
 
     private void setEntityCommonAttributes(AtlasVertex ev, AtlasEntity diffEntity) {
