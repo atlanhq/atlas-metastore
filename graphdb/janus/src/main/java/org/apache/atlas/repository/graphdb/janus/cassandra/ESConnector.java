@@ -93,6 +93,7 @@ public class ESConnector {
 
     public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+
         if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
             return;
         }
@@ -101,11 +102,8 @@ public class ESConnector {
 
             if (entitiesMapForUpdate != null) {
                 for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                    Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
                     Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
-                    //Map<String, Object> toUpdate = new HashMap<>();
 
-                    //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
                     toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
 

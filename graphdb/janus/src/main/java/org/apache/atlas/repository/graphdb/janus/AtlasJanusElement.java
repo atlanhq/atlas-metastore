@@ -207,7 +207,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                     removeProperty(propertyName);
                 }
             } else {
-                if (RequestContext.get().NEW_FLOW && isVertex()) {
+                if (RequestContext.get().NEW_FLOW && isVertex() && !propertyName.equals("__type")) {
                     AtlasJanusVertex vertex = (AtlasJanusVertex) this;
                     vertex.getDynamicVertex().setProperty(propertyName, value);
 
