@@ -1,13 +1,18 @@
-package org.apache.atlas.repository.store.graph.v2;
+package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 import com.datastax.oss.driver.shaded.json.JSONArray;
 import com.datastax.oss.driver.shaded.json.JSONObject;
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
+import org.apache.commons.configuration.Configuration;
+
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
@@ -24,6 +29,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -37,7 +43,7 @@ import static org.apache.atlas.repository.Constants.CLASSIFICATION_TEXT_KEY;
 import static org.apache.atlas.repository.Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
+import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 
 public class ESConnector {
     private static final Logger LOG      = LoggerFactory.getLogger(ESConnector.class);
@@ -46,6 +52,8 @@ public class ESConnector {
 
     private static Set<String> DENORM_ATTRS;
     private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
+
+    public static final String INDEX_BACKEND_CONF = "atlas.graph.index.search.hostname";
 
     static {
         try {
@@ -86,17 +94,16 @@ public class ESConnector {
 
     public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+
+        if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
+            return;
+        }
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
             for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                Map<String, Object> entry = entitiesMapForUpdate.get(assetVertexId);
                 Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
-                //Map<String, Object> toUpdate = new HashMap<>();
-
-                //DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
                 toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
-
 
                 long vertexId = Long.valueOf(assetVertexId);
                 String docId = LongEncoding.encode(vertexId);
@@ -205,5 +212,24 @@ public class ESConnector {
         }
 
         return ret;
+    }
+
+    private static List<HttpHost> getHttpHosts() throws AtlasException {
+        List<HttpHost> httpHosts = new ArrayList<>();
+        Configuration configuration = ApplicationProperties.get();
+        String indexConf = configuration.getString(INDEX_BACKEND_CONF);
+        String[] hosts = indexConf.split(",");
+        for (String host : hosts) {
+            host = host.trim();
+            String[] hostAndPort = host.split(":");
+            if (hostAndPort.length == 1) {
+                httpHosts.add(new HttpHost(hostAndPort[0]));
+            } else if (hostAndPort.length == 2) {
+                httpHosts.add(new HttpHost(hostAndPort[0], Integer.parseInt(hostAndPort[1])));
+            } else {
+                throw new AtlasException("Invalid config");
+            }
+        }
+        return httpHosts;
     }
 }

@@ -58,6 +58,7 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         entityHeaderCache    = new HashMap<>();
     private final Map<String, AtlasEntityWithExtInfo>    entityExtInfoCache   = new HashMap<>();
     private final Map<String, AtlasEntity>               diffEntityCache      = new HashMap<>();
+    private final Map<String, Object>                    diffVertexCache      = new HashMap<>();
     private final Map<String, List<AtlasClassification>> addedPropagations    = new HashMap<>();
     private final Map<String, List<AtlasClassification>> removedPropagations  = new HashMap<>();
     private final Map<String, String>                    requestContextHeaders= new HashMap<>();
@@ -611,9 +612,10 @@ public class RequestContext {
         }
     }
 
-    public void cacheDifferentialEntity(AtlasEntity entity) {
+    public void cacheDifferentialEntity(AtlasEntity entity, Object atlasVertex) {
         if (entity != null && entity.getGuid() != null) {
             diffEntityCache.put(entity.getGuid(), entity);
+            diffVertexCache.put(entity.getGuid(), atlasVertex);
         }
     }
 
@@ -632,6 +634,10 @@ public class RequestContext {
 
     public AtlasEntity getDifferentialEntity(String guid) {
         return diffEntityCache.get(guid);
+    }
+
+    public Object getDifferentialVertex(String guid) {
+        return diffVertexCache.get(guid);
     }
 
     public Collection<AtlasEntity> getDifferentialEntities() { return diffEntityCache.values(); }

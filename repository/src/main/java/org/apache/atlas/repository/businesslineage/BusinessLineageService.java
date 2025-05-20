@@ -329,7 +329,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
         diffEntity.setAttribute(assetDenormAttribute, existingValues);
 
-        requestContext.cacheDifferentialEntity(diffEntity);
+        requestContext.cacheDifferentialEntity(diffEntity, ev);
     }
 
     public void commitChanges() throws AtlasBaseException {

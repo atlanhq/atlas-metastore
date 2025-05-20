@@ -5,7 +5,6 @@ import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.*;
-import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
@@ -24,7 +23,7 @@ import org.apache.commons.collections4.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 
 import java.util.*;
 
@@ -47,8 +46,8 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
     public DataProductPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
                                    AtlasGraph graph, AtlasEntityStore entityStore,
-                                   VertexRetrievalService vertexRetrievalService) {
-        super(typeRegistry, entityRetriever, graph, vertexRetrievalService);
+                                   DynamicVertexService dynamicVertexService) {
+        super(typeRegistry, entityRetriever, graph, dynamicVertexService);
         this.updatedPolicyResources = new HashMap<>();
         this.entityStore = entityStore;
         this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);

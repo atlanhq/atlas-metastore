@@ -43,7 +43,7 @@ import org.apache.atlas.plugin.util.ServicePolicies.TagPolicies;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -67,7 +67,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.Iterator;
 
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
@@ -120,7 +119,7 @@ public class CachePolicyTransformerImpl {
     private EntityDiscoveryService discoveryService;
     private final AtlasGraph                graph;
     private final EntityGraphRetriever      entityRetriever;
-    private final VertexRetrievalService    vertexRetrievalService;
+    private final DynamicVertexService dynamicVertexService;
 
     private final PersonaCachePolicyTransformer personaTransformer;
     private final PurposeCachePolicyTransformer purposeTransformer;
@@ -131,16 +130,16 @@ public class CachePolicyTransformerImpl {
 
     @Inject
     public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry,
-                                      VertexRetrievalService vertexRetrievalService) throws AtlasBaseException {
+                                      DynamicVertexService dynamicVertexService) throws AtlasBaseException {
         this.graph                = new AtlasJanusGraph();
         this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
-        this.vertexRetrievalService = vertexRetrievalService;
+        this.dynamicVertexService = dynamicVertexService;
 
         this.personaTransformer = new PersonaCachePolicyTransformer(entityRetriever);
         this.purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
 
         try {
-            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.vertexRetrievalService, null, entityRetriever);
+            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize discoveryService in CachePolicyTransformerImpl", e);
             throw new AtlasBaseException(e.getCause());

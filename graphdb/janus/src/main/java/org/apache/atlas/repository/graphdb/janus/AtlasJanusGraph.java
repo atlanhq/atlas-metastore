@@ -27,8 +27,10 @@ import com.google.common.collect.Maps;
 import org.apache.atlas.*;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
+import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.discovery.SearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndexClient;
@@ -42,11 +44,18 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
+import org.apache.atlas.type.AtlasArrayType;
+import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.http.HttpEntity;
 import org.apache.http.entity.ContentType;
@@ -81,6 +90,7 @@ import org.janusgraph.core.schema.JanusGraphManagement;
 import org.janusgraph.core.schema.Parameter;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.graphdb.database.StandardJanusGraph;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -92,12 +102,15 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.INDEX_SEARCH_FAILED;
 import static org.apache.atlas.AtlasErrorCode.RELATIONSHIP_CREATE_INVALID_PARAMS;
@@ -131,10 +144,10 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     private String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
     private final CqlSession cqlSession;
-    private final VertexRetrievalService dynamicVertexRetrievalService;
+    private final DynamicVertexService dynamicVertexService;
 
-    public VertexRetrievalService getDynamicVertexRetrievalService() {
-        return dynamicVertexRetrievalService;
+    public DynamicVertexService getDynamicVertexRetrievalService() {
+        return dynamicVertexService;
     }
 
     private final ThreadLocal<GremlinGroovyScriptEngine> scriptEngine = ThreadLocal.withInitial(() -> {
@@ -175,7 +188,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
         this.cqlSession = initializeCassandraSession();
-        this.dynamicVertexRetrievalService = new VertexRetrievalService(cqlSession);
+        this.dynamicVertexService = new DynamicVertexService(cqlSession);
     }
 
     private CqlSession initializeCassandraSession() {
@@ -330,6 +343,116 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     @Override
     public void commit() {
         getGraph().tx().commit();
+    }
+
+    @Override
+    public void commit(AtlasTypeRegistry typeRegistry) {
+        getGraph().tx().commit();
+
+        commitIdOnly(typeRegistry);
+    }
+
+    private void commitIdOnly(AtlasTypeRegistry typeRegistry) {
+        if (RequestContext.get().NEW_FLOW) {
+
+            try {
+                AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertVertices");
+                // Extract updated vertices
+                List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
+                        .map(x -> ((AtlasVertex) RequestContext.get().getDifferentialVertex(x)))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
+
+                // Extract SOFT deleted vertices
+                updatedVertexList.addAll(RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList());
+
+                if (CollectionUtils.isNotEmpty(updatedVertexList)) {
+                    dynamicVertexService.insertVertices(normalizeAttributes(updatedVertexList, typeRegistry));
+                }
+                RequestContext.get().endMetricRecord(recorder);
+
+                recorder = RequestContext.get().startMetricRecord("commitIdOnly.callDropVertices");
+                // Extract HARD/PURGE vertex Ids
+                List<String> purgedVertexIdsList = RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList();
+                dynamicVertexService.dropVertices(purgedVertexIdsList);
+
+                RequestContext.get().endMetricRecord(recorder);
+
+
+                recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertES");
+                List<String> docIdsToDelete = RequestContext.get().getVerticesToHardDelete().stream()
+                        .map(x -> ((AtlasJanusVertex) x ))
+                        .map(x -> LongEncoding.encode((Long) x.getId()))
+                        .toList();
+
+                ESConnector.syncToEs(
+                        getESPropertiesForUpdateFromVertices(updatedVertexList, typeRegistry),
+                        true,
+                        docIdsToDelete);
+
+                RequestContext.get().endMetricRecord(recorder);
+            } catch (AtlasBaseException e) {
+                throw new RuntimeException(e);
+            }
+        }
+    }
+
+    private Map<String, Map<String, Object>> normalizeAttributes(List<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
+        Map<String, Map<String, Object>> rt = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+            AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
+
+            Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
+
+            type.normalizeAttributeValuesForUpdate(allProperties);
+
+            rt.put(vertex.getIdForDisplay(), allProperties);
+        }
+
+        return rt;
+    }
+
+    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(List<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices");
+        if (CollectionUtils.isEmpty(vertices)) {
+            return null;
+        }
+        Map<String, Map<String, Object>> ret = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            Map<String, Object> properties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
+            Map<String, Object> propertiesToUpdate = new HashMap<>();
+            AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
+
+            getEligibleProperties(properties, type).forEach(x -> propertiesToUpdate.put(x, properties.get(x)));
+            ret.put(vertex.getIdForDisplay(), propertiesToUpdate);
+        }
+
+        RequestContext.get().endMetricRecord(recorder);
+
+        return ret;
+    }
+
+    private List<String> getEligibleProperties(Map<String, Object> properties, AtlasEntityType type) {
+        return properties.keySet().stream().filter(x -> isEligibleForESSync(x, type.getAttribute(x))).toList();
+    }
+
+    private boolean isEligibleForESSync(String propertyName, AtlasStructType.AtlasAttribute attribute) {
+        return  ((attribute != null  && isPrimitiveAttribute(attribute.getAttributeType()))
+                || propertyName.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) ;
+    }
+
+    private boolean isPrimitiveAttribute (AtlasType attributeType) {
+        boolean ret = attributeType.getTypeCategory() == TypeCategory.PRIMITIVE || attributeType.getTypeCategory() == TypeCategory.ENUM;
+
+        if (!ret)
+            ret = attributeType.getTypeCategory() == TypeCategory.ARRAY && (
+                    ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.PRIMITIVE
+                            || ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.ENUM);
+
+        return ret;
     }
 
     @Override

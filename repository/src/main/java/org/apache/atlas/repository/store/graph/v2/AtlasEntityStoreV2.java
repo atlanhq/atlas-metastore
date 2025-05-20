@@ -18,7 +18,6 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
@@ -37,7 +36,6 @@ import org.apache.atlas.model.instance.AtlasEntity.Status;
 import org.apache.atlas.model.notification.AtlasDistributedTaskNotification;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
-import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
@@ -48,7 +46,8 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
-import org.apache.atlas.repository.graphdb.janus.cassandra.VertexRetrievalService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
@@ -99,7 +98,6 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.InputStream;
 import java.util.*;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static java.lang.Boolean.FALSE;
@@ -154,7 +152,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
 
-    private VertexRetrievalService dynamicVertexRetrievalService;
+    private DynamicVertexService dynamicVertexService;
 
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
@@ -178,9 +176,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
-        this.dynamicVertexRetrievalService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+        this.dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexRetrievalService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize EntityDiscoveryService in AtlasEntityStoreV2 constructor", e);
         }
@@ -1660,7 +1658,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     if (diffResult.hasDifference()) {
                         if (storeDifferentialAudits) {
                             diffResult.getDiffEntity().setGuid(entity.getGuid());
-                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity());
+                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity(), storedVertex);
                         }
 
                         if (diffResult.hasDifferenceOnlyInCustomAttributes()) {
@@ -1729,7 +1727,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             ret.setGuidAssignments(context.getGuidAssignments());
 
             for (AtlasEntity entity: context.getCreatedEntities()) {
-                RequestContext.get().cacheDifferentialEntity(entity);
+                RequestContext.get().cacheDifferentialEntity(entity, context.getVertex(entity.getGuid()));
             }
             // Notify the change listeners
             entityChangeNotifier.onEntitiesMutated(ret, RequestContext.get().isImportInProgress());
@@ -1738,7 +1736,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 LOG.debug("<== createOrUpdate()");
             }
 
-            if (RequestContext.get().NEW_FLOW) {
+           /* if (RequestContext.get().NEW_FLOW) {
                 MetricRecorder recorder = RequestContext.get().startMetricRecord("atlasEntityStoreV2.callInsertVertices");
                 // TODO: Move to commit graph section
                 List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
@@ -1746,7 +1744,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         .filter(Objects::nonNull)
                         .toList();
 
-                dynamicVertexRetrievalService.insertVertices(normalizeAttributes(updatedVertexList));
+                dynamicVertexService.insertVertices(normalizeAttributes(updatedVertexList));
 
                 RequestContext.get().endMetricRecord(recorder);
 
@@ -1759,7 +1757,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         .toList();
 
                 ESConnector.syncToEs(getESPropertiesForUpdateFromVertices(updatedVertexList), true, docIdsToDelete);
-            }
+            }*/
 
             return ret;
         } finally {
@@ -2154,13 +2152,13 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case DATA_DOMAIN_ENTITY_TYPE:
-                // Pass dynamicVertexRetrievalService
-                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexRetrievalService));
+                // Pass dynamicDynamicVertexService
+                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexService));
                 break;
 
             case DATA_PRODUCT_ENTITY_TYPE:
-                // Pass dynamicVertexRetrievalService, keeping existing 'this' for AtlasEntityStore
-                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this, this.dynamicVertexRetrievalService));
+                // Pass dynamicDynamicVertexService, keeping existing 'this' for AtlasEntityStore
+                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this, this.dynamicVertexService));
                 break;
 
             case QUERY_ENTITY_TYPE:
@@ -2313,11 +2311,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(e);
         }
 
-        if (RequestContext.get().NEW_FLOW) {
+        /*if (RequestContext.get().NEW_FLOW) {
             List<AtlasVertex> verticesToUpdate = RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList();
 
-            dynamicVertexRetrievalService.insertVertices(normalizeAttributes(verticesToUpdate));
-            dynamicVertexRetrievalService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
+            dynamicVertexService.insertVertices(normalizeAttributes(verticesToUpdate));
+            dynamicVertexService.dropVertices(RequestContext.get().getVerticesToHardDelete().stream().map(x -> ((AtlasVertex) x).getIdForDisplay()).toList());
 
             List<String> docIdsToDelete = RequestContext.get().getVerticesToHardDelete()
                     .stream()
@@ -2328,7 +2326,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             ESConnector.syncToEs(getESPropertiesForUpdateFromVertices(verticesToUpdate),
                     true,
                     docIdsToDelete);
-        }
+        }*/
 
         return response;
     }

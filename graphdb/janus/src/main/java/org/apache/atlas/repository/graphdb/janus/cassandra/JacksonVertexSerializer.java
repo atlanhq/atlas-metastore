@@ -25,9 +25,9 @@ class JacksonVertexSerializer implements VertexSerializer {
     private final DynamicVertexDeserializer deserializer;
 
 
-    public JacksonVertexSerializer(final  ObjectMapper objectMapper) {
+    public JacksonVertexSerializer() {
         this.deserializer = new DynamicVertexDeserializer();
-        this.objectMapper = objectMapper;
+        this.objectMapper = new ObjectMapper();
 
         // Configure Jackson to handle nulls similar to GSON
         this.objectMapper.setSerializationInclusion(JsonInclude.Include.ALWAYS);
@@ -35,6 +35,7 @@ class JacksonVertexSerializer implements VertexSerializer {
         // Register custom deserializer
         SimpleModule module = new SimpleModule();
         module.addDeserializer(DynamicVertex.class, deserializer);
+        module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
         this.objectMapper.registerModule(module);
     }
 

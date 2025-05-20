@@ -10,7 +10,9 @@ import com.datastax.oss.driver.api.core.cql.Row;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.google.common.collect.Lists;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.type.AtlasType;
@@ -47,15 +49,17 @@ class CassandraVertexDataRepository implements VertexDataRepository {
      * Creates a new enhanced Cassandra repository.
      *
      * @param session   The Cassandra session
-     * @param keyspace  The keyspace containing vertex data
-     * @param tableName The table name for vertex data
      */
     @Inject
-    public CassandraVertexDataRepository(CqlSession session, ObjectMapper objectMapper, String keyspace, String tableName) {
+    public CassandraVertexDataRepository(CqlSession session) {
         this.session = session;
-        this.keyspace = keyspace;
-        this.tableName = tableName;
-        this.objectMapper = objectMapper;
+        this.keyspace = AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString();
+        this.tableName = AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString();
+
+        this.objectMapper = new ObjectMapper();
+        SimpleModule module = new SimpleModule("NumbersAsStringModule");
+        module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
+        objectMapper.registerModule(module);
     }
 
     @Override
