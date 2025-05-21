@@ -101,24 +101,26 @@ public class ESConnector {
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-            for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
-                toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
+            if (entitiesMapForUpdate != null) {
+                for (String assetVertexId : entitiesMapForUpdate.keySet()) {
+                    Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+                    toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
-                long vertexId = Long.valueOf(assetVertexId);
-                String docId = LongEncoding.encode(vertexId);
-                bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
+                    long vertexId = Long.valueOf(assetVertexId);
+                    String docId = LongEncoding.encode(vertexId);
+                    bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
 
-                bulkRequestBody.append("{");
+                    bulkRequestBody.append("{");
 
-                String attrsToUpdate = AtlasType.toJson(toUpdate);
-                bulkRequestBody.append("\"doc\":" + attrsToUpdate);
+                    String attrsToUpdate = AtlasType.toJson(toUpdate);
+                    bulkRequestBody.append("\"doc\":" + attrsToUpdate);
 
-                if (upsert) {
-                    bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
+                    if (upsert) {
+                        bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
+                    }
+
+                    bulkRequestBody.append("}\n");
                 }
-
-                bulkRequestBody.append("}\n");
             }
 
             for (String docId: docIdsToDelete) {
