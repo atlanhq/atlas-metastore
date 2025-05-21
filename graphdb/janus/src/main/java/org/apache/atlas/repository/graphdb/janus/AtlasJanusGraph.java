@@ -423,16 +423,33 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
         for (AtlasVertex vertex : vertices) {
             Map<String, Object> properties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
-            Map<String, Object> propertiesToUpdate = new HashMap<>();
             AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
 
+            AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices.oldFilter");
+            Map<String, Object> propertiesToUpdate = new HashMap<>();
             getEligibleProperties(properties, type).forEach(x -> propertiesToUpdate.put(x, properties.get(x)));
-            ret.put(vertex.getIdForDisplay(), propertiesToUpdate);
+            RequestContext.get().endMetricRecord(recorder1);
+            LOG.info("Found {} properties with OLD filtering logic", propertiesToUpdate.size());
+
+            AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices.newFilter");
+            Map<String, Object> propertiesToUpdateNew = new HashMap<>();
+            getEligiblePropertiesNew(properties, type).forEach(x -> propertiesToUpdateNew.put(x, properties.get(x)));
+            RequestContext.get().endMetricRecord(recorder2);
+            LOG.info("Found {} properties with NEW filtering logic", propertiesToUpdateNew.size());
+
+
+            ret.put(vertex.getIdForDisplay(), propertiesToUpdateNew);
         }
 
         RequestContext.get().endMetricRecord(recorder);
 
         return ret;
+    }
+
+    private List<String> getEligiblePropertiesNew(Map<String, Object> properties, AtlasEntityType type) {
+        return properties.keySet().stream().filter(x ->
+                type.isAttributesForESSync(x) || x.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX))
+                .toList();
     }
 
     private List<String> getEligibleProperties(Map<String, Object> properties, AtlasEntityType type) {
