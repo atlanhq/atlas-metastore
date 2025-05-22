@@ -695,6 +695,8 @@ public class EntityGraphMapper {
         String                           typeName                     = getTypeName(entityVertex);
         AtlasEntityType                  entityType                   = typeRegistry.getEntityTypeByName(typeName);
         AtlasEntityHeader                entityHeader                 = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
+        RequestContext.get().cacheDifferentialEntity(new AtlasEntity(entityHeader), entityVertex);
+
         Map<String, Map<String, Object>> currEntityBusinessAttributes = entityRetriever.getBusinessMetadata(entityVertex);
         Set<String>                      updatedBusinessMetadataNames = new HashSet<>();
 
@@ -901,6 +903,8 @@ public class EntityGraphMapper {
 
         AtlasEntityHeader               entityHeader   = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
         AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder requestBuilder = new AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder(typeRegistry, AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, entityHeader);
+
+        RequestContext.get().cacheDifferentialEntity(new AtlasEntity(entityHeader), entityVertex);
 
         for (String bmName : businessAttributes.keySet()) {
             requestBuilder.setBusinessMetadata(bmName);
