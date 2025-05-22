@@ -1700,6 +1700,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         List<PreProcessor> preProcessors;
 
         List<AtlasEntity> copyOfCreated = new ArrayList<>(context.getCreatedEntities());
+        LOG.info("PreProcessor for created entities: {}", AtlasType.toJson(copyOfCreated));
         for (AtlasEntity entity : copyOfCreated) {
             entityType = context.getType(entity.getGuid());
             preProcessors = getPreProcessor(entityType.getTypeName());
@@ -1709,6 +1710,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
         List<AtlasEntity> copyOfUpdated = new ArrayList<>(context.getUpdatedEntities());
+        LOG.info("PreProcessor for created entities: {}", AtlasType.toJson(copyOfUpdated));
         for (AtlasEntity entity: copyOfUpdated) {
             entityType = context.getType(entity.getGuid());
             preProcessors = getPreProcessor(entityType.getTypeName());

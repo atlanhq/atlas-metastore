@@ -859,6 +859,7 @@ public class EntityREST {
                     .setReplaceBusinessAttributes(replaceBusinessAttributes)
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
                     .build();
+            LOG.info("Retrieve all entities :{}", AtlasType.toJson(entities));
             return entitiesStore.createOrUpdate(entityStream, context);
         } finally {
             AtlasPerfTracer.log(perf);
