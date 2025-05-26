@@ -424,7 +424,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return rt;
     }
 
-    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(Set<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
+    public Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(Set<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices");
         if (CollectionUtils.isEmpty(vertices)) {
             return null;
@@ -435,18 +435,10 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             Map<String, Object> properties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
             AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
 
-            AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices.oldFilter");
-            Map<String, Object> propertiesToUpdate = new HashMap<>();
-            getEligibleProperties(properties, type).forEach(x -> propertiesToUpdate.put(x, properties.get(x)));
-            RequestContext.get().endMetricRecord(recorder1);
-            LOG.info("Found {} properties with OLD filtering logic", propertiesToUpdate.size());
-
             AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices.newFilter");
             Map<String, Object> propertiesToUpdateNew = new HashMap<>();
             getEligiblePropertiesNew(properties, type).forEach(x -> propertiesToUpdateNew.put(x, properties.get(x)));
             RequestContext.get().endMetricRecord(recorder2);
-            LOG.info("Found {} properties with NEW filtering logic", propertiesToUpdateNew.size());
-
 
             ret.put(vertex.getIdForDisplay(), propertiesToUpdateNew);
         }
