@@ -109,14 +109,16 @@ public class EntityREST {
     private final ESBasedAuditRepository  esBasedAuditRepository;
     private final EntityGraphRetriever entityGraphRetriever;
     private final EntityMutationService entityMutationService;
+    private final RepairIndex repairIndex;
 
     @Inject
-    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService) {
+    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, RepairIndex repairIndex) {
         this.typeRegistry      = typeRegistry;
         this.entitiesStore     = entitiesStore;
         this.esBasedAuditRepository = esBasedAuditRepository;
         this.entityGraphRetriever = retriever;
         this.entityMutationService = entityMutationService;
+        this.repairIndex = repairIndex;
     }
 
     /**
@@ -1803,8 +1805,6 @@ public class EntityREST {
 
             AtlasEntityWithExtInfo entity = entitiesStore.getById(guid);
             Map<String, AtlasEntity> referredEntities = entity.getReferredEntities();
-            RepairIndex repairIndex = new RepairIndex();
-            repairIndex.setupGraph();
 
             repairIndex.restoreSelective(guid, referredEntities);
         } catch (Exception e) {
@@ -1827,8 +1827,6 @@ public class EntityREST {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairEntityIndexBulk(" + guids.size() + ")");
             }
-            RepairIndex repairIndex = new RepairIndex();
-            repairIndex.setupGraph();
 
             repairIndex.restoreByIds(guids);
         } catch (Exception e) {
@@ -1852,9 +1850,6 @@ public class EntityREST {
             }
 
             AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index");
-
-            RepairIndex repairIndex = new RepairIndex();
-            repairIndex.setupGraph();
 
             LOG.info("Repairing index for entities in " + typename);
 

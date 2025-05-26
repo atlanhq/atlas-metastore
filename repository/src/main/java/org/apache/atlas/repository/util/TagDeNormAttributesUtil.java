@@ -15,6 +15,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -58,6 +59,38 @@ public class TagDeNormAttributesUtil {
 
             deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, directTraits);
         }
+
+        return deNormAttrs;
+    }
+
+    public static Map<String, Object> getAllTagAttributes(String entityGuid,
+                                                            List<AtlasClassification> currentTags,
+                                                            AtlasTypeRegistry typeRegistry,
+                                                            IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
+        Map<String, Object> deNormAttrs = new HashMap<>();
+        deNormAttrs.put(CLASSIFICATION_TEXT_KEY, getClassificationTextKey(currentTags, typeRegistry, fullTextMapperV2));
+
+        List<String> directTags = new ArrayList<>();
+        List<String> propagatedTags = new ArrayList<>();
+
+        for (AtlasClassification tag: currentTags) {
+            if (entityGuid.equals(tag.getEntityGuid())) {
+                directTags.add(tag.getTypeName());
+            } else {
+                propagatedTags.add(tag.getTypeName());
+            }
+        }
+
+        // Direct
+        deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, directTags);
+        deNormAttrs.put(CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(directTags));
+
+        // Propagated
+        deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propagatedTags);
+
+        StringBuilder finalTagNames = new StringBuilder();
+        propagatedTags.forEach(tagName -> finalTagNames.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
+        deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, finalTagNames.toString());
 
         return deNormAttrs;
     }

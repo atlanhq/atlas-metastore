@@ -104,7 +104,6 @@ public class ESConnector {
             if (entitiesMapForUpdate != null) {
                 for (String assetVertexId : entitiesMapForUpdate.keySet()) {
                     Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
-                    toUpdate.put("__modificationTimestamp", RequestContext.get().getRequestTime());
 
                     long vertexId = Long.valueOf(assetVertexId);
                     String docId = LongEncoding.encode(vertexId);
@@ -123,10 +122,12 @@ public class ESConnector {
                 }
             }
 
-            for (String docId: docIdsToDelete) {
-                bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
-                bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
-                bulkRequestBody.append("}\n");
+            if (docIdsToDelete != null) {
+                for (String docId: docIdsToDelete) {
+                    bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
+                    bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
+                    bulkRequestBody.append("}\n");
+                }
             }
 
             Request request = new Request("POST", "/_bulk");
