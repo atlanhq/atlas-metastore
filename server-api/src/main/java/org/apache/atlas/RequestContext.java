@@ -51,6 +51,7 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         updatedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         deletedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
+    private final Map<String, Object>                    restoreVertices      = new HashMap<>();
 
 
     private       Map<String, String>                    lexoRankCache        = null;
@@ -437,10 +438,11 @@ public class RequestContext {
         }
     }
 
-    public void recordEntityRestore(AtlasEntityHeader entity) {
+    public void recordEntityRestore(AtlasEntityHeader entity, Object vertex) {
         if (entity != null && entity.getGuid() != null) {
             entity.setStatus(AtlasEntity.Status.ACTIVE);
             restoreEntities.put(entity.getGuid(), entity);
+            restoreVertices.put(entity.getGuid(), vertex);
         }
     }
 
@@ -664,6 +666,10 @@ public class RequestContext {
 
     public Collection<AtlasEntityHeader> getRestoredEntities() {
         return restoreEntities.values();
+    }
+
+    public Collection<Object> getRestoredVertices() {
+        return restoreVertices.values();
     }
 
     /**
