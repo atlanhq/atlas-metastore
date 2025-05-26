@@ -77,6 +77,7 @@ import static org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags.
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.*;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.*;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.OUTPUT_PORT_GUIDS_ATTR;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_ADD;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_REFRESH_PROPAGATION;
@@ -1068,6 +1069,8 @@ public abstract class DeleteHandlerV1 {
             }
         }
 
+        cleanupDenormalizedAssetReferencesFromProduct(instanceVertex);
+
         _deleteVertex(instanceVertex, force);
     }
 
@@ -1737,5 +1740,48 @@ public abstract class DeleteHandlerV1 {
                     // Check if this edge has lineage
                     return Boolean.TRUE.equals(edge.get(HAS_LINEAGE));
                 });
+    }
+
+    private void cleanupDenormalizedAssetReferencesFromProduct(AtlasVertex vertex) {
+        try {
+            DeleteType deleteType = RequestContext.get().getDeleteType();
+            if (deleteType != DeleteType.HARD && deleteType != DeleteType.PURGE) {
+                return;
+            }
+
+            if (isAssetType(vertex)) {
+                String guid = GraphHelper.getGuid(vertex);
+                int productRefsRemoved = 0;
+
+                try {
+                    Iterator<AtlasVertex> products = graph.query()
+                        .has("__typeName", DATA_PRODUCT_ENTITY_TYPE)
+                        .has(OUTPUT_PORT_GUIDS_ATTR, guid)
+                        .vertices().iterator();
+
+                    while (products.hasNext()) {
+                        AtlasVertex product = products.next();
+                        AtlasGraphUtilsV2.removeItemFromListPropertyValue(product, OUTPUT_PORT_GUIDS_ATTR, guid);
+                        productRefsRemoved++;
+                    }
+
+                    if (productRefsRemoved > 0) {
+                        LOG.info("cleanupDenormalizedProductReferences: successfully cleaned up {} product references for asset: {}", productRefsRemoved, guid);
+                    }
+                } catch (Exception e) {
+                    LOG.error("cleanupDenormalizedAssetReferencesFromProduct: failed to cleanup reference for asset {} from individual product", guid, e);
+                }
+            }
+        }
+        catch (Exception e) {
+            LOG.error("cleanupDenormalizedAssetReferencesFromProduct: unexpected error during cleanup", e);
+        }
+    }
+
+    private boolean isAssetType(AtlasVertex vertex) {
+        String typeName = GraphHelper.getTypeName(vertex);
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        
+        return entityType != null && entityType.getTypeAndAllSuperTypes().contains("Asset");
     }
 }
