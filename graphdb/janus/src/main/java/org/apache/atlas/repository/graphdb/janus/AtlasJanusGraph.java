@@ -358,13 +358,23 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             try {
                 AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertVertices");
                 // Extract updated vertices
-                List<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
+                Set<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
                         .map(x -> ((AtlasVertex) RequestContext.get().getDifferentialVertex(x)))
                         .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
+                        .collect(Collectors.toSet());
 
                 // Extract SOFT deleted vertices
-                updatedVertexList.addAll(RequestContext.get().getVerticesToSoftDelete().stream().map(x -> ((AtlasVertex) x)).toList());
+                updatedVertexList.addAll(RequestContext.get().getVerticesToSoftDelete().stream()
+                        .map(x -> ((AtlasVertex) x))
+                        .collect(Collectors.toSet()));
+
+                // Extract restored vertices
+                if (!RequestContext.get().getRestoredVertices().isEmpty()) {
+                    updatedVertexList.addAll(RequestContext.get().getRestoredVertices().stream()
+                            .filter(Objects::nonNull)
+                            .map(x -> ((AtlasVertex) x))
+                            .collect(Collectors.toSet()));
+                }
 
                 if (CollectionUtils.isNotEmpty(updatedVertexList)) {
                     dynamicVertexService.insertVertices(normalizeAttributes(updatedVertexList, typeRegistry));
@@ -397,7 +407,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         }
     }
 
-    private Map<String, Map<String, Object>> normalizeAttributes(List<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
+    private Map<String, Map<String, Object>> normalizeAttributes(Set<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
         Map<String, Map<String, Object>> rt = new HashMap<>();
 
         for (AtlasVertex vertex : vertices) {
@@ -414,7 +424,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return rt;
     }
 
-    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(List<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
+    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(Set<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices");
         if (CollectionUtils.isEmpty(vertices)) {
             return null;
