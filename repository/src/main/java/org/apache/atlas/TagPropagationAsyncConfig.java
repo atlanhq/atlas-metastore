@@ -17,14 +17,14 @@ public class TagPropagationAsyncConfig implements AsyncConfigurer {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagPropagationAsyncConfig.class);
 
-    @Bean
+    @Bean(destroyMethod = "shutdown")
     public Executor classificationPropagationExecutor() {
         ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(32);
-        executor.setMaxPoolSize(200);
-        executor.setQueueCapacity(1000);
-        executor.setKeepAliveSeconds(300); // 5 minutes to keep extra threads alive
-        executor.setAllowCoreThreadTimeOut(true); // Allow thread pool to shrink when idle
+        executor.setCorePoolSize(AtlasConfiguration.TAG_ASYNC_NOTIFIER_CORE_POOL_SIZE.getInt());
+        executor.setMaxPoolSize(AtlasConfiguration.TAG_ASYNC_NOTIFIER_MAX_POOL_SIZE.getInt());
+        executor.setQueueCapacity(AtlasConfiguration.TAG_ASYNC_NOTIFIER_QUEUE_CAPACITY.getInt());
+        executor.setKeepAliveSeconds(AtlasConfiguration.TAG_ASYNC_NOTIFIER_KEEP_ALIVE_SECONDS.getInt());
+        executor.setAllowCoreThreadTimeOut(true);
         executor.setThreadNamePrefix("ClassificationPropagation-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
 
