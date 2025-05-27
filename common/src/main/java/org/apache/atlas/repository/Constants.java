@@ -143,6 +143,9 @@ public final class Constants {
     public static final String DATA_DOMAIN_ENTITY_TYPE     = "DataDomain";
     public static final String DATA_PRODUCT_ENTITY_TYPE    = "DataProduct";
 
+    public static final String AI_APPLICATION       = "AIApplication";
+    public static final String AI_MODEL             = "AIModel";
+    
     public static final String STAKEHOLDER_ENTITY_TYPE       = "Stakeholder";
     public static final String STAKEHOLDER_TITLE_ENTITY_TYPE = "StakeholderTitle";
 
@@ -157,6 +160,10 @@ public final class Constants {
 
     public static final String INPUT_PORT_PRODUCT_EDGE_LABEL = "__Asset.inputPortDataProducts";
     public static final String OUTPUT_PORT_PRODUCT_EDGE_LABEL = "__Asset.outputPortDataProducts";
+
+    public static final String OUTPUT_PORTS = "outputPorts";
+    public static final String ADDED_OUTPUT_PORTS = "addedOutputPorts";
+    public static final String REMOVED_OUTPUT_PORTS = "removedOutputPorts";
 
     public static final String UD_RELATIONSHIP_EDGE_LABEL = "__Referenceable.userDefRelationshipTo";
     public static final String UD_RELATIONSHIP_END_NAME_FROM = "userDefRelationshipFrom";
@@ -193,6 +200,11 @@ public final class Constants {
     public static final String ASSET_README_EDGE_LABEL = "__Asset.readme";
     public static final String ASSET_LINK_EDGE_LABEL = "__Asset.links";
 
+    public static final String DATA_SET_SUPER_TYPE       = "Catalog";
+    public static final String PROCESS_SUPER_TYPE        = "Process";
+    public static final String ERROR      = "error";
+    public static final String STATUS     = "Status";
+
     /**
      * Contract
      */
@@ -207,6 +219,11 @@ public final class Constants {
     public static final String PROCESS_INPUTS = "__Process.inputs";
 
     public static String[] PROCESS_EDGE_LABELS = {PROCESS_OUTPUTS, PROCESS_INPUTS};
+
+    public static final String PROCESS_ENTITY_TYPE = "Process";
+
+    public static final String CONNECTION_PROCESS_ENTITY_TYPE = "ConnectionProcess";
+    public static final String PARENT_CONNECTION_PROCESS_QUALIFIED_NAME = "parentConnectionProcessQualifiedName";
 
     /**
      * The homeId field is used when saving into Atlas a copy of an object that is being imported from another
@@ -270,6 +287,7 @@ public final class Constants {
 
     public static final String NAME                                    = "name";
     public static final String QUALIFIED_NAME                          = "qualifiedName";
+    public static final String CONNECTION_QUALIFIED_NAME               = "connectionQualifiedName";
     public static final String UNIQUE_QUALIFIED_NAME                   = UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX + QUALIFIED_NAME;
     public static final String TYPE_NAME_PROPERTY_KEY                  = INTERNAL_PROPERTY_KEY_PREFIX + "typeName";
 
@@ -280,6 +298,7 @@ public final class Constants {
     public static final String INDEX_SEARCH_VERTEX_PREFIX_PROPERTY     = "atlas.graph.index.search.vertex.prefix";
     public static final String INDEX_SEARCH_VERTEX_PREFIX_DEFAULT      = "$v$";
     public static final String DOMAIN_GUIDS                            = "domainGUIDs";
+    public static final String PRODUCT_GUIDS                           = "productGUIDs";
 
     public static final String ATTR_TENANT_ID = "tenantId";
     public static final String DEFAULT_TENANT_ID = "default";
@@ -404,6 +423,7 @@ public final class Constants {
     public static final String FILE_SPOOL_SOURCE  = "file_spool";
     public static final String DOMAIN_GUIDS_ATTR = "domainGUIDs";
     public static final String ASSET_POLICY_GUIDS  = "assetPolicyGUIDs";
+    public static final String PRODUCT_GUIDS_ATTR  = "productGUIDs";
 
     public static final String NON_COMPLIANT_ASSET_POLICY_GUIDS  = "nonCompliantAssetPolicyGUIDs";
     public static final String ASSET_POLICIES_COUNT  = "assetPoliciesCount";

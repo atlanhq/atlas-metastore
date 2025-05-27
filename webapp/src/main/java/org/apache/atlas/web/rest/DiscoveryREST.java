@@ -17,13 +17,12 @@
  */
 package org.apache.atlas.web.rest;
 
-import org.apache.atlas.AtlasClient;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.SortOrder;
 import org.apache.atlas.annotation.Timed;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -68,6 +67,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Arrays;
 
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.REQUEST_HEADER_HOST;
 import static org.apache.atlas.repository.Constants.REQUEST_HEADER_USER_AGENT;
@@ -297,7 +297,7 @@ public class DiscoveryREST {
                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
                 if (entityType != null) {
-                    String[] defaultAttrNames = new String[] { AtlasClient.QUALIFIED_NAME, AtlasClient.NAME };
+                    String[] defaultAttrNames = new String[] { QUALIFIED_NAME, NAME };
 
                     for (String defaultAttrName : defaultAttrNames) {
                         AtlasStructType.AtlasAttribute attribute = entityType.getAttribute(defaultAttrName);
@@ -311,14 +311,14 @@ public class DiscoveryREST {
                 }
 
                 if (StringUtils.isEmpty(attrName)) {
-                    attrName = AtlasClient.QUALIFIED_NAME;
+                    attrName = QUALIFIED_NAME;
                 }
             }
 
             SearchParameters searchParams = new SearchParameters();
             FilterCriteria   attrFilter   = new FilterCriteria();
 
-            attrFilter.setAttributeName(StringUtils.isEmpty(attrName) ? AtlasClient.QUALIFIED_NAME : attrName);
+            attrFilter.setAttributeName(StringUtils.isEmpty(attrName) ? QUALIFIED_NAME : attrName);
             attrFilter.setOperator(SearchParameters.Operator.STARTS_WITH);
             attrFilter.setAttributeValue(attrValuePrefix);
 
@@ -415,7 +415,7 @@ public class DiscoveryREST {
 
             if (StringUtils.isEmpty(parameters.getQuery())) {
                 AtlasBaseException abe = new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid search query");
-                if (enableSearchLogging && parameters.isSaveSearchLog()) {
+                if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
                     logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
                 }
                 throw abe;
@@ -430,19 +430,19 @@ public class DiscoveryREST {
             }
             long endTime = System.currentTimeMillis();
 
-            if (enableSearchLogging && parameters.isSaveSearchLog()) {
+            if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
                 logSearchLog(parameters, result, servletRequest, endTime - startTime);
             }
 
             return result;
         } catch (AtlasBaseException abe) {
-            if (enableSearchLogging && parameters.isSaveSearchLog()) {
+            if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
                 logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }
             throw abe;
         } catch (Exception e) {
             AtlasBaseException abe = new AtlasBaseException(e.getMessage(), e.getCause());
-            if (enableSearchLogging && parameters.isSaveSearchLog()) {
+            if (enableSearchLogging && parameters.isSaveSearchLog() && !shouldSkipSearchLog(parameters)) {
                 logSearchLog(parameters, servletRequest, abe, System.currentTimeMillis() - startTime);
             }
             abe.setStackTrace(e.getStackTrace());
@@ -1047,5 +1047,34 @@ public class DiscoveryREST {
                 .setResponseTime(requestTime);
 
         loggerManagement.log(builder.build());
+    }
+
+    private boolean shouldSkipSearchLog(IndexSearchParams parameters) {
+
+        // Skip if utmTags contain specific landing page patterns
+        Set<String> utmTags = parameters.getUtmTags();
+        if (CollectionUtils.isNotEmpty(utmTags)) {
+            // Pattern 1: Bootstrap/landing page load
+            if (utmTags.contains("project_webapp") &&
+                    utmTags.contains("action_bootstrap") &&
+                    utmTags.contains("action_fetch_starred_assets")) {
+                return true;
+            }
+
+            // Pattern 2: Page loading
+            if (utmTags.contains("project_webapp") &&
+                    utmTags.contains("action_searched_on_load")) {
+                return true;
+            }
+
+            // Pattern 3: Assets page with search input empty
+            if (utmTags.contains("project_webapp") &&
+                    utmTags.contains("page_assets") &&
+                    utmTags.contains("action_searched")) {
+                return StringUtils.isEmpty(parameters.getSearchInput());
+            }
+        }
+
+        return false;
     }
 }

@@ -103,6 +103,8 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
     private Set<String>                      labels;
     private Set<String>                      pendingTasks; // read-only field i.e. value provided is ignored during entity create/update
     private String                           deleteHandler;
+    private Map<String, Object>              addedRelationshipAttributes;
+    private Map<String, Object>              removedRelationshipAttributes;
 
     @JsonIgnore
     private static AtomicLong s_nextId = new AtomicLong(System.nanoTime());
@@ -236,6 +238,8 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
             setPendingTasks(other.getPendingTasks());
             setAppendRelationshipAttributes(other.getAppendRelationshipAttributes());
             setRemoveRelationshipAttributes(other.getRemoveRelationshipAttributes());
+            setAddedRelationshipAttributes(other.getAddedRelationshipAttributes());
+            setRemovedRelationshipAttributes(other.getRemovedRelationshipAttributes());
         }
     }
 
@@ -545,6 +549,69 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
 
     public void setDeleteHandler(String deleteHandler) {
         this.deleteHandler = deleteHandler;
+    }
+
+    public Map<String, Object> getRemovedRelationshipAttributes() {
+        return removedRelationshipAttributes;
+    }
+
+    public void setRemovedRelationshipAttributes(Map<String, Object> removedRelationshipAttributes) {
+        this.removedRelationshipAttributes = removedRelationshipAttributes;
+    }
+
+    public void setRemovedRelationshipAttribute(String name, Object value) {
+        Map<String, Object> r = this.removedRelationshipAttributes;
+
+        if (r != null) {
+            r.put(name, value);
+        } else {
+            r = new HashMap<>();
+            r.put(name, value);
+
+            this.removedRelationshipAttributes = r;
+        }
+    }
+
+    public Map<String, Object> getAddedRelationshipAttributes() {
+        return addedRelationshipAttributes;
+    }
+
+    public void setAddedRelationshipAttributes(Map<String, Object> addedRelationshipAttributes) {
+        this.addedRelationshipAttributes = addedRelationshipAttributes;
+    }
+
+    public void setAddedRelationshipAttribute(String name, Object value) {
+        Map<String, Object> r = this.addedRelationshipAttributes;
+
+        if (r != null) {
+            r.put(name, value);
+        } else {
+            r = new HashMap<>();
+            r.put(name, value);
+
+            this.addedRelationshipAttributes = r;
+        }
+    }
+
+    public void addOrAppendAddedRelationshipAttribute(String name, AtlasObjectId relationship) {
+        if (this.addedRelationshipAttributes == null) {
+            this.addedRelationshipAttributes = new HashMap<>(1);
+        }
+
+        addToMapList(this.addedRelationshipAttributes, name, relationship);
+    }
+
+    public void addOrAppendRemovedRelationshipAttribute(String name, AtlasObjectId relationship) {
+        if (this.removedRelationshipAttributes == null) {
+            this.removedRelationshipAttributes = new HashMap<>(1);
+        }
+        addToMapList(this.removedRelationshipAttributes, name, relationship);
+    }
+
+    private void addToMapList(Map<String, Object> map, String key, Object value) {
+        List<Object> values = (List<Object>) map.getOrDefault(key, new ArrayList<>(1));
+        values.add(value);
+        map.put(key, values);
     }
 
     private void init() {

@@ -20,13 +20,12 @@ package org.apache.atlas.web.resources;
 
 import com.sun.jersey.multipart.FormDataParam;
 import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasClient;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.authorize.AtlasAdminAccessRequest;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.SearchContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.audit.AtlasAuditEntry;
@@ -123,6 +122,7 @@ import java.util.*;
 
 import static org.apache.atlas.AtlasErrorCode.DEPRECATED_API;
 import static org.apache.atlas.AtlasErrorCode.DISABLED_API;
+import static org.apache.atlas.repository.Constants.STATUS;
 import static org.apache.atlas.web.filters.AtlasCSRFPreventionFilter.CSRF_TOKEN;
 
 
@@ -327,7 +327,7 @@ public class AdminResource {
         }
 
         Map<String, Object> responseData = new HashMap() {{
-                put(AtlasClient.STATUS, serviceState.getState().toString());
+                put(STATUS, serviceState.getState().toString());
             }};
 
         if(serviceState.isInstanceInMigration()) {
