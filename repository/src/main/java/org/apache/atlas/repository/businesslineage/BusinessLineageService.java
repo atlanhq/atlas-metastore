@@ -143,7 +143,6 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                     return null;
                 }
 
-<<<<<<< HEAD
                 if (operation == BusinessLineageRequest.OperationType.ADD) {
                     productVertex = entityRetriever.getEntityVertex(productGuid);
                     if (productVertex == null) {
@@ -151,10 +150,8 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                         return null;
                     }
                 }
+
                 // For REMOVE operation, we are not fetching the product vertex because we are also handling DataProduct hard deletion in REMOVE flow.
-=======
-//                Removed null check for product to handle product hard delete scenario
->>>>>>> 5eafd0042 (handling product hard delete using lineage API)
             } catch (AtlasBaseException e){
                 LOG.warn("Entity Vertex not found", e);
                 return null;
