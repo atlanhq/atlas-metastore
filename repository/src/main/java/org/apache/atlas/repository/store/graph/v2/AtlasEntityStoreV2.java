@@ -26,6 +26,7 @@ import org.apache.atlas.authorize.*;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder;
 import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.bulkimport.BulkImportResponse.ImportInfo;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.EntityDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.featureflag.FeatureFlagStore;
@@ -122,8 +123,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("store.EntityStore");
 
     static final boolean DEFERRED_ACTION_ENABLED = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
-
-    static final String PROCESS_ENTITY_TYPE = "Process";
 
     private static final String ATTR_MEANINGS = "meanings";
 
@@ -1678,7 +1677,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             ret.setGuidAssignments(context.getGuidAssignments());
 
-
+            for (AtlasEntity entity: context.getCreatedEntities()) {
+                RequestContext.get().cacheDifferentialEntity(entity);
+            }
             // Notify the change listeners
             entityChangeNotifier.onEntitiesMutated(ret, RequestContext.get().isImportInProgress());
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
@@ -3032,26 +3033,21 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     @Override
     @GraphTransaction
-    public void moveBusinessPolicies(Set<String> policyIds, String assetId, String type) throws AtlasBaseException {
-        // Start performance metric recording
-        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("moveBusinessPolicy.GraphTransaction");
-
+    public void unlinkBusinessPolicyV2(Set<String> assetGuids, Set<String> unlinkGuids) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("unlinkBusinessPolicy.GraphTransaction");
         try {
-            // Attempt to move the business policy using the entityGraphMapper
-            AtlasVertex vertex = entityGraphMapper.moveBusinessPolicies(policyIds, assetId, type);
-
-            if (vertex == null) {
-                LOG.warn("No vertex found for assetId: {}", assetId);
+            List<AtlasVertex> vertices = this.entityGraphMapper.unlinkBusinessPolicyV2(assetGuids, unlinkGuids);
+            if (CollectionUtils.isEmpty(vertices)) {
                 return;
             }
-            handleEntityMutation(Collections.singletonList(vertex));
+
+            handleEntityMutation(vertices);
         } catch (Exception e) {
-            // Log the error with context and rethrow it wrapped in an AtlasBaseException
-            LOG.error("Error during moveBusinessPolicy for assetId: {}", assetId, e);
-            throw new AtlasBaseException(e);
+            LOG.error("Error during unlinkBusinessPolicy", e);
+            throw e;
         } finally {
-            // End the performance metric recording
             RequestContext.get().endMetricRecord(metric);
         }
     }
+
 }

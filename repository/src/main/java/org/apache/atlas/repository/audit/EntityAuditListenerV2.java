@@ -20,7 +20,7 @@ package org.apache.atlas.repository.audit;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.EntityAuditEvent.EntityAuditAction;
+import org.apache.atlas.model.EntityAuditEvent.EntityAuditAction;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.EnableConditional;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
@@ -73,7 +73,7 @@ import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV
 import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2.TERM_DELETE;
 
 @Component
-@EnableConditional(property = "atlas.enable.entity.audits")
+@EnableConditional(property = "atlas.enable.entity.audits", isDefault = true)
 public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
     private static final Logger LOG = LoggerFactory.getLogger(EntityAuditListenerV2.class);
     private static final ThreadLocal<FixedBufferList<EntityAuditEventV2>> AUDIT_EVENTS_BUFFER =
@@ -102,10 +102,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
     }
 
     private long getAuditMaxSize(EntityAuditRepository auditRepository, int entityCount) {
-        boolean isCassandraRepository = auditRepository.getClass().equals(CassandraBasedAuditRepository.class);
-        // Subtracting 150 for other details in the Insert statement.
-        long auditMaxSize = isCassandraRepository ? ((CASSANDRA_AUDIT_REPOSITORY_MAX_SIZE_DEFAULT / entityCount) - 150): AUDIT_REPOSITORY_MAX_SIZE_DEFAULT;
-        return  auditMaxSize;
+        return AUDIT_REPOSITORY_MAX_SIZE_DEFAULT;
     }
 
     @Override
@@ -142,6 +139,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
             FixedBufferList<EntityAuditEventV2> updatedEvents = getAuditEventsList();
             for (AtlasEntity entity : updatedEntites) {
                 final EntityAuditActionV2 action;
+                boolean generateBMUpdateEvent = false;
 
                 if (isImport) {
                     action = ENTITY_IMPORT_UPDATE;
@@ -153,10 +151,21 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
                     action = ENTITY_UPDATE;
                 }
 
+                // If action is not BUSINESS_ATTRIBUTE_UPDATE and it has BUSINESS ATTRIBUTE UPDATE , create another BM update event
+                if(action != BUSINESS_ATTRIBUTE_UPDATE && MapUtils.isNotEmpty(entity.getBusinessAttributes())) {
+                    generateBMUpdateEvent = true;
+                }
+
                 long auditMaxSize = getAuditMaxSize(auditRepository, entities.size());
                 if (DIFFERENTIAL_AUDITS) {
+                    if (generateBMUpdateEvent) {
+                        createEvent(updatedEvents.next(), entity, entitiesMap.get(entity.getGuid()), BUSINESS_ATTRIBUTE_UPDATE, auditMaxSize);
+                    }
                     createEvent(updatedEvents.next(), entity, entitiesMap.get(entity.getGuid()), action, auditMaxSize);
                 } else {
+                    if (generateBMUpdateEvent) {
+                        createEvent(updatedEvents.next(), entity, null, BUSINESS_ATTRIBUTE_UPDATE, auditMaxSize);
+                    }
                     createEvent(updatedEvents.next(), entity, action, auditMaxSize);
                 }
             }
@@ -173,6 +182,7 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         for (EntityAuditRepository auditRepository: auditRepositories) {
             FixedBufferList<EntityAuditEventV2> deletedEntities = getAuditEventsList();
             for (AtlasEntity entity : entities) {
+                entity.setClassifications(Collections.emptyList());
                 long auditMaxSize = getAuditMaxSize(auditRepository, entities.size());
                 createEvent(deletedEntities.next(), entity, isImport ? ENTITY_IMPORT_DELETE : ENTITY_DELETE, auditMaxSize);
             }
