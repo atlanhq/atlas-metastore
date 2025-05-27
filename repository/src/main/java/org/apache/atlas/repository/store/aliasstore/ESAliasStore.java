@@ -50,28 +50,7 @@ import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_DOMAIN;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_METADATA;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_GLOSSARY;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_PRODUCT;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_SUB_DOMAIN;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_APP;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_MODEL;
-import static org.apache.atlas.repository.util.AccessControlUtils.RESOURCES_ENTITY_TYPE;
-import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_SERVICE_NAME;
-import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PURPOSE_METADATA;
-import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_SERVICE_NAME_ABAC;
-import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_FILTER_CRITERIA;
-import static org.apache.atlas.repository.util.AccessControlUtils.getConnectionQualifiedNameFromPolicyAssets;
-import static org.apache.atlas.repository.util.AccessControlUtils.getESAliasName;
-import static org.apache.atlas.repository.util.AccessControlUtils.getIsAllowPolicy;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPolicies;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyActions;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyAssets;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyResources;
-import static org.apache.atlas.repository.util.AccessControlUtils.getFilteredPolicyResources;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyConnectionQN;
-import static org.apache.atlas.repository.util.AccessControlUtils.getPurposeTags;
+import static org.apache.atlas.repository.util.AccessControlUtils.*;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 import static org.apache.atlas.type.Constants.GLOSSARY_PROPERTY_KEY;
 
@@ -286,6 +265,13 @@ public class ESAliasStore implements IndexAliasStore {
                     for (String asset : assets) {
                         List<Map<String, Object>> mustMap = new ArrayList<>();
                         mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*product/*")));
+                        mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
+                        allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                    }
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_DIRECT_PRODUCT)) {
+                    for (String asset : assets) {
+                        List<Map<String, Object>> mustMap = new ArrayList<>();
+                        mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }

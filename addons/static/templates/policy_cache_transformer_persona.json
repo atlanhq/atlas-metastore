@@ -911,6 +911,100 @@
     }
   ],
 
+  "persona-direct-product-read": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "resources": [
+        "entity:{entity}",
+        "entity-type:DataProduct",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-read"]
+    }
+  ],
+  "persona-direct-product-update": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:{entity}",
+        "entity-type:DataProduct",
+        "entity-classification:*",
+        "classification:*"
+      ],
+      "actions": [
+        "entity-update",
+        "entity-add-classification",
+        "entity-update-classification",
+        "entity-remove-classification"
+      ]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink any Asset to this DataProduct",
+
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:Asset",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:DataProduct",
+        "end-two-entity-classification:*",
+        "end-two-entity:{entity}"
+      ],
+
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyResourceCategory": "RELATIONSHIP",
+      "policyType": "ACCESS",
+      "description": "Link/unlink any Asset to this DataProduct",
+
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:DataProduct",
+        "end-one-entity-classification:*",
+        "end-one-entity:{entity}",
+
+        "end-two-entity-type:Asset",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+
+      "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    }
+  ],
+  "persona-direct-product-business-update-metadata": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "resources": [
+        "entity:{entity}",
+        "entity-type:DataProduct",
+        "entity-classification:*",
+        "entity-business-metadata:*"
+      ],
+      "actions": ["entity-update-business-metadata"]
+    }
+  ],
+  "persona-direct-product-delete": [
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "resources": [
+        "entity:{entity}",
+        "entity-type:DataProduct",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-delete"]
+    }
+  ],
+
   "select": [
     {
       "policyType": "ACCESS",
