@@ -34,13 +34,14 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -62,8 +63,10 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateUniquenessByTags;
 
+@Component
 public class PurposePreProcessor extends AccessControlPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(PurposePreProcessor.class);
+    private static final String TYPE_NAME = PURPOSE_ENTITY_TYPE;
 
     private final AtlasGraph graph;
     private final AtlasTypeRegistry typeRegistry;
@@ -71,6 +74,7 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
     private IndexAliasStore aliasStore;
     private AtlasEntityStore entityStore;
 
+    @Inject
     public PurposePreProcessor(AtlasGraph graph,
                                AtlasTypeRegistry typeRegistry,
                                EntityGraphRetriever entityRetriever,
@@ -81,6 +85,11 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
         this.entityStore = entityStore;
 
         aliasStore = new ESAliasStore(graph, entityRetriever);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

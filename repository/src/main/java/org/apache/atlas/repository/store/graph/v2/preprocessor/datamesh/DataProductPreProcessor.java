@@ -24,6 +24,8 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.*;
 
@@ -32,8 +34,12 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
 
+@Component
 public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(DataProductPreProcessor.class);
+
+    private static final String TYPE_NAME = DATA_PRODUCT_ENTITY_TYPE;
+
     private static final String PRIVATE = "Private";
     private static final String PROTECTED = "Protected";
     private static final String PUBLIC = "Public";
@@ -44,6 +50,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private Map<String, String> updatedPolicyResources;
     private EntityGraphRetriever retrieverNoRelation = null;
 
+    @Inject
     public DataProductPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
                                    AtlasGraph graph, AtlasEntityStore entityStore,
                                    DynamicVertexService dynamicVertexService) {
@@ -51,6 +58,11 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         this.updatedPolicyResources = new HashMap<>();
         this.entityStore = entityStore;
         this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

@@ -13,26 +13,38 @@ import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import java.util.regex.Pattern;
 
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.CREATE;
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.UPDATE;
 import static org.apache.atlas.repository.Constants.ASSET_LINK_EDGE_LABEL;
 import static org.apache.atlas.repository.Constants.ATTRIBUTE_LINK;
+import static org.apache.atlas.repository.Constants.LINK_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 
+@Component
 public class LinkPreProcessor extends AbstractResourcePreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(LinkPreProcessor.class);
+
+    private static final String TYPE_NAME = LINK_ENTITY_TYPE;
 
     private static final Pattern REGEX_ONSITE_URL = Pattern.compile("(?:[\\p{L}\\p{N}\\\\\\.\\#@\\$%\\+&;\\-_~,\\?=/!]+|\\#(\\w)+)");
     private static final Pattern REGEX_OFFSITE_URL = Pattern.compile("\\s*(?:(?:ht|f)tps?://|mailto:)[\\p{L}\\p{N}]"
             + "[\\p{L}\\p{N}\\p{Zs}\\.\\#@\\$%\\+&;:\\-_~,\\?=/!\\(\\)]*+\\s*");
     private static final Predicate<String> REGEX_ON_OFFSITE_URL = matchesEither(REGEX_ONSITE_URL, REGEX_OFFSITE_URL);
 
+    @Inject
     public LinkPreProcessor(AtlasTypeRegistry typeRegistry,
                             EntityGraphRetriever entityRetriever) {
         super(typeRegistry, entityRetriever);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

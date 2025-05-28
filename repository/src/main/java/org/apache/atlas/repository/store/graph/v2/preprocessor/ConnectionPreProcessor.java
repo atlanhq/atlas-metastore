@@ -45,6 +45,8 @@ import org.apache.commons.lang.StringUtils;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -56,8 +58,11 @@ import static org.apache.atlas.authorize.AtlasAuthorizerFactory.CURRENT_AUTHORIZ
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
+@Component
 public class ConnectionPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(ConnectionPreProcessor.class);
+
+    private static final String TYPE_NAME = CONNECTION_ENTITY_TYPE;
 
     public static final String CONN_NAME_PATTERN = "connection_admins_%s";
 
@@ -70,6 +75,7 @@ public class ConnectionPreProcessor implements PreProcessor {
     private KeycloakStore keycloakStore;
     private final DeleteHandlerDelegate deleteDelegate;
 
+    @Inject
     public ConnectionPreProcessor(AtlasGraph graph,
                                   EntityDiscoveryService discovery,
                                   EntityGraphRetriever entityRetriever,
@@ -84,6 +90,11 @@ public class ConnectionPreProcessor implements PreProcessor {
         this.deleteDelegate = deleteDelegate;
         transformer = new PreProcessorPoliciesTransformer();
         keycloakStore = new KeycloakStore();
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

@@ -17,6 +17,8 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.*;
 
@@ -25,8 +27,12 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 import static org.apache.atlas.type.AtlasTypeUtil.getAtlasObjectId;
 
+@Component
 public class ContractPreProcessor extends AbstractContractPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(ContractPreProcessor.class);
+
+    private static final String TYPE_NAME = CONTRACT_ENTITY_TYPE;
+
     public static final String ATTR_ASSET_GUID = "dataContractAssetGuid";
     public static final String REL_ATTR_LATEST_CONTRACT = "dataContractLatest";
     public static final String REL_ATTR_GOVERNED_ASSET_CERTIFIED = "dataContractLatestCertified";
@@ -47,6 +53,7 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
     private final AtlasEntityComparator entityComparator;
 
 
+    @Inject
     public ContractPreProcessor(AtlasGraph graph, AtlasTypeRegistry typeRegistry,
                                 EntityGraphRetriever entityRetriever,
                                 boolean storeDifferentialAudits, EntityDiscoveryService discovery) {
@@ -55,6 +62,11 @@ public class ContractPreProcessor extends AbstractContractPreProcessor {
         this.storeDifferentialAudits = storeDifferentialAudits;
         this.discovery = discovery;
         this.entityComparator = new AtlasEntityComparator(typeRegistry, entityRetriever, null, new BulkRequestContext());
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

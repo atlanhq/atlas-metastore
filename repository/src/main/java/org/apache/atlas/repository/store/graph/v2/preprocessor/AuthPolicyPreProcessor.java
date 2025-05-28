@@ -41,6 +41,8 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -57,13 +59,18 @@ import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.CR
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.UPDATE;
 import static org.apache.atlas.repository.Constants.ATTR_ADMIN_ROLES;
 import static org.apache.atlas.repository.Constants.KEYCLOAK_ROLE_ADMIN;
+import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.STAKEHOLDER_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicySubCategory;
 
+@Component
 public class AuthPolicyPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AuthPolicyPreProcessor.class);
+
+    private static final String TYPE_NAME = POLICY_ENTITY_TYPE;
+
     public static final String ENTITY_DEFAULT_DOMAIN_SUPER = "entity:default/domain/*/super";
 
     private final AtlasGraph graph;
@@ -71,6 +78,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
     private final EntityGraphRetriever entityRetriever;
     private IndexAliasStore aliasStore;
 
+    @Inject
     public AuthPolicyPreProcessor(AtlasGraph graph,
                                   AtlasTypeRegistry typeRegistry,
                                   EntityGraphRetriever entityRetriever) {
@@ -79,6 +87,11 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         this.entityRetriever = entityRetriever;
 
         aliasStore = new ESAliasStore(graph, entityRetriever);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

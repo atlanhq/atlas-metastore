@@ -17,16 +17,10 @@
  */
 package org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh;
 
-
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.model.instance.AtlasObjectId;
-import org.apache.atlas.model.instance.AtlasRelatedObjectId;
-import org.apache.atlas.model.instance.AtlasStruct;
-import org.apache.atlas.model.instance.EntityMutations;
+import org.apache.atlas.model.instance.*;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
@@ -40,6 +34,8 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.*;
 
@@ -47,20 +43,29 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.getActiveChildrenVertices;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 
+@Component
 public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(DataDomainPreProcessor.class);
+
+    private static final String TYPE_NAME = DATA_DOMAIN_ENTITY_TYPE;
 
     private EntityMutationContext context;
     private Map<String, String> updatedPolicyResources;
     private EntityGraphRetriever retrieverNoRelation = null;
     private Map<String, String> updatedDomainQualifiedNames;
 
+    @Inject
     public DataDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
                                   AtlasGraph graph, DynamicVertexService dynamicVertexService) {
         super(typeRegistry, entityRetriever, graph, dynamicVertexService);
         this.updatedPolicyResources = new HashMap<>();
         this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);
         this.updatedDomainQualifiedNames = new HashMap<>();
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

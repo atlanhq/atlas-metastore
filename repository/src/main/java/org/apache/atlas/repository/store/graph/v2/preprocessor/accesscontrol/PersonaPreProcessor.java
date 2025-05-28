@@ -45,6 +45,8 @@ import org.apache.commons.collections.CollectionUtils;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -52,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
+import static org.apache.atlas.repository.Constants.PERSONA_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_ACCESS_CONTROL_ENABLED;
@@ -71,8 +74,10 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateNoPoliciesAttached;
 
+@Component
 public class PersonaPreProcessor extends AccessControlPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(PersonaPreProcessor.class);
+    private static final String TYPE_NAME = PERSONA_ENTITY_TYPE;
 
     protected final AtlasGraph graph;
     protected AtlasTypeRegistry typeRegistry;
@@ -81,6 +86,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
     protected AtlasEntityStore entityStore;
     protected KeycloakStore keycloakStore;
 
+    @Inject
     public PersonaPreProcessor(AtlasGraph graph,
                                AtlasTypeRegistry typeRegistry,
                                EntityGraphRetriever entityRetriever,
@@ -92,6 +98,11 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
         aliasStore = new ESAliasStore(graph, entityRetriever);
         keycloakStore = new KeycloakStore(true, true);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

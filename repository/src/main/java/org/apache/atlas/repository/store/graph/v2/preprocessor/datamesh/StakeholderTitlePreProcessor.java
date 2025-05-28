@@ -25,6 +25,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.List;
 import java.util.Optional;
@@ -40,9 +42,12 @@ import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcess
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.verifyDuplicateAssetByName;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
+@Component
 public class StakeholderTitlePreProcessor implements PreProcessor {
 
     private static final Logger LOG = LoggerFactory.getLogger(StakeholderTitlePreProcessor.class);
+
+    private static final String TYPE_NAME = STAKEHOLDER_TITLE_ENTITY_TYPE;
 
     public static final String PATTERN_QUALIFIED_NAME_ALL_DOMAINS = "stakeholderTitle/domain/default/%s";
     public static final String PATTERN_QUALIFIED_NAME_DOMAIN = "stakeholderTitle/domain/%s";
@@ -58,6 +63,7 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
     private final EntityGraphRetriever entityRetriever;
     protected EntityDiscoveryService discovery;
 
+    @Inject
     public StakeholderTitlePreProcessor(AtlasGraph graph,
                                        AtlasTypeRegistry typeRegistry,
                                        EntityGraphRetriever entityRetriever) {
@@ -75,6 +81,11 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
         } catch (AtlasException e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

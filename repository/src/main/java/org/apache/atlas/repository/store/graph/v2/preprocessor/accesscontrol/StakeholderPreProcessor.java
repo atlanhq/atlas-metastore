@@ -45,6 +45,8 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -70,8 +72,10 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateNoPoliciesAttached;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
+@Component
 public class StakeholderPreProcessor extends PersonaPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(StakeholderPreProcessor.class);
+    private static final String TYPE_NAME = STAKEHOLDER_ENTITY_TYPE;
 
     public static final String ATTR_DOMAIN_QUALIFIED_NAME  = "stakeholderDomainQualifiedName";
     public static final String ATTR_STAKEHOLDER_TITLE_GUID = "stakeholderTitleGuid";
@@ -81,6 +85,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
 
     protected EntityDiscoveryService discovery;
 
+    @Inject
     public StakeholderPreProcessor(AtlasGraph graph,
                                    AtlasTypeRegistry typeRegistry,
                                    EntityGraphRetriever entityRetriever,
@@ -98,6 +103,11 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         } catch (AtlasException e) {
             e.printStackTrace();
         }
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

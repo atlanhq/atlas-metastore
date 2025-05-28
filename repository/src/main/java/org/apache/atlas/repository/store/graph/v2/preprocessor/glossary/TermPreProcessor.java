@@ -43,6 +43,8 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+
+import javax.inject.Inject;
 import java.util.Iterator;
 import java.util.List;
 
@@ -56,9 +58,21 @@ import static org.apache.atlas.type.Constants.LEXICOGRAPHICAL_SORT_ORDER;
 public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(TermPreProcessor.class);
 
+    private static final String TYPE_NAME = ATLAS_GLOSSARY_TERM_ENTITY_TYPE;
+
     private AtlasEntityHeader anchor;
-    public TermPreProcessor( AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, TaskManagement taskManagement) {
+
+    @Inject
+    public TermPreProcessor(AtlasTypeRegistry typeRegistry, 
+                          EntityGraphRetriever entityRetriever,
+                          AtlasGraph graph, 
+                          TaskManagement taskManagement) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

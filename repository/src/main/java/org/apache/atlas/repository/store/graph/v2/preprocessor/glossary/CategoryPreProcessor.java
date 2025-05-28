@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.repository.store.graph.v2.preprocessor.glossary;
 
-
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
@@ -46,7 +45,9 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import java.util.*;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -73,18 +74,30 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFacto
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 import static org.apache.atlas.type.Constants.*;
 
+@Component
 public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(CategoryPreProcessor.class);
+
+    private static final String TYPE_NAME = ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE;
 
     private AtlasEntityHeader anchor;
     private AtlasEntityHeader parentCategory;
     private EntityGraphMapper entityGraphMapper;
     private EntityMutationContext context;
 
-    public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever,
-                                AtlasGraph graph, TaskManagement taskManagement, EntityGraphMapper entityGraphMapper) {
+    @Inject
+    public CategoryPreProcessor(AtlasTypeRegistry typeRegistry, 
+                              EntityGraphRetriever entityRetriever,
+                              AtlasGraph graph, 
+                              TaskManagement taskManagement, 
+                              EntityGraphMapper entityGraphMapper) {
         super(typeRegistry, entityRetriever, graph, taskManagement);
         this.entityGraphMapper = entityGraphMapper;
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

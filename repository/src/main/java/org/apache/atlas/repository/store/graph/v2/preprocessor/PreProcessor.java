@@ -29,4 +29,13 @@ public interface PreProcessor {
     default void processDelete(AtlasVertex vertex) throws AtlasBaseException {
         //override this method for implementation
     }
+
+    /**
+     * Returns the type name this processor handles.
+     * Return "*" for global processors that should run for all types.
+     * @return the type name this processor handles
+     */
+    default String getApplicableTypeName() {
+        return null;
+    }
 }

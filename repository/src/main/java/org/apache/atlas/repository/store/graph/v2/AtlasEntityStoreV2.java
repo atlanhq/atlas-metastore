@@ -47,7 +47,6 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
-import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
@@ -58,25 +57,7 @@ import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEntityDiffResult;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.StakeholderPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.contract.ContractPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataDomainPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataProductPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.StakeholderTitlePreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.CategoryPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.GlossaryPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.glossary.TermPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.resource.LinkPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.resource.ReadmePreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryCollectionPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryFolderPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
@@ -90,7 +71,6 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -98,6 +78,7 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 import static java.lang.Boolean.FALSE;
@@ -154,12 +135,14 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     private DynamicVertexService dynamicVertexService;
 
+    private final Map<String, List<PreProcessor>> preProcessorMap;
+
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
                               AtlasRelationshipStore atlasRelationshipStore, FeatureFlagStore featureFlagStore,
                               IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier, AtlasDistributedTaskNotificationSender taskNotificationSender,
-                              EntityGraphRetriever entityRetriever) {
+                              EntityGraphRetriever entityRetriever, List<PreProcessor> preProcessors) {
 
         this.graph                = graph;
         this.deleteDelegate       = deleteDelegate;
@@ -177,6 +160,17 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
         this.dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+
+        // Initialize the preProcessorMap
+        this.preProcessorMap = new ConcurrentHashMap<>();
+        
+        // Group preprocessors by type
+        for (PreProcessor processor : preProcessors) {
+            String typeName = processor.getApplicableTypeName();
+            preProcessorMap.computeIfAbsent(typeName, k -> new ArrayList<>())
+                          .add(processor);
+        }
+
         try {
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
@@ -2133,87 +2127,21 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
 
     public List<PreProcessor> getPreProcessor(String typeName) {
-        List<PreProcessor> preProcessors = new ArrayList<>();
-
-        switch (typeName) {
-            case ATLAS_GLOSSARY_ENTITY_TYPE:
-                // Expects: (AtlasTypeRegistry, EntityGraphRetriever, AtlasGraph)
-                preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph));
-                break;
-
-            case ATLAS_GLOSSARY_TERM_ENTITY_TYPE:
-                // Extends AbstractGlossaryPreProcessor, expects: (AtlasTypeRegistry, EntityGraphRetriever, AtlasGraph, TaskManagement)
-                preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement));
-                break;
-
-            case ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE:
-                // Extends AbstractGlossaryPreProcessor, expects: (AtlasTypeRegistry, EntityGraphRetriever, AtlasGraph, TaskManagement, EntityGraphMapper)
-                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper));
-                break;
-
-            case DATA_DOMAIN_ENTITY_TYPE:
-                // Pass dynamicDynamicVertexService
-                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexService));
-                break;
-
-            case DATA_PRODUCT_ENTITY_TYPE:
-                // Pass dynamicDynamicVertexService, keeping existing 'this' for AtlasEntityStore
-                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this, this.dynamicVertexService));
-                break;
-
-            case QUERY_ENTITY_TYPE:
-                preProcessors.add(new QueryPreProcessor(typeRegistry, entityRetriever));
-                break;
-
-            case QUERY_FOLDER_ENTITY_TYPE:
-                preProcessors.add(new QueryFolderPreProcessor(typeRegistry, entityRetriever));
-                break;
-
-            case QUERY_COLLECTION_ENTITY_TYPE:
-                preProcessors.add(new QueryCollectionPreProcessor(typeRegistry, discovery, entityRetriever, featureFlagStore, this));
-                break;
-
-            case PERSONA_ENTITY_TYPE:
-                preProcessors.add(new PersonaPreProcessor(graph, typeRegistry, entityRetriever, this));
-                break;
-
-            case PURPOSE_ENTITY_TYPE:
-                preProcessors.add(new PurposePreProcessor(graph, typeRegistry, entityRetriever, this));
-                break;
-
-            case POLICY_ENTITY_TYPE:
-                preProcessors.add(new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever));
-                break;
-
-            case STAKEHOLDER_ENTITY_TYPE:
-                preProcessors.add(new StakeholderPreProcessor(graph, typeRegistry, entityRetriever, this));
-                break;
-
-            case CONNECTION_ENTITY_TYPE:
-                preProcessors.add(new ConnectionPreProcessor(graph, discovery, entityRetriever, featureFlagStore, deleteDelegate, this));
-                break;
-
-            case LINK_ENTITY_TYPE:
-                preProcessors.add(new LinkPreProcessor(typeRegistry, entityRetriever));
-                break;
-
-            case README_ENTITY_TYPE:
-                preProcessors.add(new ReadmePreProcessor(typeRegistry, entityRetriever));
-                break;
-
-            case CONTRACT_ENTITY_TYPE:
-                preProcessors.add(new ContractPreProcessor(graph, typeRegistry, entityRetriever, storeDifferentialAudits, discovery));
-                break;
-
-            case STAKEHOLDER_TITLE_ENTITY_TYPE:
-                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
-                break;
+        List<PreProcessor> processors = new ArrayList<>();
+        
+        // Get type-specific processors
+        List<PreProcessor> typeProcessors = preProcessorMap.get(typeName);
+        if (typeProcessors != null) {
+            processors.addAll(typeProcessors);
         }
-
-        //  The default global pre-processor for all AssetTypes
-        preProcessors.add(new AssetPreProcessor(typeRegistry, entityRetriever, graph));
-
-        return preProcessors;
+        
+        // Add global processors
+        List<PreProcessor> globalProcessors = preProcessorMap.get("*");
+        if (globalProcessors != null) {
+            processors.addAll(globalProcessors);
+        }
+        
+        return processors;
     }
 
     private AtlasVertex getResolvedEntityVertex(EntityGraphDiscoveryContext context, AtlasEntity entity) throws AtlasBaseException {

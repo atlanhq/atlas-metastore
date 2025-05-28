@@ -46,6 +46,8 @@ import org.apache.commons.lang.StringUtils;
 import org.keycloak.representations.idm.RoleRepresentation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -66,12 +68,16 @@ import static org.apache.atlas.repository.Constants.ATTR_VIEWER_USERS;
 import static org.apache.atlas.repository.Constants.CREATED_BY_KEY;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
+import static org.apache.atlas.repository.Constants.QUERY_COLLECTION_ENTITY_TYPE;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.PREFIX_QUERY_QN;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.getUUID;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
+@Component
 public class QueryCollectionPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(QueryCollectionPreProcessor.class);
+
+    private static final String TYPE_NAME = QUERY_COLLECTION_ENTITY_TYPE;
 
     private static final String qualifiedNameFormat = PREFIX_QUERY_QN + "%s/%s";
     private static final String COLL_ADMIN_ROLE_PATTERN = "collection_admins_%s";
@@ -85,6 +91,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
     private FeatureFlagStore featureFlagStore;
     private KeycloakStore keycloakStore;
 
+    @Inject
     public QueryCollectionPreProcessor(AtlasTypeRegistry typeRegistry,
                                        EntityDiscoveryService discovery,
                                        EntityGraphRetriever entityRetriever,
@@ -98,6 +105,11 @@ public class QueryCollectionPreProcessor implements PreProcessor {
 
         transformer = new PreProcessorPoliciesTransformer();
         keycloakStore = new KeycloakStore();
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

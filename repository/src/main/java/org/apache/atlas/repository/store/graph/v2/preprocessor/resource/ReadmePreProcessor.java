@@ -29,16 +29,28 @@ import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+
+import javax.inject.Inject;
 
 import static org.apache.atlas.repository.Constants.ASSET_README_EDGE_LABEL;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
+import static org.apache.atlas.repository.Constants.README_ENTITY_TYPE;
 
+@Component
 public class ReadmePreProcessor extends AbstractResourcePreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(ReadmePreProcessor.class);
+    private static final String TYPE_NAME = README_ENTITY_TYPE;
 
+    @Inject
     public ReadmePreProcessor(AtlasTypeRegistry typeRegistry,
                               EntityGraphRetriever entityRetriever) {
         super(typeRegistry, entityRetriever);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

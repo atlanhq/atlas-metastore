@@ -19,13 +19,18 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections4.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.*;
 
+@Component
 public class AssetPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AssetPreProcessor.class);
+
+    private static final String TYPE_NAME = "*";
 
     private EntityMutationContext context;
     private AtlasTypeRegistry typeRegistry;
@@ -35,10 +40,16 @@ public class AssetPreProcessor implements PreProcessor {
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
+    @Inject
     public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
         this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

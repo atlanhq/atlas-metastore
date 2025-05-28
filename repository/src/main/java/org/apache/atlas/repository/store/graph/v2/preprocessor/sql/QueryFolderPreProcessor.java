@@ -36,6 +36,8 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import java.util.HashMap;
 import java.util.Iterator;
@@ -49,18 +51,26 @@ import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcess
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.CHILDREN_QUERIES;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.PARENT_QUALIFIED_NAME;
 
+@Component
 public class QueryFolderPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(QueryFolderPreProcessor.class);
+
+    private static final String TYPE_NAME = QUERY_FOLDER_ENTITY_TYPE;
 
     private static String qualifiedNameFormat = "%s/folder/%s/%s";
 
     private final AtlasTypeRegistry typeRegistry;
     private final EntityGraphRetriever entityRetriever;
 
+    @Inject
     public QueryFolderPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
+    }
 
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

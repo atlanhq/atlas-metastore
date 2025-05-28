@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.repository.store.graph.v2.preprocessor.glossary;
 
-
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.discovery.EntityDiscoveryService;
@@ -38,19 +37,26 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
+import static org.apache.atlas.repository.Constants.ATLAS_GLOSSARY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.type.Constants.LEXICOGRAPHICAL_SORT_ORDER;
 
+@Component
 public class GlossaryPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(GlossaryPreProcessor.class);
+
+    private static final String TYPE_NAME = ATLAS_GLOSSARY_ENTITY_TYPE;
 
     private final AtlasTypeRegistry typeRegistry;
     private final EntityGraphRetriever entityRetriever;
     protected EntityDiscoveryService discovery;
 
+    @Inject
     public GlossaryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
@@ -65,6 +71,10 @@ public class GlossaryPreProcessor implements PreProcessor {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override

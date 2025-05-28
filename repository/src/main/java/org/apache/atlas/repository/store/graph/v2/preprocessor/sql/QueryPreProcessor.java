@@ -32,23 +32,35 @@ import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
+import javax.inject.Inject;
 
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
+import static org.apache.atlas.repository.Constants.QUERY_ENTITY_TYPE;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.COLLECTION_QUALIFIED_NAME;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.updateQueryResourceAttributes;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.getUUID;
 
+@Component
 public class QueryPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(QueryPreProcessor.class);
+
+    private static final String TYPE_NAME = QUERY_ENTITY_TYPE;
 
     private static String qualifiedNameFormat = "%s/query/%s/%s";
 
     private final AtlasTypeRegistry typeRegistry;
     private final EntityGraphRetriever entityRetriever;
 
+    @Inject
     public QueryPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever) {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
+    }
+
+    @Override
+    public String getApplicableTypeName() {
+        return TYPE_NAME;
     }
 
     @Override
