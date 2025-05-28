@@ -37,6 +37,13 @@ import org.elasticsearch.cluster.metadata.AliasMetadata;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import static org.apache.atlas.repository.Constants.AI_APPLICATION;
+import static org.apache.atlas.repository.Constants.AI_MODEL;
+import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_APP;
+import static org.apache.atlas.repository.util.AccessControlUtils.ACCESS_READ_PERSONA_AI_MODEL;
+import static org.apache.atlas.repository.util.AccessControlUtils.RESOURCES_ENTITY_TYPE;
+import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyResources;
+import static org.apache.atlas.repository.util.AccessControlUtils.getFilteredPolicyResources;
 
 import javax.inject.Inject;
 import java.util.*;
@@ -195,7 +202,9 @@ public class ESAliasStore implements IndexAliasStore {
                     continue;
                 }
                 
-                if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_METADATA)) {
+                List<String> policyActions = getPolicyActions(policy);
+                
+                if (policyActions.contains(ACCESS_READ_PERSONA_METADATA)) {
 
                     String connectionQName = getPolicyConnectionQN(policy);
                     if (StringUtils.isEmpty(connectionQName)) {
@@ -231,12 +240,12 @@ public class ESAliasStore implements IndexAliasStore {
 
                     terms.add(connectionQName);
 
-                } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_GLOSSARY)) {
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_GLOSSARY)) {
                     if (CollectionUtils.isNotEmpty(assets)) {
                         terms.addAll(assets);
                         glossaryQualifiedNames.addAll(assets);
                     }
-                } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_DOMAIN)) {
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_DOMAIN)) {
                     for (String asset : assets) {
                         if(!isAllDomain(asset)) {
                             terms.add(asset);
@@ -246,7 +255,7 @@ public class ESAliasStore implements IndexAliasStore {
                         allowClauseList.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "*")));
                     }
 
-                } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_SUB_DOMAIN)) {
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_SUB_DOMAIN)) {
                     for (String asset : assets) {
                         //terms.add(asset);
                         List<Map<String, Object>> mustMap = new ArrayList<>();
@@ -255,12 +264,21 @@ public class ESAliasStore implements IndexAliasStore {
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
 
-                } else if (getPolicyActions(policy).contains(ACCESS_READ_PERSONA_PRODUCT)) {
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_PRODUCT)) {
                     for (String asset : assets) {
                         //terms.add(asset);
                         List<Map<String, Object>> mustMap = new ArrayList<>();
                         mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*product/*")));
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
+                        allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
+                    }
+                } else if (policyActions.contains(ACCESS_READ_PERSONA_AI_APP) || policyActions.contains(ACCESS_READ_PERSONA_AI_MODEL)) {
+                    // access is given across the resource as per entity-type for AI asset
+                    List<String> resources = getPolicyResources(policy);
+                    List<String> typeResources = getFilteredPolicyResources(resources, RESOURCES_ENTITY_TYPE);
+                    List<Map<String, Object>> mustMap = new ArrayList<>();
+                    if (CollectionUtils.isNotEmpty(typeResources)) {
+                        mustMap.add(mapOf("terms", mapOf("__typeName.keyword", typeResources)));
                         allowClauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                 }
