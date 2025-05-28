@@ -145,6 +145,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
 
+    private static final Boolean isConnectionLineageEnabled = ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean();
+
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
 
@@ -2076,7 +2078,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case PROCESS_ENTITY_TYPE:
-                if(ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean()){
+                if(isConnectionLineageEnabled){
                     preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
                 }
         }
