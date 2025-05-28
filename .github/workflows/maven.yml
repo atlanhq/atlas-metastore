@@ -29,6 +29,7 @@ on:
       - lineageondemand
       - makerlogic
       - businesslineage
+      - businesslineage2
 
 jobs:
   build:
