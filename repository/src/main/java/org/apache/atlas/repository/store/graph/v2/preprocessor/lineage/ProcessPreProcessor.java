@@ -33,8 +33,8 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_CO
 import static org.apache.atlas.repository.util.AtlasEntityUtils.getStringAttribute;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
-public class LineagePreProcessor implements PreProcessor {
-    private static final Logger LOG = LoggerFactory.getLogger(LineagePreProcessor.class);
+public class ProcessPreProcessor implements PreProcessor {
+    private static final Logger LOG = LoggerFactory.getLogger(ProcessPreProcessor.class);
     private static final List<String> FETCH_ENTITY_ATTRIBUTES = Arrays.asList(ATTR_POLICY_CONNECTION_QN);
     private static final String HAS_LINEAGE = "__hasLineage";
 
@@ -43,7 +43,7 @@ public class LineagePreProcessor implements PreProcessor {
     private final AtlasEntityStore entityStore;
     private final EntityDiscoveryService discovery;
 
-    public LineagePreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, AtlasEntityStore entityStore) {
+    public ProcessPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, AtlasEntityStore entityStore) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
         this.entityStore = entityStore;

@@ -58,7 +58,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEnt
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.LineagePreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.ProcessPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
@@ -2079,7 +2079,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             case PROCESS_ENTITY_TYPE:
                 if(isConnectionLineageEnabled){
-                    preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
+                    preProcessors.add(new ProcessPreProcessor(typeRegistry, entityRetriever, graph, this));
                 }
         }
 
