@@ -1198,10 +1198,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             return vertexIndexName;
         }
 
-        if (params.getEnableFullRestriction()) {
-            return vertexIndexName;
-        }
-
         String qualifiedName = "";
         if (StringUtils.isNotEmpty(params.getPersona())) {
             qualifiedName = params.getPersona();
