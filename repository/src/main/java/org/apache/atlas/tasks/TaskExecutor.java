@@ -109,7 +109,7 @@ public class TaskExecutor {
 
         @Override
         public void run() {
-            AtlasVertex taskVertex = null;
+//            AtlasVertex taskVertex = null;
             int         attemptCount;
 
             try {
@@ -120,46 +120,46 @@ public class TaskExecutor {
                 }
 
                 TASK_LOG.info("Task guid = "+task.getGuid());
-                taskVertex = registry.getVertex(task.getGuid());
-                if (taskVertex == null) {
-                    TASK_LOG.warn("Task not scheduled as vertex not found", task);
-                }
+//                taskVertex = registry.getVertex(task.getGuid());
+//                if (taskVertex == null) {
+//                    TASK_LOG.warn("Task not scheduled as vertex not found", task);
+//                }
+//
+//                if (task.getStatus() == AtlasTask.Status.COMPLETE) {
+//                    TASK_LOG.warn("Task not scheduled as status was COMPLETE!", task);
+//                }
+//
+//                if (perfEnabled) {
+//                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, String.format("atlas.task:%s", task.getGuid(), task.getType()));
+//                }
 
-                if (task.getStatus() == AtlasTask.Status.COMPLETE) {
-                    TASK_LOG.warn("Task not scheduled as status was COMPLETE!", task);
-                }
-
-                if (perfEnabled) {
-                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, String.format("atlas.task:%s", task.getGuid(), task.getType()));
-                }
-
-                statistics.increment(1);
-
-                attemptCount = task.getAttemptCount();
-
-                if (attemptCount >= MAX_ATTEMPT_COUNT) {
-                    TASK_LOG.warn("Max retry count for task exceeded! Skipping!", task);
-
-                    task.setStatus(AtlasTask.Status.FAILED);
-                    registry.updateStatus(taskVertex, task);
-
-                    return;
-                }
+//                statistics.increment(1);
+//
+//                attemptCount = task.getAttemptCount();
+//
+//                if (attemptCount >= MAX_ATTEMPT_COUNT) {
+//                    TASK_LOG.warn("Max retry count for task exceeded! Skipping!", task);
+//
+//                    task.setStatus(AtlasTask.Status.FAILED);
+//                    registry.updateStatus(taskVertex, task);
+//
+//                    return;
+//                }
 
                 LOG.info(String.format("Started performing task with guid: %s", task.getGuid()));
 
-                performTask(taskVertex, task);
+                performTask(task);
 
                 LOG.info(String.format("Finished task with guid: %s", task.getGuid()));
 
             } catch (InterruptedException exception) {
-                registry.updateStatus(taskVertex, task);
-                TASK_LOG.error("{}: {}: Interrupted!", task, exception);
+//                registry.updateStatus(taskVertex, task);
+//                TASK_LOG.error("{}: {}: Interrupted!", task, exception);
 
                 statistics.error();
             } catch (Exception exception) {
                 if (task != null) {
-                    registry.updateStatus(taskVertex, task);
+//                    registry.updateStatus(taskVertex, task);
 
                     TASK_LOG.error("Error executing task. Please perform the operation again!", task, exception);
                 } else {
@@ -180,7 +180,7 @@ public class TaskExecutor {
             }
         }
 
-        private void performTask(AtlasVertex taskVertex, AtlasTask task) throws Exception {
+        private void performTask(AtlasTask task) throws Exception {
             TaskFactory  factory      = taskTypeFactoryMap.get(task.getType());
             if (factory == null) {
                 LOG.error("taskTypeFactoryMap does not contain task of type: {}", task.getType());
@@ -189,11 +189,11 @@ public class TaskExecutor {
 
             AbstractTask runnableTask = factory.create(task);
 
-            registry.inProgress(taskVertex, task);
+//            registry.inProgress(taskVertex, task);
 
             runnableTask.run();
 
-            registry.complete(taskVertex, task);
+//            registry.complete(taskVertex, task);
 
             statistics.successPrint();
         }
