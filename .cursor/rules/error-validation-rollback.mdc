@@ -1,0 +1,121 @@
+---
+description: Error, validation and rollback management in the project
+globs: 
+alwaysApply: false
+---
+## 1. Centralized Error Code Management
+
+### Use AtlasErrorCode Enum for Standardized Error Definitions
+
+All error conditions should be defined using the centralized `AtlasErrorCode` enum which provides standardized error codes, HTTP status mappings, and formatted error messages.
+
+### Error Code Structure
+
+Error codes follow a structured format with HTTP status codes, unique identifiers, and parameterized messages.
+
+### Message Formatting
+
+Use parameterized error messages with `MessageFormat` for dynamic content.
+
+## 2. Exception Handling Architecture
+
+### Base Exception Class
+
+All custom exceptions should extend `AtlasBaseException` which provides error code integration, entity GUID tracking, and additional error details. 
+
+### Exception Construction Patterns
+
+Support multiple constructor patterns for different use cases including error codes with parameters, entity GUIDs, and error details maps.
+
+### Chained Exception Support
+
+Properly support exception chaining with cause tracking for debugging purposes.
+
+## 3. Input Validation and Error Reporting
+
+### Structured Validation Failures
+
+Use `ValidationFailureDetails` class for comprehensive validation error reporting with field-level granularity.
+
+### Validation Error Categories
+
+Categorize validation errors into missing values, semantic errors, and internal errors with appropriate error type identification.
+
+### Detailed Error Information
+
+Provide comprehensive error details including field names, sub-field names, error codes, and descriptive reasons.
+
+## 4. Transaction Management and Rollback
+
+### AOP-Based Transaction Management
+
+Use the `GraphTransactionInterceptor` pattern for automatic transaction management with proper commit and rollback handling.
+
+### Nested Transaction Handling
+
+Implement proper nested transaction support where inner transactions defer commit/rollback to outer transactions.
+
+### Exception-Based Rollback
+
+Automatically trigger rollback on exceptions while providing proper logging based on exception types.
+
+### Post-Transaction Hooks
+
+Support post-transaction hooks for cleanup operations and ensure they execute regardless of transaction success.
+
+## 5. REST API Error Response Handling
+
+### Structured Error Response Format
+
+Generate consistent JSON error responses with error codes, messages, entity GUIDs, and cause information.
+
+### HTTP Status Code Mapping
+
+Map internal error codes to appropriate HTTP status codes for proper REST API semantics.
+## 6. Error Logging and Debugging
+
+### Selective Error Logging
+
+Log exceptions selectively based on their severity, avoiding noise for expected exceptions like NOT_FOUND.
+
+### Structured Exception Information
+
+Provide structured exception information including error IDs, exception chains, and location details for debugging.
+
+### Stack Trace Location Tracking
+
+Extract and format location information from stack traces for better error diagnostics.
+
+## 7. Best Practices
+
+### Error Code Consistency
+
+- Use consistent error code formats across the application
+- Map HTTP status codes appropriately to error conditions
+- Provide parameterized messages for dynamic content
+
+### Exception Handling Strategy
+
+- Always extend `AtlasBaseException` for custom exceptions
+- Include relevant context information (entity GUIDs, field names)
+- Support exception chaining for root cause analysis
+
+### Validation Patterns
+
+- Use structured validation with detailed failure information
+- Categorize validation errors appropriately
+- Provide field-level granularity in error reporting
+
+### Transaction Management
+
+- Use AOP-based transaction interceptors
+- Handle nested transactions properly
+- Implement proper rollback mechanisms
+- Clean up resources in finally blocks
+
+### REST API Error Responses
+
+- Implement consistent exception mappers
+- Return structured JSON error responses
+- Map internal errors to appropriate HTTP status codes
+- Log exceptions selectively based on severity
