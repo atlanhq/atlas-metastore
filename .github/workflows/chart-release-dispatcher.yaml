@@ -14,7 +14,6 @@ on:
       - dq651
       - poctagprophashedrebased
       - idonlycanary
-      - idonlycanarybeta
     types:
       - completed
 
