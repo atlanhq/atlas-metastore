@@ -1338,6 +1338,23 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                             }
                         }
                     }
+
+                    // Handle business attributes
+                    Map<String, Map<String, AtlasBusinessMetadataType.AtlasBusinessAttribute>> businessAttributeS = type.getBusinessAttributes();
+                    if (MapUtils.isNotEmpty(businessAttributeS)) {
+                        for (Map.Entry<String, Map<String, AtlasBusinessMetadataType.AtlasBusinessAttribute>> entry : businessAttributeS.entrySet()) {
+                            String businessAttributeName = entry.getKey();
+                            for (Map.Entry<String, AtlasBusinessMetadataType.AtlasBusinessAttribute> attributeTypes : entry.getValue().entrySet()) {
+                                String attributeTypeName = attributeTypes.getKey();
+                                String fqAttributeName = businessAttributeName + "." + attributeTypeName;
+                                if (resultAttributes.contains(fqAttributeName)) {
+                                    Object attributeValue = vertex.getProperty(attributeTypeName);
+                                    header.setAttribute(fqAttributeName, attributeValue);
+                                }
+                            }
+                        }
+                    }
+
                     
                     // Store for later relation processing
                     vertexIdHeader.put(vertexId, header);
@@ -1463,23 +1480,23 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
         // Get unique attributes for object ID creation
         Map<String, AtlasAttribute> uniqueAttributes = type.getUniqAttributes();
-        
-        // Prepare projection keys in one go instead of adding them in multiple places
-        Set<String> projectionKeys = new HashSet<>(RequestContext.get().getRelationAttrsForSearch());
-        if (MapUtils.isNotEmpty(uniqueAttributes)) {
-            projectionKeys.addAll(uniqueAttributes.keySet());
-        }
 
         // Process based on type category
         switch (typeCategory) {
             case ARRAY:
                 // Preallocate the list based on number of vertices
-                List<Object> list = new ArrayList<>(vertexIDs.size());
+                List<AtlasObjectId> list = new ArrayList<>(vertexIDs.size());
                 for (String vertexID : vertexIDs) {
                     DynamicVertex dynamicVertex = vertexRelationsPropertiesMap.get(vertexID);
                     if (dynamicVertex != null) {
-                        Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
-                        list.add(filterMapByKeys(propertiesRetrieved, projectionKeys));
+                        AtlasObjectId atlasObjectId = new AtlasObjectId();
+                        atlasObjectId.setGuid(dynamicVertex.getProperty(GUID_PROPERTY_KEY, String.class));
+                        atlasObjectId.setTypeName(dynamicVertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class));
+                        atlasObjectId.setUniqueAttributes(
+                            filterMapByKeys(dynamicVertex.getAllProperties(), uniqueAttributes.keySet())
+                        );
+                        atlasObjectId.setAttributes(filterMapByKeys(dynamicVertex.getAllProperties(), RequestContext.get().getRelationAttrsForSearch()));
+                        list.add(atlasObjectId);
                     }
                 }
                 return list.isEmpty() ? null : list;
@@ -1499,17 +1516,16 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 }
 
                 Map<String, Object> propertiesRetrieved = dynamicVertex.getAllProperties();
-                Map<String, Object> filteredProperties = filterMapByKeys(propertiesRetrieved, projectionKeys);
                 
                 if (typeCategory == TypeCategory.STRUCT) {
                     // For struct, wrap in AtlasStruct
                     AtlasStruct struct = new AtlasStruct(typeName);
-                    struct.setAttributes(filteredProperties);
+                    struct.setAttributes(propertiesRetrieved);
                     return struct;
                 }
                 
                 // For MAP, return the filtered properties directly
-                return filteredProperties;
+                return propertiesRetrieved;
 
             case OBJECT_ID_TYPE:
                 // Handle object ID type
@@ -1547,7 +1563,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
                 }
                 
-                return new AtlasObjectId(guid, typeName, uniqueAttributesMap, 
+                return new AtlasObjectId(guid, dynamicVertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class), uniqueAttributesMap,
                                          filterMapByKeys(propertiesRetrieved, RequestContext.get().getRelationAttrsForSearch()));
 
             default:
