@@ -19,6 +19,7 @@
 
 package org.apache.atlas.plugin.audit;
 
+import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -141,6 +142,10 @@ public class RangerDefaultAuditHandler implements RangerAccessResultProcessor {
 			ret.setZoneName(result.getZoneName());
 			ret.setAgentHostname(restUtils.getAgentHostname());
 			ret.setPolicyVersion(result.getPolicyVersion());
+
+			if (request instanceof AtlasEntityAccessRequest entityAccessRequest && entityAccessRequest.getEntity() != null) {
+				ret.setEntityGuid(entityAccessRequest.getEntity().getGuid());
+			}
 
 			populateDefaults(ret);
 
