@@ -140,6 +140,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
             entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
             diffEntity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
             diffEntity.setAttribute(STATE_PROPERTY_KEY, entity.getAttribute(STATE_PROPERTY_KEY));
+            diffEntity.setStatus(AtlasEntity.Status.valueOf((String) entity.getAttribute(STATE_PROPERTY_KEY)));
         }
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
@@ -477,9 +478,9 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
                     }
                 }
 
-                if (hasLinkedAssets(productGuid, PRODUCT_GUIDS)) {
-                    throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "This product can't be deleted right now because it has linked assets that are in the process of being removed. Please try again shortly.");
-                }
+//                if (hasLinkedAssets(productGuid, PRODUCT_GUIDS)) {
+//                    throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "This product can't be deleted right now because it has linked assets that are in the process of being removed. Please try again shortly.");
+//                }
             }
             if(RequestContext.get().getDeleteType() == DeleteType.SOFT || RequestContext.get().getDeleteType() == DeleteType.DEFAULT){
                 vertex.setProperty(DAAP_STATUS_ATTR, DAAP_ARCHIVED_STATUS);
