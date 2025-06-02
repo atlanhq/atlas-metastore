@@ -228,6 +228,7 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
             try {
                 startTime        = recoveryInfoManagement.getStartTime();
                 Instant newStartTime = Instant.now();
+                this.graph.setEnableCache(false);
                 txRecoveryObject = this.graph.getManagementSystem().startIndexRecovery(startTime);
                 recoveryInfoManagement.updateStartTime(newStartTime.toEpochMilli());
 

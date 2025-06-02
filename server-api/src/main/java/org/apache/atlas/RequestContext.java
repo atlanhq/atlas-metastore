@@ -790,6 +790,10 @@ public class RequestContext {
         this.cacheEnabled = cacheEnabled;
     }
 
+    public boolean isCacheEnabled() {
+        return this.cacheEnabled;
+    }
+
     public boolean isIncludeClassificationNames() {
         return includeClassificationNames;
     }
