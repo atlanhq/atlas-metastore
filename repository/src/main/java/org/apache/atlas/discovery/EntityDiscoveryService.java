@@ -1338,6 +1338,23 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                             }
                         }
                     }
+
+                    // Handle business attributes
+                    Map<String, Map<String, AtlasBusinessMetadataType.AtlasBusinessAttribute>> businessAttributeS = type.getBusinessAttributes();
+                    if (MapUtils.isNotEmpty(businessAttributeS)) {
+                        for (Map.Entry<String, Map<String, AtlasBusinessMetadataType.AtlasBusinessAttribute>> entry : businessAttributeS.entrySet()) {
+                            String businessAttributeName = entry.getKey();
+                            for (Map.Entry<String, AtlasBusinessMetadataType.AtlasBusinessAttribute> attributeTypes : entry.getValue().entrySet()) {
+                                String attributeTypeName = attributeTypes.getKey();
+                                String fqAttributeName = businessAttributeName + "." + attributeTypeName;
+                                if (resultAttributes.contains(fqAttributeName)) {
+                                    Object attributeValue = vertex.getProperty(attributeTypeName);
+                                    header.setAttribute(fqAttributeName, attributeValue);
+                                }
+                            }
+                        }
+                    }
+
                     
                     // Store for later relation processing
                     vertexIdHeader.put(vertexId, header);
