@@ -21,6 +21,7 @@ package org.apache.atlas.audit.destination;
 
 import org.apache.atlas.audit.model.AuditEventBase;
 import org.apache.atlas.audit.model.AuthzAuditEvent;
+import org.apache.atlas.audit.model.ExternalAuditEvent;
 import org.apache.atlas.audit.provider.MiscUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,9 +35,11 @@ public class Log4JAuditDestination extends AuditDestination {
 			.getLogger(Log4JAuditDestination.class);
 
 	private static Logger auditLogger = null;
+	private static Logger auditLoggerExternal = null;
 
 	public static final String PROP_LOG4J_LOGGER = "logger";
 	public static final String DEFAULT_LOGGER_PREFIX = "ranger.audit";
+	public static final String EXTERNAL_LOGGER = "AUTH_AUDIT_EXTERNAL";
 	private String loggerName = null;
 	private static final String AUTH_AUDIT_USER = "reqUser";
 	private static final String AUTH_AUDIT_ACTION = "action";
@@ -66,6 +69,7 @@ public class Log4JAuditDestination extends AuditDestination {
 		}
 		logger.info("Logger name for " + getName() + " is " + loggerName);
 		auditLogger = LoggerFactory.getLogger(loggerName);
+		auditLoggerExternal = LoggerFactory.getLogger(EXTERNAL_LOGGER);
 		logger.info("Done initializing logger for audit. name=" + getName()
 				+ ", loggerName=" + loggerName);
 	}
@@ -89,9 +93,25 @@ public class Log4JAuditDestination extends AuditDestination {
 			recordLogAttributes(event);
 			String eventStr = MiscUtil.stringify(event);
 			logJSON(eventStr);
+			logExternalEvent(event);
 			clearLogAttributes(event);
 		}
 		return true;
+	}
+
+	private void logExternalEvent(AuditEventBase event) {
+		if (event instanceof AuthzAuditEvent authzEvent) {
+            ExternalAuditEvent externalEvent = new ExternalAuditEvent(authzEvent);
+			String eventStr = MiscUtil.stringify(externalEvent);
+			
+			if (authzEvent.getAccessResult() == 0) {
+				auditLoggerExternal.error(eventStr);
+			} else {
+				auditLoggerExternal.info(eventStr);
+			}
+		} else {
+			logger.warn("logExternalEvent() called with event of type: " + event.getClass().getName());
+		}
 	}
 
 	private void recordLogAttributes(AuditEventBase eventBase) {

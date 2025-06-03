@@ -183,12 +183,12 @@ class NewAtlasAuditHandler {
             ret.setAccessResult((short) (result.isAllowed() ? 1 : 0));
             ret.setAccessType(request.getAction().getType());
             ret.setClientIP(RequestContext.get().getClientIPAddress());
-            /*Set<String> tags = getTags(request);
-            if (tags != null) {
-                ret.setTags(tags);
-            }*/
             ret.setAgentHostname(MiscUtil.getHostname());
             ret.setAclEnforcer("abac_auth");
+
+            if (request instanceof AtlasEntityAccessRequest entityAccessRequest && entityAccessRequest.getEntity() != null) {
+                ret.setEntityGuid(entityAccessRequest.getEntity().getGuid());
+            }
 
             populateDefaults(ret);
 
