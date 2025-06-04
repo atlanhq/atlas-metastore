@@ -41,7 +41,6 @@ public class RequestContext {
     private static final Logger METRICS = LoggerFactory.getLogger("METRICS");
     private static final Logger LOG = LoggerFactory.getLogger(RequestContext.class);
 
-    public boolean NEW_FLOW = true;
 
     private static final ThreadLocal<RequestContext> CURRENT_CONTEXT = new ThreadLocal<>();
     private static final Set<RequestContext>         ACTIVE_REQUESTS = new HashSet<>();
@@ -53,6 +52,7 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
     private final Map<String, Object>                    restoreVertices      = new HashMap<>();
 
+    private boolean isIdOnlyGraphEnabled = false;
 
     private       Map<String, String>                    lexoRankCache        = null;
     private final Map<String, AtlasEntity>               entityCache          = new HashMap<>();
@@ -196,6 +196,7 @@ public class RequestContext {
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
+        this.isIdOnlyGraphEnabled = false;
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -466,6 +467,14 @@ public class RequestContext {
 
     public void setDelayTagNotifications(boolean delayTagNotifications) {
         this.delayTagNotifications = delayTagNotifications;
+    }
+
+    public boolean isIdOnlyGraphEnabled() {
+        return isIdOnlyGraphEnabled;
+    }
+
+    public void setIdOnlyGraphEnabled(boolean idOnlyGraphEnabled) {
+        isIdOnlyGraphEnabled = idOnlyGraphEnabled;
     }
 
     public Map<AtlasClassification, Collection<Object>> getDeletedClassificationAndVertices() {

@@ -1233,7 +1233,7 @@ public class EntityGraphMapper {
                     return mapPrimitiveValue(ctx, context);
 
                 case STRUCT: {
-                    if (RequestContext.get().NEW_FLOW) {
+                    if (RequestContext.get().isIdOnlyGraphEnabled()) {
                         return mapToVertexByTypeCategoryForStructV2(ctx);
                     } else {
                         return mapToVertexByTypeCategoryForStruct(ctx, context);
@@ -2795,7 +2795,7 @@ public class EntityGraphMapper {
             return ctx.getValue();
 
         case STRUCT:
-            if (RequestContext.get().NEW_FLOW) {
+            if (RequestContext.get().isIdOnlyGraphEnabled()) {
                 //return ctx.getValue();
                 return mapToVertexByTypeCategoryForStructV2(ctx);
             } else {
@@ -3227,7 +3227,7 @@ public class EntityGraphMapper {
 
         if (!isReference(elementType) || isSoftReference) {
             if (isArrayOfPrimitiveType || isArrayOfEnum || isArrayOfStruct) {
-                if (RequestContext.get().NEW_FLOW) {
+                if (RequestContext.get().isIdOnlyGraphEnabled()) {
                     AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
 
                 } else {
