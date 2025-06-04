@@ -41,11 +41,11 @@ public class FeatureFlagStore {
         }
     }
 
-    public static void setFlag(String key, String value) {
+    public static String setFlag(String key, String value) {
         if (StringUtils.isEmpty(key) || StringUtils.isEmpty(value))
-            return;
+            return null;
 
-        redisService.putValue(addFeatureFlagNamespace(key), value);
+        return redisService.putValue(addFeatureFlagNamespace(key), value);
     }
 
     public static void deleteFlag(String key) {
