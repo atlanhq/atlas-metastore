@@ -1908,7 +1908,7 @@ public class EntityGraphRetriever {
                     break;
                 case STRUCT:
                     AtlasPerfMetrics.MetricRecorder recorder2 = RequestContext.get().startMetricRecord("mapVertexToAttribute.STRUCT");
-                    if (RequestContext.get().NEW_FLOW) {
+                    if (RequestContext.get().isIdOnlyGraphEnabled()) {
                         Object val = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, attribute.getVertexPropertyName(), Object.class);
                         if (val instanceof String) {
                             ret = mapStringToStruct(attrType, (String) val);
@@ -2165,7 +2165,7 @@ public class EntityGraphRetriever {
                 break;
 
             case MAP:
-                if (RequestContext.get().NEW_FLOW && value instanceof String) { // For indexsearch & diff & constructHeader (probably all reads)
+                if (RequestContext.get().isIdOnlyGraphEnabled() && value instanceof String) { // For indexsearch & diff & constructHeader (probably all reads)
                     return AtlasType.fromJson((String) value, Map.class);
                 } else {
                     ret = value;
@@ -2176,7 +2176,7 @@ public class EntityGraphRetriever {
                 break;
 
             case STRUCT:
-                if (RequestContext.get().NEW_FLOW) {
+                if (RequestContext.get().isIdOnlyGraphEnabled()) {
                     ret = value instanceof String ? mapStringToStruct(atlasType, (String) value) : value;
                 } else {
                     ret = mapVertexToStruct(entityVertex, edgeLabel, (AtlasEdge) value, entityExtInfo, isMinExtInfo);

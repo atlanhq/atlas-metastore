@@ -367,7 +367,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     private void commitIdOnly(AtlasTypeRegistry typeRegistry) {
-        if (RequestContext.get().NEW_FLOW) {
+        if (RequestContext.get().isIdOnlyGraphEnabled()) {
 
             try {
                 AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertVertices");
