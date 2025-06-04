@@ -45,16 +45,6 @@ public class DynamicVertex {
     }
 
     /**
-     * Gets a property value by its key.
-     *
-     * @param key The property key
-     * @return The property value, or null if not found
-     */
-    public Object getProperty(String key) {
-        return properties.get(key);
-    }
-
-    /**
      * Gets a property value as a specific type.
      *
      * @param key   The property key
