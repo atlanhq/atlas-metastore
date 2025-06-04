@@ -250,7 +250,7 @@ public class AtlasAuthorizationUtils {
                     // log final result audit
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
                     try {
-                        auditHandler.processResult(finalResult, request);
+                        auditHandler.processResult(finalResult, request, NewAtlasAuditHandler.ENFORCER_COMBINED);
                     } finally {
                         auditHandler.flushAudit();
                     }
