@@ -10,9 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.math.BigInteger;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,6 +34,7 @@ class JacksonVertexSerializer implements VertexSerializer {
         SimpleModule module = new SimpleModule();
         module.addDeserializer(DynamicVertex.class, deserializer);
         module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
+        module.addSerializer(String.class, new StringSerializer());
         this.objectMapper.registerModule(module);
     }
 
