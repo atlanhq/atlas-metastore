@@ -88,6 +88,7 @@ import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.getAllTagNames;
 import static org.apache.atlas.repository.graph.GraphHelper.parseLabelsString;
+import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.DISPLAY_NAME;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.BASIC_SEARCH_STATE_FILTER;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.TO_RANGE_LIST;
 
@@ -1320,7 +1321,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     }
                     
                     header.setUpdatedBy(vertex.getProperty(MODIFIED_BY_KEY, String.class));
-                    header.setDisplayText(vertex.getProperty(TYPE_DISPLAYNAME_PROPERTY_KEY, String.class));
+                    header.setDisplayText(getDisplayText(vertex, type).toString());
                     header.setLabels(parseLabelsString(vertex.getProperty(LABELS_PROPERTY_KEY, String.class)));
                     
                     // Set incomplete flag
@@ -1487,6 +1488,32 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+
+    private Object getDisplayText(DynamicVertex dynamicVertex, AtlasEntityType entityType) throws AtlasBaseException {
+        Object ret =  dynamicVertex.getProperty(TYPE_DISPLAYNAME_PROPERTY_KEY, String.class);
+
+        if (entityType != null && ret == null) {
+            String displayTextAttribute = entityType.getDisplayTextAttribute();
+
+            if (displayTextAttribute != null) {
+                ret = dynamicVertex.getProperty(displayTextAttribute, String.class);
+            }
+
+            if (ret == null) {
+                ret = dynamicVertex.getProperty(NAME, String.class);
+
+                if (ret == null) {
+                    ret = dynamicVertex.getProperty(DISPLAY_NAME, String.class);
+
+                    if (ret == null) {
+                        ret = dynamicVertex.getProperty(QUALIFIED_NAME, String.class);
+                    }
+                }
+            }
+        }
+        return ret;
     }
 
     private Object mapAttributesFromCassandra(String attributeName, String typeName, Set<String> vertexIDs, Map<String, DynamicVertex> vertexRelationsPropertiesMap) throws AtlasBaseException {
