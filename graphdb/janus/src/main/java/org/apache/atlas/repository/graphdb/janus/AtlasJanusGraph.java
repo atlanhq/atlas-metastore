@@ -100,6 +100,8 @@ import javax.script.ScriptException;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.HashMap;
@@ -123,6 +125,9 @@ import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDataba
 import static org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase.getGraphInstance;
 import static org.apache.atlas.type.Constants.STATE_PROPERTY_KEY;
 
+import com.orztip.sonyflake.IdGenerator;
+import com.orztip.sonyflake.IdGeneratorProperties;
+
 /**
  * Janus implementation of AtlasGraph.
  */
@@ -145,6 +150,22 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     private String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
     private final CqlSession cqlSession;
     private final DynamicVertexService dynamicVertexService;
+
+    // Sonyflake-based distributed ID generator
+    private static final IdGenerator SONYFLAKE_ID_GENERATOR;
+    static {
+        IdGeneratorProperties props = new IdGeneratorProperties();
+        // Set machineId based on hostname hash (or customize as needed)
+        try {
+            String hostname = InetAddress.getLocalHost().getHostName();
+            long machineId = Math.abs(hostname.hashCode()) % 65536; // 16 bits
+            props.setMachineId(machineId);
+        } catch (UnknownHostException e) {
+            // fallback to random machineId
+            props.setMachineId((long) (Math.random() * 65536));
+        }
+        SONYFLAKE_ID_GENERATOR = new IdGenerator(props);
+    }
 
     public DynamicVertexService getDynamicVertexRetrievalService() {
         return dynamicVertexService;
@@ -310,17 +331,10 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
-        Vertex result = getGraph().addVertex(T.id, generateRandomNormalVertexId());
-
+        long id = SONYFLAKE_ID_GENERATOR.nextId();
+        id = id - (id % 8); // Ensure id is divisible by 8 for JanusGraph
+        Vertex result = getGraph().addVertex(T.id, id);
         return GraphDbObjectFactory.createVertex(this, result);
-    }
-
-    public static long generateRandomNormalVertexId() {
-        long id;
-        do {
-            id = ThreadLocalRandom.current().nextLong(10000, 999999998);
-        } while (id % 8 != 0); // ensure it's a NormalVertex ID (divisible by 8)
-        return id;
     }
 
     @Override
