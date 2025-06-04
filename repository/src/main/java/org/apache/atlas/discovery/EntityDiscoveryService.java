@@ -66,6 +66,7 @@ import org.apache.commons.collections4.IteratorUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
+import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 
@@ -1176,22 +1177,24 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
     }
 
-    private Map<String, Object> filterMapByKeys(Map<String, Object> originalMap, Set<String> resultAttributes) {
-        if (originalMap == null || originalMap.isEmpty() || resultAttributes == null || resultAttributes.isEmpty()) {
+    private Map<String, Object> filterMapByKeys(AtlasEntityType entityType, DynamicVertex vertex, Set<String> resultAttributes) {
+        if (vertex.getAllProperties() == null || vertex.getAllProperties().isEmpty() || resultAttributes == null || resultAttributes.isEmpty()) {
             return Collections.emptyMap();
         }
-        
+
         // Estimate capacity to avoid resize operations
-        Map<String, Object> filteredMap = new HashMap<>((int)(originalMap.size() * 0.75));
-        
-        for (Map.Entry<String, Object> entry : originalMap.entrySet()) {
-            String key = entry.getKey();
+        Map<String, Object> filteredMap = new HashMap<>((int) (vertex.getAllProperties().size() * 0.75));
+
+        for (Map.Entry<String, Object> entry : vertex.getAllProperties().entrySet()) {
+            String attributeName = entry.getKey();
+            Map<String, AtlasAttribute> allAttributes = entityType.getAllAttributes();
+            AtlasAttribute atlasAttribute = allAttributes.get(attributeName);
+            Class<?> clazz = atlasAttribute.getAttributeDef().getClass();
             // Check if the key exists directly or with "__" prefix
-            if (resultAttributes.contains(key) || resultAttributes.contains("__" + key)) {
-                filteredMap.put(key, entry.getValue());
+            if (resultAttributes.contains(attributeName) || resultAttributes.contains("__" + attributeName)) {
+                filteredMap.put(attributeName, vertex.getProperty(attributeName, clazz));
             }
         }
-        
         return filteredMap;
     }
 
@@ -1297,7 +1300,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                         header.setStatus(AtlasEntity.Status.ACTIVE);
                     }
 
-                    Map<String, Object> propertiesRetrieved = vertex.getAllProperties();
                     Set<String> allRequiredAttrs = new HashSet<>();
                     if (type != null) {
                         allRequiredAttrs.addAll(type.getHeaderAttributes().keySet());
@@ -1305,7 +1307,9 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     allRequiredAttrs.addAll(resultAttributes);
 
                     // includes primitives, structs, meanings and enums
-                    header.setAttributes(filterMapByKeys(propertiesRetrieved, allRequiredAttrs));
+                    header.setAttributes(filterMapByKeys(type, vertex, allRequiredAttrs));
+
+
                     
                     // Handle classifications if needed
                     // this is additional cassandra call per asset in a batch
@@ -1346,9 +1350,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                             String businessAttributeName = entry.getKey();
                             for (Map.Entry<String, AtlasBusinessMetadataType.AtlasBusinessAttribute> attributeTypes : entry.getValue().entrySet()) {
                                 String attributeTypeName = attributeTypes.getKey();
+                                Class<?> tClass= attributeTypes.getValue().getAttributeDef().getClass();
                                 String fqAttributeName = businessAttributeName + "." + attributeTypeName;
                                 if (resultAttributes.contains(fqAttributeName)) {
-                                    Object attributeValue = vertex.getProperty(attributeTypeName);
+                                    Object attributeValue = vertex.getProperty(attributeTypeName, tClass);
                                     header.setAttribute(fqAttributeName, attributeValue);
                                 }
                             }
@@ -1492,10 +1497,11 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                         AtlasObjectId atlasObjectId = new AtlasObjectId();
                         atlasObjectId.setGuid(dynamicVertex.getProperty(GUID_PROPERTY_KEY, String.class));
                         atlasObjectId.setTypeName(dynamicVertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class));
+                        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(atlasObjectId.getTypeName());
                         atlasObjectId.setUniqueAttributes(
-                            filterMapByKeys(dynamicVertex.getAllProperties(), uniqueAttributes.keySet())
+                            filterMapByKeys(entityType, dynamicVertex, uniqueAttributes.keySet())
                         );
-                        atlasObjectId.setAttributes(filterMapByKeys(dynamicVertex.getAllProperties(), RequestContext.get().getRelationAttrsForSearch()));
+                        atlasObjectId.setAttributes(filterMapByKeys(entityType, dynamicVertex, RequestContext.get().getRelationAttrsForSearch()));
                         list.add(atlasObjectId);
                     }
                 }
@@ -1540,14 +1546,16 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                     return null;
                 }
 
-                propertiesRetrieved = dynamicVertex.getAllProperties();
                 
                 // Get GUID directly without null checks since it's a critical property
-                Object guidObj = propertiesRetrieved.get(GUID_PROPERTY_KEY);
+                Object guidObj = dynamicVertex.getProperty(GUID_PROPERTY_KEY, String.class);
                 if (guidObj == null) {
                     LOG.warn("No GUID found for vertex ID {}", vertexId);
                     return null;
                 }
+
+                String relationTypeName= dynamicVertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class);
+                AtlasEntityType relationType = typeRegistry.getEntityTypeByName(relationTypeName);
                 
                 String guid = guidObj.toString();
                 
@@ -1556,15 +1564,16 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 if (MapUtils.isNotEmpty(uniqueAttributes)) {
                     for (AtlasAttribute attribute : uniqueAttributes.values()) {
                         String attrName = attribute.getName();
-                        Object attrValue = propertiesRetrieved.get(attrName);
+                        Class<?> clazz = attribute.getAttributeDef().getClass();
+                        Object attrValue = dynamicVertex.getProperty(attributeName, clazz);
                         if (attrValue != null) {
                             uniqueAttributesMap.put(attrName, attrValue);
                         }
                     }
                 }
                 
-                return new AtlasObjectId(guid, dynamicVertex.getProperty(ENTITY_TYPE_PROPERTY_KEY, String.class), uniqueAttributesMap,
-                                         filterMapByKeys(propertiesRetrieved, RequestContext.get().getRelationAttrsForSearch()));
+                return new AtlasObjectId(guid, relationTypeName, uniqueAttributesMap,
+                                         filterMapByKeys(relationType, dynamicVertex, RequestContext.get().getRelationAttrsForSearch()));
 
             default:
                 LOG.warn("Unsupported type category {} for attribute {}/{}", typeCategory, typeName, attributeName);
