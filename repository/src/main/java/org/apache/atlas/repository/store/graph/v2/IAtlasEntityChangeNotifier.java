@@ -39,9 +39,18 @@ public interface IAtlasEntityChangeNotifier {
 
     void onClassificationsAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline) throws AtlasBaseException;
 
+    void onClassificationPropagationAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline) throws AtlasBaseException;
+
+    void onClassificationUpdatedToEntitiesV2(List<AtlasEntity> entities, AtlasClassification updatedClassification, boolean forceInline) throws AtlasBaseException;
+
     void onClassificationDeletedFromEntity(AtlasEntity entity, List<AtlasClassification> deletedClassifications) throws AtlasBaseException;
 
     void onClassificationsDeletedFromEntities(List<AtlasEntity> entities, List<AtlasClassification> deletedClassifications) throws AtlasBaseException;
+    void onClassificationDeletedFromEntities(List<AtlasEntity> entities, AtlasClassification deletedClassification) throws AtlasBaseException;
+
+    void onClassificationPropagationDeleted(List<AtlasEntity> entities, AtlasClassification deletedClassification, boolean forceInline) throws AtlasBaseException;
+
+    void onClassificationPropagationDeleted(AtlasEntity entity, List<AtlasClassification> deletedClassifications, boolean forceInline) throws AtlasBaseException;
 
     void onTermAddedToEntities(AtlasGlossaryTerm term, List<AtlasRelatedObjectId> entityIds) throws AtlasBaseException;
 
@@ -52,6 +61,10 @@ public interface IAtlasEntityChangeNotifier {
     void notifyPropagatedEntities() throws AtlasBaseException;
 
     void onClassificationUpdatedToEntity(AtlasEntity entity, List<AtlasClassification> updatedClassifications) throws AtlasBaseException;
+
+    void onClassificationUpdatedToEntity(AtlasEntity entity, List<AtlasClassification> updatedClassifications, boolean forceInline) throws AtlasBaseException;
+
+    void onClassificationUpdatedToEntities(List<AtlasEntity> entities, AtlasClassification updatedClassification) throws AtlasBaseException;
 
     void onBusinessAttributesUpdated(String entityGuid, Map<String, Map<String, Object>> updatedBusinessAttributes) throws AtlasBaseException;
 }
