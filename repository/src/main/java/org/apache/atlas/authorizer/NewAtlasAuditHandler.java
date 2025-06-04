@@ -34,6 +34,9 @@ class NewAtlasAuditHandler {
     private final String                       resourceType;
     private         long                       sequenceNumber = 0;
 
+    public static final String ENFORCER_ABAC     = "abac_auth";
+    public static final String ENFORCER_COMBINED = "combined";
+
     public NewAtlasAuditHandler(AtlasEntityAccessRequest request, RangerServiceDef serviceDef) {
         Collection<AtlasClassification> classifications    = request.getEntityClassifications();
         String             strClassifications = classifications == null ? "[]" : classifications.toString();
@@ -99,7 +102,7 @@ class NewAtlasAuditHandler {
         resourcePath = rangerResource.getAsString();
     }
 
-    public void processResult(AtlasAccessResult result, AtlasAccessRequest request) {
+    public void processResult(AtlasAccessResult result, AtlasAccessRequest request, String enforcer) {
 
         AuthzAuditEvent auditEvent = getAuthzEvents(result, request);
 
@@ -116,6 +119,8 @@ class NewAtlasAuditHandler {
             if (StringUtils.isNotEmpty(result.getPolicyId())) {
                 auditEvent.setPolicyId(result.getPolicyId());
             }
+
+            auditEvent.setAclEnforcer(enforcer);
 
             auditEvents.put(auditEvent.getPolicyId() + auditEvent.getAccessType(), auditEvent);
         }

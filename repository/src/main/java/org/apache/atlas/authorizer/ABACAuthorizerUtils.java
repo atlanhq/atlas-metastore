@@ -93,7 +93,7 @@ public class ABACAuthorizerUtils {
 
         try {
             result = EntityAuthorizer.isAccessAllowedInMemory(entity, action.getType());
-            auditHandler.processResult(result, request);
+            auditHandler.processResult(result, request, NewAtlasAuditHandler.ENFORCER_ABAC);
         } finally {
             auditHandler.flushAudit();
             RequestContext.get().endMetricRecord(recorder);
@@ -115,7 +115,7 @@ public class ABACAuthorizerUtils {
 
         try {
             result = RelationshipAuthorizer.isAccessAllowedInMemory(action.getType(), relationshipType, endOneEntity, endTwoEntity);
-            auditHandler.processResult(result, request);
+            auditHandler.processResult(result, request, NewAtlasAuditHandler.ENFORCER_ABAC);
         } catch (AtlasBaseException e) {
             LOG.error(e.getMessage());
         } finally {
