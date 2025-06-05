@@ -1779,6 +1779,27 @@ public abstract class DeleteHandlerV1 {
         }
     }
 
+
+    private List<AtlasEntityHeader> fetchEntitiesUsingIndexSearch(String typeName, String attributeName, String guid) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("findProductsWithPortGuid");
+        try {
+            List<Map<String, Object>> mustClauses = new ArrayList<>();
+            mustClauses.add(mapOf("term", mapOf("__typeName.keyword", typeName)));
+            mustClauses.add(mapOf("term", mapOf(attributeName, guid)));
+
+            Map<String, Object> bool = new HashMap<>();
+            bool.put("must", mustClauses);
+
+            Map<String, Object> dsl = mapOf("query", mapOf("bool", bool));
+
+            return indexSearchPaginated(dsl, null, discovery);
+
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+}
+
+
     private boolean isAssetType(AtlasVertex vertex) {
         String typeName = GraphHelper.getTypeName(vertex);
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
