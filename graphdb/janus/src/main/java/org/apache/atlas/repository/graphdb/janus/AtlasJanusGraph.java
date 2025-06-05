@@ -90,6 +90,7 @@ import org.janusgraph.core.schema.JanusGraphManagement;
 import org.janusgraph.core.schema.Parameter;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.graphdb.database.StandardJanusGraph;
+import org.janusgraph.graphdb.idmanagement.IDManager;
 import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -99,6 +100,7 @@ import javax.script.ScriptEngine;
 import javax.script.ScriptException;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -111,7 +113,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.INDEX_SEARCH_FAILED;
@@ -127,6 +128,7 @@ import static org.apache.atlas.type.Constants.STATE_PROPERTY_KEY;
 
 import com.orztip.sonyflake.IdGenerator;
 import com.orztip.sonyflake.IdGeneratorProperties;
+import org.apache.atlas.ApplicationProperties;
 
 /**
  * Janus implementation of AtlasGraph.
@@ -331,8 +333,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
+        long divisor = getVertexIdDivisor();
         long id = SONYFLAKE_ID_GENERATOR.nextId();
-        id = id - (id % 8); // Ensure id is divisible by 8 for JanusGraph
+        id = id - (id % divisor); // Ensure id is divisible by the correct divisor
         Vertex result = getGraph().addVertex(T.id, id);
         return GraphDbObjectFactory.createVertex(this, result);
     }
@@ -913,5 +916,26 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     public Boolean isCacheEnabled() {
         return this.janusGraph.isCacheEnabled();
+    }
+
+    private long getVertexIdDivisor() {
+        try {
+            Object numPartitionsObj = getGraph().configuration().getProperty("ids.num-partitions");
+            int numPartitions;
+            if (numPartitionsObj instanceof Integer) {
+                numPartitions = (Integer) numPartitionsObj;
+            } else if (numPartitionsObj instanceof String) {
+                numPartitions = Integer.parseInt((String) numPartitionsObj);
+            } else if (numPartitionsObj != null) {
+                numPartitions = Integer.parseInt(numPartitionsObj.toString());
+            } else {
+                numPartitions = 32; // fallback default
+            }
+            int partitionBits = Integer.numberOfTrailingZeros(numPartitions);
+            return 1L << partitionBits;
+        } catch (Exception e) {
+            // fallback to default divisor
+            return 32L;
+        }
     }
 }
