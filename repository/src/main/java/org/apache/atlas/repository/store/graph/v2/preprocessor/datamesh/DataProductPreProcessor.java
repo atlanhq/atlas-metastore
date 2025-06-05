@@ -139,8 +139,6 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         if(entity.hasAttribute(STATE_PROPERTY_KEY) && !state.equals(entity.getAttribute(STATE_PROPERTY_KEY))){
             entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
             diffEntity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
-            diffEntity.setAttribute(STATE_PROPERTY_KEY, entity.getAttribute(STATE_PROPERTY_KEY));
-            diffEntity.setStatus(AtlasEntity.Status.valueOf((String) entity.getAttribute(STATE_PROPERTY_KEY)));
         }
 
         String vertexQnName = vertex.getProperty(QUALIFIED_NAME, String.class);
