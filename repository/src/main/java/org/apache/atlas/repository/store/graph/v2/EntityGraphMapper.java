@@ -2646,6 +2646,7 @@ public class EntityGraphMapper {
      * @param deletedElements
      *
      * Notes : This case exists when user requests to add a meaning to multiple assets at a time.
+     * TODO: Term.relationshipAttributes.assignedEntities case is not handled
      *
      */
     private void addMeaningsToEntityRelations(AttributeMutationContext ctx, List<Object> createdElements, List<AtlasEdge> deletedElements) {
