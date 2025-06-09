@@ -197,6 +197,9 @@ public class RequestContext {
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
         this.isIdOnlyGraphEnabled = false;
+        this.verticesToSoftDelete.clear();
+        this.verticesToHardDelete.clear();
+
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
