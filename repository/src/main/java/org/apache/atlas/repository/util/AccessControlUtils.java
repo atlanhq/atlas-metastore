@@ -131,6 +131,11 @@ public final class AccessControlUtils {
     public static final String INSTANCE_DOMAIN_KEY = "instance";
 
     public static final String POLICY_SERVICE_NAME_ABAC  = "atlas_abac";
+    public static final String POLICY_SERVICE_NAME_ATLAS  = "atlas";
+
+    public static final String POLICY_FILTER_CRITERIA_ENTITY = "entity";
+    public static final String POLICY_FILTER_CRITERIA_END1 = "endOneEntity";
+    public static final String POLICY_FILTER_CRITERIA_END2 = "endTwoEntity";
 
     private AccessControlUtils() {}
 
