@@ -20,8 +20,10 @@ package org.apache.atlas.web.filters;
 
 import org.apache.atlas.*;
 import org.apache.atlas.authorize.AtlasAuthorizationUtils;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.service.metrics.MetricsRegistry;
+import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.util.AtlasRepositoryConfiguration;
 import org.apache.atlas.web.util.DateTimeHelper;
 import org.apache.atlas.web.util.Servlets;
@@ -106,15 +108,15 @@ public class AuditFilter implements Filter {
             requestContext.setSkipFailedEntities(skipFailedEntities);
             requestContext.setClientOrigin(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN));
             requestContext.setMetricRegistry(metricsRegistry);
+
+            requestContext.setIdOnlyGraphEnabled(Boolean.parseBoolean(
+                    FeatureFlagStore.getFlag(FeatureFlagStore.FEATURE_FLAG_ID_ONLY_GRAPH_ENABLED)
+            ));
+
             MDC.put(TRACE_ID, internalRequestId);
             MDC.put(X_ATLAN_CLIENT_ORIGIN, ofNullable(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN)).orElse(EMPTY));
             MDC.put(X_ATLAN_REQUEST_ID, ofNullable(httpRequest.getHeader(X_ATLAN_REQUEST_ID)).orElse(EMPTY));
 
-            if (httpRequest.getParameter("_new") == null) {
-                requestContext.NEW_FLOW = true;
-            } else {
-                requestContext.NEW_FLOW = Boolean.parseBoolean(httpRequest.getParameter("_new"));
-            }
 
             if (StringUtils.isNotEmpty(deleteType)) {
                 if (deleteTypeOverrideEnabled) {
