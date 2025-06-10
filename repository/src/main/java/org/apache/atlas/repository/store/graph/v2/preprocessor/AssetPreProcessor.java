@@ -52,7 +52,11 @@ public class AssetPreProcessor implements PreProcessor {
         this.retrieverNoRelation = new EntityGraphRetriever(graph, typeRegistry, true);
 
         try {
+<<<<<<< HEAD
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+=======
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+>>>>>>> b389f08a0 (mesh-407: shifted logic to preprocessor)
         } catch (AtlasException e) {
             e.printStackTrace();
         }
@@ -183,9 +187,17 @@ public class AssetPreProcessor implements PreProcessor {
                         int currentAttributeRefcount = 0;
 
                         try {
+<<<<<<< HEAD
                             List<AtlasVertex> entityVertices = fetchEntityVerticesUsingIndexSearch(entityType, attributeName, guid);
 
                             for (AtlasVertex entityVertex: entityVertices) {
+=======
+                            List<AtlasEntityHeader> entities = fetchEntitiesUsingIndexSearch(entityType, attributeName, guid);
+
+                            for (AtlasEntityHeader entity: entities) {
+                                String entityGuid = entity.getGuid();
+                                AtlasVertex entityVertex = entityRetriever.getEntityVertex(entityGuid);
+>>>>>>> b389f08a0 (mesh-407: shifted logic to preprocessor)
 
                                 AtlasGraphUtilsV2.removeItemFromListPropertyValue(
                                         entityVertex,
@@ -223,7 +235,11 @@ public class AssetPreProcessor implements PreProcessor {
         }
     }
 
+<<<<<<< HEAD
     private List<AtlasVertex> fetchEntityVerticesUsingIndexSearch(String typeName, String attributeName, String guid) throws AtlasBaseException {
+=======
+    private List<AtlasEntityHeader> fetchEntitiesUsingIndexSearch(String typeName, String attributeName, String guid) throws AtlasBaseException {
+>>>>>>> b389f08a0 (mesh-407: shifted logic to preprocessor)
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("findProductsWithPortGuid");
         try {
             List<Map<String, Object>> mustClauses = new ArrayList<>();
@@ -235,7 +251,11 @@ public class AssetPreProcessor implements PreProcessor {
 
             Map<String, Object> dsl = mapOf("query", mapOf("bool", bool));
 
+<<<<<<< HEAD
             return retrieveVerticesFromIndexSearchPaginated(dsl, null, discovery);
+=======
+            return indexSearchPaginated(dsl, null, discovery);
+>>>>>>> b389f08a0 (mesh-407: shifted logic to preprocessor)
 
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
@@ -244,10 +264,13 @@ public class AssetPreProcessor implements PreProcessor {
 
     private boolean isAssetType(AtlasVertex vertex) {
         String typeName = GraphHelper.getTypeName(vertex);
+<<<<<<< HEAD
         if (excludedTypes.contains(typeName)) {
             return false;
         }
 
+=======
+>>>>>>> b389f08a0 (mesh-407: shifted logic to preprocessor)
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
         return entityType != null && entityType.getTypeAndAllSuperTypes().contains("Asset");
