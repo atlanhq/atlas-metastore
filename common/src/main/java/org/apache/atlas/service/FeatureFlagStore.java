@@ -10,6 +10,8 @@ import javax.inject.Inject;
 public class FeatureFlagStore {
     private static RedisService redisService = null;
 
+    public static final String FEATURE_FLAG_ID_ONLY_GRAPH_ENABLED = "idOnlyGraphFeatureEnabled";
+
     @Inject
     public FeatureFlagStore(RedisService redisService) {
         FeatureFlagStore.redisService = redisService;

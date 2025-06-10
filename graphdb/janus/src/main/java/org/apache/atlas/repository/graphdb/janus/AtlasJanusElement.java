@@ -85,7 +85,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 return null;
             }
 
-            if (RequestContext.get().NEW_FLOW && isVertex()) {
+            if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
                 AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("AtlasJanusElement.getProperty.newFlow");
                 AtlasJanusVertex vertex = (AtlasJanusVertex) this;
                 // TODO: Still treating graph read as fallback as not sure how to differentiate assetVertex VS typeDef vertex (any other type of vertex)
@@ -145,7 +145,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public Set<String> getPropertyKeys() {
-        if (RequestContext.get().NEW_FLOW && isVertex()) {
+        if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             return vertex.getDynamicVertex().getPropertyKeys();
         } else {
@@ -155,7 +155,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void removeProperty(String propertyName) {
-        if (RequestContext.get().NEW_FLOW && isVertex()) {
+        if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             vertex.getDynamicVertex().removeProperty(propertyName);
             return;
@@ -207,7 +207,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                     removeProperty(propertyName);
                 }
             } else {
-                if (RequestContext.get().NEW_FLOW && isVertex() && !propertyName.equals("__type")) {
+                if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex() && !propertyName.equals("__type")) {
                     AtlasJanusVertex vertex = (AtlasJanusVertex) this;
                     vertex.getDynamicVertex().setProperty(propertyName, value);
 
@@ -288,7 +288,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty");
         try {
-            if (RequestContext.get().NEW_FLOW && isVertex()) {
+            if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
                 AtlasPerfMetrics.MetricRecorder recorder1 = RequestContext.get().startMetricRecord("AtlasJanusElement.getMultiValuedProperty.newFlow");
                 try {
                     Object val = getProperty(propertyName, elementType);
@@ -320,7 +320,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> Set<V> getMultiValuedSetProperty(String propertyName, Class<V> elementType) {
-        if (RequestContext.get().NEW_FLOW && isVertex()) {
+        if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
             return (Set<V>) getProperty(propertyName, elementType);
         }
 

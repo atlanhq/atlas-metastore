@@ -65,7 +65,7 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     public <T> void addProperty(String propertyName, T value) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.addProperty");
         try {
-            if (RequestContext.get().NEW_FLOW && isVertex()) {
+            if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
                 this.getDynamicVertex().addSetProperty(propertyName, value);
 
                 if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
@@ -85,7 +85,7 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     public <T> void addListProperty(String propertyName, T value) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.addListProperty");
         try {
-            if (RequestContext.get().NEW_FLOW && isVertex()) {
+            if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
                 this.getDynamicVertex().addListProperty(propertyName, value);
 
                 if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
@@ -188,7 +188,7 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     public <T> Collection<T> getPropertyValues(String propertyName, Class<T> clazz) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.getPropertyValues");
         try {
-            if (RequestContext.get().NEW_FLOW && isVertex()) {
+            if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
                 return (Collection<T>) getProperty(propertyName, clazz);
             }
 

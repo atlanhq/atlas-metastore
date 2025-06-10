@@ -159,7 +159,7 @@ public class AtlasGraphUtilsV2 {
 
     public static boolean isReference(TypeCategory typeCategory) {
 
-        if (RequestContext.get().NEW_FLOW) {
+        if (RequestContext.get().isIdOnlyGraphEnabled()) {
             return typeCategory == TypeCategory.ENTITY ||
                     typeCategory == TypeCategory.OBJECT_ID_TYPE;
         } else {
