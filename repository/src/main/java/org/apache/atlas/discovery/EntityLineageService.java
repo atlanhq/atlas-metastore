@@ -71,6 +71,7 @@ import static org.apache.atlas.AtlasErrorCode.INSTANCE_LINEAGE_QUERY_FAILED;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.lineage.AtlasLineageInfo.LineageDirection.*;
 import static org.apache.atlas.model.lineage.LineageListRequest.LINEAGE_TYPE_DATASET_PROCESS_LINEAGE;
+import static org.apache.atlas.model.lineage.LineageListRequest.LINEAGE_TYPE_CONNECTION_PROCESS_LINEAGE;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.*;
 import static org.apache.atlas.repository.graphdb.AtlasEdgeDirection.IN;
@@ -93,14 +94,13 @@ public class EntityLineageService implements AtlasLineageService {
      */
     public static final HashMap<String, String[]> LINEAGE_MAP = new HashMap<String, String[]>(2){{
         put(LINEAGE_TYPE_DATASET_PROCESS_LINEAGE, new String[]{PROCESS_INPUTS_EDGE, PROCESS_OUTPUTS_EDGE});
-        put(CONNECTION_PROCESS_LINEAGE, new String[]{CONNECTION_PROCESS_INPUTS_EDGE, CONNECTION_PROCESS_OUTPUTS_EDGE});
+        put(LINEAGE_TYPE_CONNECTION_PROCESS_LINEAGE, new String[]{CONNECTION_PROCESS_INPUTS_EDGE, CONNECTION_PROCESS_OUTPUTS_EDGE});
     }};
     private static final String COLUMNS = "columns";
     private static final boolean LINEAGE_USING_GREMLIN = AtlasConfiguration.LINEAGE_USING_GREMLIN.getBoolean();
     private static final Integer DEFAULT_LINEAGE_MAX_NODE_COUNT       = 9000;
     private static final int     LINEAGE_ON_DEMAND_DEFAULT_DEPTH      = 3;
     private static final String  SEPARATOR                            = "->";
-    public static final String CONNECTION_PROCESS_LINEAGE = "ConnectionProcessLineage";
 
     private final AtlasGraph graph;
     private final AtlasGremlinQueryProvider gremlinQueryProvider;
