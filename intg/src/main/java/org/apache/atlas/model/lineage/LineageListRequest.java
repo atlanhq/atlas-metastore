@@ -14,6 +14,7 @@ import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.PUBLIC_
 @JsonSerialize(include = JsonSerialize.Inclusion.NON_NULL)
 public class LineageListRequest {
     public static final String LINEAGE_TYPE_DATASET_PROCESS_LINEAGE = "DatasetProcessLineage";
+    public static final String LINEAGE_TYPE_CONNECTION_PROCESS_LINEAGE = "ConnectionProcessLineage";
     private String                          guid;
     private Integer                         size;
     private Integer                         from;
@@ -99,7 +100,11 @@ public class LineageListRequest {
     }
 
     public void setLineageType(String lineageType) {
-        this.lineageType = lineageType;
+        if (LINEAGE_TYPE_CONNECTION_PROCESS_LINEAGE.equals(lineageType)) {
+            this.lineageType = lineageType;
+        } else {
+            this.lineageType = LINEAGE_TYPE_DATASET_PROCESS_LINEAGE;
+        }
     }
 
     public LineageDirection getDirection() {
