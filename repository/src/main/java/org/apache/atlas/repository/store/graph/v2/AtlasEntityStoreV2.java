@@ -60,7 +60,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEnt
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.ProcessPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.LineagePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
@@ -149,8 +149,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final ESAliasStore esAliasStore;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
-
-    private static final Boolean isConnectionLineageEnabled = ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean();
 
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
@@ -2079,8 +2077,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case PROCESS_ENTITY_TYPE:
-                if(isConnectionLineageEnabled){
-                    preProcessors.add(new ProcessPreProcessor(typeRegistry, entityRetriever, graph, this));
+                if(ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean()){
+                    preProcessors.add(new LineagePreProcessor(typeRegistry, entityRetriever, graph, this));
                 }
         }
 
