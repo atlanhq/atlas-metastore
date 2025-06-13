@@ -39,6 +39,7 @@ import java.util.Objects;
 import java.util.HashMap;
 
 import static org.apache.atlas.repository.graph.GraphHelper.getCustomAttributes;
+import static org.apache.atlas.repository.graph.GraphHelper.getJanusOptimisationEnabled;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_ADD;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_NOOP;
@@ -160,7 +161,16 @@ public class AtlasEntityComparator {
 
         if (context.isReplaceClassifications() || context.isReplaceTags() || context.isAppendTags()) {
             List<AtlasClassification> newVal  = updatedEntity.getClassifications();
-            List<AtlasClassification> currVal = (storedEntity != null) ? storedEntity.getClassifications() : entityRetriever.getAllClassifications(storedVertex);
+            List<AtlasClassification> currVal;
+            if (storedEntity != null) {
+                currVal = storedEntity.getClassifications();
+            } else {
+                if (getJanusOptimisationEnabled()) {
+                    currVal = entityRetriever.getDirectClassifications(storedVertex);
+                } else {
+                    currVal = entityRetriever.getAllClassifications_V1(storedVertex);
+                }
+            }
 
             if (context.isReplaceClassifications()) {
                 if (!Objects.equals(currVal, newVal)) {
