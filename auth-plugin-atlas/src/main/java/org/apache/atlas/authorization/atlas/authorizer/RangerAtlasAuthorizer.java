@@ -19,6 +19,8 @@
 
 package org.apache.atlas.authorization.atlas.authorizer;
 
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.authorize.AtlasAccessRequest;
 import org.apache.atlas.authorize.AtlasAccessResult;
 import org.apache.atlas.authorize.AtlasAccessorResponse;
@@ -80,6 +82,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         add(AtlasPrivilege.ENTITY_REMOVE_CLASSIFICATION);
         add(AtlasPrivilege.ENTITY_UPDATE_CLASSIFICATION);
     }};
+
+    private static final String READ_RESTRICTION_LEVEL_SCRUB = "scrub";
+    private static final String READ_RESTRICTION_LEVEL_GUID_ONLY = "guid_only";
+    private static final String READ_RESTRICTION_LEVEL_FULL = "full";
+    private static final String readRestrictionLevel = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
 
     @Override
     public void init() {
@@ -862,7 +869,18 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             boolean isEntityAccessAllowed  = AtlasAuthorizationUtils.isAccessAllowed(entityAccessRequest, isScrubAuditEnabled);
             if (!isEntityAccessAllowed) {
-                scrubEntityHeader(entity, request.getTypeRegistry());
+                if (READ_RESTRICTION_LEVEL_GUID_ONLY.equals(readRestrictionLevel)) {
+                    entity.setAttributes(new HashMap<>());
+                    entity.setCreatedBy(null);
+                    entity.setUpdatedBy(null);
+                    entity.setDisplayText(null);
+                    entity.setUpdateTime(null);
+                    entity.setCreateTime(null);
+                    entity.setIsIncomplete(null);
+                    entity.setScrubbed(true);
+                } else {
+                    scrubEntityHeader(entity, request.getTypeRegistry());
+                }
             }
         }
     }
