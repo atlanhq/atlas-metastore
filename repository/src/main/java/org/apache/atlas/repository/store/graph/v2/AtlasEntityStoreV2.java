@@ -2746,11 +2746,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         }
 
         boolean currentHasLineage = getEntityHasLineage(assetVertex);
-        Boolean shouldHaveLineage = checkIfAssetShouldHaveLineage(assetVertex);
-        if (shouldHaveLineage == null) {
-            LOG.warn("repairHasLineage: Failed to determine if asset should have lineage for guid: {}", request.getAssetGuid());
-            return;
-        }
+        boolean shouldHaveLineage = checkIfAssetShouldHaveLineage(assetVertex);
 
         if (currentHasLineage && !shouldHaveLineage) {
             // Case 1: hasLineage is true but should be false
