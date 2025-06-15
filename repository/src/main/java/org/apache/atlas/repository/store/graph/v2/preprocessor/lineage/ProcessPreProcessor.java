@@ -33,17 +33,20 @@ import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_CO
 import static org.apache.atlas.repository.util.AtlasEntityUtils.getStringAttribute;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 
-public class LineagePreProcessor implements PreProcessor {
-    private static final Logger LOG = LoggerFactory.getLogger(LineagePreProcessor.class);
-    private static final List<String> FETCH_ENTITY_ATTRIBUTES = Arrays.asList(ATTR_POLICY_CONNECTION_QN);
+public class ProcessPreProcessor implements PreProcessor {
+    private static final Logger LOG = LoggerFactory.getLogger(ProcessPreProcessor.class);
     private static final String HAS_LINEAGE = "__hasLineage";
+    private static final String CONNECTION_PROCESS_INFO_MAP_INPUT = "input";
+    private static final String CONNECTION_PROCESS_INFO_MAP_OUTPUT = "output";
+    private static final String CONNECTION_PROCESS_INFO_MAP_CONNECTION_PROCESS_NAME = "connectionProcessName";
+    private static final String CONNECTION_PROCESS_INFO_MAP_CONNECTION_PROCESS_QUALIFIED_NAME = "connectionProcessQualifiedName";
 
     private final AtlasTypeRegistry typeRegistry;
     private final EntityGraphRetriever entityRetriever;
     private final AtlasEntityStore entityStore;
     private final EntityDiscoveryService discovery;
 
-    public LineagePreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, AtlasEntityStore entityStore) {
+    public ProcessPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, AtlasEntityStore entityStore) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
         this.entityStore = entityStore;
@@ -70,7 +73,7 @@ public class LineagePreProcessor implements PreProcessor {
 
             AtlasEntity entity = (AtlasEntity) entityStruct;
             AtlasVertex vertex = context.getVertex(entity.getGuid());
-            ArrayList<String> connectionProcessQNs = getConnectionProcessesForProcessEntity(entity, vertex);
+            List<String> connectionProcessQNs = getConnectionProcessesForProcessEntity(entity, vertex);
 
             switch (operation) {
                 case CREATE:
@@ -87,9 +90,9 @@ public class LineagePreProcessor implements PreProcessor {
         }
     }
 
-    private ArrayList<String> getConnectionProcessesForProcessEntity(AtlasEntity processEntity, AtlasVertex vertex) throws AtlasBaseException {
-        ArrayList<AtlasObjectId> inputsAssets = getInputsAssets(processEntity, vertex);
-        ArrayList<AtlasObjectId> outputsAssets = getOutputsAssets(processEntity, vertex);
+    private List<String> getConnectionProcessesForProcessEntity(AtlasEntity processEntity, AtlasVertex vertex) throws AtlasBaseException {
+        List<AtlasObjectId> inputsAssets = getInputsAssets(processEntity, vertex);
+        List<AtlasObjectId> outputsAssets = getOutputsAssets(processEntity, vertex);
 
         Set<String> inputConnectionQNs = getConnectionQualifiedNames(inputsAssets);
         Set<String> outputConnectionQNs = getConnectionQualifiedNames(outputsAssets);
@@ -97,31 +100,31 @@ public class LineagePreProcessor implements PreProcessor {
         return createConnectionProcesses(inputConnectionQNs, outputConnectionQNs);
     }
 
-    private ArrayList<AtlasObjectId> getInputsAssets(AtlasEntity processEntity, AtlasVertex vertex) throws AtlasBaseException {
-        ArrayList<AtlasObjectId> inputsAssets = (ArrayList<AtlasObjectId>) processEntity.getRelationshipAttributes().get("inputs");
-        if ((inputsAssets == null || inputsAssets.isEmpty()) && vertex.isIdAssigned()) {
+    private List<AtlasObjectId> getInputsAssets(AtlasEntity processEntity, AtlasVertex vertex) throws AtlasBaseException {
+        List<AtlasObjectId> inputsAssets = (List<AtlasObjectId>) processEntity.getRelationshipAttributes().get("inputs");
+        if ((CollectionUtils.isNotEmpty(inputsAssets)) && vertex.isIdAssigned()) {
             inputsAssets = new ArrayList<>();
             AtlasEntity storedProduct = entityRetriever.toAtlasEntity(vertex);
             if (storedProduct != null) {
-                inputsAssets = (ArrayList<AtlasObjectId>) storedProduct.getRelationshipAttribute("inputs");
+                inputsAssets = (List<AtlasObjectId>) storedProduct.getRelationshipAttribute("inputs");
             }
         }
         return inputsAssets;
     }
 
-    private ArrayList<AtlasObjectId> getOutputsAssets(AtlasEntity processEntity, AtlasVertex vertex) throws AtlasBaseException {
-        ArrayList<AtlasObjectId> outputsAssets = (ArrayList<AtlasObjectId>) processEntity.getRelationshipAttributes().get("outputs");
-        if ((outputsAssets == null || outputsAssets.isEmpty()) && vertex.isIdAssigned()) {
+    private List<AtlasObjectId> getOutputsAssets(AtlasEntity processEntity, AtlasVertex vertex) throws AtlasBaseException {
+        List<AtlasObjectId> outputsAssets = (List<AtlasObjectId>) processEntity.getRelationshipAttributes().get("outputs");
+        if ((CollectionUtils.isNotEmpty(outputsAssets)) && vertex.isIdAssigned()) {
             outputsAssets = new ArrayList<>();
             AtlasEntity storedProduct = entityRetriever.toAtlasEntity(vertex);
             if (storedProduct != null) {
-                outputsAssets = (ArrayList<AtlasObjectId>) storedProduct.getRelationshipAttribute("outputs");
+                outputsAssets = (List<AtlasObjectId>) storedProduct.getRelationshipAttribute("outputs");
             }
         }
         return outputsAssets;
     }
 
-    private Set<String> getConnectionQualifiedNames(ArrayList<AtlasObjectId> assets) throws AtlasBaseException {
+    private Set<String> getConnectionQualifiedNames(List<AtlasObjectId> assets) throws AtlasBaseException {
         Set<String> connectionQNs = new HashSet<>();
         for (AtlasObjectId asset : assets) {
 
@@ -134,7 +137,7 @@ public class LineagePreProcessor implements PreProcessor {
         return connectionQNs;
     }
 
-    private ArrayList<String> createConnectionProcesses(Set<String> inputConnectionQNs, Set<String> outputConnectionQNs) throws AtlasBaseException {
+    private List<String> createConnectionProcesses(Set<String> inputConnectionQNs, Set<String> outputConnectionQNs) throws AtlasBaseException {
         Set<Map<String, Object>> uniqueConnectionProcesses = new HashSet<>();
         for (String inputConnectionQN : inputConnectionQNs) {
             for (String outputConnectionQN : outputConnectionQNs) {
@@ -152,16 +155,16 @@ public class LineagePreProcessor implements PreProcessor {
         String connectionProcessQualifiedName = outputConnectionQN + "/" + connectionProcessName;
 
         Map<String, Object> connectionProcessMap = new HashMap<>();
-        connectionProcessMap.put("input", inputConnectionQN);
-        connectionProcessMap.put("output", outputConnectionQN);
-        connectionProcessMap.put("connectionProcessName", connectionProcessName);
-        connectionProcessMap.put("connectionProcessQualifiedName", connectionProcessQualifiedName);
+        connectionProcessMap.put(CONNECTION_PROCESS_INFO_MAP_INPUT, inputConnectionQN);
+        connectionProcessMap.put(CONNECTION_PROCESS_INFO_MAP_OUTPUT, outputConnectionQN);
+        connectionProcessMap.put(CONNECTION_PROCESS_INFO_MAP_CONNECTION_PROCESS_NAME, connectionProcessName);
+        connectionProcessMap.put(CONNECTION_PROCESS_INFO_MAP_CONNECTION_PROCESS_QUALIFIED_NAME, connectionProcessQualifiedName);
 
         return connectionProcessMap;
     }
 
-    private ArrayList<String> getConnectionProcessList(Set<Map<String, Object>> uniqueConnectionProcesses) throws AtlasBaseException {
-        ArrayList<String> connectionProcessList = new ArrayList<>();
+    private List<String> getConnectionProcessList(Set<Map<String, Object>> uniqueConnectionProcesses) throws AtlasBaseException {
+        List<String> connectionProcessList = new ArrayList<>();
         for (Map<String, Object> connectionProcessInfo : uniqueConnectionProcesses) {
             AtlasEntity connectionProcess = getOrCreateConnectionProcess(connectionProcessInfo);
             connectionProcessList.add(connectionProcess.getAttribute(QUALIFIED_NAME).toString());
@@ -195,13 +198,13 @@ public class LineagePreProcessor implements PreProcessor {
         }
     }
 
-    private void processCreateLineageProcess(AtlasEntity entity, ArrayList<String> connectionProcessList) {
+    private void processCreateLineageProcess(AtlasEntity entity, List<String> connectionProcessList) {
         if (!connectionProcessList.isEmpty()) {
             entity.setAttribute(PARENT_CONNECTION_PROCESS_QUALIFIED_NAME, connectionProcessList);
         }
     }
 
-    private void processUpdateLineageProcess(AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context, ArrayList<String> newConnectionProcessList) throws AtlasBaseException {
+    private void processUpdateLineageProcess(AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context, List<String> newConnectionProcessList) throws AtlasBaseException {
         List<String> oldConnectionProcessList = getOldConnectionProcessList(vertex);
 
         Set<String> connectionProcessesToRemove = new HashSet<>(oldConnectionProcessList);
@@ -235,12 +238,12 @@ public class LineagePreProcessor implements PreProcessor {
 
     private AtlasEntity createConnectionProcessEntity(Map<String, Object> connectionProcessInfo) throws AtlasBaseException {
         AtlasEntity processEntity = new AtlasEntity(CONNECTION_PROCESS_ENTITY_TYPE);
-        processEntity.setAttribute(NAME, connectionProcessInfo.get("connectionProcessName"));
-        processEntity.setAttribute(QUALIFIED_NAME, connectionProcessInfo.get("connectionProcessQualifiedName"));
+        processEntity.setAttribute(NAME, connectionProcessInfo.get(CONNECTION_PROCESS_INFO_MAP_CONNECTION_PROCESS_NAME));
+        processEntity.setAttribute(QUALIFIED_NAME, connectionProcessInfo.get(CONNECTION_PROCESS_INFO_MAP_CONNECTION_PROCESS_QUALIFIED_NAME));
         processEntity.setAttribute(HAS_LINEAGE, true);
 
-        AtlasObjectId inputConnection = new AtlasObjectId(CONNECTION_ENTITY_TYPE, mapOf(QUALIFIED_NAME, connectionProcessInfo.get("input")));
-        AtlasObjectId outputConnection = new AtlasObjectId(CONNECTION_ENTITY_TYPE, mapOf(QUALIFIED_NAME, connectionProcessInfo.get("output")));
+        AtlasObjectId inputConnection = new AtlasObjectId(CONNECTION_ENTITY_TYPE, mapOf(QUALIFIED_NAME, connectionProcessInfo.get(CONNECTION_PROCESS_INFO_MAP_INPUT)));
+        AtlasObjectId outputConnection = new AtlasObjectId(CONNECTION_ENTITY_TYPE, mapOf(QUALIFIED_NAME, connectionProcessInfo.get(CONNECTION_PROCESS_INFO_MAP_OUTPUT)));
 
         Map<String, Object> relationshipAttributes = new HashMap<>();
         relationshipAttributes.put("inputs", Collections.singletonList(inputConnection));
