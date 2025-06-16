@@ -88,7 +88,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     private static final String READ_RESTRICTION_LEVEL_SCRUB = "scrub";
     private static final String READ_RESTRICTION_LEVEL_GUID_ONLY = "guid_only";
     private static final String READ_RESTRICTION_LEVEL_FULL = "full";
-    private static final String readRestrictionLevel = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
+    private static final String readRestrictionLevel = READ_RESTRICTION_LEVEL_GUID_ONLY; // AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
 
     private static final Set<String> READ_RESTRICTION_EXCLUDE_TYPES = new HashSet<String>() {{
         add(POLICY_CATEGORY_PERSONA);
