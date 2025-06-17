@@ -68,6 +68,8 @@ import java.util.Set;
 
 import static org.apache.atlas.authorization.atlas.authorizer.RangerAtlasAuthorizerUtil.*;
 import static org.apache.atlas.constants.RangerAtlasConstants.*;
+import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PERSONA;
+import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_CATEGORY_PURPOSE;
 
 
 public class RangerAtlasAuthorizer implements AtlasAuthorizer {
@@ -87,6 +89,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     private static final String READ_RESTRICTION_LEVEL_GUID_ONLY = "guid_only";
     private static final String READ_RESTRICTION_LEVEL_FULL = "full";
     private static final String readRestrictionLevel = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
+
+    private static final Set<String> READ_RESTRICTION_EXCLUDE_TYPES = new HashSet<String>() {{
+        add(POLICY_CATEGORY_PERSONA);
+        add(POLICY_CATEGORY_PURPOSE);
+    }};
 
     @Override
     public void init() {
@@ -870,13 +877,15 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             boolean isEntityAccessAllowed  = AtlasAuthorizationUtils.isAccessAllowed(entityAccessRequest, isScrubAuditEnabled);
             if (!isEntityAccessAllowed) {
                 if (READ_RESTRICTION_LEVEL_GUID_ONLY.equals(readRestrictionLevel)) {
-                    entity.setAttributes(new HashMap<>());
-                    entity.setCreatedBy(null);
-                    entity.setUpdatedBy(null);
-                    entity.setDisplayText(null);
-                    entity.setUpdateTime(null);
-                    entity.setCreateTime(null);
-                    entity.setIsIncomplete(null);
+                    if (!READ_RESTRICTION_EXCLUDE_TYPES.contains(entity.getTypeName())) {
+                        entity.setAttributes(new HashMap<>());
+                        entity.setCreatedBy(null);
+                        entity.setUpdatedBy(null);
+                        entity.setDisplayText(null);
+                        entity.setUpdateTime(null);
+                        entity.setCreateTime(null);
+                        entity.setIsIncomplete(null);
+                    }
                     entity.setScrubbed(true);
                 } else {
                     scrubEntityHeader(entity, request.getTypeRegistry());
