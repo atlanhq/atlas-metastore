@@ -30,7 +30,7 @@ each other -- the metadata store is common.
 
 The metadata veracity is maintained by leveraging Apache Ranger to prevent
 non-authorized access paths to data at runtime.
-Security is both role based (RBAC) and attribute based (ABAC).
+Security is both role based (RBAC) and attribute based (ABAC)
 
 
 Build Process
