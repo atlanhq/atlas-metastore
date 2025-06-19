@@ -79,7 +79,7 @@ public final class GraphDbObjectFactory {
 
         AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
 
-        if (source.keys().contains("__u_qualifiedName") && RequestContext.get().isIdOnlyGraphEnabled()) { // Do only for Asset vertices
+        if (!source.keys().contains("__type") && RequestContext.get().isIdOnlyGraphEnabled()) { // Do only for Asset vertices
             try {
                 DynamicVertex dynamicVertex = graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString());
                 if (dynamicVertex == null) {
