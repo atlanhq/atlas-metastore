@@ -26,9 +26,8 @@ on:
       - beta
       - development
       - master
-      - lineageondemand
-      - optimise_classifications_fetch
       - staging
+      - downloadimpactreport
 
 jobs:
   build:
