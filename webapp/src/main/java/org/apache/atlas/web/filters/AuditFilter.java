@@ -108,11 +108,7 @@ public class AuditFilter implements Filter {
             requestContext.setSkipFailedEntities(skipFailedEntities);
             requestContext.setClientOrigin(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN));
             requestContext.setMetricRegistry(metricsRegistry);
-
-            requestContext.setIdOnlyGraphEnabled(Boolean.parseBoolean(
-                    FeatureFlagStore.getFlag(FeatureFlagStore.FEATURE_FLAG_ID_ONLY_GRAPH_ENABLED)
-            ));
-
+            
             MDC.put(TRACE_ID, internalRequestId);
             MDC.put(X_ATLAN_CLIENT_ORIGIN, ofNullable(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN)).orElse(EMPTY));
             MDC.put(X_ATLAN_REQUEST_ID, ofNullable(httpRequest.getHeader(X_ATLAN_REQUEST_ID)).orElse(EMPTY));
