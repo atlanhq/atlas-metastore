@@ -52,7 +52,7 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
     private final Map<String, Object>                    restoreVertices      = new HashMap<>();
 
-    private boolean isIdOnlyGraphEnabled = false;
+    private Boolean isIdOnlyGraphEnabled = null;
 
     private       Map<String, String>                    lexoRankCache        = null;
     private final Map<String, AtlasEntity>               entityCache          = new HashMap<>();
@@ -196,7 +196,7 @@ public class RequestContext {
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
-        this.isIdOnlyGraphEnabled = false;
+        this.isIdOnlyGraphEnabled = null;
         this.verticesToSoftDelete.clear();
         this.verticesToHardDelete.clear();
 
@@ -473,11 +473,14 @@ public class RequestContext {
     }
 
     public boolean isIdOnlyGraphEnabled() {
-        return isIdOnlyGraphEnabled;
-    }
-
-    public void setIdOnlyGraphEnabled(boolean idOnlyGraphEnabled) {
-        isIdOnlyGraphEnabled = idOnlyGraphEnabled;
+//        if (isIdOnlyGraphEnabled == null || !isIdOnlyGraphEnabled) {
+//            // flag is not set yet
+//            // set it for the current request
+//            isIdOnlyGraphEnabled = Boolean.parseBoolean(
+//                                FeatureFlagStore.getFlag(FeatureFlagStore.FEATURE_FLAG_ID_ONLY_GRAPH_ENABLED)
+//                        );
+//        }
+        return true;
     }
 
     public Map<AtlasClassification, Collection<Object>> getDeletedClassificationAndVertices() {
