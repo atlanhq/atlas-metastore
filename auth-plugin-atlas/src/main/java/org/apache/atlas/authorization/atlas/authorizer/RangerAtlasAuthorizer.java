@@ -85,16 +85,6 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         add(AtlasPrivilege.ENTITY_UPDATE_CLASSIFICATION);
     }};
 
-    private static final String READ_RESTRICTION_LEVEL_SCRUB = "scrub";
-    private static final String READ_RESTRICTION_LEVEL_GUID_ONLY = "guid_only";
-    private static final String READ_RESTRICTION_LEVEL_FULL = "full";
-    private static final String readRestrictionLevel = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
-
-    private static final Set<String> READ_RESTRICTION_EXCLUDE_TYPES = new HashSet<String>() {{
-        add(POLICY_CATEGORY_PERSONA);
-        add(POLICY_CATEGORY_PURPOSE);
-    }};
-
     @Override
     public void init() {
         if (LOG.isDebugEnabled()) {
@@ -876,20 +866,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             boolean isEntityAccessAllowed  = AtlasAuthorizationUtils.isAccessAllowed(entityAccessRequest, isScrubAuditEnabled);
             if (!isEntityAccessAllowed) {
-                if (READ_RESTRICTION_LEVEL_GUID_ONLY.equals(readRestrictionLevel)) {
-                    if (!READ_RESTRICTION_EXCLUDE_TYPES.contains(entity.getTypeName())) {
-                        entity.setAttributes(new HashMap<>());
-                        entity.setCreatedBy(null);
-                        entity.setUpdatedBy(null);
-                        entity.setDisplayText(null);
-                        entity.setUpdateTime(null);
-                        entity.setCreateTime(null);
-                        entity.setIsIncomplete(null);
-                    }
-                    entity.setScrubbed(true);
-                } else {
                     scrubEntityHeader(entity, request.getTypeRegistry());
-                }
             }
         }
     }

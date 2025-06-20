@@ -19,12 +19,14 @@
 package org.apache.atlas.authorize;
 
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 
 import java.util.Set;
+import static org.apache.atlas.constants.RangerAtlasConstants.*;
 
 public interface AtlasAuthorizer {
     /**
@@ -131,14 +133,16 @@ public interface AtlasAuthorizer {
     }
 
     default void scrubEntityHeader(AtlasEntityHeader entity, AtlasTypeRegistry typeRegistry) {
+        String READ_RESTRICTION_LEVEL = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
         boolean isScrubbed = false;
+        boolean scrubFully = READ_RESTRICTION_LEVEL_GUID_ONLY.equals(READ_RESTRICTION_LEVEL) && !READ_RESTRICTION_EXCLUDE_TYPES.contains(entity.getTypeName());
 
         if (entityType != null) {
             if (entity.getAttributes() != null) {
                 for (AtlasStructType.AtlasAttribute attribute : entityType.getAllAttributes().values()) {
-                    if (!attribute.getAttributeDef().getSkipScrubbing()) {
+                    if (!attribute.getAttributeDef().getSkipScrubbing() || scrubFully) {
                         entity.getAttributes().remove(attribute.getAttributeDef().getName());
                         isScrubbed = true;
                     }
