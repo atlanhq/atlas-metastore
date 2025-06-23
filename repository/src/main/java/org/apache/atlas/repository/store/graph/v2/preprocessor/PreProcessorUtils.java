@@ -205,7 +205,7 @@ public class PreProcessorUtils {
         return ret;
     }
 
-    public static List<AtlasVertex> IndexSearchPaginatedVertices(Map<String, Object> dsl, Set<String> attributes, EntityDiscoveryService discovery) throws AtlasBaseException {
+    public static List<AtlasVertex> retrieveVerticesFromIndexSearchPaginated(Map<String, Object> dsl, Set<String> attributes, EntityDiscoveryService discovery) throws AtlasBaseException {
         IndexSearchParams searchParams = new IndexSearchParams();
         List<AtlasVertex> ret = new ArrayList<>();
 
@@ -226,7 +226,7 @@ public class PreProcessorUtils {
             dsl.put("size", size);
             searchParams.setDsl(dsl);
 
-            List<AtlasVertex> vertices = discovery.directVerticesIndexSearch(searchParams);
+            List<AtlasVertex> vertices = discovery.directIndexSearchForVertices(searchParams);
 
             if (CollectionUtils.isNotEmpty(vertices)) {
                 ret.addAll(vertices);

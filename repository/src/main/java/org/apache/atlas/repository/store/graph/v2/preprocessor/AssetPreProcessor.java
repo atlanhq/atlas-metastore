@@ -235,7 +235,7 @@ public class AssetPreProcessor implements PreProcessor {
 
             Map<String, Object> dsl = mapOf("query", mapOf("bool", bool));
 
-            return IndexSearchPaginatedVertices(dsl, null, discovery);
+            return retrieveVerticesFromIndexSearchPaginated(dsl, null, discovery);
 
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
