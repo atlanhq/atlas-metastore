@@ -1,0 +1,185 @@
+---
+description: Bulk entity ingestion patterns and optimization strategies
+globs: []
+alwaysApply: false
+---
+
+# Bulk Entity Operations
+
+Guidelines for implementing and optimizing bulk entity operations in Atlas.
+
+## Bulk API Usage
+
+### REST Endpoint
+```java
+@POST
+@Path("/api/atlas/v2/entity/bulk")
+public EntityMutationResponse createOrUpdate(
+    AtlasEntityStream entityStream,
+    @QueryParam("replaceClassifications") boolean replaceClassifications,
+    @QueryParam("replaceBusinessAttributes") boolean replaceBusinessAttributes) {
+    // Bulk processing
+}
+```
+
+### Entity Limits
+```properties
+# Maximum entities per bulk request
+atlas.entities.allowed.in.bulk=1000
+```
+
+## Processing Flow
+
+1. **Request Validation**
+   - Check entity count limits
+   - Validate attribute lengths
+   - Verify entity types exist
+
+2. **Pre-processing**
+   - Entity discovery (new vs existing)
+   - Authorization checks
+   - Diff calculation
+
+3. **Entity Processing**
+   - Execute preprocessors
+   - Map to graph storage
+   - Handle relationships
+
+4. **Post-processing**
+   - Audit trail creation
+   - Notification generation
+   - Elasticsearch indexing
+
+## Performance Optimizations
+
+### Skip Unchanged Entities
+```java
+// Atlas automatically skips entities with no changes
+// Enable diff calculation:
+atlas.entity.diff.calculation.enabled=true
+```
+
+### Batch Processing
+```java
+// Configure batch sizes
+atlas.bulk.import.batch.size=10
+atlas.bulk.import.consumer.count=8
+```
+
+### Request Context
+```java
+// Disable cache for bulk operations
+RequestContext.get().setEnableCache(false);
+```
+
+## BulkImporter Pattern
+
+For very large imports:
+```java
+// Uses Producer-Consumer pattern
+// Automatic retry on failures
+// Progress tracking
+
+BulkImportResponse response = bulkImporter.bulkImport(
+    entityStream,
+    importParams
+);
+```
+
+## Diff Calculation
+
+Atlas calculates differences to optimize updates:
+- Compares all attributes
+- Checks classifications
+- Evaluates business attributes
+- Identifies custom attribute changes
+
+Only changed entities are processed.
+
+## Error Handling
+
+### Partial Failures
+```java
+EntityMutationResponse response = entityStore.createOrUpdate(entityStream);
+
+// Check for partial failures
+if (response.getPartialUpdatedEntities() != null) {
+    // Handle entities that partially failed
+}
+```
+
+### Validation Errors
+Common validation issues:
+- Missing required attributes
+- Invalid type references
+- Duplicate unique attributes
+- Circular relationships
+
+## Best Practices
+
+### 1. Batch Size Selection
+- Keep under 500 entities for optimal performance
+- Consider entity complexity
+- Monitor memory usage
+
+### 2. Attribute Optimization
+- Minimize large attribute values
+- Use references instead of embedding
+- Avoid deep nesting
+
+### 3. Classification Strategy
+- Use `replaceClassifications=false` when possible
+- Batch similar classification operations
+- Consider propagation impact
+
+### 4. Relationship Handling
+- Create entities before relationships
+- Use bulk relationship APIs
+- Handle bidirectional relationships carefully
+
+### 5. Transaction Management
+- Bulk operations are atomic
+- All entities succeed or all fail
+- Consider breaking very large imports
+
+## Monitoring
+
+Key metrics to track:
+- `entities.created.count`
+- `entities.updated.count`
+- `entities.skipped.count`
+- `bulk.operation.duration`
+- `graph.commit.duration`
+
+## Example: Bulk Import
+
+```java
+// Prepare entities
+List<AtlasEntity> entities = new ArrayList<>();
+for (Data data : dataset) {
+    AtlasEntity entity = new AtlasEntity("hive_table");
+    entity.setAttribute("name", data.getName());
+    entity.setAttribute("qualifiedName", data.getQualifiedName());
+    entities.add(entity);
+}
+
+// Create stream
+AtlasEntityStream stream = new AtlasEntityStream(entities);
+
+// Bulk create/update
+EntityMutationResponse response = entityStore.createOrUpdate(
+    stream,
+    false,  // replaceClassifications
+    false,  // replaceBusinessAttributes
+    false   // overwriteBusinessAttributes
+);
+
+// Process response
+LOG.info("Created: {}, Updated: {}, Skipped: {}", 
+    response.getCreatedEntities().size(),
+    response.getUpdatedEntities().size(),
+    RequestContext.get().getSkippedEntities().size()
+);
+```
+
+See: @docs/CLAUDE-bulk-entity-ingestion-flow.md for detailed flow
