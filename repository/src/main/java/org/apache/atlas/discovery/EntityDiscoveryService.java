@@ -979,7 +979,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         setupRequestContext(params);
 
         AtlasSearchResult ret = new AtlasSearchResult();
-
         ret.setSearchParameters(searchParams);
         ret.setQueryType(AtlasQueryType.INDEX);
 
@@ -989,14 +988,14 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
 
         try {
-            DirectIndexQueryResult indexQueryResult = performDirectIndexSearch(searchParams);
-            if (indexQueryResult == null) {
+            IndexSearchResult searchResult = performDirectIndexSearch(searchParams);
+            if (searchResult.indexQueryResult == null) {
                 return null;
             }
             
-            prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
-            ret.setAggregations(indexQueryResult.getAggregationMap());
-            ret.setApproximateCount(indexQueryResult.getApproximateCount());
+            prepareSearchResult(ret, searchResult.indexQueryResult, resultAttributes, true);
+            ret.setAggregations(searchResult.indexQueryResult.getAggregationMap());
+            ret.setApproximateCount(searchResult.indexQuery.vertexTotals());
         } catch (Exception e) {
             LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
             throw e;
@@ -1011,12 +1010,12 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         List<AtlasVertex> ret = new ArrayList<>();
 
         try {
-            DirectIndexQueryResult indexQueryResult = performDirectIndexSearch(searchParams);
-            if (indexQueryResult == null) {
+            IndexSearchResult searchResult = performDirectIndexSearch(searchParams);
+            if (searchResult.indexQueryResult == null) {
                 return null;
             }
 
-            Iterator<Result> iterator = indexQueryResult.getIterator();
+            Iterator<Result> iterator = searchResult.indexQueryResult.getIterator();
             while (iterator.hasNext()) {
                 Result result = iterator.next();
                 AtlasVertex vertex = result.getVertex();
@@ -1035,7 +1034,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
     }
 
-    private DirectIndexQueryResult performDirectIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+    private record IndexSearchResult(AtlasIndexQuery indexQuery, DirectIndexQueryResult indexQueryResult) {
+    }
+
+    private IndexSearchResult performDirectIndexSearch(SearchParams searchParams) throws AtlasBaseException {
         if(LOG.isDebugEnabled()){
             LOG.debug("Performing ES search for the params ({})", searchParams);
         }
@@ -1052,7 +1054,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
         RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
         
-        return indexQueryResult;
+        return new IndexSearchResult(indexQuery, indexQueryResult);
     }
 
     @Override
