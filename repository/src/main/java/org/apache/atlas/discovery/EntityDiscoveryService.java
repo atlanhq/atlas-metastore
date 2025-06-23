@@ -987,16 +987,13 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     @Override
     public AtlasSearchResult directIndexSearch(SearchParams searchParams) throws AtlasBaseException {
         IndexSearchParams params = (IndexSearchParams) searchParams;
-        RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
-        RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
-        RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
+        setupRequestContext(params);
 
         RequestContext.get().setIncludeMeanings(!searchParams.isExcludeMeanings());
         RequestContext.get().setIncludeClassifications(!searchParams.isExcludeClassifications());
         RequestContext.get().setIncludeClassificationNames(searchParams.isIncludeClassificationNames());
 
         AtlasSearchResult ret = new AtlasSearchResult();
-        AtlasIndexQuery indexQuery;
 
         ret.setSearchParameters(searchParams);
         ret.setQueryType(AtlasQueryType.INDEX);
@@ -1007,28 +1004,14 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
 
         try {
-            if(LOG.isDebugEnabled()){
-                LOG.debug("Performing ES search for the params ({})", searchParams);
-            }
-
-            String indexName = getIndexName(params);
-
-            indexQuery = graph.elasticsearchQuery(indexName);
-
-            if (searchParams.getEnableFullRestriction()) {
-                addPreFiltersToSearchQuery(searchParams);
-            }
-
-            AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
-            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+            DirectIndexQueryResult indexQueryResult = performDirectIndexSearch(searchParams);
             if (indexQueryResult == null) {
                 return null;
             }
-            RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
+            
             prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
-
             ret.setAggregations(indexQueryResult.getAggregationMap());
-            ret.setApproximateCount(indexQuery.vertexTotals());
+            ret.setApproximateCount(indexQueryResult.getApproximateCount());
         } catch (Exception e) {
             LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
             throw e;
@@ -1036,34 +1019,17 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         return ret;
     }
 
-    public List<AtlasVertex> directIndexSearchForVertices(SearchParams searchParams) throws AtlasBaseException {
+    public List<AtlasVertex> directVerticesIndexSearch(SearchParams searchParams) throws AtlasBaseException {
         IndexSearchParams params = (IndexSearchParams) searchParams;
-        RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
-        RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
-        RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
+        setupRequestContext(params);
 
         List<AtlasVertex> ret = new ArrayList<>();
-        AtlasIndexQuery indexQuery;
 
         try {
-            if(LOG.isDebugEnabled()){
-                LOG.debug("Performing ES search for the params ({})", searchParams);
-            }
-
-            String indexName = getIndexName(params);
-
-            indexQuery = graph.elasticsearchQuery(indexName);
-
-            if (searchParams.getEnableFullRestriction()) {
-                addPreFiltersToSearchQuery(searchParams);
-            }
-
-            AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
-            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+            DirectIndexQueryResult indexQueryResult = performDirectIndexSearch(searchParams);
             if (indexQueryResult == null) {
                 return null;
             }
-            RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
 
             Iterator<Result> iterator = indexQueryResult.getIterator();
             while (iterator.hasNext()) {
@@ -1076,6 +1042,32 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             throw e;
         }
         return ret;
+    }
+
+    private void setupRequestContext(IndexSearchParams params) {
+        RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
+        RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
+        RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
+    }
+
+    private DirectIndexQueryResult performDirectIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+        if(LOG.isDebugEnabled()){
+            LOG.debug("Performing ES search for the params ({})", searchParams);
+        }
+
+        IndexSearchParams params = (IndexSearchParams) searchParams;
+        String indexName = getIndexName(params);
+        AtlasIndexQuery indexQuery = graph.elasticsearchQuery(indexName);
+
+        if (searchParams.getEnableFullRestriction()) {
+            addPreFiltersToSearchQuery(searchParams);
+        }
+
+        AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
+        DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+        RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
+        
+        return indexQueryResult;
     }
 
     @Override
