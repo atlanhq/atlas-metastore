@@ -30,6 +30,6 @@ jobs:
 
       - name: Push changes to idonlycanarybeta
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
         run: |
           git push https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git idonlycanarybeta
