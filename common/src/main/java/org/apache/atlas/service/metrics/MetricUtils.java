@@ -7,7 +7,6 @@ import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.RequestContext;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,11 +72,9 @@ public class MetricUtils {
     }
 
     private Tags getTags(String httpMethod, int httpResponseStatus, String uri) {
-        String clientOrigin = RequestContext.get().getClientOrigin();
         return Tags.of(METHOD, httpMethod,
                 STATUS, String.valueOf(httpResponseStatus),
-                URI, matchCanonicalPattern(uri).get(),
-                ORIGIN, clientOrigin);
+                URI, matchCanonicalPattern(uri).get());
     }
 
     public static Optional<String> matchCanonicalPattern(String uri) {
