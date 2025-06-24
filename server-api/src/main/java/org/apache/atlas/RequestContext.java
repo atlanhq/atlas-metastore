@@ -108,6 +108,7 @@ public class RequestContext {
     private boolean     allowDuplicateDisplayName;
     private MetricsRegistry metricsRegistry;
     private boolean skipAuthorizationCheck = false;
+    private boolean allowCustomGuid = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
     private boolean cacheEnabled;
@@ -373,6 +374,14 @@ public class RequestContext {
     }
     public boolean getAllowDuplicateDisplayName(){
         return allowDuplicateDisplayName;
+    }
+
+    public boolean isAllowCustomGuid() {
+        return allowCustomGuid;
+    }
+
+    public void setAllowCustomGuid(boolean allowCustomGuid) {
+        this.allowCustomGuid = allowCustomGuid;
     }
 
     public String getCurrentTypePatchAction() {
