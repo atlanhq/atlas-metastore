@@ -112,7 +112,7 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             entity.removeAttribute(SUPER_DOMAIN_QN_ATTR);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(entity, parentDomainQualifiedName));
 
 
         entity.setCustomAttributes(customAttributes);
@@ -215,7 +215,7 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             }
             else{
                 if(StringUtils.isEmpty(sourceDomainQualifiedName)){
-                    updatedQualifiedName = createQualifiedName(targetDomainQualifiedName);
+                    updatedQualifiedName = createQualifiedName(domain, targetDomainQualifiedName);
                 }else {
                     updatedQualifiedName = currentDomainQualifiedName.replace(sourceDomainQualifiedName, targetDomainQualifiedName);
                 }
@@ -390,11 +390,11 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
         }
     }
 
-    private static String createQualifiedName(String parentDomainQualifiedName) {
+    private static String createQualifiedName(AtlasEntity entity, String parentDomainQualifiedName) {
         if (StringUtils.isNotEmpty(parentDomainQualifiedName)) {
-            return parentDomainQualifiedName + "/domain/" + getUUID();
+            return parentDomainQualifiedName + "/domain/" + getUUID(entity);
         } else{
-            return "default/domain/" + getUUID() + "/super";
+            return "default/domain/" + getUUID(entity) + "/super";
         }
     }
 

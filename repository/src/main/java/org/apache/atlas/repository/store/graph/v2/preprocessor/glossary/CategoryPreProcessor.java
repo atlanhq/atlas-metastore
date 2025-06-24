@@ -137,7 +137,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             isValidLexoRank(lexicographicalSortOrder, glossaryQualifiedName, parentQname, this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(vertex));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(entity, vertex));
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
                 "create entity: type=", entity.getTypeName());
 
@@ -506,7 +506,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         entityGraphMapper.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
     }
 
-    private String createQualifiedName(AtlasVertex vertex) {
+    private String createQualifiedName(AtlasEntity entity, AtlasVertex vertex) {
 
         if (vertex != null) {
             String catQName = vertex.getProperty(QUALIFIED_NAME, String.class);
@@ -515,7 +515,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             }
         }
 
-        return getUUID() + "@" + anchor.getAttribute(QUALIFIED_NAME);
+        return getUUID(entity) + "@" + anchor.getAttribute(QUALIFIED_NAME);
     }
 
 }
