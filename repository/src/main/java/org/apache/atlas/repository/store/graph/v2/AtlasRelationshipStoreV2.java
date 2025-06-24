@@ -827,7 +827,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         return ret;
     }
 
-    private String getRelationshipEdgeLabel(AtlasVertex fromVertex, AtlasVertex toVertex, String relationshipTypeName) throws AtlasBaseException {
+    public String getRelationshipEdgeLabel(AtlasVertex fromVertex, AtlasVertex toVertex, String relationshipTypeName) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("entityStoreV2.getRelationshipEdgeLabel");
         if (LOG.isDebugEnabled()) {
             LOG.debug("getRelationshipEdgeLabel({})", relationshipTypeName);

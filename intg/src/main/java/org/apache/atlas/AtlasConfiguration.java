@@ -166,11 +166,7 @@ public enum AtlasConfiguration {
      */
     ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
     ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "janusgraph_target"),
-    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets");
-
-
-
-    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 4),
+    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets"),
     MAX_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.edge.count", 10000),
     TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60);
 

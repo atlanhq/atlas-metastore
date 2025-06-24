@@ -21,6 +21,7 @@ package org.apache.atlas.plugin.service;
 
 import org.apache.atlas.authorizer.store.PoliciesStore;
 import org.apache.atlas.authorizer.store.UsersStore;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -74,8 +75,7 @@ public class RangerBasePlugin {
 	private       RangerUserStore             userStore;
 	private final List<RangerChainedPlugin>   chainedPlugins;
 	private 	  AtlasTypeRegistry 		  typeRegistry = null;
-	private DynamicVertexService dynamicVertexService = null;
-	private       AtlasTypeRegistry           typeRegistry = null;
+	private 	DynamicVertexService dynamicVertexService = null;
 	private final UsersStore                  usersStore;
 	private final PoliciesStore               policiesStore;
 
