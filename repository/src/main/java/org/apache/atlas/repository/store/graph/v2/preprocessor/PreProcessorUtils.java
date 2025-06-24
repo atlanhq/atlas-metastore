@@ -236,7 +236,7 @@ public class PreProcessorUtils {
             dsl.put("size", size);
             searchParams.setDsl(dsl);
 
-            List<AtlasVertex> vertices = discovery.directVerticesIndexSearch(searchParams);
+            List<AtlasVertex> vertices = discovery.directIndexSearchForVertices(searchParams);
 
             if (CollectionUtils.isNotEmpty(vertices)) {
                 ret.addAll(vertices);
