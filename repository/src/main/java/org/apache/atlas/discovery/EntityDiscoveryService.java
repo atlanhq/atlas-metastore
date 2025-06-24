@@ -1606,7 +1606,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                         list.add(atlasObjectId);
                     }
                 }
-                return list.isEmpty() ? null : list;
+                return list.isEmpty() ? new ArrayList<>() : list;
 
             case MAP:
             case STRUCT:
