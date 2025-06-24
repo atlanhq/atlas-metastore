@@ -813,7 +813,8 @@ public class EntityREST {
                                                  @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
-                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
+                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration,
+                                                 @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid
     ) throws AtlasBaseException {
 
         if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
@@ -822,6 +823,7 @@ public class EntityREST {
 
         AtlasPerfTracer perf = null;
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
+        RequestContext.get().setAllowCustomGuid(allowCustomGuid);
         try {
 
             if (CollectionUtils.isEmpty(entities.getEntities())) {

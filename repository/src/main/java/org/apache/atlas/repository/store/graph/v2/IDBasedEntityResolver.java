@@ -78,7 +78,17 @@ public class IDBasedEntityResolver implements EntityResolver {
             if (vertex != null) {
                 context.addResolvedGuid(guid, vertex);
             } else {
-                if (isAssignedGuid) {
+                if (isAssignedGuid && RequestContext.get().isAllowCustomGuid()) {
+                    // Check if this GUID belongs to an entity in the current stream
+                    // If it does, it's being created and we should allow it
+                    AtlasEntity entityInStream = entityStream.getByGuid(guid);
+                    if (entityInStream == null) {
+                        throw new AtlasBaseException(element.getValue(), AtlasErrorCode.REFERENCED_ENTITY_NOT_FOUND, guid);
+                    }
+                    // Entity is in the stream, so it's being created - add as local reference
+                    context.addLocalGuidReference(guid);
+                } else if (isAssignedGuid && !RequestContext.get().isAllowCustomGuid()) {
+                    // Original behavior when custom GUID is not allowed
                     throw new AtlasBaseException(element.getValue(), AtlasErrorCode.REFERENCED_ENTITY_NOT_FOUND, guid);
                 } else {
                     context.addLocalGuidReference(guid);

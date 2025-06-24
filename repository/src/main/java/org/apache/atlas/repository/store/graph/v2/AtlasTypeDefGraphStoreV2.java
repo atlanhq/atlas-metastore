@@ -191,7 +191,7 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
             typeDef.setVersion(1L);
         }
 
-        if (StringUtils.isBlank(typeDef.getGuid()) || !AtlasTypeUtil.isAssignedGuid(typeDef.getGuid())) {
+        if (StringUtils.isBlank(typeDef.getGuid()) || !RequestContext.get().isAllowCustomGuid() || !AtlasTypeUtil.isAssignedGuid(typeDef.getGuid())) {
             typeDef.setGuid(UUID.randomUUID().toString());
         }
 

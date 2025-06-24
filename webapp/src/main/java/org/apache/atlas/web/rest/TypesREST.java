@@ -440,7 +440,9 @@ public class TypesREST {
     @POST
     @Path("/typedefs")
     @Timed
-    public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
+    public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, 
+                                           @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
+                                           @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid) throws AtlasBaseException {
         Lock lock = null;
         AtlasPerfTracer perf = null;
         validateBuiltInTypeNames(typesDef);
@@ -452,6 +454,7 @@ public class TypesREST {
             }
             lock = attemptAcquiringLockV2();
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
+            RequestContext.get().setAllowCustomGuid(allowCustomGuid);
             typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
             typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
             AtlasTypesDef atlasTypesDef = createTypeDefsWithRetry(typesDef);
