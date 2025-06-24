@@ -7,6 +7,7 @@ import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.RequestContext;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -27,6 +28,7 @@ public class MetricUtils {
     private static final String METHOD = "method";
     private static final String SERVICE = "service";
     private static final String INTEGRATION = "integration";
+    private static final String ORIGIN = "origin";
     private static final String ATLAS_METASTORE = "atlas-metastore";
     private static final String REGEX_URI_PLACEHOLDER = "\\[\\^/\\]\\+";
     private static final String HTTP_SERVER_REQUESTS = "http.server.requests";
@@ -71,9 +73,11 @@ public class MetricUtils {
     }
 
     private Tags getTags(String httpMethod, int httpResponseStatus, String uri) {
+        String clientOrigin = RequestContext.get().getClientOrigin();
         return Tags.of(METHOD, httpMethod,
                 STATUS, String.valueOf(httpResponseStatus),
-                URI, matchCanonicalPattern(uri).get());
+                URI, matchCanonicalPattern(uri).get(),
+                ORIGIN, clientOrigin);
     }
 
     public static Optional<String> matchCanonicalPattern(String uri) {
