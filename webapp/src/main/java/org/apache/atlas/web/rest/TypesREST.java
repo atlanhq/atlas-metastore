@@ -445,7 +445,8 @@ public class TypesREST {
     @Timed
     public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, 
                                            @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
-                                           @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid) throws AtlasBaseException {
+                                           @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid,
+                                           @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
         Lock lock = null;
         AtlasPerfTracer perf = null;
         validateTypeCreateOrUpdate(typesDef);
@@ -459,8 +460,69 @@ public class TypesREST {
             lock = attemptAcquiringLockV2();
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             RequestContext.get().setAllowCustomGuid(allowCustomGuid);
-            typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
-            typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
+            
+            // Process BusinessMetadataDefs
+            if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
+                for (AtlasBusinessMetadataDef bmDef : typesDef.getBusinessMetadataDefs()) {
+                    if (allowCustomName) {
+                        // Validate that name is provided
+                        if (bmDef.getName() == null || bmDef.getName().trim().isEmpty()) {
+                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "BusinessMetadataDef");
+                        }
+                        // Validate attribute names
+                        if (CollectionUtils.isNotEmpty(bmDef.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : bmDef.getAttributeDefs()) {
+                                if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
+                                    throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
+                                        "BusinessMetadataDef attribute in " + bmDef.getName());
+                                }
+                            }
+                        }
+                        // Names are already provided by user, no action needed
+                    } else {
+                        // Always generate random names when allowCustomName=false
+                        bmDef.setName(AtlasStructDef.generateRandomName());
+                        // Generate random names for all attributes
+                        if (CollectionUtils.isNotEmpty(bmDef.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : bmDef.getAttributeDefs()) {
+                                attrDef.setName(AtlasStructDef.generateRandomName());
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Process ClassificationDefs
+            if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+                for (AtlasClassificationDef classDef : typesDef.getClassificationDefs()) {
+                    if (allowCustomName) {
+                        // Validate that name is provided
+                        if (classDef.getName() == null || classDef.getName().trim().isEmpty()) {
+                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "ClassificationDef");
+                        }
+                        // Validate attribute names
+                        if (CollectionUtils.isNotEmpty(classDef.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : classDef.getAttributeDefs()) {
+                                if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
+                                    throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
+                                        "ClassificationDef attribute in " + classDef.getName());
+                                }
+                            }
+                        }
+                        // Names are already provided by user, no action needed
+                    } else {
+                        // Always generate random names when allowCustomName=false
+                        classDef.setName(AtlasStructDef.generateRandomName());
+                        // Generate random names for all attributes
+                        if (CollectionUtils.isNotEmpty(classDef.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : classDef.getAttributeDefs()) {
+                                attrDef.setName(AtlasStructDef.generateRandomName());
+                            }
+                        }
+                    }
+                }
+            }
+            
             AtlasTypesDef atlasTypesDef = typeDefStore.createTypesDef(typesDef);
             refreshAllHostCache(RequestContext.get().getTraceId());
             return atlasTypesDef;
@@ -510,7 +572,8 @@ public class TypesREST {
     @Experimental
     @Timed
     public AtlasTypesDef updateAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
-                                             @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
+                                             @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
+                                             @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         validateTypeCreateOrUpdate(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
@@ -522,25 +585,93 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
-            for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
-                AtlasBusinessMetadataDef existingMB;
-                try{
-                    existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
-                }catch (AtlasBaseException e){
-                    //do nothing -- this BM is ew
-                    existingMB = null;
+            
+            // Process BusinessMetadataDefs
+            if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
+                for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
+                    AtlasBusinessMetadataDef existingMB = null;
+                    try {
+                        existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
+                    } catch (AtlasBaseException e) {
+                        // This is a new BM
+                    }
+                    
+                    if (allowCustomName) {
+                        // Validate that name is provided
+                        if (mb.getName() == null || mb.getName().trim().isEmpty()) {
+                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "BusinessMetadataDef");
+                        }
+                        // Validate new attribute names
+                        if (CollectionUtils.isNotEmpty(mb.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : mb.getAttributeDefs()) {
+                                if (existingMB == null || !isExistingAttribute(existingMB, attrDef.getName())) {
+                                    if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
+                                        throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
+                                            "BusinessMetadataDef attribute in " + mb.getName());
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Always generate random names when allowCustomName=false
+                        if (existingMB == null) {
+                            // New type - generate random name
+                            mb.setName(AtlasStructDef.generateRandomName());
+                        }
+                        // Generate random names for new attributes only
+                        if (CollectionUtils.isNotEmpty(mb.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : mb.getAttributeDefs()) {
+                                if (existingMB == null || !isExistingAttribute(existingMB, attrDef.getName())) {
+                                    attrDef.setName(AtlasStructDef.generateRandomName());
+                                }
+                            }
+                        }
+                    }
                 }
-                mb.setRandomNameForNewAttributeDefs(existingMB);
             }
-            for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
-                AtlasClassificationDef existingClassificationDef;
-                try{
-                    existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
-                }catch (AtlasBaseException e){
-                    //do nothing -- this classification is ew
-                    existingClassificationDef = null;
+            
+            // Process ClassificationDefs
+            if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+                for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
+                    AtlasClassificationDef existingClassificationDef = null;
+                    try {
+                        existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
+                    } catch (AtlasBaseException e) {
+                        // This is a new classification
+                    }
+                    
+                    if (allowCustomName) {
+                        // Validate that name is provided
+                        if (classificationDef.getName() == null || classificationDef.getName().trim().isEmpty()) {
+                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "ClassificationDef");
+                        }
+                        // Validate new attribute names
+                        if (CollectionUtils.isNotEmpty(classificationDef.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : classificationDef.getAttributeDefs()) {
+                                if (existingClassificationDef == null || !isExistingAttribute(existingClassificationDef, attrDef.getName())) {
+                                    if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
+                                        throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
+                                            "ClassificationDef attribute in " + classificationDef.getName());
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        // Always generate random names when allowCustomName=false
+                        if (existingClassificationDef == null) {
+                            // New type - generate random name
+                            classificationDef.setName(AtlasStructDef.generateRandomName());
+                        }
+                        // Generate random names for new attributes only
+                        if (CollectionUtils.isNotEmpty(classificationDef.getAttributeDefs())) {
+                            for (AtlasStructDef.AtlasAttributeDef attrDef : classificationDef.getAttributeDefs()) {
+                                if (existingClassificationDef == null || !isExistingAttribute(existingClassificationDef, attrDef.getName())) {
+                                    attrDef.setName(AtlasStructDef.generateRandomName());
+                                }
+                            }
+                        }
+                    }
                 }
-                classificationDef.setRandomNameForNewAttributeDefs(existingClassificationDef);
             }
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
@@ -713,6 +844,20 @@ public class TypesREST {
                 LOG.error("Error while refreshing all host cache", e);
             }
         }
+    }
+
+    private boolean isExistingAttribute(AtlasStructDef structDef, String attributeName) {
+        if (structDef == null || attributeName == null || CollectionUtils.isEmpty(structDef.getAttributeDefs())) {
+            return false;
+        }
+        
+        for (AtlasStructDef.AtlasAttributeDef attr : structDef.getAttributeDefs()) {
+            if (attributeName.equals(attr.getName())) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 
     @PreDestroy
