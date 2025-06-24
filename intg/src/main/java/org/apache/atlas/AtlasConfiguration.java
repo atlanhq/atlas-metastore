@@ -131,6 +131,7 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION("atlas.indexsearch.enable.janus.optimization", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_RELATIONS("atlas.indexsearch.enable.janus.optimization.for.relationship", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_CLASSIFICATIONS("atlas.indexsearch.enable.janus.optimization.for.classifications", false),
+    ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_LINEAGE("atlas.indexsearch.enable.janus.optimization.for.lineage", false),
 
     ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE("atlas.lineage.enable.connection.lineage", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED("atlas.indexsearch.enable.janus.optimization.extended", false),
@@ -160,9 +161,12 @@ public enum AtlasConfiguration {
 
     // ES and Cassandra batch operation configurations
     ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
-    CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100);
+    CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
 
 
+    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 4),
+    MAX_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.edge.count", 10000),
+    TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60);
 
     private static final Configuration APPLICATION_PROPERTIES;
 
