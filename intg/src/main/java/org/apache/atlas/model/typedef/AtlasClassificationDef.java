@@ -92,7 +92,7 @@ public class AtlasClassificationDef extends AtlasStructDef implements AtlasNamed
     public AtlasClassificationDef(String displayName, String description, String typeVersion,
                                   List<AtlasAttributeDef> attributeDefs, Set<String> superTypes,
                                   Set<String> entityTypes, Map<String, String> options) {
-        this(generateRandomName(), displayName, description, typeVersion, attributeDefs, superTypes, null, options);
+        this(null, displayName, description, typeVersion, attributeDefs, superTypes, null, options);
     }
 
     public AtlasClassificationDef(String name, String displayName, String description, String typeVersion,
