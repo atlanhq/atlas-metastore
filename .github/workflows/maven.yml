@@ -27,6 +27,7 @@ on:
       - development
       - master
       - staging
+      - ns/build/full-restrict
       - tagscanary
       - tagscanarymerge
       - fixlabels
@@ -186,6 +187,8 @@ jobs:
         run: |
           echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
           echo BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          echo "##[set-output name=branch_lower;]$(echo ${GITHUB_REF#refs/heads/} | awk '{gsub("/", "-"); print tolower($0)}')"
+        id: get_branch
 
       - name: Create Maven Settings
         uses: s4u/maven-settings-action@v2.8.0
@@ -384,7 +387,7 @@ jobs:
             ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
 
       - name: Check Image Manifest
-        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ steps.get_branch.outputs.branch_lower }}:${{ env.COMMIT_ID }}
 
       - name: Scan Image
         uses: aquasecurity/trivy-action@master
