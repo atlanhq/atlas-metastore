@@ -164,7 +164,6 @@ public enum AtlasConfiguration {
     CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
 
 
-    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 4),
     MAX_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.edge.count", 10000),
     TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60);
 
