@@ -366,7 +366,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     @Override
     public void onBusinessAttributesUpdated(String entityGuid, Map<String, Map<String, Object>> updatedBusinessAttributes) throws AtlasBaseException{
         if (isV2EntityNotificationEnabled) {
-            AtlasEntity entity = instanceConverter.getEntityWithMandatoryRelations(entityGuid);
+            AtlasEntity entity = instanceConverter.getAndCacheEntity(entityGuid);
 
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
                 listener.onBusinessAttributesUpdated(entity, updatedBusinessAttributes);
