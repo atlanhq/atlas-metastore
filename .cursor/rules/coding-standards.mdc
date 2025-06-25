@@ -1,0 +1,106 @@
+---
+description: Java coding standards and best practices for Atlas development
+globs:
+  - "**/*.java"
+alwaysApply: true
+---
+
+# Atlas Coding Standards
+
+## Naming Conventions
+
+### Class Naming
+- **REST endpoints**: Suffix with `REST` (e.g., `EntityREST`, `GlossaryREST`)
+- **Services**: Suffix with `Service` (e.g., `AtlasEntityService`)
+- **Stores**: Suffix with `Store` (e.g., `AtlasEntityStore`)
+- **Preprocessors**: Suffix with `PreProcessor` (e.g., `AssetPreProcessor`)
+- **Utilities**: Suffix with `Utils` or `Util` (e.g., `GraphHelper`, `AtlasEntityUtils`)
+- **Constants**: Use `UPPER_SNAKE_CASE`
+- **Package structure**: `org.apache.atlas.module.submodule.feature`
+
+### Code Organization
+- One class per file (except inner classes)
+- Order: static fields → instance fields → constructors → public methods → private methods
+- Keep methods focused and concise (aim for under 50 lines)
+- Use dependency injection via `@Inject`, `@Component`, `@Service` annotations
+- Prefer constructor injection over field injection
+
+## Logging Standards
+
+### Logger Declaration
+```java
+private static final Logger LOG = LoggerFactory.getLogger(ClassName.class);
+private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.ClassName");
+```
+
+### Logging Levels
+- **DEBUG**: Method entry/exit, detailed flow (guard with `isDebugEnabled()`)
+- **INFO**: Important state changes, business events
+- **WARN**: Recoverable errors, fallback scenarios
+- **ERROR**: Exceptions, unrecoverable errors with stack traces
+
+### Logging Best Practices
+```java
+// Use parameterized messages
+LOG.debug("Processing entity: guid={}, type={}", guid, typeName);
+
+// Guard expensive operations
+if (LOG.isDebugEnabled()) {
+    LOG.debug("Entity details: {}", entity.toString());
+}
+
+// Log exceptions properly
+LOG.error("Failed to process entity: guid={}", guid, e);
+```
+
+## Error Handling
+
+### Exception Usage
+- Throw `AtlasBaseException` with appropriate error codes
+- Use specific error codes from `AtlasErrorCode` enum
+- Include meaningful error messages with context
+
+```java
+throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+```
+
+### Validation
+- Validate parameters early in methods
+- Use `Servlets.validateQueryParamLength()` for REST parameters
+- Leverage Apache Commons utilities:
+  - `CollectionUtils.isNotEmpty()`
+  - `StringUtils.isNotBlank()`
+- Check for null before accessing properties
+
+## Performance Best Practices
+
+### Transaction Management
+- Use `@GraphTransaction` for automatic transaction management
+- Keep transactions small and focused
+- Handle rollback scenarios properly
+
+### Caching
+- Use `RequestContext` for request-scoped caching
+- Cache frequently accessed data (type definitions, entities)
+- Clear caches when necessary
+
+### Bulk Operations
+- Leverage bulk APIs for multiple entity operations
+- Implement pagination for large result sets
+- Use batch processing for better performance
+
+## Utility Usage
+
+### Core Utilities to Use
+- **GraphHelper**: Graph operations, vertex/edge manipulation
+- **AtlasGraphUtilsV2**: Encoded properties, graph utilities
+- **AtlasEntityUtils**: Entity manipulation and comparison
+- **AtlasTypeUtil**: Type system utilities
+- **RequestContext**: Thread-local request state
+- **AtlasJson**: JSON serialization/deserialization
+
+### When to Create New Utilities
+- Check existing utilities first before creating new ones
+- New utilities should be generic and reusable
+- Place in appropriate utils package
+- Follow existing naming patterns

@@ -1,0 +1,196 @@
+---
+description: REST API development guidelines for the webapp module
+globs:
+  - "webapp/**/*.java"
+alwaysApply: false
+---
+
+# WebApp Module Guidelines
+
+The `webapp` module provides REST APIs and web interface for Atlas.
+
+## REST API Patterns
+
+### Creating REST Endpoints
+
+Annotate REST classes properly:
+```java
+@Path("/api/atlas/v2/entity")
+@Singleton
+@Service
+@Consumes({Servlets.JSON_MEDIA_TYPE})
+@Produces({Servlets.JSON_MEDIA_TYPE})
+public class EntityREST {
+    @Inject
+    private AtlasEntityStore entityStore;
+    
+    @POST
+    @Path("/bulk")
+    @Timed  // For metrics
+    public EntityMutationResponse createOrUpdate(AtlasEntityStream entityStream) {
+        // Implementation
+    }
+}
+```
+
+### Common Query Parameters
+```java
+@QueryParam("minExtInfo") @DefaultValue("false") boolean minExtInfo
+@QueryParam("ignoreRelationships") @DefaultValue("false") boolean ignoreRelationships
+@QueryParam("limit") @DefaultValue("100") int limit
+@QueryParam("offset") @DefaultValue("0") int offset
+```
+
+### Input Validation
+```java
+// Validate query parameters
+Servlets.validateQueryParamLength("query", queryString);
+
+// Check request size limits
+if (entities.size() > maxEntitiesAllowed) {
+    throw new AtlasBaseException(AtlasErrorCode.BULK_ENTITY_LIMIT_EXCEEDED, 
+                                String.valueOf(maxEntitiesAllowed));
+}
+```
+
+## Security
+
+### Authorization
+Use `@AtlasAuthorize` for method-level security:
+```java
+@POST
+@AtlasAuthorize(resource = "entity", action = "create")
+public EntityMutationResponse createEntity(AtlasEntity entity) {
+    // Method implementation
+}
+```
+
+### Manual Authorization Checks
+```java
+AtlasAuthorizationUtils.verifyAccess(
+    new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, entity),
+    "Creating entity: ", entity.getTypeName()
+);
+```
+
+## Error Handling
+
+### Exception Mappers
+Atlas automatically maps exceptions to HTTP responses:
+```java
+// AtlasBaseException → Appropriate HTTP status
+// Exception details included in response
+// Stack traces logged but not exposed
+```
+
+### Error Response Format
+```json
+{
+    "errorCode": "ATLAS-404-00-005",
+    "errorMessage": "Entity with guid 123 not found",
+    "error": {
+        "entity-guid": "123"
+    }
+}
+```
+
+## Filter Chain
+
+Key filters in order:
+1. **MetricsFilter** - Records request metrics
+2. **AuditFilter** - Audit logging
+3. **AtlasAuthenticationFilter** - Authentication
+4. **AtlasCSRFPreventionFilter** - CSRF protection
+5. **ActiveServerFilter** - HA server filtering
+
+## Performance
+
+### Response Streaming
+For large responses:
+```java
+@GET
+@Path("/bulk/export")
+@Produces(MediaType.APPLICATION_OCTET_STREAM)
+public Response exportEntities(@QueryParam("guid") List<String> guids) {
+    StreamingOutput stream = outputStream -> {
+        // Write data incrementally
+    };
+    return Response.ok(stream).build();
+}
+```
+
+### Async Operations
+```java
+// For long-running operations
+@POST
+@Path("/async/import")
+public Response asyncImport(InputStream inputStream) {
+    String operationId = UUID.randomUUID().toString();
+    // Submit to background executor
+    // Return operation ID for status polling
+    return Response.accepted(operationId).build();
+}
+```
+
+## Metrics
+
+All REST endpoints should use `@Timed`:
+```java
+@GET
+@Path("/guid/{guid}")
+@Timed  // Automatically tracks request duration
+public AtlasEntityWithExtInfo getById(@PathParam("guid") String guid) {
+    // Implementation
+}
+```
+
+## Common REST Resources
+
+### EntityREST
+- Entity CRUD operations
+- Bulk operations
+- Classification management
+
+### TypesREST
+- Type definition management
+- Type queries
+
+### DiscoveryREST
+- Search functionality
+- DSL queries
+- Full-text search
+
+### GlossaryREST
+- Business glossary management
+- Term relationships
+
+### LineageREST
+- Data lineage operations
+- Impact analysis
+
+## Configuration
+
+Key properties:
+```properties
+# Request limits
+atlas.entities.allowed.in.bulk=1000
+atlas.attribute.value.max.length=100000
+
+# Session management
+atlas.server.session.timeout.secs=3600
+
+# Performance
+atlas.rest.filter.enabled=true
+atlas.http.header.size=65536
+```
+
+## Testing REST APIs
+
+Use provided scripts:
+```bash
+cd dev-support/atlas-scripts/
+./admin_status.sh
+./entity_create.sh entity.json
+```
+
+See: @docs/CLAUDE-webapp-module.md for detailed documentation
