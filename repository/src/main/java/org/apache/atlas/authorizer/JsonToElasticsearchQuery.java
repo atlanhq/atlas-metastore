@@ -21,7 +21,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_FILTER_
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_FILTER_CRITERIA_ENDS_WITH;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_FILTER_CRITERIA_IN;
 import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_FILTER_CRITERIA_NOT_IN;
-import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_FILTER_CRITERIA_NEGATIVE_OPS;
 
 
 public class JsonToElasticsearchQuery {
@@ -64,16 +63,13 @@ public class JsonToElasticsearchQuery {
                 
                 List<String> relatedAttributes = EntityAuthorizer.getRelatedAttributes(attributeName);
 
-                ArrayNode queryArray = ((ArrayNode) query.get("bool").get(getConditionClause(condition)));
+                ArrayNode queryArray = ((ArrayNode) query.get("bool").get(condition.equals("AND") ? "filter" : "should"));
                 JsonNode attributeQuery;
                 if (relatedAttributes.size() > 1) { // handle attributes with multiple related attributes
-                    String relatedAttrCondition = POLICY_FILTER_CRITERIA_NEGATIVE_OPS.contains(operator)
-                            ? POLICY_FILTER_CRITERIA_AND
-                            : POLICY_FILTER_CRITERIA_OR;
-                    attributeQuery = convertConditionToQuery(relatedAttrCondition);
+                    attributeQuery = convertConditionToQuery("OR");
                     for (String relatedAttribute : relatedAttributes) {
                         JsonNode relatedAttributeQuery = createAttributeQuery(operator, relatedAttribute, attributeValueNode);
-                        ((ArrayNode) attributeQuery.get("bool").get(getConditionClause(relatedAttrCondition))).add(relatedAttributeQuery);
+                        ((ArrayNode) attributeQuery.get("bool").get("should")).add(relatedAttributeQuery);
                     }
                 } else {
                     attributeQuery = createAttributeQuery(operator, attributeName, attributeValueNode);
@@ -145,9 +141,5 @@ public class JsonToElasticsearchQuery {
             return StringUtils.isNotEmpty(rootKey) ? filterCriteriaNode.get(rootKey) : filterCriteriaNode;
         }
         return null;
-    }
-
-    private static String getConditionClause(String condition) {
-        return POLICY_FILTER_CRITERIA_AND.equals(condition) ? "filter" : "should";
     }
 }
