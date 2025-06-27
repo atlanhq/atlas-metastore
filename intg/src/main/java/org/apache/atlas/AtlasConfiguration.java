@@ -152,7 +152,19 @@ public enum AtlasConfiguration {
     ENABLE_ASYNC_TYPE_UPDATE("atlas.types.update.async.enable", false),
     MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 4),
     MAX_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.edge.count", 10000),
-    TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60);
+    TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60),
+
+    // Classification propagation thread pool configuration
+    TAG_ASYNC_NOTIFIER_CORE_POOL_SIZE("atlas.classification.propagation.core.pool.size", 32),
+    TAG_ASYNC_NOTIFIER_MAX_POOL_SIZE("atlas.classification.propagation.max.pool.size", 200),
+    TAG_ASYNC_NOTIFIER_QUEUE_CAPACITY("atlas.classification.propagation.queue.capacity", 1000),
+    TAG_ASYNC_NOTIFIER_KEEP_ALIVE_SECONDS("atlas.classification.propagation.keep.alive.seconds", 300),
+
+    // ES and Cassandra batch operation configurations
+    ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
+    CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100);
+
+
 
     private static final Configuration APPLICATION_PROPERTIES;
 
