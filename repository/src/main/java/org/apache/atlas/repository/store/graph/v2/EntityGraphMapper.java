@@ -5036,10 +5036,9 @@ public class EntityGraphMapper {
             int totalDeleted = 0;
 
             // Get tags in batches and delete them
+            // The DAO now returns a PaginatedTagResult which contains the batch and paging information
             PaginatedTagResult pageToDelete = tagDAO.getPropagationsForAttachmentBatch(entityVertex.getIdForDisplay(), tagTypeName);
             List<Tag> batchToDelete = pageToDelete.getTags();
-            int previousBatchSize = -1; // Track previous batch size for loop detection
-            int loopDetectionCounter = 0;
 
             AtlasClassification originalClassification;
 
@@ -5055,28 +5054,14 @@ public class EntityGraphMapper {
             }
 
             while (!batchToDelete.isEmpty()) {
-                // Safety check to prevent infinite loops - if we get the same batch size twice in a row
-                int batchSize = batchToDelete.size();
-                if (batchSize == previousBatchSize) {
-                    loopDetectionCounter++;
-                    if (loopDetectionCounter > 3) {
-                        LOG.warn("Possible infinite loop detected in tag propagation for entity {}, tag type {}. Processed {} batches so far.", sourceEntityGuid, tagTypeName, totalDeleted / batchSize);
-                        break;
-                    }
-                } else {
-                    loopDetectionCounter = 0;
-                }
-                previousBatchSize = batchSize;
-
                 // collect the vertex IDs in this batch
                 List<String> vertexIds = batchToDelete.stream()
                         .map(Tag::getVertexId)
                         .toList();
 
-
                 List<AtlasEntity> entities = batchToDelete.stream().map(x->getEntityForNotification(x.getAssetMetadata())).toList();
 
-                // Delete from Cassandra
+                // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
 
                 // compute fresh classification‑text de‑norm attributes for this batch
@@ -5090,7 +5075,8 @@ public class EntityGraphMapper {
                 entityChangeNotifier.onClassificationPropagationDeleted(entities, originalClassification, true, RequestContext.get());
 
                 totalDeleted += batchToDelete.size();
-                // grab next batch
+
+                // grab next batch. The loop terminates correctly when the DAO reports it is done.
                 if (pageToDelete.isDone()) {
                     break;
                 }
@@ -5742,20 +5728,12 @@ public class EntityGraphMapper {
                 //get current associated tags to asset ONLY from Cassandra namespace
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(vertex.getIdForDisplay());
                 List<AtlasClassification> finalClassifications = tags.stream().map(t -> {
-                    try {
-                        return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                    } catch (AtlasBaseException e) {
-                        throw new RuntimeException(e);
-                    }
+                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
                 }).collect(Collectors.toList());
 
                 tags = tags.stream().filter(Tag::isPropagated).toList();
                 List<AtlasClassification> finalPropagatedClassifications = tags.stream().map(t -> {
-                    try {
-                        return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                    } catch (AtlasBaseException e) {
-                        throw new RuntimeException(e);
-                    }
+                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
                 }).collect(Collectors.toList());
 
                 AtlasClassification copiedPropagatedClassification = new AtlasClassification(currentTag);
@@ -5806,20 +5784,12 @@ public class EntityGraphMapper {
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
 
                 List<AtlasClassification> finalClassifications = tags.stream().map(t -> {
-                    try {
-                        return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                    } catch (AtlasBaseException e) {
-                        throw new RuntimeException(e);
-                    }
+                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
                 }).collect(Collectors.toList());
 
                 tags = tags.stream().filter(Tag::isPropagated).toList();
                 List<AtlasClassification> propagatedClassifications = tags.stream().map(t -> {
-                    try {
-                        return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                    } catch (AtlasBaseException e) {
-                        throw new RuntimeException(e);
-                    }
+                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
                 }).collect(Collectors.toList());
 
                 Map<String, Object> deNormAttributes;
@@ -6274,23 +6244,8 @@ public class EntityGraphMapper {
             }
 
             List<Tag> batchToUpdate = paginatedResult.getTags();
-            int previousBatchSize = -1; // Track previous batch size for loop detection
-            int loopDetectionCounter = 0;
 
             while (!batchToUpdate.isEmpty()) {
-                // Safety check to prevent infinite loops - if we get the same batch size twice in a row
-                int batchSize = batchToUpdate.size();
-                if (batchSize == previousBatchSize) {
-                    loopDetectionCounter++;
-                    if (loopDetectionCounter > 3) {
-                        LOG.warn("Possible infinite loop detected in tag propagation for entity {}, tag type {}. Processed {} batches so far.",
-                                sourceEntityGuid, tagTypeName, totalUpdated / batchSize);
-                        break;
-                    }
-                } else {
-                    loopDetectionCounter = 0;
-                }
-                previousBatchSize = batchSize;
 
                 // collect the vertex IDs in this batch
                 List<String> vertexIds = batchToUpdate.stream()
@@ -6325,8 +6280,7 @@ public class EntityGraphMapper {
                 batchToUpdate = paginatedResult.getTags();
             }
 
-            LOG.info("Updated classification text for {} propagations, taskId: {}",
-                    totalUpdated, RequestContext.get().getCurrentTask().getGuid());
+            LOG.info("Updated classification text for {} propagations, taskId: {}", totalUpdated, RequestContext.get().getCurrentTask().getGuid());
         } catch (Exception e) {
             LOG.error("Error while updating classification text for tag type {}: {}", tagTypeName, e.getMessage());
             throw new AtlasBaseException(e);
