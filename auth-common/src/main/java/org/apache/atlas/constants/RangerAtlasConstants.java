@@ -1,5 +1,8 @@
 package org.apache.atlas.constants;
 
+import java.util.HashSet;
+import java.util.Set;
+
 public class RangerAtlasConstants {
 
     public static final String RESOURCE_SERVICE                       = "atlas-service";
@@ -25,4 +28,16 @@ public class RangerAtlasConstants {
     public static final String ENTITY_NOT_CLASSIFIED          = "_NOT_CLASSIFIED";
 
     public static final String COMPONENT_ACCESSTYPE_SEPARATOR = ":";
+
+    public static final String POLICY_CATEGORY_PERSONA  = "persona";
+    public static final String POLICY_CATEGORY_PURPOSE  = "purpose";
+
+    public static final String READ_RESTRICTION_LEVEL_SCRUB = "scrub";
+    public static final String READ_RESTRICTION_LEVEL_GUID_ONLY = "guid_only";
+    public static final String READ_RESTRICTION_LEVEL_FULL = "full";
+
+    public static final Set<String> READ_RESTRICTION_EXCLUDE_TYPES = new HashSet<>() {{
+        add(POLICY_CATEGORY_PERSONA);
+        add(POLICY_CATEGORY_PURPOSE);
+    }};
 } 
