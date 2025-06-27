@@ -78,14 +78,14 @@ public class QueryPreProcessor implements PreProcessor {
             throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, entity.getTypeName(), COLLECTION_QUALIFIED_NAME);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(collectionQualifiedName));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName((AtlasEntity) entity, collectionQualifiedName));
     }
 
     private void processUpdateQueryCollection(AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context) throws AtlasBaseException {
         updateQueryResourceAttributes(typeRegistry, entityRetriever, entity, vertex, context);
     }
 
-    public static String createQualifiedName(String collectionQualifiedName) {
-        return String.format(qualifiedNameFormat, collectionQualifiedName, AtlasAuthorizationUtils.getCurrentUserName(), getUUID());
+    public static String createQualifiedName(AtlasEntity entity, String collectionQualifiedName) {
+        return String.format(qualifiedNameFormat, collectionQualifiedName, AtlasAuthorizationUtils.getCurrentUserName(), getUUID(entity));
     }
 }
