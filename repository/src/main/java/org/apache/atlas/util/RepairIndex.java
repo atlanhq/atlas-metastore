@@ -18,27 +18,35 @@
 
 package org.apache.atlas.util;
 
+
+import org.apache.atlas.model.Tag;
+import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.graph.IFullTextMapper;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
+import org.apache.atlas.repository.util.AtlasEntityUtils;
+import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
+import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.utils.AtlasEntityUtil;
 import org.janusgraph.core.JanusGraph;
-import org.janusgraph.core.schema.JanusGraphIndex;
-import org.janusgraph.diskstorage.BackendTransaction;
-import org.janusgraph.diskstorage.indexing.IndexEntry;
-import org.janusgraph.graphdb.database.IndexSerializer;
-import org.janusgraph.graphdb.database.StandardJanusGraph;
-import org.janusgraph.graphdb.database.management.ManagementSystem;
-import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
-import org.janusgraph.graphdb.types.MixedIndexType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.inject.Inject;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.atlas.repository.graph.GraphHelper.getGuid;
+
+@Component
 public class RepairIndex {
     private static final Logger LOG = LoggerFactory.getLogger(RepairIndex.class);
 
@@ -48,43 +56,41 @@ public class RepairIndex {
     private static final String INDEX_NAME_FULLTEXT_INDEX = "fulltext_index";
     private static final String INDEX_NAME_EDGE_INDEX = "edge_index";
 
-    private static JanusGraph graph;
+    private static TagDAO tagDAO;
+    private static AtlasGraph graph;
+    private static AtlasTypeRegistry typeRegistry;
+    private static IFullTextMapper fullTextMapperV2;
 
-    public static void setupGraph() {
-        LOG.info("Initializing graph: ");
-        graph = AtlasJanusGraphDatabase.getGraphInstance();
-        LOG.info("Graph Initialized!");
+    @Inject
+    public RepairIndex(AtlasGraph graph, AtlasTypeRegistry typeRegistry,
+                       TagDAO tagDAO, IFullTextMapper fullTextMapperV2) {
+        this.graph = graph;
+        this.tagDAO = tagDAO;
+        this.typeRegistry = typeRegistry;
+        this.fullTextMapperV2 = fullTextMapperV2;
     }
 
-    private static String[] getIndexes() {
-        return new String[]{ INDEX_NAME_VERTEX_INDEX, INDEX_NAME_EDGE_INDEX, INDEX_NAME_FULLTEXT_INDEX};
+    public void restoreSelective(String guid, Map<String,
+                                         AtlasEntity> referredEntities) throws Exception {
+        Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
+        LOG.info("processing referencedGuids => " + referencedGUIDs);
+
+        long startTime = System.currentTimeMillis();
+        reindexVertex(referencedGUIDs);
+
+        LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
+        LOG.info(": Done!");
     }
 
-    private static void reindexVertex(String indexName, IndexSerializer indexSerializer, Set<String> entityGUIDs) throws Exception {
-        Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
-        ManagementSystem mgmt = (ManagementSystem) graph.openManagement();
-        StandardJanusGraphTx tx = mgmt.getWrappedTx();
-        BackendTransaction mutator = tx.getTxHandle();
-        JanusGraphIndex index = mgmt.getGraphIndex(indexName);
-        MixedIndexType indexType = (MixedIndexType) mgmt.getSchemaVertex(index).asIndexType();
+    public void restoreByIds(Set<String> guids) throws Exception {
+        long startTime = System.currentTimeMillis();
+        reindexVertex(guids);
 
-        for (String entityGuid : entityGUIDs){
-            for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
-                try {
-                    indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
-                    break;
-                } catch (Exception e){
-                    LOG.info("Exception: " + e.getMessage());
-                    LOG.info("Pausing before retry..");
-                    Thread.sleep(2000 * attemptCount);
-                }
-            }
-        }
-        mutator.getIndexTransaction(indexType.getBackingIndexName()).restore(documentsPerStore);
+        LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
+        LOG.info(": Done!");
     }
 
-    private static Set<String> getEntityAndReferenceGuids(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
+    private Set<String> getEntityAndReferenceGuids(String guid, Map<String, AtlasEntity> referredEntities) {
         Set<String> set = new HashSet<>();
         set.add(guid);
         if (referredEntities == null || referredEntities.isEmpty()) {
@@ -94,34 +100,26 @@ public class RepairIndex {
         return set;
     }
 
-    public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
-        Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
-        LOG.info("processing referencedGuids => " + referencedGUIDs);
+    private void reindexVertex(Set<String> entityGUIDs) throws Exception {
+        Set<AtlasVertex> vertices = new HashSet<>(entityGUIDs.size());
 
-        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
-        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
-
-        for (String indexName : getIndexes()) {
-            LOG.info("Restoring: " + indexName);
-            long startTime = System.currentTimeMillis();
-            reindexVertex(indexName, indexSerializer, referencedGUIDs);
-
-            LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
+        for (String entityGuid : entityGUIDs){
+            vertices.add(AtlasGraphUtilsV2.findByGuid(entityGuid));
         }
-    }
 
-    public void restoreByIds(Set<String> guids) throws Exception {
+        Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) graph).getESPropertiesForUpdateFromVertices(vertices, this.typeRegistry);
+        for (AtlasVertex vertex : vertices) {
+            String vertexId = vertex.getIdForDisplay();
+            List<AtlasClassification> tags = tagDAO.getTagsForVertex(vertexId);
+            if (!tags.isEmpty()) {
+                toReIndex.get(vertexId).putAll(TagDeNormAttributesUtil.getAllTagAttributes(getGuid(vertex), tags, typeRegistry, fullTextMapperV2));
+            }
+        }
 
-        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
-        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
-
-        for (String indexName : getIndexes()) {
-            LOG.info("Restoring: " + indexName);
-            long startTime = System.currentTimeMillis();
-            reindexVertex(indexName, indexSerializer, guids);
-
-            LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
-            LOG.info(": Done!");
+        try {
+            ESConnector.syncToEs(toReIndex, true, null);
+        } catch (Exception e){
+            LOG.info("Exception: " + e.getMessage());
         }
     }
 }

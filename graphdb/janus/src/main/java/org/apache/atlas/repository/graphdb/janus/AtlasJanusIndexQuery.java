@@ -135,6 +135,11 @@ public class AtlasJanusIndexQuery implements AtlasIndexQuery<AtlasJanusVertex, A
         }
 
         @Override
+        public Long getVertexId() {
+            return 0L;
+        }
+
+        @Override
         public double getScore() {
             return source.getScore();
         }

@@ -36,6 +36,8 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
@@ -53,7 +55,13 @@ public class GlossaryPreProcessor implements PreProcessor {
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         try{
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+            DynamicVertexService dynamicVertexService = null;
+            if (graph instanceof AtlasJanusGraph) {
+                dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+            } else {
+                LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in GlossaryPreProcessor.");
+            }
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
         } catch (Exception e) {
             e.printStackTrace();
         }

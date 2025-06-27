@@ -1,0 +1,260 @@
+---
+description: Prometheus metrics implementation and monitoring patterns
+globs: []
+alwaysApply: false
+---
+
+# Prometheus Metrics
+
+Atlas uses Micrometer with Prometheus registry for metrics collection.
+
+## Metrics Architecture
+
+```
+HTTP Request → MetricsFilter → Business Logic → Response
+      ↓              ↓               ↓             ↓
+  Timer Start   Record URI    Custom Metrics  Timer Stop
+                                    ↓
+                            MetricsRegistry
+                                    ↓
+                         PrometheusMeterRegistry
+                                    ↓
+                    GET /api/atlas/admin/metrics/prometheus
+```
+
+## Adding Custom Metrics
+
+### Using RequestContext (Recommended)
+```java
+// Start timing an operation
+MetricRecorder recorder = RequestContext.get().startMetricRecord("searchEntities");
+try {
+    // Perform operation
+    List<AtlasEntity> results = performSearch();
+    
+    // Add custom metric
+    RequestContext.get().addApplicationMetrics(
+        "search_results", 
+        results.size(), 
+        Tag.of("search_type", "dsl")
+    );
+    
+    return results;
+} finally {
+    // Stop timing
+    RequestContext.get().endMetricRecord(recorder);
+}
+```
+
+### Using MetricsRegistry Directly
+```java
+@Inject
+private MetricsRegistry metricsRegistry;
+
+// Create a counter
+metricsRegistry.counter("entities_created", Tag.of("type", "hive_table"));
+
+// Create a timer
+Timer.Sample sample = metricsRegistry.timer("import_duration");
+// ... perform import ...
+sample.stop(Tag.of("status", "success"));
+```
+
+## HTTP Metrics
+
+Automatically collected by MetricsFilter:
+```
+# Metric name: http_server_requests
+# Tags:
+- method: GET, POST, PUT, DELETE
+- status: 200, 404, 500, etc.
+- uri: Canonicalized URI pattern
+```
+
+## Method-Level Metrics
+
+Enable method-level tracking:
+```properties
+atlas.metrics.method_level.enable=true
+atlas.metrics.method_patterns=["createOrUpdate", "searchUsingDSL", "getById"]
+```
+
+## Metric Types
+
+### Counters
+```java
+// Simple counter
+Counter counter = metricsRegistry.counter("events_processed");
+counter.increment();
+
+// Counter with tags
+metricsRegistry.counter("entity_operations", 
+    Tag.of("operation", "create"),
+    Tag.of("type", "hive_table")
+).increment();
+```
+
+### Timers
+```java
+// Timer with percentiles
+Timer timer = Timer.builder("operation_duration")
+    .publishPercentiles(0.5, 0.9, 0.99)
+    .register(metricsRegistry);
+
+timer.record(() -> {
+    // Timed operation
+});
+```
+
+### Gauges
+```java
+// Track current value
+metricsRegistry.gauge("queue_size", queue, Queue::size);
+
+// Track collection size
+metricsRegistry.gaugeCollectionSize("active_sessions", sessions);
+```
+
+## Configuration
+
+### Required Properties
+```properties
+# URI patterns to track (regex supported)
+atlas.metrics.uri_patterns=["/api/atlas/v2/entity/.*", "/api/atlas/v2/search/.*"]
+
+# Enable method-level metrics
+atlas.metrics.method_level.enable=true
+
+# Methods to track
+atlas.metrics.method_patterns=["createOrUpdate", "searchUsingDSL", "getById"]
+```
+
+## Best Practices
+
+### Naming Conventions
+```java
+// Use lowercase with underscores
+"http_requests_total"       // Good
+"httpRequestsTotal"         // Bad
+
+// Include unit in name
+"request_duration_seconds"  // Good
+"request_duration"          // Bad
+
+// Be descriptive
+"entity_creation_errors"    // Good
+"errors"                    // Bad
+```
+
+### Tagging
+```java
+// Keep cardinality low
+Tag.of("status", "success")     // Good - limited values
+Tag.of("user_id", userId)       // Bad - high cardinality
+
+// Use consistent tag names
+Tag.of("entity_type", "table")  // Consistent across metrics
+```
+
+### Performance Considerations
+```java
+// Use RequestContext for request-scoped metrics
+RequestContext.get().startMetricRecord("operation");
+
+// Reuse metric instances
+private final Counter successCounter = metricsRegistry.counter("success");
+
+// Avoid creating metrics in hot paths
+// Pre-create metrics in constructor/init
+```
+
+## Common Metrics
+
+### Request Metrics
+```java
+// Automatically tracked
+http_server_requests_seconds{method="GET",status="200",uri="/api/atlas/v2/entity/guid/*"}
+```
+
+### Business Metrics
+```java
+// Entity operations
+RequestContext.get().addApplicationMetrics(
+    "entities_processed",
+    count,
+    Tag.of("operation", "bulk_create"),
+    Tag.of("status", "success")
+);
+
+// Search metrics
+RequestContext.get().addApplicationMetrics(
+    "search_latency",
+    duration,
+    Tag.of("index", "vertex_index"),
+    Tag.of("result_count", String.valueOf(results.size()))
+);
+```
+
+## Accessing Metrics
+
+### Prometheus Endpoint
+```bash
+curl http://localhost:21000/api/atlas/admin/metrics/prometheus
+```
+
+### Sample Queries
+```promql
+# Request rate
+rate(http_server_requests_seconds_count[5m])
+
+# Error rate
+rate(http_server_requests_seconds_count{status=~"5.."}[5m])
+
+# P99 latency
+http_server_requests_seconds{quantile="0.99"}
+
+# Entity creation rate
+rate(entities_created_total[5m])
+```
+
+## Integration with Monitoring
+
+### Prometheus Configuration
+```yaml
+scrape_configs:
+  - job_name: 'atlas'
+    metrics_path: '/api/atlas/admin/metrics/prometheus'
+    static_configs:
+      - targets: ['localhost:21000']
+```
+
+### Alerting Rules
+```yaml
+groups:
+  - name: atlas_alerts
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_server_requests_seconds_count{status=~"5.."}[5m]) > 0.1
+        for: 5m
+        
+      - alert: SlowRequests
+        expr: http_server_requests_seconds{quantile="0.99"} > 5
+        for: 10m
+```
+
+## Debugging Metrics
+
+### Enable Debug Logging
+```properties
+log4j.logger.org.apache.atlas.service.metrics=DEBUG
+```
+
+### Check Metric Registration
+```java
+// List all registered metrics
+metricsRegistry.getRegistry().getMeters().forEach(meter -> {
+    LOG.info("Registered metric: {}", meter.getId());
+});
+```
+
+See: @docs/CLAUDE-prometheus-metrics.md for detailed documentation

@@ -20,16 +20,19 @@ package org.apache.atlas.repository.store.graph.v2.tasks;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.type.AtlasType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Map;
-import java.util.Set;
 
 public class ClassificationPropagationTasks {
+    private static final Logger LOG      = LoggerFactory.getLogger(ClassificationPropagationTasks.class);
     public static class Add extends ClassificationTask {
         public Add(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
             super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
@@ -38,11 +41,20 @@ public class ClassificationPropagationTasks {
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String entityGuid               = (String) parameters.get(PARAM_ENTITY_GUID);
-            String classificationVertexId   = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            String relationshipGuid         = (String) parameters.get(PARAM_RELATIONSHIP_GUID);
+            String tagTypeName              = getTaskDef().getClassificationTypeName();
+
             Boolean previousRestrictPropagationThroughLineage = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_LINEAGE);
             Boolean previousRestrictPropagationThroughHierarchy = (Boolean) parameters.get(PARAM_PREVIOUS_CLASSIFICATION_RESTRICT_PROPAGATE_THROUGH_HIERARCHY);
-            entityGraphMapper.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage,previousRestrictPropagationThroughHierarchy);
+
+            if (JANUS_OPTIMISATION_ENABLED != null && JANUS_OPTIMISATION_ENABLED) {
+                LOG.info("via JANUS_OPTIMISATION_ENABLED mode");
+                entityGraphMapper.propagateClassificationV2(parameters, entityGuid, tagTypeName);
+            } else {
+                String classificationVertexId   = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+                String relationshipGuid         = (String) parameters.get(PARAM_RELATIONSHIP_GUID);
+                LOG.info("via old mode");
+                entityGraphMapper.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage, previousRestrictPropagationThroughHierarchy);
+            }
         }
     }
 
@@ -53,8 +65,17 @@ public class ClassificationPropagationTasks {
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            entityGraphMapper.updateClassificationTextPropagation(classificationVertexId);
+            String tagTypeName              = getTaskDef().getClassificationTypeName();
+            String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
+
+            if (JANUS_OPTIMISATION_ENABLED != null && JANUS_OPTIMISATION_ENABLED) {
+                LOG.info("via JANUS_OPTIMISATION_ENABLED mode");
+                entityGraphMapper.updateClassificationTextPropagationV2(entityGuid, tagTypeName);
+            } else {
+                String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+                LOG.info("via old mode");
+                entityGraphMapper.updateClassificationTextPropagation(classificationVertexId);
+            }
         }
     }
 
@@ -66,44 +87,15 @@ public class ClassificationPropagationTasks {
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
             String entityGuid             = (String) parameters.get(PARAM_ENTITY_GUID);
-            String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+            String tagTypeName              = getTaskDef().getClassificationTypeName();
 
-            entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
-        }
-    }
-
-    // TODO: Will be deprecated
-    public static class DeleteOnlyPropagations extends ClassificationTask {
-        public DeleteOnlyPropagations(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
-        }
-
-        @Override
-        protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            if (parameters.get(PARAM_DELETED_EDGE_IDS) != null) {
-                Set<String> deletedEdgeIds    =  AtlasType.fromJson((String) parameters.get(PARAM_DELETED_EDGE_IDS), Set.class);
-                entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeIds);
+            if (JANUS_OPTIMISATION_ENABLED != null && JANUS_OPTIMISATION_ENABLED) {
+                LOG.info("via JANUS_OPTIMISATION_ENABLED mode");
+                entityGraphMapper.deleteClassificationPropagationV2(entityGuid, tagTypeName);
             } else {
-                String deletedEdgeId          =  (String) parameters.get(PARAM_DELETED_EDGE_ID);
-                String classificationVertexId =  (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-                entityGraphMapper.deleteClassificationOnlyPropagation(deletedEdgeId, classificationVertexId);
+                String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+                entityGraphMapper.deleteClassificationPropagation(entityGuid, classificationVertexId);
             }
-        }
-    }
-
-    // TODO: Will be deprecated
-    public static class DeleteOnlyPropagationsOnHardDelete extends ClassificationTask {
-        public DeleteOnlyPropagationsOnHardDelete(AtlasTask task, AtlasGraph graph, EntityGraphMapper entityGraphMapper, DeleteHandlerDelegate deleteDelegate, AtlasRelationshipStore relationshipStore) {
-            super(task, graph, entityGraphMapper, deleteDelegate, relationshipStore);
-        }
-
-        @Override
-        protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            String classificationVertexId =  (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-            String referencedVertexId = (String) parameters.get(PARAM_REFERENCED_VERTEX_ID);
-            boolean isTermEntityEdge = (boolean) parameters.get(PARAM_IS_TERM_ENTITY_EDGE);
-
-            entityGraphMapper.deleteClassificationOnlyPropagation(classificationVertexId, referencedVertexId, isTermEntityEdge);
         }
     }
 
@@ -114,9 +106,14 @@ public class ClassificationPropagationTasks {
 
         @Override
         protected void run(Map<String, Object> parameters) throws AtlasBaseException {
-            String            classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
-
-            entityGraphMapper.classificationRefreshPropagation(classificationVertexId);
+            String classificationTypeName = getTaskDef().getClassificationTypeName();
+            String sourceEntity = getTaskDef().getEntityGuid();
+            if (JANUS_OPTIMISATION_ENABLED != null && JANUS_OPTIMISATION_ENABLED) {
+                entityGraphMapper.classificationRefreshPropagationV2(parameters, sourceEntity, classificationTypeName);
+            } else {
+            String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
+                entityGraphMapper.classificationRefreshPropagation(classificationVertexId);
+            }
         }
     }
 

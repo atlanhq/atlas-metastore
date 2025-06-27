@@ -137,7 +137,6 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED("atlas.indexsearch.enable.janus.optimization.extended", false),
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
-
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
 
     /***
@@ -150,7 +149,24 @@ public enum AtlasConfiguration {
     ATLAS_ENTITIES_ATTRIBUTE_ALLOWED_LARGE_ATTRIBUTES("atlas.entities.attribute.allowed.large.attributes", "rawQueryText,variablesSchemaBase64,visualBuilderSchemaBase64,dataContractSpec,dataContractJson"),
 
     ENABLE_ASYNC_TYPE_UPDATE("atlas.types.update.async.enable", false),
-    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 4),
+    MAX_THREADS_TYPE_UPDATE("atlas.types.update.thread.count", 3),
+
+    // Classification propagation thread pool configuration
+    CLASSIFICATION_PROPAGATION_CORE_POOL_SIZE("atlas.classification.propagation.core.pool.size", 32),
+    CLASSIFICATION_PROPAGATION_MAX_POOL_SIZE("atlas.classification.propagation.max.pool.size", 200),
+    CLASSIFICATION_PROPAGATION_QUEUE_CAPACITY("atlas.classification.propagation.queue.capacity", 1000),
+    CLASSIFICATION_PROPAGATION_KEEP_ALIVE_SECONDS("atlas.classification.propagation.keep.alive.seconds", 300),
+
+    // ES and Cassandra batch operation configurations
+    ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
+    CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
+
+    /**
+     * Cassabdra Configuration
+     */
+    ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
+    ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "janusgraph_target"),
+    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets"),
     MAX_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.edge.count", 10000),
     TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60);
 

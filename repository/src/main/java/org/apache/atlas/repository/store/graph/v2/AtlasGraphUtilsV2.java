@@ -158,9 +158,15 @@ public class AtlasGraphUtilsV2 {
     }
 
     public static boolean isReference(TypeCategory typeCategory) {
-        return typeCategory == TypeCategory.STRUCT ||
-                typeCategory == TypeCategory.ENTITY ||
-                typeCategory == TypeCategory.OBJECT_ID_TYPE;
+
+        if (RequestContext.get().isIdOnlyGraphEnabled()) {
+            return typeCategory == TypeCategory.ENTITY ||
+                    typeCategory == TypeCategory.OBJECT_ID_TYPE;
+        } else {
+            return typeCategory == TypeCategory.STRUCT ||
+                    typeCategory == TypeCategory.ENTITY ||
+                    typeCategory == TypeCategory.OBJECT_ID_TYPE;
+        }
     }
 
     public static String encodePropertyKey(String key) {

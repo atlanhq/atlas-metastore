@@ -33,6 +33,7 @@ import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
@@ -80,18 +81,22 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
         customAttributes.put(MIGRATION_CUSTOM_ATTRIBUTE, "true");
     }
 
-    AbstractDomainPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
+    AbstractDomainPreProcessor(AtlasTypeRegistry typeRegistry,
+                               EntityGraphRetriever entityRetriever,
+                               AtlasGraph graph,
+                               DynamicVertexService dynamicVertexService) {
         this.graph = graph;
         this.entityRetriever = entityRetriever;
         this.typeRegistry = typeRegistry;
         this.preProcessor = new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever);
 
         try {
-            this.entityRetrieverNoRelations = new EntityGraphRetriever(graph, typeRegistry, true);
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
-            e.printStackTrace();
+            LOG.error("Failed to initialize EntityDiscoveryService in AbstractDomainPreProcessor", e);
         }
+
+        this.entityRetrieverNoRelations = new EntityGraphRetriever(entityRetriever, true);
     }
 
     protected void isAuthorizedToMove(String typeName, AtlasEntityHeader sourceDomain, AtlasEntityHeader targetDomain) throws AtlasBaseException {
@@ -356,7 +361,7 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
         AtlasEntity entity = new AtlasEntity();
         entity = entityRetriever.mapSystemAttributes(entityVertex, entity);
         entity.setAttributes(updatedAttributes);
-        requestContext.cacheDifferentialEntity(new AtlasEntity(entity));
+        requestContext.cacheDifferentialEntity(new AtlasEntity(entity), entityVertex);
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
 

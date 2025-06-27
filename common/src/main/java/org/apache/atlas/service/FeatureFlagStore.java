@@ -10,6 +10,8 @@ import javax.inject.Inject;
 public class FeatureFlagStore {
     private static RedisService redisService = null;
 
+    public static final String FEATURE_FLAG_ID_ONLY_GRAPH_ENABLED = "idOnlyGraphFeatureEnabled";
+
     @Inject
     public FeatureFlagStore(RedisService redisService) {
         FeatureFlagStore.redisService = redisService;
@@ -28,11 +30,24 @@ public class FeatureFlagStore {
         return ret;
     }
 
-    public static void setFlag(String key, String value) {
-        if (StringUtils.isEmpty(key) || StringUtils.isEmpty(value))
-            return;
+    public static String getFlag(String key) {
+        String ret = "";
+        try{
+            if (StringUtils.isEmpty(key))
+            {
+                return ret;
+            }
+            return redisService.getValue(addFeatureFlagNamespace(key));
+        } catch (Exception e) {
+            return ret;
+        }
+    }
 
-        redisService.putValue(addFeatureFlagNamespace(key), value);
+    public static String setFlag(String key, String value) {
+        if (StringUtils.isEmpty(key) || StringUtils.isEmpty(value))
+            return null;
+
+        return redisService.putValue(addFeatureFlagNamespace(key), value);
     }
 
     public static void deleteFlag(String key) {

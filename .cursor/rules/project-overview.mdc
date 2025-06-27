@@ -1,0 +1,74 @@
+---
+description: Apache Atlas architecture overview and core components
+globs: []
+alwaysApply: true
+---
+
+# Apache Atlas Architecture
+
+Apache Atlas is an enterprise-scale metadata management and data governance platform for Hadoop ecosystems.
+
+## Core Components
+
+### 1. Graph Database Layer (`graphdb/` module)
+- **Primary Interface**: `AtlasGraph` - abstraction for graph operations
+- **Implementation**: JanusGraph with Elasticsearch/Solr indexing
+- **Key Classes**: `AtlasJanusGraph`, `AtlasVertex`, `AtlasEdge`
+- **Features**: Transaction management, graph traversals
+- See: @docs/CLAUDE-graphdb-module.md
+
+### 2. Type System (`intg/` module)
+- **Primary Interface**: `AtlasTypeRegistry` - central registry for metadata types
+- **Type Categories**: Entity types, classifications, structs, enums
+- **Key Classes**: `AtlasEntityDef`, `AtlasClassificationDef`, `AtlasStructDef`
+- **Features**: Type inheritance, relationships, validation
+- See: @docs/CLAUDE-intg-module.md
+
+### 3. Repository Layer (`repository/` module)
+- **Primary Interface**: `AtlasEntityStore` - entity CRUD operations
+- **Key Classes**: 
+  - `EntityGraphMapper` - maps domain models to graph storage
+  - `EntityGraphRetriever` - efficient entity retrieval
+- **Features**: Bulk operations, audit, access control
+- See: @docs/CLAUDE-repository-module.md
+
+### 4. REST API Layer (`webapp/` module)
+- **Framework**: Jersey-based REST endpoints
+- **Main Resources**: 
+  - `EntityREST` - entity operations
+  - `TypesREST` - type management
+  - `DiscoveryREST` - search functionality
+  - `LineageREST` - lineage operations
+- See: @docs/CLAUDE-webapp-module.md
+
+### 5. Notification System (`notification/` module)
+- **Transport**: Kafka-based event streaming
+- **Features**: Entity change notifications, message compression
+- **Key Interface**: `NotificationInterface`
+
+## Key Design Patterns
+
+- **Repository Pattern**: Clean separation between domain and data access
+- **Factory Pattern**: Type creation and graph provider instantiation
+- **Observer Pattern**: Change notifications and audit logging
+- **Dependency Injection**: Spring framework with `@Component`, `@Service`
+
+## Configuration Files
+
+- `atlas-application.properties` - Main application configuration
+- `atlas-logback.xml` - Logging configuration
+- `keycloak.json` - Authentication configuration
+- `users-credentials.properties` - File-based auth credentials
+
+## Development Environment
+
+### Current Branch Information
+- Current branch: `idonlymaster`
+- Main branch for PRs: `master`
+- CI runs on: alpha, beta, development, master, lineageondemand, idonlymaster
+
+### Performance Guidelines
+- Use bulk operations when possible
+- Leverage Elasticsearch for searches instead of graph traversals
+- Entity relationships are lazy-loaded
+- Type registry maintains caches - clear when updating types

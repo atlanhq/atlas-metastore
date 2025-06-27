@@ -1,0 +1,290 @@
+---
+description: Performance optimization strategies and best practices
+globs: []
+alwaysApply: false
+---
+
+# Performance Optimization
+
+Key strategies for optimizing Atlas performance.
+
+## Metrics and Monitoring
+
+### Using AtlasPerfTracer
+```java
+// For REST endpoints
+AtlasPerfTracer perf = null;
+try {
+    if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+        perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.createEntity");
+    }
+    // ... operation
+} finally {
+    AtlasPerfTracer.log(perf);
+}
+```
+
+### Using MetricRecorder
+```java
+// For internal operations
+MetricRecorder metric = RequestContext.get().startMetricRecord("searchEntities");
+try {
+    // ... operation
+} finally {
+    RequestContext.get().endMetricRecord(metric);
+}
+```
+
+## Caching Strategies
+
+### Request-Level Cache
+```java
+// Cache entities during request processing
+RequestContext context = RequestContext.get();
+context.cacheEntity(guid, entity);
+
+// Retrieve from cache
+AtlasEntity cached = context.getEntity(guid);
+```
+
+### Type Registry Cache
+```java
+// Types are cached automatically
+AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+// Subsequent calls use cache
+```
+
+### Clear Caches When Needed
+```java
+// After type updates
+typeRegistry.clearCache();
+
+// Clear request cache
+RequestContext.get().clearCache();
+```
+
+## Query Optimization
+
+### Use Direct Index Queries
+```java
+// Instead of graph traversal
+String dslQuery = "v.\"__typeName\":\"hive_table\" AND v.\"__state\":\"ACTIVE\"";
+AtlasIndexQuery query = graph.indexQuery("vertexIndex", dslQuery);
+Iterator<Result> results = query.vertices();
+```
+
+### Limit Result Sets
+```java
+// Always use pagination
+SearchParameters params = new SearchParameters();
+params.setLimit(100);  // Don't fetch everything
+params.setOffset(0);
+params.setAttributes(Arrays.asList("name", "owner"));  // Only needed attributes
+```
+
+### Minimize Graph Traversals
+```java
+// Bad: Multiple traversals
+for (String edgeLabel : edgeLabels) {
+    Iterable<AtlasEdge> edges = vertex.getEdges(direction, edgeLabel);
+    // Process edges
+}
+
+// Good: Single traversal with multiple labels
+Iterable<AtlasEdge> edges = vertex.getEdges(direction, edgeLabels.toArray(new String[0]));
+```
+
+## Bulk Operation Optimization
+
+### Batch Processing
+```java
+// Configure batch sizes
+atlas.bulk.import.batch.size=100
+
+// Process in batches
+List<List<AtlasEntity>> batches = Lists.partition(entities, batchSize);
+for (List<AtlasEntity> batch : batches) {
+    processBatch(batch);
+}
+```
+
+### Disable Request Cache for Bulk
+```java
+// For bulk operations
+RequestContext.get().setEnableCache(false);
+```
+
+### Skip Unchanged Entities
+```java
+// Enable diff calculation
+atlas.entity.diff.calculation.enabled=true
+
+// Atlas automatically skips unchanged entities
+```
+
+## Transaction Management
+
+### Use @GraphTransaction
+```java
+@GraphTransaction
+public void bulkOperation() {
+    // Automatic transaction management
+    // Reduces transaction overhead
+}
+```
+
+### Keep Transactions Small
+```java
+// Bad: Large transaction
+for (AtlasEntity entity : largeEntityList) {
+    createEntity(entity);
+}
+
+// Good: Batch transactions
+for (List<AtlasEntity> batch : batches) {
+    createBatch(batch);  // Each batch in separate transaction
+}
+```
+
+## Memory Management
+
+### Stream Large Results
+```java
+@GET
+@Path("/export")
+@Produces(MediaType.APPLICATION_OCTET_STREAM)
+public Response exportEntities() {
+    StreamingOutput stream = output -> {
+        // Write incrementally
+        try (Writer writer = new OutputStreamWriter(output)) {
+            // Process and write in chunks
+        }
+    };
+    return Response.ok(stream).build();
+}
+```
+
+### Clear ThreadLocal Variables
+```java
+try {
+    // Operation
+} finally {
+    RequestContext.clear();  // Clear thread-local data
+}
+```
+
+## Elasticsearch Optimization
+
+### Bulk Indexing
+```java
+// Use bulk API for multiple documents
+BulkRequest bulkRequest = new BulkRequest();
+for (Document doc : documents) {
+    bulkRequest.add(new IndexRequest(index).id(doc.getId()).source(doc));
+}
+```
+
+### Query Optimization
+```java
+// Use filters instead of queries when possible
+// Filters are cached and faster
+{
+    "query": {
+        "bool": {
+            "filter": [
+                {"term": {"__typeName": "hive_table"}},
+                {"term": {"__state": "ACTIVE"}}
+            ]
+        }
+    }
+}
+```
+
+## JanusGraph Optimization
+
+### Configuration Tuning
+```properties
+# Enable caching
+atlas.graph.cache.db-cache=true
+atlas.graph.cache.db-cache-size=0.5
+atlas.graph.cache.tx-cache-size=15000
+
+# Connection pooling
+atlas.graph.storage.connection-pool-size=32
+```
+
+### ID-Only Mode
+```properties
+# Enable Cassandra offloading
+atlas.enable.entity.cud.on.cassandra=true
+
+# Reduces graph storage by 60-70%
+```
+
+## Common Performance Patterns
+
+### Lazy Loading
+```java
+// Load minimal information first
+AtlasEntityWithExtInfo minimal = entityStore.getById(guid, true);
+
+// Load full details only when needed
+if (needFullDetails) {
+    AtlasEntityWithExtInfo full = entityStore.getById(guid, false);
+}
+```
+
+### Parallel Processing
+```java
+ExecutorService executor = Executors.newFixedThreadPool(poolSize);
+List<Future<Result>> futures = new ArrayList<>();
+
+for (Task task : tasks) {
+    futures.add(executor.submit(() -> processTask(task)));
+}
+
+// Wait for completion
+for (Future<Result> future : futures) {
+    results.add(future.get());
+}
+```
+
+### Prefetching
+```java
+// Prefetch related entities
+Set<String> relatedGuids = entities.stream()
+    .flatMap(e -> getRelatedGuids(e).stream())
+    .collect(Collectors.toSet());
+
+Map<String, AtlasEntity> relatedEntities = entityStore.getByIds(relatedGuids);
+```
+
+## Monitoring and Tuning
+
+### Key Metrics
+- `http_server_requests_seconds` - REST endpoint latency
+- `method_dist_summary` - Method-level performance
+- `entities.created.count` - Entity creation rate
+- `bulk.operation.duration` - Bulk operation time
+
+### JVM Tuning
+```bash
+# Heap size
+-Xms4g -Xmx8g
+
+# GC tuning
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+
+# Large pages
+-XX:+UseLargePages
+```
+
+### Connection Pools
+```properties
+# Database connections
+atlas.graph.storage.connection-pool-size=32
+
+# HTTP connections
+atlas.client.connection.pool.size=20
+```

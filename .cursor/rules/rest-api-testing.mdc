@@ -1,0 +1,351 @@
+---
+description: REST API testing with scripts and tools
+globs: []
+alwaysApply: false
+---
+
+# REST API Testing
+
+Guide for testing Atlas REST APIs using provided scripts and tools.
+
+## Atlas Scripts Setup
+
+### Location
+```bash
+cd dev-support/atlas-scripts/
+```
+
+### Configuration
+Edit `env_atlas.sh`:
+```bash
+#!/bin/bash
+export ATLAS_URL="http://localhost:21000"
+export ATLAS_USER="admin"
+export ATLAS_PASS="admin"
+```
+
+## Common API Operations
+
+### Server Status
+```bash
+# Check if Atlas is running
+./admin_status.sh
+
+# Expected output:
+{
+  "Status": "ACTIVE",
+  "Version": "3.0.0-SNAPSHOT"
+}
+```
+
+### Type Management
+
+#### Create Types
+```bash
+# Create custom type definitions
+./typedefs_create.sh my_types.json
+
+# Example type definition:
+cat > my_types.json << 'EOF'
+{
+  "entityDefs": [{
+    "name": "custom_dataset",
+    "superTypes": ["DataSet"],
+    "attributeDefs": [{
+      "name": "owner",
+      "typeName": "string",
+      "isOptional": false,
+      "cardinality": "SINGLE"
+    }]
+  }]
+}
+EOF
+```
+
+#### List Types
+```bash
+# Get all type definitions
+./typedefs_list.sh
+
+# Get specific type
+curl -u admin:admin \
+  ${ATLAS_URL}/api/atlas/v2/types/typedef/name/hive_table
+```
+
+### Entity Operations
+
+#### Create Entity
+```bash
+# Create entity from JSON
+./entity_create.sh entity.json
+
+# Example entity:
+cat > entity.json << 'EOF'
+{
+  "entity": {
+    "typeName": "hive_table",
+    "attributes": {
+      "name": "test_table",
+      "qualifiedName": "default.test_table@cluster1",
+      "owner": "admin"
+    }
+  }
+}
+EOF
+```
+
+#### Search Entities
+```bash
+# Basic search
+./search_basic.sh hive_table 10
+
+# DSL search
+curl -u admin:admin \
+  -H "Content-Type: application/json" \
+  -X POST ${ATLAS_URL}/api/atlas/v2/search/dsl \
+  -d '{"query":"hive_table where name=\"test_table\"","limit":10}'
+```
+
+#### Get Entity by GUID
+```bash
+# Get full entity details
+./entity_get_by_guid.sh <guid>
+
+# Get minimal info
+./entity_get_by_guid.sh <guid> "?minExtInfo=true"
+```
+
+### Bulk Operations
+
+#### Bulk Entity Creation
+```bash
+cat > bulk_entities.json << 'EOF'
+{
+  "entities": [
+    {
+      "typeName": "hive_table",
+      "attributes": {
+        "name": "table1",
+        "qualifiedName": "db.table1@cluster"
+      }
+    },
+    {
+      "typeName": "hive_table",
+      "attributes": {
+        "name": "table2",
+        "qualifiedName": "db.table2@cluster"
+      }
+    }
+  ]
+}
+EOF
+
+curl -u admin:admin \
+  -H "Content-Type: application/json" \
+  -X POST ${ATLAS_URL}/api/atlas/v2/entity/bulk \
+  -d @bulk_entities.json
+```
+
+## Advanced Testing
+
+### Using cURL with Options
+
+#### With Query Parameters
+```bash
+# Search with parameters
+curl -u admin:admin \
+  -G ${ATLAS_URL}/api/atlas/v2/search/basic \
+  --data-urlencode "typeName=hive_table" \
+  --data-urlencode "limit=50" \
+  --data-urlencode "offset=0"
+```
+
+#### With Headers
+```bash
+# Custom headers
+curl -u admin:admin \
+  -H "Content-Type: application/json" \
+  -H "X-Requested-By: atlas-test" \
+  ${ATLAS_URL}/api/atlas/v2/entity/guid/123
+```
+
+#### With Response Time
+```bash
+# Measure response time
+curl -u admin:admin \
+  -w "\nTotal time: %{time_total}s\n" \
+  ${ATLAS_URL}/api/atlas/v2/types/typedefs
+```
+
+### Using HTTPie
+```bash
+# Install httpie
+pip install httpie
+
+# Basic request
+http -a admin:admin GET localhost:21000/api/atlas/v2/types/typedefs
+
+# POST with JSON
+http -a admin:admin POST localhost:21000/api/atlas/v2/entity \
+  typeName=hive_table \
+  attributes:='{"name":"test","qualifiedName":"test@cluster"}'
+```
+
+### Using Postman
+
+Create a Postman collection with:
+1. Environment variables:
+   - `base_url`: http://localhost:21000
+   - `username`: admin
+   - `password`: admin
+
+2. Pre-request script:
+```javascript
+pm.environment.set("timestamp", new Date().toISOString());
+```
+
+3. Common requests:
+   - GET Types: `{{base_url}}/api/atlas/v2/types/typedefs`
+   - Search: `{{base_url}}/api/atlas/v2/search/basic`
+   - Create Entity: `{{base_url}}/api/atlas/v2/entity`
+
+## Performance Testing
+
+### Using Apache Bench
+```bash
+# Test endpoint performance
+ab -n 100 -c 10 -A admin:admin \
+  http://localhost:21000/api/atlas/v2/types/typedefs
+
+# POST request testing
+ab -n 50 -c 5 -A admin:admin \
+  -p search.json -T application/json \
+  http://localhost:21000/api/atlas/v2/search/basic
+```
+
+### Using JMeter
+1. Create test plan
+2. Add HTTP Request Defaults
+3. Add HTTP Authorization Manager
+4. Create request samplers
+5. Add listeners for results
+
+## Debugging API Issues
+
+### Enable Request Logging
+```bash
+# View request details
+curl -u admin:admin -v \
+  ${ATLAS_URL}/api/atlas/v2/entity/guid/123
+
+# View headers only
+curl -u admin:admin -I \
+  ${ATLAS_URL}/api/atlas/v2/entity/guid/123
+```
+
+### Check Response Headers
+```bash
+# Important headers to check:
+# - X-Frame-Options
+# - Content-Type
+# - X-Total-Count (for searches)
+```
+
+### Common Error Responses
+
+#### 400 Bad Request
+```json
+{
+  "errorCode": "ATLAS-400-00-002",
+  "errorMessage": "Type hive_table_invalid does not exist"
+}
+```
+
+#### 404 Not Found
+```json
+{
+  "errorCode": "ATLAS-404-00-005",
+  "errorMessage": "Entity with guid 123 not found"
+}
+```
+
+#### 403 Forbidden
+```json
+{
+  "errorCode": "ATLAS-403-00-001",
+  "errorMessage": "admin is not authorized to perform ENTITY_CREATE"
+}
+```
+
+## Automated Testing
+
+### Shell Script Test Suite
+```bash
+#!/bin/bash
+# test_suite.sh
+
+source env_atlas.sh
+
+echo "Testing Atlas APIs..."
+
+# Test 1: Server status
+echo -n "Testing server status... "
+if ./admin_status.sh | grep -q "ACTIVE"; then
+    echo "PASS"
+else
+    echo "FAIL"
+    exit 1
+fi
+
+# Test 2: Type creation
+echo -n "Testing type creation... "
+if ./typedefs_create.sh test_types.json | grep -q "success"; then
+    echo "PASS"
+else
+    echo "FAIL"
+fi
+
+# Add more tests...
+```
+
+### Python Test Script
+```python
+import requests
+from requests.auth import HTTPBasicAuth
+
+class AtlasAPITest:
+    def __init__(self, base_url, username, password):
+        self.base_url = base_url
+        self.auth = HTTPBasicAuth(username, password)
+    
+    def test_server_status(self):
+        response = requests.get(
+            f"{self.base_url}/api/atlas/admin/status",
+            auth=self.auth
+        )
+        assert response.status_code == 200
+        assert response.json()["Status"] == "ACTIVE"
+    
+    def test_entity_creation(self, entity_data):
+        response = requests.post(
+            f"{self.base_url}/api/atlas/v2/entity",
+            json=entity_data,
+            auth=self.auth
+        )
+        assert response.status_code == 200
+        return response.json()
+
+# Run tests
+tester = AtlasAPITest("http://localhost:21000", "admin", "admin")
+tester.test_server_status()
+```
+
+## Best Practices
+
+1. **Use Script Variables**: Define common values in env_atlas.sh
+2. **Check Return Codes**: Verify HTTP status codes
+3. **Validate Responses**: Check response structure and data
+4. **Clean Up Test Data**: Delete test entities after testing
+5. **Use Unique Names**: Avoid conflicts with timestamps/UUIDs
+6. **Test Error Cases**: Verify error handling
+7. **Monitor Performance**: Track response times

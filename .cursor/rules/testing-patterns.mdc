@@ -1,0 +1,324 @@
+---
+description: Testing patterns and best practices for Atlas development
+globs:
+  - "**/src/test/**/*.java"
+alwaysApply: false
+---
+
+# Testing Patterns
+
+Best practices for writing tests in the Atlas codebase.
+
+## Test Structure
+
+### Test Class Organization
+```java
+public class AtlasEntityStoreTest {
+    // Class-level test fixtures
+    @Mock
+    private AtlasTypeRegistry typeRegistry;
+    
+    @Mock
+    private AtlasGraph graph;
+    
+    private AtlasEntityStore entityStore;
+    
+    @BeforeClass
+    public static void setupClass() {
+        // One-time setup
+    }
+    
+    @Before
+    public void setup() {
+        MockitoAnnotations.initMocks(this);
+        entityStore = new AtlasEntityStore(typeRegistry, graph);
+        
+        // Setup RequestContext
+        RequestContext.clear();
+        RequestContext.get().setUser("test-user");
+    }
+    
+    @After
+    public void cleanup() {
+        RequestContext.clear();
+    }
+    
+    @Test
+    public void testCreateEntity() {
+        // Test implementation
+    }
+}
+```
+
+## Common Test Patterns
+
+### Testing Entity Operations
+```java
+@Test
+public void testEntityCreation() throws AtlasBaseException {
+    // Arrange
+    AtlasEntity entity = TestUtilsV2.createEntity("hive_table");
+    entity.setAttribute("name", "test_table");
+    entity.setAttribute("qualifiedName", "test_table@cluster");
+    
+    // Mock type registry
+    AtlasEntityType entityType = mock(AtlasEntityType.class);
+    when(typeRegistry.getEntityTypeByName("hive_table")).thenReturn(entityType);
+    
+    // Act
+    EntityMutationResponse response = entityStore.createOrUpdate(
+        new AtlasEntityWithExtInfo(entity)
+    );
+    
+    // Assert
+    assertNotNull(response);
+    assertEquals(1, response.getCreatedEntities().size());
+    verify(graph).addVertex();
+}
+```
+
+### Testing REST Endpoints
+```java
+@Test
+public void testRESTEndpoint() throws Exception {
+    // Setup mock services
+    when(entityStore.getById(anyString())).thenReturn(testEntity);
+    
+    // Create REST resource
+    EntityREST entityREST = new EntityREST(entityStore, typeRegistry);
+    
+    // Test endpoint
+    AtlasEntityWithExtInfo result = entityREST.getById("test-guid");
+    
+    // Verify
+    assertNotNull(result);
+    assertEquals("test-guid", result.getEntity().getGuid());
+    verify(entityStore).getById("test-guid");
+}
+```
+
+### Testing Preprocessors
+```java
+@Test
+public void testPreprocessorValidation() {
+    // Arrange
+    AtlasEntity entity = new AtlasEntity("Contract");
+    entity.setAttribute("name", "invalid@name");  // Invalid name
+    
+    ContractPreProcessor preprocessor = new ContractPreProcessor(typeRegistry);
+    
+    // Act & Assert
+    AtlasBaseException exception = assertThrows(
+        AtlasBaseException.class,
+        () -> preprocessor.processAttributes(entity, context, EntityOperation.CREATE)
+    );
+    
+    assertEquals(AtlasErrorCode.INVALID_PARAMETERS, exception.getAtlasErrorCode());
+}
+```
+
+### Testing with Transactions
+```java
+@Test
+@GraphTransaction
+public void testTransactionalOperation() throws AtlasBaseException {
+    try {
+        // Operations within transaction
+        AtlasVertex v1 = graph.addVertex();
+        AtlasVertex v2 = graph.addVertex();
+        graph.addEdge(v1, v2, "test_edge");
+        
+        // Verify within transaction
+        assertNotNull(graph.getVertex(v1.getId()));
+        
+        // Force rollback for test
+        if (testRollback) {
+            throw new RuntimeException("Test rollback");
+        }
+    } catch (Exception e) {
+        // Verify rollback
+        assertNull(graph.getVertex(v1.getId()));
+    }
+}
+```
+
+## Mock Utilities
+
+### Using TestUtilsV2
+```java
+// Create test entities
+AtlasEntity table = TestUtilsV2.createEntity("hive_table");
+AtlasEntity column = TestUtilsV2.createEntity("hive_column");
+
+// Create with relationships
+AtlasEntityWithExtInfo tableWithColumns = TestUtilsV2.createTableWithColumns();
+
+// Create classifications
+AtlasClassification pii = TestUtilsV2.createClassification("PII");
+```
+
+### Mocking Graph Operations
+```java
+@Mock
+private AtlasGraph graph;
+
+@Mock
+private AtlasVertex vertex;
+
+@Before
+public void setupMocks() {
+    // Setup vertex properties
+    when(vertex.getProperty("__guid", String.class)).thenReturn("test-guid");
+    when(vertex.getProperty("__typeName", String.class)).thenReturn("hive_table");
+    
+    // Setup graph queries
+    AtlasGraphQuery query = mock(AtlasGraphQuery.class);
+    when(graph.query()).thenReturn(query);
+    when(query.has(anyString(), anyString())).thenReturn(query);
+    when(query.vertices()).thenReturn(Arrays.asList(vertex));
+}
+```
+
+## Integration Testing
+
+### Using Embedded Services
+```java
+@IntegrationTest
+public class AtlasEntityStoreIntegrationTest {
+    private static EmbeddedKafka kafka;
+    private static EmbeddedElasticsearch elasticsearch;
+    
+    @BeforeClass
+    public static void setupServices() {
+        kafka = new EmbeddedKafka();
+        kafka.start();
+        
+        elasticsearch = new EmbeddedElasticsearch();
+        elasticsearch.start();
+    }
+    
+    @Test
+    public void testEndToEndFlow() {
+        // Test with real services
+    }
+}
+```
+
+### Testing with Real Graph
+```java
+@Test
+public void testWithRealGraph() {
+    // Use in-memory graph for testing
+    Configuration config = new BaseConfiguration();
+    config.setProperty("storage.backend", "inmemory");
+    
+    AtlasGraph graph = new AtlasJanusGraph(config);
+    
+    // Perform real graph operations
+    AtlasVertex vertex = graph.addVertex();
+    vertex.setProperty("test", "value");
+    graph.commit();
+    
+    // Verify
+    AtlasVertex retrieved = graph.getVertex(vertex.getId());
+    assertEquals("value", retrieved.getProperty("test", String.class));
+}
+```
+
+## Performance Testing
+
+```java
+@Test
+@PerfTest
+public void testBulkOperationPerformance() {
+    int entityCount = 1000;
+    List<AtlasEntity> entities = createTestEntities(entityCount);
+    
+    long startTime = System.currentTimeMillis();
+    EntityMutationResponse response = entityStore.createOrUpdate(
+        new AtlasEntityStream(entities)
+    );
+    long duration = System.currentTimeMillis() - startTime;
+    
+    // Verify performance
+    assertTrue("Bulk operation took " + duration + "ms", duration < 5000);
+    assertEquals(entityCount, response.getCreatedEntities().size());
+}
+```
+
+## Testing Best Practices
+
+### 1. Test Data Isolation
+```java
+@Before
+public void setup() {
+    // Use unique names to avoid conflicts
+    String uniqueSuffix = UUID.randomUUID().toString();
+    testEntityName = "test_entity_" + uniqueSuffix;
+}
+```
+
+### 2. RequestContext Management
+```java
+@Before
+public void setupContext() {
+    RequestContext.clear();
+    RequestContext.get().setUser("test-user");
+}
+
+@After
+public void cleanupContext() {
+    RequestContext.clear();
+}
+```
+
+### 3. Assertion Patterns
+```java
+// Use specific assertions
+assertEquals("Expected specific value", expected, actual);
+
+// Verify collections
+assertThat(results, hasSize(3));
+assertThat(results, contains("item1", "item2", "item3"));
+
+// Verify exceptions
+AtlasBaseException exception = assertThrows(
+    AtlasBaseException.class,
+    () -> methodThatThrows()
+);
+assertEquals(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, exception.getAtlasErrorCode());
+```
+
+### 4. Verify Mock Interactions
+```java
+// Verify method calls
+verify(entityStore, times(1)).createOrUpdate(any());
+
+// Verify no more interactions
+verifyNoMoreInteractions(entityStore);
+
+// Capture arguments
+ArgumentCaptor<AtlasEntity> captor = ArgumentCaptor.forClass(AtlasEntity.class);
+verify(entityStore).createOrUpdate(captor.capture());
+assertEquals("expected-name", captor.getValue().getAttribute("name"));
+```
+
+## Test Categories
+
+### Unit Tests
+- Fast, isolated tests
+- Mock all dependencies
+- Test single units of code
+- Run with: `mvn test`
+
+### Integration Tests
+- Test component interactions
+- May use embedded services
+- Slower than unit tests
+- Run with: `mvn verify`
+
+### End-to-End Tests
+- Test complete workflows
+- Use real services
+- Slowest tests
+- Run with: `mvn verify -Pintegration`

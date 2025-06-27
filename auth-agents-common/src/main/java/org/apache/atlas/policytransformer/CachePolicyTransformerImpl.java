@@ -43,6 +43,7 @@ import org.apache.atlas.plugin.util.ServicePolicies.TagPolicies;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -87,6 +88,8 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyCateg
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyFilterCriteria;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyResourceCategory;
 
+import org.apache.atlas.utils.AtlasJson;
+
 @Component
 public class CachePolicyTransformerImpl {
     private static final Logger LOG = LoggerFactory.getLogger(CachePolicyTransformerImpl.class);
@@ -119,11 +122,12 @@ public class CachePolicyTransformerImpl {
     public static final int POLICY_BATCH_SIZE = 250;
 
     private EntityDiscoveryService discoveryService;
-    private AtlasGraph                graph;
-    private EntityGraphRetriever      entityRetriever;
+    private final AtlasGraph                graph;
+    private final EntityGraphRetriever      entityRetriever;
+    private final DynamicVertexService dynamicVertexService;
 
-    private PersonaCachePolicyTransformer personaTransformer;
-    private PurposeCachePolicyTransformer purposeTransformer;
+    private final PersonaCachePolicyTransformer personaTransformer;
+    private final PurposeCachePolicyTransformer purposeTransformer;
 
     private AtlasEntityHeader service;
     private Map<String, AtlasEntityHeader> services;
@@ -131,17 +135,19 @@ public class CachePolicyTransformerImpl {
     private final Map<EntityAuditActionV2, Integer> auditEventToDeltaChangeType;
 
     @Inject
-    public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+    public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry,
+                                      DynamicVertexService dynamicVertexService) throws AtlasBaseException {
         this.graph                = new AtlasJanusGraph();
         this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
+        this.dynamicVertexService = dynamicVertexService;
 
-        personaTransformer = new PersonaCachePolicyTransformer(entityRetriever);
-        purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
+        this.personaTransformer = new PersonaCachePolicyTransformer(entityRetriever);
+        this.purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
 
         try {
-            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
-            LOG.error("Failed to initialize discoveryService");
+            LOG.error("Failed to initialize discoveryService in CachePolicyTransformerImpl", e);
             throw new AtlasBaseException(e.getCause());
         }
 
@@ -617,17 +623,54 @@ public class CachePolicyTransformerImpl {
             return null;
         }
 
-        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+        Object rawConditionsObject = atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
 
-        for (AtlasStruct condition : conditions) {
-            RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
-
-            rangerCondition.setType((String) condition.getAttribute("policyConditionType"));
-            rangerCondition.setValues((List<String>) condition.getAttribute("policyConditionValues"));
-
-            ret.add(rangerCondition);
+        if (!(rawConditionsObject instanceof List)) {
+            LOG.error("Attribute {} in AtlasEntityHeader {} (QN: {}) was not a List, but was: {}. Returning null.",
+                    ATTR_POLICY_CONDITIONS, atlasPolicy.getGuid(), atlasPolicy.getAttribute(QUALIFIED_NAME),
+                    rawConditionsObject != null ? rawConditionsObject.getClass().getName() : "null");
+            return null;
         }
-        return ret;
+
+        List<?> conditionList = (List<?>) rawConditionsObject;
+
+        for (Object conditionObj : conditionList) {
+            if (conditionObj instanceof Map) {
+                try {
+                    AtlasStruct conditionStruct = AtlasJson.fromLinkedHashMap(conditionObj, AtlasStruct.class);
+
+                    if (conditionStruct != null) {
+                        RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
+                        
+                        // Directly attempt to get and cast attributes
+                        // The try-catch block will handle potential ClassCastExceptions or NullPointers if attributes are missing/wrong type
+                        rangerCondition.setType((String) conditionStruct.getAttribute("policyConditionType"));
+                        rangerCondition.setValues((List<String>) conditionStruct.getAttribute("policyConditionValues"));
+                        
+                        // Basic check to ensure type was actually set if it's mandatory
+                        if (rangerCondition.getType() == null) {
+                            LOG.warn("policyConditionType was null after attempting to read from AtlasStruct for policy QN: {}. Condition map: {}. Skipping.", 
+                                     atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj);
+                            continue;
+                        }
+                        ret.add(rangerCondition);
+                    } else {
+                        LOG.warn("AtlasJson.fromLinkedHashMap returned null for a condition object for policy QN: {}. Object: {}",
+                                atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj);
+                    }
+                } catch (ClassCastException cce) {
+                     LOG.error("ClassCastException while processing attributes from converted AtlasStruct for policy QN: {}. Condition map: {}. Error: ",
+                              atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj, cce);
+                } catch (Exception e) {
+                    LOG.error("Error converting/processing policy condition using AtlasJson.fromLinkedHashMap for policy QN: {}. Condition map: {}. Error: ",
+                              atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj, e);
+                }
+            } else {
+                LOG.warn("Expected a Map element in policy conditions list for policy QN: {}, but got: {}. Skipping this element.",
+                        atlasPolicy.getAttribute(QUALIFIED_NAME), conditionObj != null ? conditionObj.getClass().getName() : "null");
+            }
+        }
+        return ret.isEmpty() ? null : ret;
     }
 
     private List<RangerValiditySchedule> getPolicyValiditySchedule(AtlasEntityHeader atlasPolicy) {
@@ -658,6 +701,8 @@ public class CachePolicyTransformerImpl {
         List<AtlasEntityHeader> ret = new ArrayList<>();
         try {
             IndexSearchParams indexSearchParams = new IndexSearchParams();
+            indexSearchParams.setExcludeClassifications(true);
+
             Set<String> attributes = new HashSet<>();
             attributes.add(NAME);
             attributes.add(ATTR_POLICY_CATEGORY);
@@ -734,6 +779,8 @@ public class CachePolicyTransformerImpl {
 
     private AtlasEntityHeader getServiceEntity(String serviceName) throws AtlasBaseException {
         IndexSearchParams indexSearchParams = new IndexSearchParams();
+        indexSearchParams.setExcludeClassifications(true);
+
         Set<String> attributes = new HashSet<>();
         attributes.add(NAME);
         attributes.add(ATTR_SERVICE_SERVICE_TYPE);
@@ -786,7 +833,11 @@ public class CachePolicyTransformerImpl {
         policy.setValiditySchedules(getPolicyValiditySchedule(atlasPolicy));
 
         if (atlasPolicy.hasAttribute(ATTR_POLICY_PRIORITY)) {
-            policy.setPolicyPriority((Integer) atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY));
+            if (atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY) instanceof String) {
+                policy.setPolicyPriority(Integer.parseInt((String) atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY)));
+            } else if (atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY) instanceof Integer) {
+                policy.setPolicyPriority((Integer) atlasPolicy.getAttribute(ATTR_POLICY_PRIORITY));
+            }
         }
 
         if (POLICY_SERVICE_NAME_ABAC.equals(atlasPolicy.getAttribute(ATTR_POLICY_SERVICE_NAME))) {

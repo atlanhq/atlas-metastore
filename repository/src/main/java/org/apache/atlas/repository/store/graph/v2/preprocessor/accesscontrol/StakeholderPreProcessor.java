@@ -33,6 +33,7 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
@@ -43,6 +44,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -86,7 +88,13 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         super(graph, typeRegistry, entityRetriever, entityStore);
 
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+            DynamicVertexService dynamicVertexService = null;
+            if (graph instanceof AtlasJanusGraph) {
+                dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+            } else {
+                LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in StakeholderPreProcessor.");
+            }
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }

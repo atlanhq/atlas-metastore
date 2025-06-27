@@ -65,10 +65,10 @@ public class RestoreHandlerV1 {
     private final EntityGraphRetriever entityRetriever;
 
     @Inject
-    public RestoreHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
+    public RestoreHandlerV1(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityGraphRetriever) {
         this.graphHelper = new GraphHelper(graph);
         this.typeRegistry = typeRegistry;
-        this.entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+        this.entityRetriever = entityGraphRetriever;
     }
 
     private void restoreEdge(AtlasEdge edge) throws AtlasBaseException {
@@ -112,7 +112,7 @@ public class RestoreHandlerV1 {
                 // Record all restoring candidate entities in RequestContext
                 // and gather restoring candidate vertices.
                 for (VertexInfo vertexInfo : getOwnedVertices(instanceVertex)) {
-                    requestContext.recordEntityRestore(vertexInfo.getEntity());
+                    requestContext.recordEntityRestore(vertexInfo.getEntity(), vertexInfo.getVertex());
                     restoreCandidateVertices.add(vertexInfo.getVertex());
                 }
             }
