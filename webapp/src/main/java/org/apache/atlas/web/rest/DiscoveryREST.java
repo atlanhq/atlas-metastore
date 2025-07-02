@@ -421,6 +421,10 @@ public class DiscoveryREST {
                 throw abe;
             }
 
+            if (!parameters.getEnableFullRestriction()) {
+                parameters.setEnableFullRestriction(AtlasAuthorizationUtils.isFullRestrictionConfigured()); // enable full restriction for all direct indexsearch calls
+            }
+
             if(LOG.isDebugEnabled()){
                 LOG.debug("Performing indexsearch for the params ({})", parameters);
             }
