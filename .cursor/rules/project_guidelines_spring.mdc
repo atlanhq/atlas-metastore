@@ -1,0 +1,479 @@
+---
+description: Project guidelines for Spring
+globs: 
+alwaysApply: false
+---
+# Spring Project Guidelines for Atlas Metastore
+
+## Overview
+
+This document outlines best practices for Spring-based development in the Atlas Metastore project, with an emphasis on simplicity, maintainability, and performance. Atlas Metastore uses Spring for dependency injection, transaction management, and REST API implementation, while integrating with JanusGraph for graph database operations.
+
+## Table of Contents
+
+1. [Project Structure](#project-structure)
+2. [Dependency Injection](#dependency-injection)
+3. [Transaction Management](#transaction-management)
+4. [REST API Implementation](#rest-api-implementation)
+5. [Exception Handling](#exception-handling)
+6. [Performance Monitoring](#performance-monitoring)
+7. [Configuration Management](#configuration-management)
+8. [Testing](#testing)
+
+## Project Structure
+
+### Module Organization
+
+Atlas Metastore follows a modular architecture with clear separation of concerns:
+
+```
+atlas-metastore/
+├── intg/                 # Integration models and common interfaces
+├── repository/           # Core business logic and data access
+├── webapp/               # Web application and REST APIs
+├── graphdb/              # Graph database abstraction and implementation
+├── notification/         # Notification framework
+├── common/               # Common utilities
+└── addons/               # Integration components
+```
+
+### Best Practices
+
+1. **Keep modules focused**: Each module should have a single responsibility
+   ```java
+   // Good: EntityREST in webapp module focuses only on REST API concerns
+   @Path("v2/entity")
+   public class EntityREST {
+       // REST endpoint implementations
+   }
+   
+   // Good: AtlasEntityStoreV2 in repository module focuses on business logic
+   public class AtlasEntityStoreV2 implements AtlasEntityStore {
+       // Business logic implementation
+   }
+   ```
+
+2. **Use interfaces for service definitions**: Define service contracts with interfaces
+   ```java
+   // Good: Define service contract with interface
+   public interface AtlasEntityStore {
+       AtlasEntityWithExtInfo getById(String guid) throws AtlasBaseException;
+       // Other methods...
+   }
+   
+   // Implementation class
+   public class AtlasEntityStoreV2 implements AtlasEntityStore {
+       // Implementation
+   }
+   ```
+
+3. **Follow package naming conventions**: Use consistent package naming
+   ```
+   org.apache.atlas.repository.store.graph.v2  // Implementation version in package name
+   org.apache.atlas.repository.store.graph     // Interface package
+   ```
+
+## Dependency Injection
+
+Atlas Metastore uses Spring's dependency injection to manage component dependencies and promote loose coupling.
+
+### Best Practices
+
+1. **Use constructor injection for required dependencies**:
+   ```java
+   // Good: Constructor injection for required dependencies
+   private final AtlasTypeRegistry typeRegistry;
+   private final AtlasGraph graph;
+   
+   @Inject
+   public AtlasEntityStoreV2(AtlasTypeRegistry typeRegistry, AtlasGraph graph) {
+       this.typeRegistry = typeRegistry;
+       this.graph = graph;
+   }
+   ```
+
+2. **Use field injection sparingly and only for optional dependencies**:
+   ```java
+   // Acceptable for optional dependencies
+   @Inject
+   private AtlasMetricsService metricsService;
+   ```
+
+3. **Avoid circular dependencies**: Restructure your code if circular dependencies emerge
+   ```java
+   // Bad: Circular dependency between ServiceA and ServiceB
+   public class ServiceA {
+       @Inject
+       private ServiceB serviceB;
+   }
+   
+   public class ServiceB {
+       @Inject
+       private ServiceA serviceA;
+   }
+   
+   // Good: Extract common functionality to a third service
+   public class ServiceA {
+       @Inject
+       private CommonService commonService;
+   }
+   
+   public class ServiceB {
+       @Inject
+       private CommonService commonService;
+   }
+   ```
+
+4. **Use qualifiers for multiple implementations of the same interface**:
+   ```java
+   // When multiple implementations exist
+   @Inject
+   @Named("janus")
+   private AtlasGraph graph;
+   ```
+
+## Transaction Management
+
+Atlas Metastore uses a custom `@GraphTransaction` annotation for managing graph database transactions.
+
+### Best Practices
+
+1. **Use @GraphTransaction for methods that modify the graph**:
+   ```java
+   // Good: Transaction annotation on methods that modify the graph
+   @GraphTransaction
+   public EntityMutationResponse createOrUpdate(EntityStream entityStream, 
+                                               boolean isPartialUpdate) throws AtlasBaseException {
+       // Implementation that modifies the graph
+   }
+   ```
+
+2. **Keep transactional methods focused and concise**:
+   ```java
+   // Good: Focused transactional method
+   @GraphTransaction
+   public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
+       // Create vertex logic
+   }
+   
+   // Bad: Overly complex transactional method
+   @GraphTransaction
+   public void doManyThings(AtlasEntity entity) throws AtlasBaseException {
+       // Validation
+       // Create vertex
+       // Update related entities
+       // Send notifications
+       // Update search index
+   }
+   ```
+
+3. **Handle exceptions properly within transactions**:
+   ```java
+   @GraphTransaction
+   public EntityMutationResponse createOrUpdate(EntityStream entityStream) throws AtlasBaseException {
+       try {
+           // Implementation
+       } catch (Exception e) {
+           // Log error
+           throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+       }
+   }
+   ```
+
+4. **Be aware of transaction boundaries**:
+   ```java
+   // Good: Clear transaction boundaries
+   @GraphTransaction
+   public EntityMutationResponse methodA() {
+       // All operations in this method are in the same transaction
+   }
+   
+   // Note: This is a separate transaction
+   @GraphTransaction
+   public void methodB() {
+       // Different transaction
+   }
+   ```
+
+## REST API Implementation
+
+Atlas Metastore uses JAX-RS (Jersey) for implementing RESTful APIs.
+
+### Best Practices
+
+1. **Use appropriate HTTP methods**:
+   ```java
+   // Good: Using appropriate HTTP methods
+   @GET
+   @Path("/{guid}")
+   public AtlasEntityWithExtInfo getById(@PathParam("guid") String guid) { ... }
+   
+   @POST
+   @Path("/")
+   public EntityMutationResponse create(AtlasEntityWithExtInfo entity) { ... }
+   
+   @PUT
+   @Path("/")
+   public EntityMutationResponse update(AtlasEntityWithExtInfo entity) { ... }
+   
+   @DELETE
+   @Path("/{guid}")
+   public EntityMutationResponse deleteById(@PathParam("guid") String guid) { ... }
+   ```
+
+2. **Use path parameters for resource identifiers**:
+   ```java
+   @GET
+   @Path("/{guid}")
+   public AtlasEntityWithExtInfo getById(@PathParam("guid") String guid) { ... }
+   ```
+
+3. **Use query parameters for filtering and options**:
+   ```java
+   @GET
+   @Path("/")
+   public AtlasSearchResult search(@QueryParam("query") String query,
+                                  @QueryParam("limit") int limit,
+                                  @QueryParam("offset") int offset) { ... }
+   ```
+
+4. **Validate input parameters**:
+   ```java
+   @POST
+   @Path("/bulk")
+   public EntityMutationResponse createOrUpdate(AtlasEntitiesWithExtInfo entities) throws AtlasBaseException {
+       if (entities == null || CollectionUtils.isEmpty(entities.getEntities())) {
+           throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "No entities to create/update");
+       }
+       
+       // Implementation
+   }
+   ```
+
+5. **Use consistent response formats**:
+   ```java
+   // Good: Consistent response format
+   @GET
+   @Path("/{guid}")
+   public AtlasEntityWithExtInfo getById(@PathParam("guid") String guid) throws AtlasBaseException {
+       // Implementation
+   }
+   
+   // Good: Error responses use AtlasBaseException
+   @GET
+   @Path("/{guid}/classification/{classificationName}")
+   public AtlasClassification getClassification(@PathParam("guid") String guid,
+                                               @PathParam("classificationName") String classificationName) throws AtlasBaseException {
+       if (StringUtils.isEmpty(guid)) {
+           throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+       }
+       
+       // Implementation
+   }
+   ```
+
+## Exception Handling
+
+Atlas Metastore uses a centralized exception handling mechanism with `AtlasBaseException` as the base exception class.
+
+### Best Practices
+
+1. **Use AtlasBaseException with appropriate error codes**:
+   ```java
+   // Good: Using specific error codes
+   if (StringUtils.isEmpty(guid)) {
+       throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+   }
+   ```
+
+2. **Implement a global exception mapper**:
+   ```java
+   @Provider
+   public class AtlasExceptionMapper implements ExceptionMapper<AtlasBaseException> {
+       @Override
+       public Response toResponse(AtlasBaseException exception) {
+           // Map exception to HTTP response
+       }
+   }
+   ```
+
+3. **Log exceptions appropriately**:
+   ```java
+   try {
+       // Implementation
+   } catch (Exception e) {
+       LOG.error("Error processing request", e);
+       throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+   }
+   ```
+
+4. **Don't expose sensitive information in error messages**:
+   ```java
+   // Bad: Exposing sensitive information
+   throw new AtlasBaseException("Failed to connect to database at jdbc:mysql://internal-db:3306/atlas with user admin");
+   
+   // Good: Generic error message
+   throw new AtlasBaseException(AtlasErrorCode.DATABASE_CONNECTION_FAILED);
+   ```
+
+## Performance Monitoring
+
+Atlas Metastore uses a custom metrics framework for performance monitoring.
+
+### Best Practices
+
+1. **Use metrics for performance-critical operations**:
+   ```java
+   // Good: Using metrics for performance monitoring
+   AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("findByUniqueAttributes");
+   
+   try {
+       // Implementation
+   } finally {
+       RequestContext.get().endMetricRecord(metric);
+   }
+   ```
+
+2. **Add metrics for bulk operations**:
+   ```java
+   // Good: Metrics for bulk operations
+   AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("bulkImport");
+   
+   try {
+       // Process entities in batches
+       for (List<AtlasEntity> batch : batches) {
+           // Process batch
+       }
+   } finally {
+       metric.recordCount("totalEntitiesProcessed", totalCount);
+       RequestContext.get().endMetricRecord(metric);
+   }
+   ```
+
+3. **Use request context for tracking request-scoped metrics**:
+   ```java
+   // Good: Using request context
+   RequestContext context = RequestContext.get();
+   context.recordEntityGuidUpdate(entityGuid, true);
+   ```
+
+## Configuration Management
+
+Atlas Metastore uses Apache Commons Configuration for managing configuration properties.
+
+### Best Practices
+
+1. **Use centralized configuration**:
+   ```java
+   // Good: Centralized configuration access
+   Configuration configuration = ApplicationProperties.get();
+   int maxLimit = configuration.getInt("atlas.search.maxLimit", 10000);
+   ```
+
+2. **Provide sensible defaults**:
+   ```java
+   // Good: Sensible defaults
+   boolean useCache = configuration.getBoolean("atlas.use.cache", true);
+   ```
+
+3. **Use typed configuration access**:
+   ```java
+   // Good: Typed configuration access
+   int maxRetries = configuration.getInt("atlas.graph.storage.max-retries", 3);
+   long retryWaitTime = configuration.getLong("atlas.graph.storage.retry-wait-time", 1000);
+   ```
+
+4. **Validate configuration at startup**:
+   ```java
+   // Good: Configuration validation
+   public void validateConfiguration() {
+       if (maxLimit <= 0) {
+           LOG.warn("Invalid configuration: atlas.search.maxLimit must be positive");
+           maxLimit = 10000; // Default value
+       }
+   }
+   ```
+
+## Testing
+
+Atlas Metastore uses JUnit for unit testing and integration testing.
+
+### Best Practices
+
+1. **Write unit tests for business logic**:
+   ```java
+   // Good: Unit test for business logic
+   @Test
+   public void testEntityValidation() {
+       AtlasEntity entity = new AtlasEntity();
+       // Set up test data
+       
+       try {
+           validator.validate(entity);
+           fail("Should have thrown exception");
+       } catch (AtlasBaseException e) {
+           assertEquals(AtlasErrorCode.INVALID_PARAMETERS, e.getAtlasErrorCode());
+       }
+   }
+   ```
+
+2. **Use mocks for dependencies**:
+   ```java
+   // Good: Using mocks
+   @Mock
+   private AtlasGraph graph;
+   
+   @Mock
+   private AtlasTypeRegistry typeRegistry;
+   
+   @InjectMocks
+   private AtlasEntityStoreV2 entityStore;
+   
+   @Before
+   public void setup() {
+       MockitoAnnotations.initMocks(this);
+       // Set up mock behavior
+   }
+   ```
+
+3. **Test error scenarios**:
+   ```java
+   // Good: Testing error scenarios
+   @Test
+   public void testEntityNotFound() {
+       when(graph.findByGuid("non-existent")).thenReturn(null);
+       
+       try {
+           entityStore.getById("non-existent");
+           fail("Should have thrown exception");
+       } catch (AtlasBaseException e) {
+           assertEquals(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, e.getAtlasErrorCode());
+       }
+   }
+   ```
+
+4. **Use integration tests for end-to-end scenarios**:
+   ```java
+   // Good: Integration test
+   @Test
+   public void testCreateAndRetrieveEntity() {
+       // Create entity
+       AtlasEntity entity = new AtlasEntity();
+       // Set up entity
+       
+       EntityMutationResponse response = entityStore.createOrUpdate(new AtlasEntityStream(entity));
+       String guid = response.getCreatedEntities().get(0).getGuid();
+       
+       // Retrieve entity
+       AtlasEntityWithExtInfo retrievedEntity = entityStore.getById(guid);
+       
+       // Verify
+       assertEquals(entity.getTypeName(), retrievedEntity.getEntity().getTypeName());
+   }
+   ```
+
+## Conclusion
+
+Following these Spring project guidelines will help maintain a clean, maintainable, and performant codebase for Atlas Metastore. The emphasis on simplicity, clear separation of concerns, and proper use of Spring features will lead to a more robust and scalable application.
+
+Remember that these guidelines are not exhaustive, and specific scenarios may require different approaches. Always consider the context and requirements when applying these practices.
