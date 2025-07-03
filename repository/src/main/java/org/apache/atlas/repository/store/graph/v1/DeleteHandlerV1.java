@@ -1386,7 +1386,8 @@ public abstract class DeleteHandlerV1 {
     }
 
     public void createAndQueueTask(String taskType, AtlasVertex entityVertex, String classificationVertexId, String classificationTypeName, String relationshipGuid) throws AtlasBaseException {
-        if (!CLASSIFICATION_PROPAGATION_DELETE.equals(taskType) && skipClassificationTaskCreation(classificationVertexId)) {
+        AtlasVertex classificationVertex = graph.getVertex(classificationVertexId);
+        if (!CLASSIFICATION_PROPAGATION_DELETE.equals(taskType) && skipClassificationTaskCreation(classificationVertex)) {
             LOG.info("Task is already scheduled for classification id {}, no need to schedule task for vertex {}", classificationVertexId, entityVertex.getIdForDisplay());
             return;
         }
@@ -1455,7 +1456,7 @@ public abstract class DeleteHandlerV1 {
                 continue;
             }
 
-            if(skipClassificationTaskCreation(currentClassificationId)) {
+            if(skipClassificationTaskCreation(currentClassificationVertex)) {
                 LOG.info("Task is already scheduled for classification id {}, no need to schedule task for edge {}", currentClassificationId, edge.getIdForDisplay());
                 continue;
             }
@@ -1468,7 +1469,7 @@ public abstract class DeleteHandlerV1 {
 
     }
 
-    private boolean skipClassificationTaskCreation(String classificationId) throws AtlasBaseException {
+    private boolean skipClassificationTaskCreation(AtlasVertex classificationVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("skipClassificationTaskCreation");
         /*
         If any of,
@@ -1476,21 +1477,34 @@ public abstract class DeleteHandlerV1 {
         2. CLASSIFICATION_REFRESH_PROPAGATION task scheduled already
         skip classification task creation
          */
+        String currentClassificationId = classificationVertex.getIdForDisplay();
         try {
+            String classificationTypeName      = getTypeName(classificationVertex);
 
             List<String> taskTypes = Arrays.asList(CLASSIFICATION_REFRESH_PROPAGATION, CLASSIFICATION_PROPAGATION_DELETE);
             List<AtlasTask> tasksInRequestContext = RequestContext.get().getQueuedTasks();
+
             if (
                     tasksInRequestContext != null &&
-                    tasksInRequestContext.stream().filter(Objects::nonNull)
-                    .anyMatch(task -> task.getClassificationId().equals(classificationId)
-                            && taskTypes.contains(task.getType()) && task.getStatus().equals(AtlasTask.Status.PENDING))
+                            tasksInRequestContext.stream().filter(Objects::nonNull)
+                                    .anyMatch(task -> {
+                                        boolean classificationIdMatches = task.getClassificationId() != null
+                                                && task.getClassificationId().equals(currentClassificationId);
+                                        boolean entityGuidMatches = task.getEntityGuid() != null
+                                                && task.getEntityGuid().equals(GraphHelper.getGuid(classificationVertex));
+                                        boolean tagTypeNameMatches = task.getTagTypeName() != null
+                                                && task.getTagTypeName().equals(classificationTypeName);
+
+                                        return (classificationIdMatches || (entityGuidMatches && tagTypeNameMatches))
+                                                && taskTypes.contains(task.getType())
+                                                && task.getStatus().equals(AtlasTask.Status.PENDING);
+                                    })
             ) {
                 return true;
             }
 
             TaskSearchResult taskSearchResult = taskUtil.findPendingTasksByClassificationId(0, PENDING_TASK_QUERY_SIZE_LIMIT,
-                    classificationId, taskTypes , new ArrayList<>());
+                    currentClassificationId, taskTypes , new ArrayList<>());
 
             List<AtlasTask> pendingTasks = taskSearchResult.getTasks();
             if(CollectionUtils.isEmpty(pendingTasks)) {
@@ -1503,23 +1517,25 @@ public abstract class DeleteHandlerV1 {
 
             // Ideally there should be only refresh propagation task
             if (pendingRefreshPropagationTasks.size() > 1) {
-                LOG.warn("More than one {} task found for classification id {}", CLASSIFICATION_REFRESH_PROPAGATION, classificationId);
+                LOG.warn("More than one {} task found for classification id {}", CLASSIFICATION_REFRESH_PROPAGATION, currentClassificationId);
             }
 
             // if any task have status as PENDING, then skip task creation
             if (
-                    pendingTasks.stream()
-                    .filter(Objects::nonNull)
-                    .anyMatch(task -> task.getClassificationId().equals(classificationId)
-                            && taskTypes.contains(task.getType()) && task.getStatus().equals(AtlasTask.Status.PENDING))
+                    tasksInRequestContext != null &&
+                            tasksInRequestContext.stream()
+                                    .filter(Objects::nonNull)
+                                    .anyMatch(task -> task.getClassificationId() != null
+                                            && task.getClassificationId().equals(currentClassificationId)
+                                            && taskTypes.contains(task.getType())
+                                            && task.getStatus().equals(AtlasTask.Status.PENDING))
             ) {
                 return true;
             } else {
-                LOG.warn("There is inconsistency " +
-                        "in task queue, there are no pending tasks for classification id {} but there are tasks in queue", classificationId);
+                LOG.warn("There is inconsistency in task queue, there are no pending tasks for classification id {} but there are tasks in queue", currentClassificationId);
             }
         } catch (AtlasBaseException e) {
-            LOG.error("Error while checking if classification task creation is required for classification id {}", classificationId, e);
+            LOG.error("Error while checking if classification task creation is required for classification id {}", currentClassificationId, e);
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metric);
