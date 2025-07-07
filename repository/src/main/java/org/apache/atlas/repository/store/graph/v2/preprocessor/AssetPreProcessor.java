@@ -184,7 +184,6 @@ public class AssetPreProcessor implements PreProcessor {
 
                         try {
                             List<AtlasVertex> entityVertices = fetchEntityVerticesUsingIndexSearch(entityType, attributeName, guid);
-
                             for (AtlasVertex entityVertex: entityVertices) {
 
                                 AtlasGraphUtilsV2.removeItemFromListPropertyValue(
@@ -249,7 +248,6 @@ public class AssetPreProcessor implements PreProcessor {
         }
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
-
         return entityType != null && entityType.getTypeAndAllSuperTypes().contains("Asset");
     }
 }
