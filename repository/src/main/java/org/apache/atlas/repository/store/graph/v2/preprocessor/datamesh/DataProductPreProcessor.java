@@ -476,23 +476,6 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
                     }
                 }
 
-//                if (hasLinkedAssets(productGuid, PRODUCT_GUIDS)) {
-//                    throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "This product can't be deleted right now because it has linked assets that are in the process of being removed. Please try again shortly.");
-//                }
-
-                if (hasLinkedAssets(productGuid, PRODUCT_GUIDS)) {
-                    throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "This product can't be deleted right now because it has linked assets that are in the process of being removed. Please try again shortly.");
-                }
-
-
-                try {
-                    cleanupProductReferencesFromAssets(productGuid);
-                } catch (AtlasBaseException e) {
-                    LOG.error("Error during cleanup of product references for product {}: {}", productGuid, e.getMessage());
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("Stack trace:", e);
-                    }
-                }
                 if (hasLinkedAssets(productGuid, PRODUCT_GUIDS)) {
                     throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "This product can't be deleted right now because it has linked assets that are in the process of being removed. Please try again shortly.");
                 }
