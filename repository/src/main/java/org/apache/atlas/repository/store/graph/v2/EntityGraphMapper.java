@@ -5427,7 +5427,7 @@ public class EntityGraphMapper {
             return null;
         }
         switch (attributeName) {
-            case "internalPopularityScore":
+            case "assetInternalPopularityScore":
                 // validate value to be a number
                 String value = data.getValue();
                 //isNumber should work for now we have to upgrade apache-common to 3.6+ to use isCreatable more reliable
