@@ -76,4 +76,14 @@ public class AtlasAccessResult {
     public void setPolicyPriority(int policyPriority) {
         this.policyPriority = policyPriority;
     }
+
+    @Override
+    public String toString() {
+        return "AtlasAccessResult{" +
+                "isAllowed=" + isAllowed +
+                ", policyId='" + policyId + '\'' +
+                ", policyPriority=" + policyPriority +
+                ", explicitDeny=" + explicitDeny +
+                '}';
+    }
 }
