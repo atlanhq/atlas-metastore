@@ -1,0 +1,284 @@
+---
+description: Cassandra vertex offloading (ID-only) implementation guide
+globs: []
+alwaysApply: false
+---
+
+# ID-Only Vertex Implementation
+
+The ID-only implementation offloads vertex properties from JanusGraph to Cassandra for improved performance.
+
+## Architecture Overview
+
+```
+┌─────────────┐     ┌──────────────┐     ┌─────────────────┐
+│  JanusGraph │     │   Cassandra  │     │  Elasticsearch  │
+├─────────────┤     ├──────────────┤     ├─────────────────┤
+│ - Vertex ID │     │ - Full JSON  │     │ - Search Index  │
+│ - Core Props│     │ - All Props  │     │ - Denormalized  │
+│ - Edges     │     │ - Bucketed   │     │                 │
+└─────────────┘     └──────────────┘     └─────────────────┘
+```
+
+## Enabling ID-Only Mode
+
+```properties
+# Enable feature
+atlas.enable.entity.cud.on.cassandra=true
+
+# Configure Cassandra
+atlas.cassandra.vanilla.keyspace=janusgraph_target
+atlas.cassandra.vertex.table=assets
+atlas.cassandra.batch.size=10
+```
+
+## DynamicVertex Implementation
+
+### Core Class
+```java
+public class DynamicVertex {
+    private final Map<String, Object> properties = new HashMap<>();
+    
+    public <T> T getProperty(String key, Class<T> clazz) {
+        // Type-safe property retrieval with conversions
+    }
+    
+    public DynamicVertex setProperty(String key, Object value) {
+        // Property storage
+    }
+    
+    public void addListProperty(String key, Object value) {
+        // List property handling
+    }
+    
+    public void addSetProperty(String key, Object value) {
+        // Set property handling with deduplication
+    }
+}
+```
+
+### Type Conversions
+```java
+// Numbers stored as strings for ES compatibility
+vertex.setProperty("count", "42");  // Stored as string
+
+// Retrieved with type conversion
+Long count = vertex.getProperty("count", Long.class);  // Returns 42L
+```
+
+## Property Storage Strategy
+
+### Core Properties (Always in Graph)
+- `__guid`
+- `__typeName`
+- `__state`
+- `__timestamp`
+
+### All Other Properties
+- Stored in DynamicVertex
+- Serialized to JSON in Cassandra
+- Retrieved on demand
+
+## Implementation in AtlasJanusVertex
+
+```java
+public class AtlasJanusVertex {
+    private DynamicVertex dynamicVertex;
+    
+    @Override
+    public <T> void addProperty(String propertyName, T value) {
+        if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
+            // Store in DynamicVertex
+            this.getDynamicVertex().addSetProperty(propertyName, value);
+            
+            // Store core properties in graph too
+            if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                getWrappedElement().property(propertyName, value);
+            }
+        } else {
+            // Legacy path - store in JanusGraph
+            getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+        }
+    }
+}
+```
+
+## Cassandra Operations
+
+### Bucketing Strategy
+```java
+private int calculateBucket(String vertexId) {
+    int numBuckets = 32;  // 2 << 5
+    return (int) (Long.parseLong(vertexId) % numBuckets);
+}
+```
+
+### Batch Insert
+```java
+public void insertVertices(Map<String, String> serialisedVertices) {
+    // Build batch query
+    StringBuilder batchQuery = new StringBuilder("BEGIN BATCH ");
+    
+    for (Entry<String, String> entry : serialisedVertices.entrySet()) {
+        String vertexId = entry.getKey();
+        String jsonData = entry.getValue();
+        int bucket = calculateBucket(vertexId);
+        
+        String insert = String.format(
+            "INSERT INTO %s.%s (bucket, id, json_data, updated_at) VALUES (%d, '%s', '%s', %d)",
+            keyspace, tableName, bucket, vertexId, jsonData, timestamp
+        );
+        batchQuery.append(insert).append("; ");
+    }
+    
+    batchQuery.append("APPLY BATCH;");
+    session.execute(batchQuery.toString());
+}
+```
+
+### Bulk Fetch
+```java
+public Map<String, DynamicVertex> fetchVerticesDirectly(List<String> vertexIds) {
+    // Group by bucket for efficiency
+    Map<Integer, List<String>> bucketToIds = vertexIds.stream()
+        .collect(Collectors.groupingBy(this::calculateBucket));
+    
+    // Query each bucket
+    Map<String, DynamicVertex> results = new HashMap<>();
+    for (Entry<Integer, List<String>> entry : bucketToIds.entrySet()) {
+        String query = String.format(
+            "SELECT id, json_data FROM %s.%s WHERE bucket = %d AND id IN (%s)",
+            keyspace, tableName, entry.getKey(), 
+            String.join(",", entry.getValue())
+        );
+        
+        // Execute and deserialize
+        ResultSet rs = session.execute(query);
+        rs.forEach(row -> {
+            String id = row.getString("id");
+            String json = row.getString("json_data");
+            results.put(id, serializer.deserialize(json));
+        });
+    }
+    
+    return results;
+}
+```
+
+## Transaction Management
+
+```java
+public class EntityMutationService {
+    public EntityMutationResponse createOrUpdate(EntityStream entityStream) {
+        boolean isGraphTransactionFailed = false;
+        try {
+            // Graph operations first
+            return entityStore.createOrUpdate(entityStream);
+        } catch (Throwable e) {
+            isGraphTransactionFailed = true;
+            // Rollback Cassandra changes
+            rollbackNativeCassandraOperations();
+            throw e;
+        } finally {
+            if (!isGraphTransactionFailed) {
+                // ES indexing after success
+                executeESPostProcessing();
+            }
+        }
+    }
+}
+```
+
+## Performance Benefits
+
+### Storage Reduction
+- 60-70% reduction in graph storage
+- Only essential data in JanusGraph
+
+### Query Performance
+- Direct Cassandra queries for bulk reads
+- 5x improvement for 1000+ entities
+- Efficient bucketing for parallel queries
+
+### Write Performance
+- Batch operations in Cassandra
+- Reduced graph transaction overhead
+
+## Best Practices
+
+### 1. Feature Toggle
+```java
+// Always check feature flag
+if (RequestContext.get().isIdOnlyGraphEnabled()) {
+    // ID-only logic
+} else {
+    // Legacy logic
+}
+```
+
+### 2. Type Safety
+```java
+// Handle type conversions properly
+try {
+    Long value = dynamicVertex.getProperty("count", Long.class);
+} catch (ClassCastException e) {
+    LOG.error("Invalid type conversion", e);
+}
+```
+
+### 3. Bulk Operations
+```java
+// Use appropriate batch sizes
+List<List<String>> batches = Lists.partition(vertexIds, 100);
+for (List<String> batch : batches) {
+    processBatch(batch);
+}
+```
+
+### 4. Error Handling
+```java
+// Handle Cassandra failures gracefully
+try {
+    cassandraRepo.insertVertices(vertices);
+} catch (Exception e) {
+    LOG.error("Cassandra insert failed", e);
+    // Rollback or retry logic
+}
+```
+
+## Testing Considerations
+
+### Feature Toggle Testing
+```java
+@Test
+public void testWithIdOnlyEnabled() {
+    RequestContext.get().setIdOnlyGraphEnabled(true);
+    // Test ID-only behavior
+}
+
+@Test
+public void testWithIdOnlyDisabled() {
+    RequestContext.get().setIdOnlyGraphEnabled(false);
+    // Test legacy behavior
+}
+```
+
+### Data Consistency
+```java
+// Verify data is stored correctly
+DynamicVertex stored = cassandraRepo.fetchVertex(vertexId);
+assertEquals(expectedValue, stored.getProperty("attribute", String.class));
+```
+
+## Monitoring
+
+Key metrics:
+- Cassandra query latency
+- Batch operation success rate
+- Type conversion errors
+- Feature toggle usage
+
+See: 
+- @docs/CLAUDE-vertex-idonly-implementation.md - Technical details
+- @docs/CLAUDE-vertex-idonly-code-review.md - Security review
+- @docs/CLAUDE-vertex-idonly-testing-guide.md - Testing guide

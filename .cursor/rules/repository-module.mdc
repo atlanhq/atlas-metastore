@@ -1,0 +1,186 @@
+---
+description: Repository layer patterns and entity storage best practices
+globs:
+  - "repository/**/*.java"
+alwaysApply: false
+---
+
+# Repository Module Guidelines
+
+The `repository` module is the core persistence layer providing storage and retrieval mechanisms for metadata.
+
+## Core Components
+
+### AtlasEntityStore
+Primary interface for entity operations:
+```java
+// Single entity operations
+EntityMutationResponse createOrUpdate(AtlasEntityWithExtInfo entityWithExtInfo);
+AtlasEntityWithExtInfo getById(String guid);
+EntityMutationResponse deleteById(String guid);
+
+// Bulk operations
+EntityMutationResponse createOrUpdate(EntityStream entityStream);
+EntityMutationResponse deleteByIds(List<String> guids);
+```
+
+### EntityGraphMapper
+Maps entities to graph vertices:
+```java
+// Key responsibilities:
+// - Maps all attribute types (primitive, object, array, map)
+// - Manages classifications and their propagation
+// - Integrates with preprocessors for validation
+// - Creates audit records
+// - Handles custom attributes and business metadata
+
+// Main processing method
+public EntityMutationResponse mapAttributesAndClassifications(EntityMutationContext context);
+```
+
+### EntityGraphRetriever
+Efficient entity retrieval:
+```java
+// Supports minimal/full retrieval modes
+// Handles relationship lazy loading
+// Integrates access control filtering
+// Optimizes for bulk retrieval
+```
+
+## Transaction Management
+
+Always use `@GraphTransaction` annotation:
+```java
+@GraphTransaction
+public EntityMutationResponse createOrUpdate(EntityStream entityStream) {
+    // Transaction boundaries handled automatically
+    // Rollback on exception
+}
+```
+
+## Preprocessor Pattern
+
+Preprocessors validate and enrich entities before storage:
+```java
+// Located in store/graph/v2/preprocessor/
+// Examples: GlossaryPreProcessor, AssetPreProcessor, ContractPreProcessor
+
+// All entities go through AssetPreProcessor
+// Type-specific preprocessors are chained
+```
+
+## Bulk Operations
+
+### BulkImporter System
+- Producer-Consumer pattern for scalability
+- Configurable batch sizes (default: 10)
+- Automatic retry on failures
+- Progress tracking
+
+Configuration:
+```properties
+atlas.bulk.import.batch.size=10
+atlas.bulk.import.consumer.count=8
+atlas.bulk.import.retry.count=3
+```
+
+### Best Practices
+```java
+// Use EntityMutationContext for bulk ops
+// Leverage BulkImporter for large datasets
+// Process in batches to avoid memory issues
+```
+
+## Audit System
+
+### Differential Auditing
+```properties
+atlas.entity.audit.differential=true
+```
+
+When enabled:
+- Only changed attributes are audited
+- Reduces storage requirements
+- Improves performance
+
+### Audit Repository
+```java
+// Interface: EntityAuditRepository
+// Implementation: ESBasedAuditRepository
+// Events created by EntityAuditListener
+```
+
+## Performance Optimizations
+
+### Request-level Caching
+```java
+// Via RequestContext
+RequestContext.get().cacheEntity(entity);
+AtlasEntity cached = RequestContext.get().getEntity(guid);
+```
+
+### Batch Processing
+- Configurable batch sizes
+- Multi-threaded consumers
+- Parallel processing support
+
+### Minimal Retrieval
+```java
+// Fetch only required attributes
+AtlasEntityWithExtInfo minimal = entityStore.getById(guid, true);
+```
+
+## Common Patterns
+
+### Entity Creation
+```java
+AtlasEntity entity = new AtlasEntity("hive_table");
+entity.setAttribute("name", "my_table");
+entity.setAttribute("qualifiedName", "db.my_table@cluster");
+
+AtlasEntityWithExtInfo entityWithExt = new AtlasEntityWithExtInfo(entity);
+EntityMutationResponse response = entityStore.createOrUpdate(entityWithExt);
+```
+
+### Adding Classifications
+```java
+AtlasClassification classification = new AtlasClassification("PII");
+classification.setAttribute("level", "high");
+
+entityStore.addClassification(guid, classification);
+```
+
+### Bulk Updates
+```java
+AtlasEntityStream entityStream = new AtlasEntityStream(entities);
+EntityMutationResponse response = entityStore.createOrUpdate(
+    entityStream,
+    false,  // replaceClassifications
+    false,  // replaceTags
+    false   // replaceBusinessAttributes
+);
+```
+
+## Error Handling
+
+Always handle `AtlasBaseException`:
+```java
+try {
+    entityStore.createOrUpdate(entity);
+} catch (AtlasBaseException e) {
+    if (e.getAtlasErrorCode() == AtlasErrorCode.INSTANCE_GUID_NOT_FOUND) {
+        // Handle missing entity
+    }
+    throw e;
+}
+```
+
+## Key Utility Classes
+
+- **GraphHelper**: Core graph operations
+- **AtlasGraphUtilsV2**: V2 specific utilities
+- **AtlasEntityUtils**: Entity manipulation
+- **RequestContext**: Request-scoped context
+- **FilterUtil**: Query filtering
+
+See: @docs/CLAUDE-repository-module.md for detailed documentation
