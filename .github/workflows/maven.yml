@@ -31,6 +31,7 @@ on:
       - poctagprophashedrebased
       - staging
       - tagscanary
+      - fix/access-control
 
 jobs:
   build:
