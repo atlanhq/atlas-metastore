@@ -321,7 +321,16 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     @Override
     public <V> Set<V> getMultiValuedSetProperty(String propertyName, Class<V> elementType) {
         if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex()) {
-            return (Set<V>) getProperty(propertyName, elementType);
+            Set<V> value = new HashSet<>();
+            Object prop = getProperty(propertyName, elementType);
+            if (prop == null) {
+                return value;
+            } else if (prop instanceof Collection) {
+                value.addAll((Collection<V>) prop);
+            } else {
+                value.add((V) prop);
+            }
+            return value;
         }
 
         Set<V> value = new HashSet<>();
