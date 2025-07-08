@@ -1,0 +1,254 @@
+---
+description: Local development environment setup and Docker configuration
+globs: []
+alwaysApply: false
+---
+
+# Local Development Setup
+
+Guide for setting up Atlas development environment locally.
+
+## Prerequisites
+
+- Java 8 or 11
+- Maven 3.6+
+- Docker and Docker Compose
+- 8GB+ RAM recommended
+
+## Quick Start with Docker
+
+### 1. Download Required Archives
+```bash
+cd dev-support/atlas-docker/
+./download-archives.sh
+```
+
+### 2. Start Development Stack
+```bash
+# Start all services
+docker-compose -f docker-compose.atlas-base.yml \
+               -f docker-compose.atlas.yml \
+               -f docker-compose.atlas-kafka.yml up -d
+
+# Check status
+docker-compose ps
+```
+
+### 3. Service URLs
+- Atlas: http://localhost:21000
+- Kafka: localhost:9092
+- Zookeeper: localhost:2181
+- Elasticsearch: http://localhost:9200
+- Cassandra: localhost:9042
+
+## Building Atlas
+
+### Set Memory Options
+```bash
+export MAVEN_OPTS="-Xms2g -Xmx2g"
+```
+
+### Build Options
+```bash
+# Quick build (no tests)
+./build.sh
+
+# Full build
+mvn clean install
+
+# Build with specific profile
+mvn clean install -Pdist
+```
+
+## Running Atlas Locally
+
+### From IDE
+1. Main class: `org.apache.atlas.Atlas`
+2. VM options: `-Xmx4g -Dlog4j.configuration=atlas-log4j.xml`
+3. Working directory: Project root
+4. Environment: `ATLAS_HOME=.`
+
+### From Command Line
+```bash
+# After building
+cd distro/target/apache-atlas-*-bin/apache-atlas-*
+./bin/atlas_start.py
+```
+
+## Configuration
+
+### atlas-application.properties
+```properties
+# Basic configuration for local development
+atlas.graph.storage.backend=berkeleyje
+atlas.graph.storage.directory=./data/berkley
+
+# Elasticsearch
+atlas.graph.index.search.backend=elasticsearch
+atlas.graph.index.search.hostname=localhost
+atlas.graph.index.search.elasticsearch.client-only=true
+
+# Kafka
+atlas.kafka.zookeeper.connect=localhost:2181
+atlas.kafka.bootstrap.servers=localhost:9092
+```
+
+### Authentication
+For local development, use file-based auth:
+```properties
+atlas.authentication.method.file=true
+```
+
+Default credentials:
+- Username: admin
+- Password: admin
+
+## Testing REST APIs
+
+### Using Atlas Scripts
+```bash
+cd dev-support/atlas-scripts/
+
+# Configure environment
+vi env_atlas.sh
+# Set ATLAS_URL=http://localhost:21000
+
+# Test endpoints
+./admin_status.sh
+./typedefs_create.sh typedef.json
+./entity_create.sh entity.json
+```
+
+### Using cURL
+```bash
+# Get server status
+curl -u admin:admin http://localhost:21000/api/atlas/admin/version
+
+# Search entities
+curl -u admin:admin \
+  -H "Content-Type: application/json" \
+  -X POST http://localhost:21000/api/atlas/v2/search/basic \
+  -d '{"typeName":"hive_table","limit":10}'
+```
+
+## Common Development Tasks
+
+### Creating Test Data
+```bash
+# Create sample types
+./typedefs_create.sh samples/types/hive_types.json
+
+# Create sample entities
+./entity_create.sh samples/entities/hive_db.json
+```
+
+### Debugging
+
+#### Enable Debug Logging
+In `atlas-log4j.xml`:
+```xml
+<logger name="org.apache.atlas" additivity="false">
+    <level value="debug"/>
+    <appender-ref ref="console"/>
+</logger>
+```
+
+#### Remote Debugging
+Add to VM options:
+```
+-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=5005
+```
+
+### Running Specific Tests
+```bash
+# Run single test
+mvn test -Dtest=EntityRESTTest#testCreateEntity
+
+# Run with debugging
+mvn -Dmaven.surefire.debug test -Dtest=TestClassName
+```
+
+## Docker Tips
+
+### View Logs
+```bash
+# All services
+docker-compose logs -f
+
+# Specific service
+docker-compose logs -f atlas
+```
+
+### Reset Environment
+```bash
+# Stop and remove containers
+docker-compose down
+
+# Remove volumes (full reset)
+docker-compose down -v
+```
+
+### Resource Limits
+In `docker-compose.yml`:
+```yaml
+services:
+  atlas:
+    mem_limit: 4g
+    environment:
+      - JAVA_OPTS=-Xmx3g
+```
+
+## Troubleshooting
+
+### Out of Memory
+- Increase Docker memory allocation
+- Set `MAVEN_OPTS="-Xmx4g"`
+- Reduce concurrent build threads: `mvn -T 1C`
+
+### Port Conflicts
+Check for services using Atlas ports:
+```bash
+lsof -i :21000  # Atlas
+lsof -i :9200   # Elasticsearch
+lsof -i :9092   # Kafka
+```
+
+### Build Failures
+```bash
+# Clean build
+mvn clean
+rm -rf ~/.m2/repository/org/apache/atlas
+
+# Skip problematic checks
+mvn clean install -DskipTests -Drat.skip=true
+```
+
+### Connection Issues
+Verify services are running:
+```bash
+# Check Elasticsearch
+curl http://localhost:9200/_cluster/health
+
+# Check Kafka
+docker exec atlas-kafka kafka-topics.sh --list --zookeeper zookeeper:2181
+```
+
+## IDE Setup
+
+### IntelliJ IDEA
+1. Import as Maven project
+2. Enable annotation processing
+3. Set SDK to Java 8/11
+4. Increase IDE memory if needed
+
+### Eclipse
+1. Import → Existing Maven Projects
+2. Enable annotation processing in project properties
+3. Add Atlas run configuration
+
+## Performance Tips
+
+- Use SSD for better I/O performance
+- Allocate sufficient memory to Docker
+- Disable unnecessary services in docker-compose
+- Use `./build.sh` for faster builds during development

@@ -1,0 +1,145 @@
+---
+description: Graph database operations and best practices for the graphdb module
+globs:
+  - "graphdb/**/*.java"
+alwaysApply: false
+---
+
+# GraphDB Module Guidelines
+
+The `graphdb` module provides a database-agnostic abstraction layer for graph operations.
+
+## Core Interfaces
+
+### AtlasGraph
+Main graph database interface:
+```java
+public interface AtlasGraph<V extends AtlasVertex, E extends AtlasEdge> {
+    // Element creation
+    AtlasVertex<V, E> addVertex();
+    AtlasEdge<V, E> addEdge(AtlasVertex<V, E> v1, AtlasVertex<V, E> v2, String label);
+    
+    // Querying
+    AtlasGraphQuery<V, E> query();
+    AtlasIndexQuery<V, E> indexQuery(String indexName, String queryString);
+    
+    // Transaction management
+    void commit();
+    void rollback();
+}
+```
+
+### AtlasVertex
+```java
+// Property operations
+vertex.setProperty("name", value);
+vertex.getProperty("name", String.class);
+vertex.removeProperty("name");
+
+// JSON properties for complex objects
+vertex.setJsonProperty("attributes", complexObject);
+
+// Edge operations
+Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.OUT, "owns");
+```
+
+## Query Patterns
+
+### Basic Query
+```java
+Iterable<AtlasVertex> results = graph.query()
+    .has("__typeName", "hive_table")
+    .has("qualifiedName", "db.table")
+    .vertices();
+```
+
+### Direct Index Query (Performance Optimized)
+```java
+String query = "v.\"qualifiedName\":\"db.table\" AND v.\"__state\":\"ACTIVE\"";
+AtlasIndexQuery indexQuery = graph.indexQuery("vertexIndex", query);
+Iterator<Result> results = indexQuery.vertices();
+```
+
+## Transaction Management
+
+### Automatic with @GraphTransaction
+```java
+@GraphTransaction
+public void updateEntity(AtlasEntity entity) {
+    // Transaction handled automatically
+    // Commit on success, rollback on exception
+}
+```
+
+### Manual Transaction
+```java
+try {
+    AtlasVertex v1 = graph.addVertex();
+    AtlasVertex v2 = graph.addVertex();
+    graph.addEdge(v1, v2, "link");
+    graph.commit();
+} catch (Exception e) {
+    graph.rollback();
+    throw e;
+}
+```
+
+## Performance Best Practices
+
+### Query Optimization
+1. Use indexes for property lookups
+2. Leverage direct index queries for large result sets
+3. Use vertex-centric indexes for relationship traversals
+4. Limit result sets with pagination
+
+### Property Management
+1. Use typed properties for consistency
+2. Leverage JSON properties for complex objects
+3. Use bulk property operations when possible
+4. Index frequently queried properties
+
+### Caching
+- Database cache: `atlas.graph.cache.db-cache=true`
+- Transaction cache: `atlas.graph.cache.tx-cache-size=15000`
+
+## ID-Only Mode (Cassandra Offloading)
+
+When enabled (`atlas.enable.entity.cud.on.cassandra=true`):
+- Only core properties stored in JanusGraph
+- Full data stored in Cassandra
+- Improves performance for bulk operations
+
+Core properties always in graph:
+- `__guid`
+- `__typeName`
+- `__state`
+- `__timestamp`
+
+## Common Patterns
+
+### Creating Vertices
+```java
+AtlasVertex vertex = graph.addVertex();
+vertex.setProperty("__typeName", "hive_table");
+vertex.setProperty("qualifiedName", "db.table");
+vertex.setJsonProperty("attributes", complexObject);
+```
+
+### Traversing Relationships
+```java
+AtlasVertex table = graph.getVertex(tableId);
+Iterable<AtlasEdge> columns = table.getEdges(OUT, "hive_table_columns");
+for (AtlasEdge edge : columns) {
+    AtlasVertex column = edge.getInVertex();
+    // Process column
+}
+```
+
+## Debugging
+
+Enable debug logging:
+```properties
+log4j.logger.org.apache.atlas.repository.graphdb=DEBUG
+```
+
+See: @docs/CLAUDE-graphdb-module.md for detailed documentation

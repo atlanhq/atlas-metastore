@@ -1,0 +1,212 @@
+---
+description: Exception handling patterns and error management
+globs: []
+alwaysApply: false
+---
+
+# Error Handling Guidelines
+
+Consistent error handling patterns across Atlas codebase.
+
+## Exception Hierarchy
+
+```
+Exception
+└── AtlasBaseException (checked)
+    ├── AtlasSecurityException
+    ├── AtlasAuthorizationException
+    └── AtlasConfigurationException
+```
+
+## Using AtlasErrorCode
+
+### Error Code Structure
+```java
+public enum AtlasErrorCode {
+    // Format: STATUS_CATEGORY_NUMBER
+    TYPE_NAME_NOT_FOUND(400, "ATLAS-400-00-002", "Type {0} does not exist"),
+    INSTANCE_GUID_NOT_FOUND(404, "ATLAS-404-00-005", "Entity with guid {0} not found"),
+    UNAUTHORIZED_ACCESS(403, "ATLAS-403-00-001", "{0} is not authorized to perform {1}"),
+    INTERNAL_ERROR(500, "ATLAS-500-00-001", "Internal server error")
+}
+```
+
+### Throwing Exceptions
+```java
+// With parameters
+throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, typeName);
+
+// With cause
+throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+
+// With custom message
+throw new AtlasBaseException("Custom error message", e);
+```
+
+## REST API Error Handling
+
+### Exception Mappers
+Atlas automatically maps exceptions to HTTP responses:
+```java
+// AtlasBaseException → HTTP status from error code
+// Runtime exceptions → 500 Internal Server Error
+// Validation errors → 400 Bad Request
+```
+
+### Error Response Format
+```json
+{
+    "errorCode": "ATLAS-404-00-005",
+    "errorMessage": "Entity with guid abc-123 not found",
+    "error": {
+        "entity-guid": "abc-123"
+    }
+}
+```
+
+## Validation Patterns
+
+### Early Validation
+```java
+public void createEntity(AtlasEntity entity) throws AtlasBaseException {
+    // Validate parameters first
+    if (entity == null) {
+        throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "entity is null");
+    }
+    
+    if (StringUtils.isBlank(entity.getTypeName())) {
+        throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, "");
+    }
+    
+    // Validate business rules
+    validateEntity(entity);
+    
+    // Then proceed with operation
+    processEntity(entity);
+}
+```
+
+### Parameter Validation
+```java
+// Use Servlets utility for REST parameters
+Servlets.validateQueryParamLength("query", queryString);
+
+// Use Apache Commons
+if (CollectionUtils.isEmpty(entities)) {
+    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "entities list is empty");
+}
+
+// Check numeric ranges
+if (limit < 0 || limit > MAX_LIMIT) {
+    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, 
+                                "limit must be between 0 and " + MAX_LIMIT);
+}
+```
+
+## Try-Catch Patterns
+
+### Resource Management
+```java
+// Use try-with-resources
+try (InputStream stream = new FileInputStream(file)) {
+    processStream(stream);
+} catch (IOException e) {
+    throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+}
+```
+
+### Transaction Rollback
+```java
+try {
+    graph.addVertex();
+    // ... operations
+    graph.commit();
+} catch (Exception e) {
+    graph.rollback();
+    throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+}
+```
+
+### Partial Failure Handling
+```java
+List<String> failedEntities = new ArrayList<>();
+List<AtlasEntity> successfulEntities = new ArrayList<>();
+
+for (AtlasEntity entity : entities) {
+    try {
+        processEntity(entity);
+        successfulEntities.add(entity);
+    } catch (AtlasBaseException e) {
+        LOG.error("Failed to process entity: {}", entity.getGuid(), e);
+        failedEntities.add(entity.getGuid());
+    }
+}
+
+if (!failedEntities.isEmpty()) {
+    // Return partial success response
+}
+```
+
+## Logging Errors
+
+### Log Levels for Errors
+```java
+try {
+    // operation
+} catch (AtlasBaseException e) {
+    // Expected errors - log at WARN
+    LOG.warn("Failed to process entity: {}", entity.getGuid(), e.getMessage());
+    throw e;
+} catch (Exception e) {
+    // Unexpected errors - log at ERROR with stack trace
+    LOG.error("Unexpected error processing entity: {}", entity.getGuid(), e);
+    throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+}
+```
+
+### Contextual Information
+```java
+LOG.error("Failed to create entity. Type: {}, Name: {}, User: {}", 
+          entity.getTypeName(), 
+          entity.getAttribute("name"),
+          RequestContext.get().getUser(), 
+          e);
+```
+
+## Common Error Scenarios
+
+### Entity Not Found
+```java
+AtlasVertex vertex = graph.getVertex(guid);
+if (vertex == null) {
+    throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+}
+```
+
+### Type Not Found
+```java
+AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+if (entityType == null) {
+    throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, typeName);
+}
+```
+
+### Authorization Failures
+```java
+try {
+    AtlasAuthorizationUtils.verifyAccess(request, "operation");
+} catch (AtlasAuthorizationException e) {
+    throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, 
+                                user, operation);
+}
+```
+
+## Best Practices
+
+1. **Use Specific Error Codes**: Choose the most appropriate AtlasErrorCode
+2. **Include Context**: Add relevant parameters to error messages
+3. **Fail Fast**: Validate early and throw exceptions immediately
+4. **Clean Resources**: Use finally blocks or try-with-resources
+5. **Log Appropriately**: Use correct log levels for different error types
+6. **Don't Swallow Exceptions**: Always handle or propagate exceptions
+7. **Avoid Generic Messages**: Provide specific, actionable error information

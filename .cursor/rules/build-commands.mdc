@@ -1,0 +1,85 @@
+---
+description: Maven build commands and configurations for Apache Atlas
+globs:
+  - "pom.xml"
+  - "**/pom.xml"
+alwaysApply: false
+---
+
+# Atlas Build Commands
+
+## Prerequisites
+Always set memory options before building:
+```bash
+export MAVEN_OPTS="-Xms2g -Xmx2g"
+```
+
+## Build Commands
+
+### Quick Development Build
+```bash
+# Fast build without tests
+./build.sh
+
+# Build without tests, license checks, and docs
+mvn clean install -DskipTests -Drat.skip=true -DskipEnunciate=true
+```
+
+### Full Build
+```bash
+# Complete build with all tests
+mvn clean install
+
+# Package distribution
+mvn clean package -Pdist
+```
+
+### Module-Specific Builds
+```bash
+# Build specific modules with dependencies
+mvn clean install -pl repository,webapp -am
+
+# Build single module
+mvn clean install -pl repository
+```
+
+## Testing Commands
+
+```bash
+# Run all tests
+mvn test
+
+# Run specific test class
+mvn test -Dtest=TestClassName
+
+# Run specific test method
+mvn test -Dtest=TestClassName#testMethodName
+
+# Run tests in specific module
+mvn test -pl module-name
+
+# Run integration tests
+mvn verify
+```
+
+## Code Quality Checks
+
+```bash
+# Run checkstyle
+mvn checkstyle:check
+
+# Run findbugs
+mvn findbugs:check
+
+# Check licenses
+mvn apache-rat:check
+
+# Run all checks
+mvn clean install -Pquality
+```
+
+## Common Build Issues
+
+- If out of memory: Increase `-Xmx` in `MAVEN_OPTS`
+- For license issues: Add proper headers or update rat exclusions
+- For test failures: Check test logs in `target/surefire-reports`

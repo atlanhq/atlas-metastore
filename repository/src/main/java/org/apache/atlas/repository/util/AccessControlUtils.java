@@ -73,6 +73,7 @@ public final class AccessControlUtils {
     public static final String ATTR_POLICY_CONDITIONS  = "policyConditions";
     public static final String ATTR_POLICY_CATEGORY  = "policyCategory";
     public static final String ATTR_POLICY_SUB_CATEGORY  = "policySubCategory";
+    public static final String ATTR_POLICY_FILTER_CRITERIA = "policyFilterCriteria";
     public static final String ATTR_POLICY_RESOURCES  = "policyResources";
     public static final String ATTR_POLICY_IS_ENABLED  = "isPolicyEnabled";
     public static final String ATTR_POLICY_CONNECTION_QN  = "connectionQualifiedName";
@@ -129,6 +130,25 @@ public final class AccessControlUtils {
 
     public static final String INSTANCE_DOMAIN_KEY = "instance";
 
+    public static final String POLICY_SERVICE_NAME_ABAC  = "atlas_abac";
+    public static final String POLICY_SERVICE_NAME_ATLAS  = "atlas";
+    public static final String POLICY_SERVICE_NAME_HEKA  = "heka";
+
+    public static final String POLICY_FILTER_CRITERIA_ENTITY = "entity";
+    public static final String POLICY_FILTER_CRITERIA_END1 = "endOneEntity";
+    public static final String POLICY_FILTER_CRITERIA_END2 = "endTwoEntity";
+
+    public static final String POLICY_FILTER_CRITERIA_CRITERION = "criterion";
+    public static final String POLICY_FILTER_CRITERIA_CONDITION = "condition";
+    public static final String POLICY_FILTER_CRITERIA_OPERATAOR = "operator";
+    public static final String POLICY_FILTER_CRITERIA_EQUALS = "EQUALS";
+    public static final String POLICY_FILTER_CRITERIA_NOT_EQUALS = "NOT_EQUALS";
+    public static final String POLICY_FILTER_CRITERIA_IN = "IN";
+    public static final String POLICY_FILTER_CRITERIA_NOT_IN = "NOT_IN";
+    public static final Set<String> POLICY_FILTER_CRITERIA_VAID_OPS = Set.of(POLICY_FILTER_CRITERIA_EQUALS,
+            POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_IN, POLICY_FILTER_CRITERIA_NOT_IN);
+
+
     private AccessControlUtils() {}
 
     public static String getEntityName(AtlasEntity entity) {
@@ -180,6 +200,14 @@ public final class AccessControlUtils {
         return getStringAttribute(policyEntity, ATTR_POLICY_CATEGORY);
     }
 
+    public static String getPolicyFilterCriteria(AtlasEntity policyEntity) {
+        return getStringAttribute(policyEntity, ATTR_POLICY_FILTER_CRITERIA);
+    }
+
+    public static String getPolicyFilterCriteria(AtlasEntityHeader policyEntity) {
+        return getStringAttribute(policyEntity, ATTR_POLICY_FILTER_CRITERIA);
+    }
+
     public static String getPolicyResourceCategory(AtlasEntity policyEntity) {
         return getStringAttribute(policyEntity, ATTR_POLICY_RESOURCES_CATEGORY);
     }
@@ -201,6 +229,10 @@ public final class AccessControlUtils {
     }
 
     public static String getPolicyServiceName(AtlasEntity policyEntity) {
+        return getStringAttribute(policyEntity, ATTR_POLICY_SERVICE_NAME);
+    }
+
+    public static String getPolicyServiceName(AtlasEntityHeader policyEntity) {
         return getStringAttribute(policyEntity, ATTR_POLICY_SERVICE_NAME);
     }
 
@@ -432,5 +464,9 @@ public final class AccessControlUtils {
         }
 
         return false;
+    }
+
+    public static boolean isABACPolicyService(AtlasEntity entity) {
+        return POLICY_SERVICE_NAME_ABAC.equals(getPolicyServiceName(entity));
     }
 }

@@ -1,0 +1,218 @@
+---
+description: Entity preprocessor implementation guide
+globs: []
+alwaysApply: false
+---
+
+# Entity Preprocessors
+
+Preprocessors intercept entity operations (CREATE, UPDATE, DELETE) before persistence, performing validations and enrichments.
+
+## Base Interface
+
+```java
+public interface PreProcessor {
+    void processAttributes(AtlasStruct entity, EntityMutationContext context, 
+                          EntityMutations.EntityOperation operation) throws AtlasBaseException;
+    
+    default void processDelete(AtlasVertex vertex) throws AtlasBaseException {
+        // Override for delete operations
+    }
+}
+```
+
+## Creating a Preprocessor
+
+### 1. Extend Base Class
+```java
+public class MyEntityPreProcessor implements PreProcessor {
+    private final AtlasTypeRegistry typeRegistry;
+    private final EntityGraphRetriever entityRetriever;
+    
+    @Inject
+    public MyEntityPreProcessor(AtlasTypeRegistry typeRegistry, 
+                               EntityGraphRetriever entityRetriever) {
+        this.typeRegistry = typeRegistry;
+        this.entityRetriever = entityRetriever;
+    }
+    
+    @Override
+    public void processAttributes(AtlasStruct entity, EntityMutationContext context,
+                                EntityOperation operation) throws AtlasBaseException {
+        AtlasEntity atlasEntity = (AtlasEntity) entity;
+        
+        switch (operation) {
+            case CREATE:
+                processCreate(atlasEntity);
+                break;
+            case UPDATE:
+                processUpdate(atlasEntity, context);
+                break;
+        }
+    }
+}
+```
+
+### 2. Register Preprocessor
+In `AtlasEntityStoreV2.getPreProcessor()`:
+```java
+switch (typeName) {
+    case "MyEntityType":
+        preProcessor = new MyEntityPreProcessor(typeRegistry, entityRetriever);
+        break;
+    // ... other cases
+}
+```
+
+## Common Preprocessor Patterns
+
+### Validation
+```java
+private void validateEntity(AtlasEntity entity) {
+    // Check required fields
+    String name = (String) entity.getAttribute("name");
+    if (StringUtils.isBlank(name)) {
+        throw new AtlasBaseException(AtlasErrorCode.MISSING_REQUIRED_ATTRIBUTE, "name");
+    }
+    
+    // Validate format
+    if (name.contains("@")) {
+        throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Name cannot contain @");
+    }
+}
+```
+
+### Qualified Name Generation
+```java
+private void generateQualifiedName(AtlasEntity entity) {
+    String name = (String) entity.getAttribute("name");
+    String parentQN = getParentQualifiedName(entity);
+    
+    String qualifiedName = parentQN + "/" + name;
+    entity.setAttribute("qualifiedName", qualifiedName);
+}
+```
+
+### Authorization
+```java
+private void checkAuthorization(AtlasEntity entity) {
+    AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(
+        typeRegistry, AtlasPrivilege.ENTITY_CREATE, entity
+    );
+    AtlasAuthorizationUtils.verifyAccess(request, "create entity");
+}
+```
+
+### Enrichment
+```java
+private void enrichEntity(AtlasEntity entity) {
+    // Set default values
+    if (entity.getAttribute("status") == null) {
+        entity.setAttribute("status", "ACTIVE");
+    }
+    
+    // Add metadata
+    entity.setAttribute("createdBy", RequestContext.get().getUser());
+    entity.setAttribute("createdTime", System.currentTimeMillis());
+}
+```
+
+## Built-in Preprocessors
+
+### AssetPreProcessor (Global)
+- Applied to all entities
+- Handles domain linking
+- Validates asset-domain relationships
+
+### GlossaryPreProcessor
+- Validates glossary names
+- Generates qualified names
+- Manages lexicographical ordering
+
+### ContractPreProcessor
+- Validates contract JSON
+- Manages contract versioning
+- Handles certification workflow
+
+### PersonaPreProcessor
+- Creates Keycloak roles
+- Manages ES aliases
+- Handles user/group assignments
+
+## Best Practices
+
+### 1. Validation First
+Always validate before making changes:
+```java
+@Override
+public void processAttributes(...) {
+    // Validate first
+    validateEntity(entity);
+    
+    // Then enrich/modify
+    enrichEntity(entity);
+}
+```
+
+### 2. Handle Updates Carefully
+```java
+private void processUpdate(AtlasEntity entity, EntityMutationContext context) {
+    // Get existing entity
+    AtlasVertex vertex = context.getVertex(entity.getGuid());
+    AtlasEntity existing = entityRetriever.toAtlasEntity(vertex);
+    
+    // Compare and validate changes
+    validateUpdate(entity, existing);
+    
+    // Update only what's needed
+    updateEntity(entity, existing);
+}
+```
+
+### 3. Use Tasks for Expensive Operations
+```java
+private void createUpdateTask(AtlasEntity entity) {
+    Map<String, Object> taskParams = new HashMap<>();
+    taskParams.put("entityGuid", entity.getGuid());
+    taskParams.put("operation", "UPDATE_MEANINGS");
+    
+    taskManagement.createTask(
+        "UPDATE_ENTITY_MEANINGS",
+        RequestContext.get().getUser(),
+        taskParams
+    );
+}
+```
+
+### 4. Error Messages
+Provide clear, actionable error messages:
+```java
+throw new AtlasBaseException(
+    AtlasErrorCode.INVALID_PARAMETERS,
+    String.format("Entity name '%s' already exists in parent '%s'", 
+                  name, parentName)
+);
+```
+
+### 5. Performance
+- Cache frequently accessed data
+- Batch validations when possible
+- Avoid expensive operations in preprocessors
+
+## Testing Preprocessors
+
+```java
+@Test
+public void testPreprocessorValidation() {
+    AtlasEntity entity = new AtlasEntity("MyType");
+    entity.setAttribute("name", "test@invalid");
+    
+    MyEntityPreProcessor preprocessor = new MyEntityPreProcessor(typeRegistry, entityRetriever);
+    
+    assertThrows(AtlasBaseException.class, () -> {
+        preprocessor.processAttributes(entity, context, EntityOperation.CREATE);
+    });
+}
+```
+
+See: @docs/CLAUDE-preprocessors.md for detailed examples
