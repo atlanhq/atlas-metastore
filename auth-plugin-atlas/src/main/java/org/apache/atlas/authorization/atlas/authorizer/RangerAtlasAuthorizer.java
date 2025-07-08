@@ -286,8 +286,12 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             final Set<AtlasClassification> end2Classifications         = new HashSet<AtlasClassification>(request.getEnd2EntityClassifications());
             final String      end2EntityId                = request.getEnd2EntityId();
 
-
             String relationShipType = request.getRelationshipType();
+
+            LOG.info("=== CLASSIFICATION DEBUG: Processing relationship access request ===");
+            LOG.info("Action: " + action + ", RelationshipType: " + relationShipType);
+            LOG.info("End1 - EntityTypes: " + end1EntityTypeAndSuperTypes + ", EntityId: " + end1EntityId + ", Classifications: " + end1Classifications.size());
+            LOG.info("End2 - EntityTypes: " + end2EntityTypeAndSuperTypes + ", EntityId: " + end2EntityId + ", Classifications: " + end2Classifications.size());
 
             RangerAccessResourceImpl rangerResource = new RangerAccessResourceImpl();
 
@@ -300,22 +304,24 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             rangerResource.setValue(RESOURCE_RELATIONSHIP_TYPE, relationShipType);
 
-
             Set<String> classificationsWithSuperTypesEnd1 = new HashSet();
 
             for (AtlasClassification classificationToAuthorize : end1Classifications) {
-                  classificationsWithSuperTypesEnd1.addAll(request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName()));
+                Set<String> superTypes = request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName());
+                classificationsWithSuperTypesEnd1.addAll(superTypes);
+                LOG.info("End1 Classification: " + classificationToAuthorize.getTypeName() + " -> SuperTypes: " + superTypes);
             }
 
             rangerResource.setValue(RESOURCE_END_ONE_ENTITY_TYPE, end1EntityTypeAndSuperTypes);
             rangerResource.setValue(RESOURCE_END_ONE_ENTITY_CLASSIFICATION, classificationsWithSuperTypesEnd1);
             rangerResource.setValue(RESOURCE_END_ONE_ENTITY_ID, end1EntityId);
 
-
             Set<String> classificationsWithSuperTypesEnd2 = new HashSet();
 
             for (AtlasClassification classificationToAuthorize : end2Classifications) {
-                classificationsWithSuperTypesEnd2.addAll(request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName()));
+                Set<String> superTypes = request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName());
+                classificationsWithSuperTypesEnd2.addAll(superTypes);
+                LOG.info("End2 Classification: " + classificationToAuthorize.getTypeName() + " -> SuperTypes: " + superTypes);
             }
 
             rangerResource.setValue(RESOURCE_END_TWO_ENTITY_TYPE, end2EntityTypeAndSuperTypes);
@@ -323,15 +329,18 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             rangerResource.setValue(RESOURCE_END_TWO_ENTITY_ID, end2EntityId);
 
             ret = checkAccess(rangerRequest);
+            LOG.info("Initial relationship access result: " + ret);
 
             if (!ret.isAllowed()) { // if resource based policy access not available fallback to check tag-based access.
+                LOG.info("Resource-based access denied, trying tag-based access with End1 classifications");
                 setClassificationsToRequestContext(end1Classifications, rangerRequest);
                 ret = checkAccess(rangerRequest); // tag-based check with end1 classification
-                LOG.info("End1 checkAccess " + ret);
+                LOG.info("End1 tag-based checkAccess result: " + ret);
                 if (ret.isAllowed()) { //
+                    LOG.info("End1 tag-based access allowed, trying End2 classifications");
                     setClassificationsToRequestContext(end2Classifications, rangerRequest);
                     ret = checkAccess(rangerRequest); // tag-based check with end2 classification
-                    LOG.info("End2 checkAccess " + ret);
+                    LOG.info("End2 tag-based checkAccess result: " + ret);
                 }
             }
 
@@ -368,21 +377,34 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             RangerAccessResult result = null;
             Set<AtlasClassification> tagNames = request.getEntityClassifications();
+            
+            LOG.info("=== CLASSIFICATION DEBUG: Getting accessors for entity ===");
+            LOG.info("Entity classifications count: " + (tagNames != null ? tagNames.size() : 0));
+            
             if (CollectionUtils.isNotEmpty(tagNames)) {
+                LOG.info("Processing classifications for accessors");
                 setClassificationsToRequestContext(tagNames, rangerRequest);
 
                 // check authorization for each classification
                 for (AtlasClassification classificationToAuthorize : tagNames) {
-                    rangerResource.setValue(RESOURCE_ENTITY_CLASSIFICATION, request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName()));
+                    Set<String> classificationTypes = request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName());
+                    rangerResource.setValue(RESOURCE_ENTITY_CLASSIFICATION, classificationTypes);
+                    
+                    LOG.info("Getting accessors for classification: " + classificationToAuthorize.getTypeName() + " -> " + classificationTypes);
 
                     result = getAccessors(rangerRequest);
                     collectAccessors(result, ret);
+                    
+                    LOG.info("Accessors result for classification " + classificationToAuthorize.getTypeName() + ": " + result);
                 }
             } else {
                 rangerResource.setValue(RESOURCE_ENTITY_CLASSIFICATION, ENTITY_NOT_CLASSIFIED);
+                LOG.info("No classifications found, using: " + ENTITY_NOT_CLASSIFIED);
 
                 result = getAccessors(rangerRequest);
                 collectAccessors(result, ret);
+                
+                LOG.info("Accessors result for unclassified entity: " + result);
             }
         } finally {
             RangerPerfTracer.log(perf);
@@ -667,6 +689,10 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             final RangerAccessResourceImpl rangerResource = new RangerAccessResourceImpl();
             final String                   ownerUser      = request.getEntity() != null ? (String) request.getEntity().getAttribute(RESOURCE_ENTITY_OWNER) : null;
 
+            LOG.info("=== CLASSIFICATION DEBUG: Processing entity access request ===");
+            LOG.info("Action: " + action + ", EntityTypes: " + entityTypes + ", EntityId: " + entityId + ", Classification: " + classification + ", OwnerUser: " + ownerUser);
+            LOG.info("User: " + request.getUser() + ", UserGroups: " + request.getUserGroups());
+
             rangerResource.setValue(RESOURCE_ENTITY_TYPE, entityTypes);
             rangerResource.setValue(RESOURCE_ENTITY_ID, entityId);
             rangerResource.setOwnerUser(ownerUser);
@@ -682,41 +708,63 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             if (AtlasPrivilege.ENTITY_ADD_LABEL.equals(request.getAction()) || AtlasPrivilege.ENTITY_REMOVE_LABEL.equals(request.getAction())) {
                 rangerResource.setValue(RESOURCE_ENTITY_LABEL, request.getLabel());
+                LOG.info("Setting entity label: " + request.getLabel());
             } else if (AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA.equals(request.getAction())) {
                 rangerResource.setValue(RESOURCE_ENTITY_BUSINESS_METADATA, request.getBusinessMetadata());
+                LOG.info("Setting business metadata: " + request.getBusinessMetadata());
             } else if (StringUtils.isNotEmpty(classification) && CLASSIFICATION_PRIVILEGES.contains(request.getAction())) {
-                rangerResource.setValue(RESOURCE_CLASSIFICATION, request.getClassificationTypeAndAllSuperTypes(classification));
+                Set<String> classificationTypes = request.getClassificationTypeAndAllSuperTypes(classification);
+                rangerResource.setValue(RESOURCE_CLASSIFICATION, classificationTypes);
+                LOG.info("Setting classification resource: " + classification + " -> " + classificationTypes);
             }
 
             if (CollectionUtils.isNotEmpty(request.getEntityClassifications())) {
                 Set<AtlasClassification> entityClassifications = request.getEntityClassifications();
                 Map<String, Object> contextOjb = rangerRequest.getContext();
 
+                LOG.info("=== CLASSIFICATION DEBUG: Processing entity classifications ===");
+                LOG.info("Entity classifications count: " + entityClassifications.size());
+                for (AtlasClassification cls : entityClassifications) {
+                    LOG.info("Classification: " + cls.getTypeName() + ", Attributes: " + cls.getAttributes());
+                }
+
                 Set<RangerTagForEval> rangerTagForEval = getRangerServiceTag(entityClassifications);
+                LOG.info("Created Ranger tags for evaluation: " + rangerTagForEval.size());
 
                 if (contextOjb == null) {
                     Map<String, Object> contextOjb1 = new HashMap<String, Object>();
                     contextOjb1.put("CLASSIFICATIONS", rangerTagForEval);
                     rangerRequest.setContext(contextOjb1);
+                    LOG.info("Created new context with classifications");
                 } else {
                     contextOjb.put("CLASSIFICATIONS", rangerTagForEval);
                     rangerRequest.setContext(contextOjb);
+                    LOG.info("Updated existing context with classifications");
                 }
 
                 // check authorization for each classification
                 for (AtlasClassification classificationToAuthorize : request.getEntityClassifications()) {
-                    rangerResource.setValue(RESOURCE_ENTITY_CLASSIFICATION, request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName()));
+                    Set<String> classificationTypes = request.getClassificationTypeAndAllSuperTypes(classificationToAuthorize.getTypeName());
+                    rangerResource.setValue(RESOURCE_ENTITY_CLASSIFICATION, classificationTypes);
+                    
+                    LOG.info("=== CLASSIFICATION DEBUG: Checking access for classification ===");
+                    LOG.info("Classification: " + classificationToAuthorize.getTypeName() + ", Types: " + classificationTypes);
 
                     ret = checkAccess(rangerRequest, auditHandler);
+                    
+                    LOG.info("Access result for classification " + classificationToAuthorize.getTypeName() + ": " + ret);
 
                     if (!ret.isAllowed()) {
+                        LOG.warn("Access DENIED for classification: " + classificationToAuthorize.getTypeName());
                         break;
                     }
                 }
             } else {
                 rangerResource.setValue(RESOURCE_ENTITY_CLASSIFICATION, ENTITY_NOT_CLASSIFIED );
+                LOG.info("No entity classifications found, setting to: " + ENTITY_NOT_CLASSIFIED);
 
                 ret = checkAccess(rangerRequest, auditHandler);
+                LOG.info("Access result for unclassified entity: " + ret);
             }
 
         } finally {
@@ -734,38 +782,66 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
 
     private void setClassificationsToRequestContext(Set<AtlasClassification> entityClassifications, RangerAccessRequestImpl rangerRequest) {
+        LOG.info("=== CLASSIFICATION DEBUG: Setting classifications to request context ===");
+        LOG.info("Classifications count: " + (entityClassifications != null ? entityClassifications.size() : 0));
+        
         Map<String, Object> contextOjb = rangerRequest.getContext();
 
         Set<RangerTagForEval> rangerTagForEval = getRangerServiceTag(entityClassifications);
+        LOG.info("Created Ranger tags for context: " + rangerTagForEval.size());
 
         if (contextOjb == null) {
             Map<String, Object> contextOjb1 = new HashMap<String, Object>();
             contextOjb1.put("CLASSIFICATIONS", rangerTagForEval);
             rangerRequest.setContext(contextOjb1);
+            LOG.info("Created new context with classifications");
         } else {
             contextOjb.put("CLASSIFICATIONS", rangerTagForEval);
             rangerRequest.setContext(contextOjb);
+            LOG.info("Updated existing context with classifications");
         }
     }
 
     Set<RangerTagForEval> getRangerServiceTag(Set<AtlasClassification> classifications) {
+        LOG.info("=== CLASSIFICATION DEBUG: Creating Ranger service tags ===");
+        LOG.info("Input classifications count: " + (classifications != null ? classifications.size() : 0));
+        
         Set<RangerTagForEval> atlasClassificationSet = new HashSet<>();
         for (AtlasClassification classification : classifications) {
-            RangerTag rangerTag = new RangerTag(null, classification.getTypeName(), getClassificationAttributes(classification), RangerTag.OWNER_SERVICERESOURCE);
+            LOG.info("Processing classification: " + classification.getTypeName());
+            
+            Map<String, String> attributes = getClassificationAttributes(classification);
+            LOG.info("Classification attributes: " + attributes);
+            
+            RangerTag rangerTag = new RangerTag(null, classification.getTypeName(), attributes, RangerTag.OWNER_SERVICERESOURCE);
             RangerTagForEval tagForEval = new RangerTagForEval(rangerTag, RangerPolicyResourceMatcher.MatchType.SELF);
             atlasClassificationSet.add(tagForEval);
+            
+            LOG.info("Created Ranger tag: " + classification.getTypeName() + " -> " + tagForEval);
         }
+        
+        LOG.info("Total Ranger tags created: " + atlasClassificationSet.size());
         return atlasClassificationSet;
     }
 
     private Map<String, String> getClassificationAttributes(AtlasClassification classification) {
+        LOG.info("=== CLASSIFICATION DEBUG: Extracting classification attributes ===");
+        LOG.info("Classification: " + classification.getTypeName());
+        
         Map<String, Object> attributes = classification.getAttributes();
         final Map<String, String> result = new HashMap<String, String>();
+        
+        LOG.info("Raw attributes: " + attributes);
+        
         if(attributes!=null) {
             for (final Map.Entry<String, Object> entry : attributes.entrySet()) {
-                result.put(entry.getKey(), String.valueOf(entry.getValue()));
+                String value = String.valueOf(entry.getValue());
+                result.put(entry.getKey(), value);
+                LOG.info("Attribute: " + entry.getKey() + " = " + value);
             }
         }
+        
+        LOG.info("Processed attributes: " + result);
         return result;
     }
 
@@ -774,25 +850,31 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         String userName = request.getUser();
         RangerBasePlugin plugin = atlasPlugin;
 
+        LOG.info("=== CLASSIFICATION DEBUG: checkAccess called ===");
+        LOG.info("User: " + userName + ", Action: " + request.getAction() + ", Resource: " + request.getResource());
+
         if (plugin != null) {
             
             groupUtil.setUserStore(atlasPlugin.getUserStore());
             
-            request.setUserGroups(groupUtil.getContainedGroups(userName));
+            Set<String> userGroups = groupUtil.getContainedGroups(userName);
+            request.setUserGroups(userGroups);
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Setting UserGroup for user: " + userName + " Groups: " + groupUtil.getContainedGroups(userName));
-            }
+            LOG.info("User groups for " + userName + ": " + userGroups);
 
             RangerAccessResult rangerResult = plugin.isAccessAllowed(request);
             if (rangerResult != null) {
                 result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
+                LOG.info("Ranger access result: allowed=" + rangerResult.getIsAllowed() + ", policyId=" + rangerResult.getPolicyId() + ", priority=" + rangerResult.getPolicyPriority());
+            } else {
+                LOG.warn("Ranger access result is null");
             }
 
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }
 
+        LOG.info("Final access result: " + result);
         return result;
     }
 
@@ -802,25 +884,31 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         RangerBasePlugin plugin = atlasPlugin;
         String userName = request.getUser();
 
+        LOG.info("=== CLASSIFICATION DEBUG: checkAccess with audit handler called ===");
+        LOG.info("User: " + userName + ", Action: " + request.getAction() + ", Resource: " + request.getResource() + ", AuditHandler: " + (auditHandler != null ? "present" : "null"));
+
         if (plugin != null) {
             
             groupUtil.setUserStore(atlasPlugin.getUserStore());
             
-            request.setUserGroups(groupUtil.getContainedGroups(userName));
+            Set<String> userGroups = groupUtil.getContainedGroups(userName);
+            request.setUserGroups(userGroups);
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Setting UserGroup for user :" + userName + " Groups: " + groupUtil.getContainedGroups(userName));
-            }
+            LOG.info("User groups for " + userName + ": " + userGroups);
 
             RangerAccessResult rangerResult = plugin.isAccessAllowed(request, auditHandler);
             if (rangerResult != null) {
                 result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
+                LOG.info("Ranger access result with audit: allowed=" + rangerResult.getIsAllowed() + ", policyId=" + rangerResult.getPolicyId() + ", priority=" + rangerResult.getPolicyPriority());
+            } else {
+                LOG.warn("Ranger access result with audit is null");
             }
         
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }
 
+        LOG.info("Final access result with audit: " + result);
         return result;
     }
 
@@ -830,16 +918,20 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         RangerBasePlugin plugin = atlasPlugin;
         String userName = request.getUser();
 
+        LOG.info("=== CLASSIFICATION DEBUG: Getting accessors from Ranger plugin ===");
+        LOG.info("User: " + userName + ", Action: " + request.getAction() + ", Resource: " + request.getResource());
+
         if (plugin != null) {
 
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            request.setUserGroups(groupUtil.getContainedGroups(userName));
+            Set<String> userGroups = groupUtil.getContainedGroups(userName);
+            request.setUserGroups(userGroups);
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Setting UserGroup for user :" + userName + " Groups: " + groupUtil.getContainedGroups(userName));
-            }
+            LOG.info("User groups for " + userName + ": " + userGroups);
 
             result = plugin.getAssetAccessors(request);
+            
+            LOG.info("Ranger plugin accessors result: " + result);
 
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Could not find Accessors!!!");
@@ -890,6 +982,10 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
                 strClassifications += ("," + request.getClassification().getTypeName());
             }
 
+            LOG.info("=== CLASSIFICATION DEBUG: Creating audit handler ===");
+            LOG.info("Classifications: " + strClassifications);
+            LOG.info("Entity type: " + request.getEntityType() + ", Entity ID: " + request.getEntityId());
+
             RangerAccessResourceImpl rangerResource = new RangerAccessResourceImpl();
 
             rangerResource.setServiceDef(serviceDef);
@@ -899,12 +995,16 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
             if (AtlasPrivilege.ENTITY_ADD_LABEL.equals(request.getAction()) || AtlasPrivilege.ENTITY_REMOVE_LABEL.equals(request.getAction())) {
                 rangerResource.setValue(RESOURCE_ENTITY_LABEL, "label=" + request.getLabel());
+                LOG.info("Setting label in audit: " + request.getLabel());
             } else if (AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA.equals(request.getAction())) {
                 rangerResource.setValue(RESOURCE_ENTITY_BUSINESS_METADATA, "business-metadata=" + request.getBusinessMetadata());
+                LOG.info("Setting business metadata in audit: " + request.getBusinessMetadata());
             }
 
             auditEvents  = new HashMap<>();
             resourcePath = rangerResource.getAsString();
+            
+            LOG.info("Audit resource path: " + resourcePath);
         }
 
         @Override
