@@ -19,8 +19,8 @@ package org.apache.atlas.web.rest;
 
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.authorize.AtlasAdminAccessRequest;
-import org.apache.atlas.authorize.AtlasAuthorizationUtils;
 import org.apache.atlas.authorize.AtlasPrivilege;
+import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.utils.AtlasPerfTracer;

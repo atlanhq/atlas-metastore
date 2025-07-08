@@ -1,0 +1,168 @@
+---
+description: Type system and integration models for the intg module
+globs:
+  - "intg/**/*.java"
+alwaysApply: false
+---
+
+# Integration Module Guidelines
+
+The `intg` module defines core data models, interfaces, and type definitions used across Atlas.
+
+## Type System Hierarchy
+
+```
+AtlasBaseTypeDef (abstract base)
+├── AtlasEnumDef              # Enumeration types
+├── AtlasStructDef            # Structured types
+│   ├── AtlasEntityDef        # Entity types
+│   ├── AtlasClassificationDef # Classification types
+│   └── AtlasRelationshipDef  # Relationship types
+└── AtlasBusinessMetadataDef  # Business metadata
+```
+
+## Entity Models
+
+### AtlasEntity
+Primary entity representation:
+```java
+AtlasEntity entity = new AtlasEntity("hive_table");
+entity.setGuid(guid);  // Usually auto-generated
+entity.setAttribute("name", "my_table");
+entity.setAttribute("qualifiedName", "db.my_table@cluster");
+entity.setClassifications(Arrays.asList(piiClassification));
+entity.setBusinessAttributes(businessAttrs);
+```
+
+### AtlasClassification
+Tags/classifications:
+```java
+AtlasClassification classification = new AtlasClassification("PII");
+classification.setAttribute("level", "high");
+classification.setPropagate(true);  // Propagate through lineage
+```
+
+### AtlasRelationship
+First-class relationships:
+```java
+AtlasRelationship relationship = new AtlasRelationship();
+relationship.setTypeName("hive_table_columns");
+relationship.setEnd1(new AtlasObjectId(tableGuid, "hive_table"));
+relationship.setEnd2(new AtlasObjectId(columnGuid, "hive_column"));
+```
+
+## Type Definitions
+
+### Entity Definition
+```java
+AtlasEntityDef entityDef = new AtlasEntityDef();
+entityDef.setName("custom_entity");
+entityDef.setServiceType("custom");
+entityDef.setSuperTypes(Arrays.asList("DataSet"));
+
+// Add attributes
+AtlasAttributeDef nameAttr = new AtlasAttributeDef("name", "string");
+nameAttr.setIsOptional(false);
+nameAttr.setIsUnique(true);
+entityDef.setAttributeDefs(Arrays.asList(nameAttr));
+```
+
+### Classification Definition
+```java
+AtlasClassificationDef classificationDef = new AtlasClassificationDef();
+classificationDef.setName("Confidential");
+classificationDef.setEntityTypes(Arrays.asList("DataSet"));  // Applicable types
+```
+
+## Search Models
+
+### SearchParameters
+```java
+SearchParameters params = new SearchParameters();
+params.setTypeName("hive_table");
+params.setQuery("name:test*");
+params.setLimit(100);
+params.setOffset(0);
+params.setAttributes(Arrays.asList("name", "owner", "qualifiedName"));
+```
+
+### FilterCriteria
+Complex filtering:
+```java
+FilterCriteria criteria = new FilterCriteria();
+criteria.setAttributeName("owner");
+criteria.setOperator(Operator.EQ);
+criteria.setAttributeValue("john");
+
+// Nested criteria
+FilterCriteria nested = new FilterCriteria();
+nested.setCondition(Condition.AND);
+nested.setCriterion(Arrays.asList(criteria1, criteria2));
+```
+
+## Exception Handling
+
+### AtlasErrorCode
+Use appropriate error codes:
+```java
+public enum AtlasErrorCode {
+    TYPE_NAME_NOT_FOUND(400, "ATLAS-400-00-002", "Type {0} does not exist"),
+    INSTANCE_GUID_NOT_FOUND(404, "ATLAS-404-00-005", "Entity with guid {0} not found"),
+    UNAUTHORIZED_ACCESS(403, "ATLAS-403-00-001", "{0} is not authorized to perform {1}")
+}
+```
+
+### AtlasBaseException
+```java
+throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, typeName);
+```
+
+## Type Registry Usage
+
+```java
+@Inject
+private AtlasTypeRegistry typeRegistry;
+
+// Get type definitions
+AtlasEntityType entityType = typeRegistry.getEntityTypeByName("hive_table");
+AtlasClassificationType classificationType = typeRegistry.getClassificationTypeByName("PII");
+
+// Check type existence
+if (!typeRegistry.getAllTypeNames().contains(typeName)) {
+    throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, typeName);
+}
+```
+
+## JSON Serialization
+
+Use AtlasJson for consistent serialization:
+```java
+// Serialize
+String json = AtlasJson.toJson(entity);
+
+// Deserialize
+AtlasEntity entity = AtlasJson.fromJson(json, AtlasEntity.class);
+
+// V1 compatibility
+String v1Json = AtlasJson.toV1Json(entity);
+```
+
+## Common Constants
+
+Use AtlasConstants:
+```java
+import static org.apache.atlas.AtlasConstants.*;
+
+entity.setAttribute(QUALIFIED_NAME, qualifiedName);
+String typeName = vertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+```
+
+## Best Practices
+
+1. **Type Validation**: Always validate types exist before creating entities
+2. **Required Attributes**: Always set `qualifiedName` for entities
+3. **Use Type Inheritance**: Leverage superTypes for common attributes
+4. **Handle Lifecycle States**: Check entity status (ACTIVE, DELETED, PURGED)
+5. **Version Types**: Include version info when updating type definitions
+
+See: @docs/CLAUDE-intg-module.md for detailed documentation
