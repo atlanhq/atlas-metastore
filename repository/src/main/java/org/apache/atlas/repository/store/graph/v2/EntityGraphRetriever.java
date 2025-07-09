@@ -146,10 +146,9 @@ public class EntityGraphRetriever {
     private final AtlasTypeRegistry typeRegistry;
 
     private final boolean ignoreRelationshipAttr;
+    private final boolean fetchOnlyMandatoryRelationshipAttr;
     private final AtlasGraph graph;
     private TagDAO tagDAO;
-
-    private boolean onlyMandatoryRelationshipAttr;
 
     @Inject
     public EntityGraphRetriever(TagDAO tagDAO, AtlasGraph graph, AtlasTypeRegistry typeRegistry) {
@@ -167,7 +166,7 @@ public class EntityGraphRetriever {
         this.graphHelper            = retriever.graphHelper;
         this.typeRegistry           = retriever.typeRegistry;
         this.ignoreRelationshipAttr = ignoreRelationshipAttr;
-        this.onlyMandatoryRelationshipAttr = false;
+        this.fetchOnlyMandatoryRelationshipAttr = false;
     }
 
     public EntityGraphRetriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean ignoreRelationshipAttr) {
@@ -175,12 +174,15 @@ public class EntityGraphRetriever {
         this.graphHelper            = new GraphHelper(graph);
         this.typeRegistry           = typeRegistry;
         this.ignoreRelationshipAttr = ignoreRelationshipAttr;
-        this.onlyMandatoryRelationshipAttr = false;
+        this.fetchOnlyMandatoryRelationshipAttr = false;
     }
 
-    public EntityGraphRetriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean ignoreRelationshipAttr, boolean onlyMandatoryRelationshipAttr) {
-        this(graph, typeRegistry, ignoreRelationshipAttr);
-        this.onlyMandatoryRelationshipAttr = onlyMandatoryRelationshipAttr;
+    public EntityGraphRetriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, boolean ignoreRelationshipAttr, boolean fetchOnlyMandatoryRelationshipAttr) {
+        this.graph                  = graph;
+        this.graphHelper            = new GraphHelper(graph);
+        this.typeRegistry           = typeRegistry;
+        this.ignoreRelationshipAttr = ignoreRelationshipAttr;
+        this.fetchOnlyMandatoryRelationshipAttr = fetchOnlyMandatoryRelationshipAttr;
     }
 
     public AtlasEntity toAtlasEntity(String guid, boolean includeReferences) throws AtlasBaseException {
@@ -1089,7 +1091,7 @@ public class EntityGraphRetriever {
             mapAttributes(entityVertex, entity, entityExtInfo, isMinExtInfo, includeReferences);
 
             if (!ignoreRelationshipAttr) { // only map when really needed
-                if (onlyMandatoryRelationshipAttr) {
+                if (fetchOnlyMandatoryRelationshipAttr) {
                     // map only mandatory relationships
                     mapMandatoryRelationshipAttributes(entityVertex, entity);
                 } else {
@@ -2257,9 +2259,10 @@ public class EntityGraphRetriever {
                     relationshipAttributes.put("attributes", relationship.getAttributes());
 
                     if (ret.getAttributes() == null) {
-                        ret.setAttributes(new HashMap<>());
+                        ret.setAttributes(mapOf("relationshipAttributes", relationshipAttributes));
+                    } else {
+                        ret.getAttributes().put("relationshipAttributes", relationshipAttributes);
                     }
-                    ret.getAttributes().put("relationshipAttributes", relationshipAttributes);
                 }
             }
         }
