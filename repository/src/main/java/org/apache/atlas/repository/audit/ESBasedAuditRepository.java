@@ -523,10 +523,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Performs a search operation using the Elasticsearch low-level client.
      *
      * @param searchRequest the search request containing query and indices
+     * @param options request options (currently unused)
      * @return SearchResponse containing search results
      * @throws AtlasBaseException if the search operation fails
      */
-    public SearchResponse search(SearchRequest searchRequest) throws AtlasBaseException {
+    public SearchResponse search(SearchRequest searchRequest, RequestOptions options) throws AtlasBaseException {
         if (searchRequest == null || searchRequest.indices() == null || searchRequest.indices().length == 0) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Search request or indices cannot be null");
         }
@@ -541,13 +542,16 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             }
 
             Response response = lowLevelClient.performRequest(request);
-            String responseString = EntityUtils.toString(response.getEntity());
             
-            SearchResponse searchResponse = AtlasType.fromJson(responseString, SearchResponse.class);
-            LOG.debug("<== ESBasedAuditRepository.search() - found {} hits", 
-                searchResponse != null ? searchResponse.getHits().getTotalHits().value : 0);
-            
-            return searchResponse;
+            try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
+                    .createParser(NamedXContentRegistry.EMPTY, 
+                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, 
+                                response.getEntity().getContent())) {
+                SearchResponse searchResponse = SearchResponse.fromXContent(parser);
+                LOG.debug("<== ESBasedAuditRepository.search() - found {} hits", 
+                    searchResponse.getHits().getTotalHits().value);
+                return searchResponse;
+            }
         } catch (IOException e) {
             LOG.error("Error performing search on index {}: {}", indexName, e.getMessage(), e);
             throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, 
@@ -559,10 +563,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Opens a Point in Time (PIT) for search operations.
      *
      * @param pitRequest the request to open a PIT
+     * @param options request options (currently unused)
      * @return OpenPointInTimeResponse containing the PIT ID and other metadata
      * @throws AtlasBaseException if the PIT creation fails
      */
-    public OpenPointInTimeResponse openPointInTime(OpenPointInTimeRequest pitRequest) throws AtlasBaseException {
+    public OpenPointInTimeResponse openPointInTime(OpenPointInTimeRequest pitRequest, RequestOptions options) throws AtlasBaseException {
         if (pitRequest == null || pitRequest.indices() == null || pitRequest.indices().length == 0) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "PIT request or indices cannot be null");
         }
@@ -579,13 +584,16 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             request.setEntity(new NStringEntity(requestBody, ContentType.APPLICATION_JSON));
             
             Response response = lowLevelClient.performRequest(request);
-            String responseString = EntityUtils.toString(response.getEntity());
             
-            OpenPointInTimeResponse pitResponse = AtlasType.fromJson(responseString, OpenPointInTimeResponse.class);
-            LOG.debug("<== ESBasedAuditRepository.openPointInTime() - created PIT: {}",
-                pitResponse != null ? pitResponse.getPointInTimeId() : null);
-            
-            return pitResponse;
+            try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
+                    .createParser(NamedXContentRegistry.EMPTY, 
+                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, 
+                                response.getEntity().getContent())) {
+                OpenPointInTimeResponse pitResponse = OpenPointInTimeResponse.fromXContent(parser);
+                LOG.debug("<== ESBasedAuditRepository.openPointInTime() - created PIT: {}", 
+                    pitResponse.getId());
+                return pitResponse;
+            }
         } catch (IOException e) {
             LOG.error("Error opening PIT for index {}: {}", indexName, e.getMessage(), e);
             throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, 
@@ -597,10 +605,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Closes a Point in Time (PIT) search context.
      *
      * @param closeRequest the request to close a PIT
+     * @param options request options (currently unused)
      * @return ClosePointInTimeResponse containing the operation status
      * @throws AtlasBaseException if the PIT closure fails
      */
-    public ClosePointInTimeResponse closePointInTime(ClosePointInTimeRequest closeRequest) throws AtlasBaseException {
+    public ClosePointInTimeResponse closePointInTime(ClosePointInTimeRequest closeRequest, RequestOptions options) throws AtlasBaseException {
         if (closeRequest == null || closeRequest.getId() == null) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Close request or PIT ID cannot be null");
         }
@@ -613,13 +622,16 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             Request request = new Request("DELETE", endpoint);
             
             Response response = lowLevelClient.performRequest(request);
-            String responseString = EntityUtils.toString(response.getEntity());
             
-            ClosePointInTimeResponse closeResponse = AtlasType.fromJson(responseString, ClosePointInTimeResponse.class);
-            LOG.debug("<== ESBasedAuditRepository.closePointInTime() - closed PIT: {}, succeeded: {}", 
-                pitId, closeResponse != null ? closeResponse.isSucceeded() : false);
-            
-            return closeResponse;
+            try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
+                    .createParser(NamedXContentRegistry.EMPTY, 
+                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, 
+                                response.getEntity().getContent())) {
+                ClosePointInTimeResponse closeResponse = ClosePointInTimeResponse.fromXContent(parser);
+                LOG.debug("<== ESBasedAuditRepository.closePointInTime() - closed PIT: {}, succeeded: {}", 
+                    pitId, closeResponse.isSucceeded());
+                return closeResponse;
+            }
         } catch (IOException e) {
             LOG.error("Error closing PIT {}: {}", pitId, e.getMessage(), e);
             throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, 

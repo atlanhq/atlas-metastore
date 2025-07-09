@@ -65,6 +65,12 @@ public class DirectSearch {
     @POST
     @Timed
     public DirectSearchResponse directSearch(DirectSearchRequest request) throws AtlasBaseException, IOException {
+        
+        // Ensure the current user is authorized to trigger this endpoint
+        if (!ARGO_SERVICE_USER_NAME.equals(RequestContext.getCurrentUser())) {
+            throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, RequestContext.getCurrentUser(), "Attribute update");
+        }
+                
         AtlasPerfTracer perf = null;
 
         try {
