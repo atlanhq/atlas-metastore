@@ -1,6 +1,7 @@
 package org.apache.atlas.web.rest;
 
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.DirectSearchRequest;
@@ -27,6 +28,8 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import java.io.IOException;
 import org.slf4j.Logger;
+
+import static org.apache.atlas.repository.util.AccessControlUtils.ARGO_SERVICE_USER_NAME;
 
 /**
  * REST endpoint for direct Elasticsearch operations in Atlas.

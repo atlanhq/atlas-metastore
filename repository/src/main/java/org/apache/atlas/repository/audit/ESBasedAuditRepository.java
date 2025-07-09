@@ -40,6 +40,7 @@ import org.apache.http.nio.entity.NStringEntity;
 import org.apache.http.util.EntityUtils;
 import org.elasticsearch.action.search.*;
 import org.elasticsearch.client.*;
+import org.elasticsearch.xcontent.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -523,11 +524,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Performs a search operation using the Elasticsearch low-level client.
      *
      * @param searchRequest the search request containing query and indices
-     * @param options request options (currently unused)
      * @return SearchResponse containing search results
      * @throws AtlasBaseException if the search operation fails
      */
-    public SearchResponse search(SearchRequest searchRequest, RequestOptions options) throws AtlasBaseException {
+    public SearchResponse search(SearchRequest searchRequest) throws AtlasBaseException {
         if (searchRequest == null || searchRequest.indices() == null || searchRequest.indices().length == 0) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Search request or indices cannot be null");
         }
@@ -544,8 +544,8 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             Response response = lowLevelClient.performRequest(request);
             
             try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
-                    .createParser(NamedXContentRegistry.EMPTY, 
-                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, 
+                    .createParser(NamedXContentRegistry.EMPTY,
+                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
                                 response.getEntity().getContent())) {
                 SearchResponse searchResponse = SearchResponse.fromXContent(parser);
                 LOG.debug("<== ESBasedAuditRepository.search() - found {} hits", 
@@ -563,11 +563,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Opens a Point in Time (PIT) for search operations.
      *
      * @param pitRequest the request to open a PIT
-     * @param options request options (currently unused)
      * @return OpenPointInTimeResponse containing the PIT ID and other metadata
      * @throws AtlasBaseException if the PIT creation fails
      */
-    public OpenPointInTimeResponse openPointInTime(OpenPointInTimeRequest pitRequest, RequestOptions options) throws AtlasBaseException {
+    public OpenPointInTimeResponse openPointInTime(OpenPointInTimeRequest pitRequest) throws AtlasBaseException {
         if (pitRequest == null || pitRequest.indices() == null || pitRequest.indices().length == 0) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "PIT request or indices cannot be null");
         }
@@ -591,7 +590,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                                 response.getEntity().getContent())) {
                 OpenPointInTimeResponse pitResponse = OpenPointInTimeResponse.fromXContent(parser);
                 LOG.debug("<== ESBasedAuditRepository.openPointInTime() - created PIT: {}", 
-                    pitResponse.getId());
+                    pitResponse.getPointInTimeId());
                 return pitResponse;
             }
         } catch (IOException e) {
@@ -605,11 +604,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Closes a Point in Time (PIT) search context.
      *
      * @param closeRequest the request to close a PIT
-     * @param options request options (currently unused)
      * @return ClosePointInTimeResponse containing the operation status
      * @throws AtlasBaseException if the PIT closure fails
      */
-    public ClosePointInTimeResponse closePointInTime(ClosePointInTimeRequest closeRequest, RequestOptions options) throws AtlasBaseException {
+    public ClosePointInTimeResponse closePointInTime(ClosePointInTimeRequest closeRequest) throws AtlasBaseException {
         if (closeRequest == null || closeRequest.getId() == null) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Close request or PIT ID cannot be null");
         }
