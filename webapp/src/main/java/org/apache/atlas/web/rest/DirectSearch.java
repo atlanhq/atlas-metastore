@@ -13,6 +13,7 @@ import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.web.util.Servlets;
 import org.elasticsearch.action.search.*;
 import org.elasticsearch.core.TimeValue;
+import org.elasticsearch.search.SearchModule;
 import org.elasticsearch.search.builder.PointInTimeBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.elasticsearch.xcontent.DeprecationHandler;
@@ -32,6 +33,10 @@ import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import java.io.IOException;
+import java.util.Collections;
+import java.util.List;
+import java.util.function.Function;
+import org.elasticsearch.common.settings.Settings;
 
 import static org.apache.atlas.repository.util.AccessControlUtils.ARGO_SERVICE_USER_NAME;
 
@@ -44,6 +49,12 @@ public class DirectSearch {
     private static final long DEFAULT_KEEPALIVE = 60000L; // 60 seconds
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.DirectSearch");
     private static final Logger LOG = LoggerFactory.getLogger(DirectSearch.class);
+    private static final NamedXContentRegistry REGISTRY;
+
+    static {
+        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, Collections.emptyList());
+        REGISTRY = new NamedXContentRegistry(searchModule.getNamedXContents());
+    }
 
     private final ESBasedAuditRepository es;
 
@@ -134,7 +145,7 @@ public class DirectSearch {
         try {
             String queryJson = AtlasJson.toJson(request.getQuery());
             try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
-                    .createParser(NamedXContentRegistry.EMPTY,
+                    .createParser(REGISTRY,
                             DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
                             queryJson)) {
 
