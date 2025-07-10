@@ -519,7 +519,6 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         return response.getStatusLine().getStatusCode() == 200;
     }
 
-
     /**
      * Performs a search operation using the Elasticsearch low-level client.
      *
@@ -542,20 +541,20 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             }
 
             Response response = lowLevelClient.performRequest(request);
-            
+
             try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
                     .createParser(NamedXContentRegistry.EMPTY,
-                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
-                                response.getEntity().getContent())) {
+                            DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                            response.getEntity().getContent())) {
                 SearchResponse searchResponse = SearchResponse.fromXContent(parser);
-                LOG.debug("<== ESBasedAuditRepository.search() - found {} hits", 
-                    searchResponse.getHits().getTotalHits().value);
+                LOG.debug("<== ESBasedAuditRepository.search() - found {} hits",
+                        searchResponse.getHits().getTotalHits().value);
                 return searchResponse;
             }
         } catch (IOException e) {
             LOG.error("Error performing search on index {}: {}", indexName, e.getMessage(), e);
-            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, 
-                String.format("Search failed on index %s: %s", indexName, e.getMessage()));
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED,
+                    String.format("Search failed on index %s: %s", indexName, e.getMessage()));
         }
     }
 
@@ -572,31 +571,31 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         }
 
         String indexName = pitRequest.indices()[0];
-        LOG.debug("==> ESBasedAuditRepository.openPointInTime(index={}, keepAlive={})", 
-            indexName, pitRequest.keepAlive());
+        LOG.debug("==> ESBasedAuditRepository.openPointInTime(index={}, keepAlive={})",
+                indexName, pitRequest.keepAlive());
 
         try {
             String endpoint = indexName + "/_pit";
             String requestBody = String.format("{\"keep_alive\":\"%s\"}", pitRequest.keepAlive());
-            
+
             Request request = new Request("POST", endpoint);
             request.setEntity(new NStringEntity(requestBody, ContentType.APPLICATION_JSON));
-            
+
             Response response = lowLevelClient.performRequest(request);
-            
+
             try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
-                    .createParser(NamedXContentRegistry.EMPTY, 
-                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, 
-                                response.getEntity().getContent())) {
+                    .createParser(NamedXContentRegistry.EMPTY,
+                            DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                            response.getEntity().getContent())) {
                 OpenPointInTimeResponse pitResponse = OpenPointInTimeResponse.fromXContent(parser);
-                LOG.debug("<== ESBasedAuditRepository.openPointInTime() - created PIT: {}", 
-                    pitResponse.getPointInTimeId());
+                LOG.debug("<== ESBasedAuditRepository.openPointInTime() - created PIT: {}",
+                        pitResponse.getPointInTimeId());
                 return pitResponse;
             }
         } catch (IOException e) {
             LOG.error("Error opening PIT for index {}: {}", indexName, e.getMessage(), e);
-            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, 
-                String.format("Failed to open PIT for index %s: %s", indexName, e.getMessage()));
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED,
+                    String.format("Failed to open PIT for index %s: %s", indexName, e.getMessage()));
         }
     }
 
@@ -618,23 +617,24 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         try {
             String endpoint = "/_pit/" + pitId;
             Request request = new Request("DELETE", endpoint);
-            
+
             Response response = lowLevelClient.performRequest(request);
-            
+
             try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
-                    .createParser(NamedXContentRegistry.EMPTY, 
-                                DeprecationHandler.THROW_UNSUPPORTED_OPERATION, 
-                                response.getEntity().getContent())) {
+                    .createParser(NamedXContentRegistry.EMPTY,
+                            DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
+                            response.getEntity().getContent())) {
                 ClosePointInTimeResponse closeResponse = ClosePointInTimeResponse.fromXContent(parser);
-                LOG.debug("<== ESBasedAuditRepository.closePointInTime() - closed PIT: {}, succeeded: {}", 
-                    pitId, closeResponse.isSucceeded());
+                LOG.debug("<== ESBasedAuditRepository.closePointInTime() - closed PIT: {}, succeeded: {}",
+                        pitId, closeResponse.isSucceeded());
                 return closeResponse;
             }
         } catch (IOException e) {
             LOG.error("Error closing PIT {}: {}", pitId, e.getMessage(), e);
-            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, 
-                String.format("Failed to close PIT %s: %s", pitId, e.getMessage()));
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED,
+                    String.format("Failed to close PIT %s: %s", pitId, e.getMessage()));
         }
     }
 }
+
 
