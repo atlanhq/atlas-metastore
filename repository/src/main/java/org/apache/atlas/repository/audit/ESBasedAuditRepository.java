@@ -582,9 +582,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             request.setOptions(RequestOptions.DEFAULT.toBuilder()
                     .addHeader("Content-Type", ContentType.APPLICATION_JSON.getMimeType())
                     .build());
-
             Response response = lowLevelClient.performRequest(request);
-
             try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
                     .createParser(NamedXContentRegistry.EMPTY,
                             DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
@@ -617,8 +615,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         LOG.debug("==> ESBasedAuditRepository.closePointInTime(pitId={})", pitId);
 
         try {
-            String endpoint = "/_pit/" + pitId;
-            Request request = new Request("DELETE", endpoint);
+            Request request = new Request("DELETE", "/_pit");
+            
+            // Create request body with PIT ID
+            String requestBody = String.format("{\"id\": \"%s\"}", pitId);
+            HttpEntity entity = new NStringEntity(requestBody, ContentType.APPLICATION_JSON);
+            request.setEntity(entity);
 
             Response response = lowLevelClient.performRequest(request);
 
