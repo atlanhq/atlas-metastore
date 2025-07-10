@@ -86,43 +86,129 @@ public class JsonToElasticsearchQuery {
         return query;
     }
 
+    private static boolean hasNullValue(ArrayNode arrayNode) {
+        for (JsonNode valueNode : arrayNode) {
+            if (valueNode.isNull()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static ArrayNode removeNullValues(ArrayNode arrayNode) {
+        ArrayNode nonNullValues = mapper.createArrayNode();
+        for (JsonNode valueNode : arrayNode) {
+            if (!valueNode.isNull()) {
+                nonNullValues.add(valueNode);
+            }
+        }
+        return nonNullValues;
+    }
+
     private static JsonNode createAttributeQuery(String operator, String attributeName, JsonNode attributeValueNode) {
         ObjectNode queryNode = mapper.createObjectNode();
         String attributeValue = attributeValueNode.asText();
+
+
+        // handle array values for attributeValueNode
+        ArrayNode arrayNode = null;
+        ArrayNode nonNullValues = null;
+        boolean hasNull = false;
+        boolean hasNonNull = false;
+        if (attributeValueNode.isArray()) {
+            arrayNode = (ArrayNode) attributeValueNode;
+            nonNullValues = removeNullValues(arrayNode);
+            hasNull = hasNullValue(arrayNode);
+            hasNonNull = nonNullValues.size() > 0;
+        }
+        
         switch (operator) {
             case POLICY_FILTER_CRITERIA_EQUALS:
-                if (attributeValueNode.isArray()) {
+                if (arrayNode != null) {
                     ArrayNode filterArray = queryNode.putObject("bool").putArray("filter");
-                    for (JsonNode valueNode : attributeValueNode) {
+                    for (JsonNode valueNode : nonNullValues) {
                         filterArray.addObject().putObject("term").put(attributeName, valueNode.asText());
                     }
+                    if (hasNull) {
+                        filterArray.addObject().putObject("bool").putObject("must_not").putObject("exists").put("field", attributeName);
+                    }
+                } else if (attributeValueNode.isNull()) {
+                    queryNode.putObject("bool").putObject("must_not").putObject("exists").put("field", attributeName);
                 } else {
                     queryNode.putObject("term").put(attributeName, attributeValue);
                 }
                 break;
 
             case POLICY_FILTER_CRITERIA_NOT_EQUALS:
-                if (attributeValueNode.isArray()) {
-                    queryNode.putObject("bool").putObject("must_not").putObject("terms").set(attributeName, attributeValueNode);
+                if (arrayNode != null) {
+                    ObjectNode boolNode = queryNode.putObject("bool");
+                    if (hasNull) {
+                        boolNode.putArray("filter").addObject().putObject("exists").put("field", attributeName);
+                    }
+                    if (nonNullValues.size() > 0) {
+                        boolNode.putObject("must_not").putObject("terms").set(attributeName, nonNullValues);
+                    }
+                } else if (attributeValueNode.isNull()) {
+                    queryNode.putObject("exists").put("field", attributeName);
                 } else {
                     queryNode.putObject("bool").putObject("must_not").putObject("term").put(attributeName, attributeValue);
                 }
                 break;
 
             case POLICY_FILTER_CRITERIA_STARTS_WITH:
-                queryNode.putObject("prefix").put(attributeName, attributeValue + "*");
+                if (attributeValueNode.isNull()) { // Cannot do prefix search on null values
+                    return null;
+                } else {
+                    queryNode.putObject("prefix").put(attributeName, attributeValue);
+                }
                 break;
 
             case POLICY_FILTER_CRITERIA_ENDS_WITH:
-                queryNode.putObject("wildcard").put(attributeName, "*" + attributeValue);
+                if (attributeValueNode.isNull()) {
+                    return null;
+                } else {
+                    queryNode.putObject("wildcard").put(attributeName, "*" + attributeValue);
+                }
                 break;
 
             case POLICY_FILTER_CRITERIA_IN:
-                queryNode.putObject("terms").set(attributeName, attributeValueNode);
+                if (arrayNode != null) {
+                    if (hasNull && hasNonNull) {
+                        ArrayNode shouldArray = queryNode.putObject("bool").putArray("should");
+                        shouldArray.addObject().putObject("bool").putObject("must_not").putObject("exists").put("field", attributeName);
+                        shouldArray.addObject().putObject("terms").set(attributeName, nonNullValues);
+                    } else if (hasNull) {
+                        queryNode.putObject("bool").putObject("must_not").putObject("exists").put("field", attributeName);
+                    } else if (hasNonNull) {
+                        queryNode.putObject("terms").set(attributeName, nonNullValues);
+                    } else {
+                        return null;
+                    }
+                } else if (attributeValueNode.isNull()) {
+                    queryNode.putObject("bool").putObject("must_not").putObject("exists").put("field", attributeName);
+                } else {
+                    queryNode.putObject("term").put(attributeName, attributeValue);
+                }
                 break;
 
             case POLICY_FILTER_CRITERIA_NOT_IN:
-                queryNode.putObject("bool").putObject("must_not").putObject("terms").set(attributeName, attributeValueNode);
+                if (arrayNode != null) {
+                    if (hasNull && hasNonNull) {
+                        ObjectNode boolNode = queryNode.putObject("bool");
+                        boolNode.putArray("filter").addObject().putObject("exists").put("field", attributeName);
+                        boolNode.putObject("must_not").putObject("terms").set(attributeName, nonNullValues);
+                    } else if (hasNull) {
+                        queryNode.putObject("exists").put("field", attributeName);
+                    } else if (hasNonNull) {
+                        queryNode.putObject("bool").putObject("must_not").putObject("terms").set(attributeName, nonNullValues);
+                    } else {
+                        return null;
+                    }
+                } else if (attributeValueNode.isNull()) {
+                    queryNode.putObject("exists").put("field", attributeName);
+                } else {
+                    queryNode.putObject("bool").putObject("must_not").putObject("term").put(attributeName, attributeValue);
+                }
                 break;
 
             default: LOG.warn("Found unknown operator {}", operator);
