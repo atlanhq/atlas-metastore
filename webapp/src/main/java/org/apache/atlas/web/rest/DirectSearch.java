@@ -204,10 +204,14 @@ public class DirectSearch {
 
             SearchSourceBuilder sourceBuilder = buildSearchSource(request);
             long keepAlive = request.getKeepAlive() != null ? request.getKeepAlive() : DEFAULT_KEEPALIVE;
+            TimeValue keepAliveMs = TimeValue.parseTimeValue(
+                keepAlive + "ms",
+                "keepAlive"
+            );
 
             sourceBuilder.pointInTimeBuilder(
                     new PointInTimeBuilder(request.getPitId())
-                            .setKeepAlive(TimeValue.timeValueMillis(keepAlive))
+                            .setKeepAlive(keepAliveMs)
             );
 
             SearchRequest searchRequest = new SearchRequest();
