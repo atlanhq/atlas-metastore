@@ -203,18 +203,19 @@ public class DirectSearch {
             LOG.debug("==> DirectSearch.handlePitSearch(pitId={}, query={})", request.getPitId(), request.getQuery());
 
             SearchSourceBuilder sourceBuilder = buildSearchSource(request);
-            long keepAlive = request.getKeepAlive() != null ? request.getKeepAlive() : DEFAULT_KEEPALIVE;
-            TimeValue keepAliveMs = TimeValue.parseTimeValue(
-                keepAlive + "ms",
-                "keepAlive"
-            );
+            
+            // Add PIT to source builder
+            PointInTimeBuilder pitBuilder = new PointInTimeBuilder(request.getPitId());
+            
+            // Only set keepAlive if specified
+            if (request.getKeepAlive() != null) {
+                pitBuilder.setKeepAlive(String.valueOf(request.getKeepAlive()));
+            }
+            
+            sourceBuilder.pointInTimeBuilder(pitBuilder);
 
-            sourceBuilder.pointInTimeBuilder(
-                    new PointInTimeBuilder(request.getPitId())
-                            .setKeepAlive(keepAliveMs)
-            );
-
-            SearchRequest searchRequest = new SearchRequest();
+            // Create search request with empty indices array since we're using PIT
+            SearchRequest searchRequest = new SearchRequest(new String[]{});
             searchRequest.source(sourceBuilder);
 
             SearchResponse response = es.search(searchRequest);
