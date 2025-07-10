@@ -202,8 +202,6 @@ public class DirectSearch {
         try {
             LOG.debug("==> DirectSearch.handlePitSearch(pitId={}, query={})", request.getPitId(), request.getQuery());
 
-            SearchSourceBuilder sourceBuilder = buildSearchSource(request);
-            
             // Add PIT to source builder
             PointInTimeBuilder pitBuilder = new PointInTimeBuilder(request.getPitId());
             
@@ -211,12 +209,12 @@ public class DirectSearch {
             if (request.getKeepAlive() != null) {
                 pitBuilder.setKeepAlive(String.valueOf(request.getKeepAlive()));
             }
+            SearchSourceBuilder sourceBuilder = buildSearchSource(request);
+            SearchRequest searchRequest = new SearchRequest(request.getIndexName());
+            searchRequest.source(sourceBuilder);
             
             sourceBuilder.pointInTimeBuilder(pitBuilder);
 
-            // Create search request with empty indices array since we're using PIT
-            SearchRequest searchRequest = new SearchRequest(new String[]{});
-            searchRequest.source(sourceBuilder);
 
             SearchResponse response = es.search(searchRequest);
             LOG.debug("<== DirectSearch.handlePitSearch() - {}", response);
