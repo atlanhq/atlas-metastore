@@ -1,8 +1,6 @@
 package org.apache.atlas.model.instance;
 
-import com.fasterxml.jackson.annotation.JsonAutoDetect;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.*;
 import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 
 import javax.xml.bind.annotation.XmlAccessType;
@@ -33,6 +31,9 @@ public class DirectSearchRequest implements Serializable {
     private String indexName;
     private Map<String, Object> query;
     private String pitId;
+
+    @JsonProperty("keepAlive") // This will be used for serialization
+    @JsonAlias({"keep_alive"})
     private Long keepAlive;
     private List<Object> searchAfter;
     private Integer size;
