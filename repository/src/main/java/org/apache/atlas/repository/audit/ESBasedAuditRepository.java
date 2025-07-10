@@ -575,11 +575,13 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 indexName, pitRequest.keepAlive());
 
         try {
-            String endpoint = indexName + "/_pit";
-            String requestBody = String.format("{\"keep_alive\":\"%s\"}", pitRequest.keepAlive());
+            String keeAliveParam = String.format("keep_alive=%s", pitRequest.keepAlive());
+            String endpoint = indexName + "/_pit?"+keeAliveParam;
 
             Request request = new Request("POST", endpoint);
-            request.setEntity(new NStringEntity(requestBody, ContentType.APPLICATION_JSON));
+            request.setOptions(RequestOptions.DEFAULT.toBuilder()
+                    .addHeader("Content-Type", ContentType.APPLICATION_JSON.getMimeType())
+                    .build());
 
             Response response = lowLevelClient.performRequest(request);
 
