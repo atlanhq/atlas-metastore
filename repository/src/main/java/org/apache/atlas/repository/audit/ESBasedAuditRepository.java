@@ -527,11 +527,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * @throws AtlasBaseException if the search operation fails
      */
     public SearchResponse search(SearchRequest searchRequest) throws AtlasBaseException {
-        if (searchRequest == null || searchRequest.indices() == null || searchRequest.indices().length == 0) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Search request or indices cannot be null");
+
+        String indexName = "";
+        if (searchRequest.indices() != null && searchRequest.indices().length == 0) {
+            indexName = searchRequest.indices()[0];
         }
 
-        String indexName = searchRequest.indices()[0];
         LOG.debug("==> ESBasedAuditRepository.search(index={})", indexName);
 
         try {

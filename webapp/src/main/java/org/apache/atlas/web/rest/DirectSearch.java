@@ -167,6 +167,9 @@ public class DirectSearch {
         try {
             LOG.debug("==> DirectSearch.handleSimpleSearch(indexName={}, query={})",
                     request.getIndexName(), request.getQuery());
+            if (request.getIndexName() == null) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Search index cannot be null");
+            }
 
             SearchSourceBuilder sourceBuilder = buildSearchSource(request);
             SearchRequest searchRequest = new SearchRequest(request.getIndexName());
