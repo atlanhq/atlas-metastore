@@ -210,11 +210,11 @@ public class DirectSearch {
                 pitBuilder.setKeepAlive(String.valueOf(request.getKeepAlive()));
             }
             SearchSourceBuilder sourceBuilder = buildSearchSource(request);
-            SearchRequest searchRequest = new SearchRequest(request.getIndexName());
-            searchRequest.source(sourceBuilder);
-            
             sourceBuilder.pointInTimeBuilder(pitBuilder);
 
+            // For PIT search, do not specify any index
+            SearchRequest searchRequest = new SearchRequest();
+            searchRequest.source(sourceBuilder);
 
             SearchResponse response = es.search(searchRequest);
             LOG.debug("<== DirectSearch.handlePitSearch() - {}", response);
