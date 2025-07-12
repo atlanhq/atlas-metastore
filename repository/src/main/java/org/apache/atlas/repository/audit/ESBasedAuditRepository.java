@@ -529,7 +529,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     public SearchResponse search(SearchRequest searchRequest) throws AtlasBaseException {
 
         String indexName = "";
-        if (searchRequest.indices() != null && searchRequest.indices().length == 0) {
+        if (searchRequest.indices() != null && searchRequest.indices().length > 0) {
             indexName = searchRequest.indices()[0];
         }
 
