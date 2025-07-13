@@ -1,6 +1,5 @@
 package org.apache.atlas.web.rest;
 
-
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
@@ -8,19 +7,14 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.DirectSearchRequest;
 import org.apache.atlas.model.instance.DirectSearchResponse;
 import org.apache.atlas.repository.audit.ESBasedAuditRepository;
-import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.utils.AtlasJson;
+import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
-import org.elasticsearch.action.search.*;
+import org.elasticsearch.action.search.ClosePointInTimeRequest;
+import org.elasticsearch.action.search.ClosePointInTimeResponse;
+import org.elasticsearch.action.search.OpenPointInTimeRequest;
+import org.elasticsearch.action.search.OpenPointInTimeResponse;
 import org.elasticsearch.core.TimeValue;
-import org.elasticsearch.search.SearchModule;
-import org.elasticsearch.search.builder.PointInTimeBuilder;
-import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.elasticsearch.xcontent.DeprecationHandler;
-import org.elasticsearch.xcontent.NamedXContentRegistry;
-import org.elasticsearch.xcontent.XContentFactory;
-import org.elasticsearch.xcontent.XContentParser;
-import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -33,10 +27,7 @@ import javax.ws.rs.Path;
 import javax.ws.rs.Produces;
 import javax.ws.rs.core.MediaType;
 import java.io.IOException;
-import java.util.Collections;
-import java.util.List;
-import java.util.function.Function;
-import org.elasticsearch.common.settings.Settings;
+import java.util.Map;
 
 import static org.apache.atlas.repository.util.AccessControlUtils.ARGO_SERVICE_USER_NAME;
 
@@ -49,12 +40,6 @@ public class DirectSearch {
     private static final long DEFAULT_KEEPALIVE = 60000L; // 60 seconds
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.DirectSearch");
     private static final Logger LOG = LoggerFactory.getLogger(DirectSearch.class);
-    private static final NamedXContentRegistry REGISTRY;
-
-    static {
-        SearchModule searchModule = new SearchModule(Settings.EMPTY, false, Collections.emptyList());
-        REGISTRY = new NamedXContentRegistry(searchModule.getNamedXContents());
-    }
 
     private final ESBasedAuditRepository es;
 
@@ -80,15 +65,26 @@ public class DirectSearch {
             LOG.debug("==> DirectSearch.directSearch({})", request);
             validateRequest(request);
 
-            DirectSearchResponse response = switch (request.getSearchType()) {
-                case SIMPLE -> DirectSearchResponse.fromSearchResponse(handleSimpleSearch(request));
-                case PIT_CREATE -> DirectSearchResponse.fromPitCreateResponse(handlePitCreate(request));
-                case PIT_SEARCH -> DirectSearchResponse.fromSearchResponse(handlePitSearch(request));
-                case PIT_DELETE -> DirectSearchResponse.fromPitDeleteResponse(handlePitDelete(request));
-            };
+            DirectSearchResponse response;
+            switch (request.getSearchType()) {
+                case SIMPLE -> {
+                    Map<String, Object> searchResponse = handleSimpleSearch(request);
+                    response = DirectSearchResponse.fromSearchResponse(searchResponse);
+                }
+                case PIT_CREATE -> response = DirectSearchResponse.fromPitCreateResponse(handlePitCreate(request));
+                case PIT_SEARCH -> {
+                    Map<String, Object> searchResponse = handlePitSearch(request);
+                    response = DirectSearchResponse.fromSearchResponse(searchResponse);
+                }
+                case PIT_DELETE -> response = DirectSearchResponse.fromPitDeleteResponse(handlePitDelete(request));
+                default -> throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Invalid search type");
+            }
 
             LOG.debug("<== DirectSearch.directSearch() - {}", response);
             return response;
+        } catch (Exception e) {
+            LOG.error("Error processing direct search request: {}", request, e);
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, e.getMessage());
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -104,82 +100,70 @@ public class DirectSearch {
         }
 
         switch (request.getSearchType()) {
-            case SIMPLE -> validateSimpleSearch(request);
-            case PIT_CREATE -> validatePitCreate(request);
-            case PIT_SEARCH -> validatePitSearch(request);
-            case PIT_DELETE -> validatePitDelete(request);
-        }
-    }
-
-    private void validateSimpleSearch(DirectSearchRequest request) throws AtlasBaseException {
-        if (request.getIndexName() == null || request.getIndexName().trim().isEmpty()) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Index name is required for simple search");
-        }
-        if (request.getQuery() == null) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Query is required for simple search");
-        }
-    }
-
-    private void validatePitCreate(DirectSearchRequest request) throws AtlasBaseException {
-        if (request.getIndexName() == null || request.getIndexName().trim().isEmpty()) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Index name is required for PIT creation");
-        }
-    }
-
-    private void validatePitSearch(DirectSearchRequest request) throws AtlasBaseException {
-        if (request.getPitId() == null || request.getPitId().trim().isEmpty()) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "PIT ID is required for PIT search");
-        }
-        if (request.getQuery() == null) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Query is required for PIT search");
-        }
-    }
-
-    private void validatePitDelete(DirectSearchRequest request) throws AtlasBaseException {
-        if (request.getPitId() == null || request.getPitId().trim().isEmpty()) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "PIT ID is required for PIT deletion");
-        }
-    }
-
-    private SearchSourceBuilder buildSearchSource(DirectSearchRequest request) throws Exception {
-        try {
-            String queryJson = AtlasJson.toJson(request.getQuery());
-            try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
-                    .createParser(REGISTRY,
-                            DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
-                            queryJson)) {
-
-                SearchSourceBuilder sourceBuilder = SearchSourceBuilder.fromXContent(parser);
-
-                if (request.getSearchAfter() != null) {
-                    sourceBuilder.searchAfter(request.getSearchAfter().toArray());
+            case SIMPLE -> {
+                if (request.getIndexName() == null || request.getIndexName().trim().isEmpty()) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Index name is required for simple search");
                 }
-
-                return sourceBuilder;
+                if (request.getQuery() == null) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Query is required for simple search");
+                }
             }
-        } catch (Exception e) {
-            LOG.error("Error building search source from query: {}", request.getQuery(), e);
-            throw new Exception("Failed to parse search query: " + e.getMessage(), e);
+            case PIT_CREATE -> {
+                if (request.getIndexName() == null || request.getIndexName().trim().isEmpty()) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Index name is required for PIT creation");
+                }
+            }
+            case PIT_SEARCH -> {
+                if (request.getQuery() == null) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Query is required for PIT search");
+                }
+                Map<String, Object> query = request.getQuery();
+                if (!hasPitSection(query)) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "PIT section is required in query for PIT search");
+                }
+            }
+            case PIT_DELETE -> {
+                if (request.getPitId() == null || request.getPitId().trim().isEmpty()) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "PIT ID is required for PIT deletion");
+                }
+            }
         }
     }
 
-    private SearchResponse handleSimpleSearch(DirectSearchRequest request) throws IOException, AtlasBaseException {
+    private boolean hasPitSection(Map<String, Object> query) {
+        if (query == null || !query.containsKey("query")) return false;
+        Map<String, Object> innerQuery = (Map<String, Object>) query.get("query");
+        return innerQuery != null && innerQuery.containsKey("pit");
+    }
+
+    private Map<String, Object> handleSimpleSearch(DirectSearchRequest request) throws IOException, AtlasBaseException {
         try {
             LOG.debug("==> DirectSearch.handleSimpleSearch(indexName={}, query={})",
                     request.getIndexName(), request.getQuery());
-            if (request.getIndexName() == null) {
-                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Search index cannot be null");
-            }
 
-            SearchSourceBuilder sourceBuilder = buildSearchSource(request);
-            SearchRequest searchRequest = new SearchRequest(request.getIndexName());
-            searchRequest.source(sourceBuilder);
-
-            SearchResponse response = es.search(searchRequest);
+            String queryJson = AtlasJson.toJson(request.getQuery());
+            Map<String, Object> response = es.searchWithRawJson(request.getIndexName(), queryJson);
+            
             LOG.debug("<== DirectSearch.handleSimpleSearch() - {}", response);
             return response;
-        } catch (IOException e) {
+        } catch (Exception e) {
             LOG.error("Error in simple search", e);
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, e.getMessage());
+        }
+    }
+
+    private Map<String, Object> handlePitSearch(DirectSearchRequest request) throws AtlasBaseException {
+        try {
+            LOG.debug("==> DirectSearch.handlePitSearch(query={})", request.getQuery());
+
+            // Use empty index name for PIT search
+            String queryJson = AtlasJson.toJson(request.getQuery());
+            Map<String, Object> response = es.searchWithRawJson("", queryJson);
+
+            LOG.debug("<== DirectSearch.handlePitSearch() - {}", response);
+            return response;
+        } catch (Exception e) {
+            LOG.error("Error in PIT search", e);
             throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, e.getMessage());
         }
     }
@@ -197,33 +181,6 @@ public class DirectSearch {
             return response;
         } catch (Exception e) {
             LOG.error("Error creating PIT", e);
-            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, e.getMessage());
-        }
-    }
-
-    private SearchResponse handlePitSearch(DirectSearchRequest request) throws AtlasBaseException {
-        try {
-            LOG.debug("==> DirectSearch.handlePitSearch(pitId={}, query={})", request.getPitId(), request.getQuery());
-
-            // Add PIT to source builder
-            PointInTimeBuilder pitBuilder = new PointInTimeBuilder(request.getPitId());
-            
-            // Only set keepAlive if specified
-            if (request.getKeepAlive() != null) {
-                pitBuilder.setKeepAlive(String.valueOf(request.getKeepAlive()));
-            }
-            SearchSourceBuilder sourceBuilder = buildSearchSource(request);
-            sourceBuilder.pointInTimeBuilder(pitBuilder);
-
-            // For PIT search, do not specify any index
-            SearchRequest searchRequest = new SearchRequest();
-            searchRequest.source(sourceBuilder);
-
-            SearchResponse response = es.search(searchRequest);
-            LOG.debug("<== DirectSearch.handlePitSearch() - {}", response);
-            return response;
-        } catch (IOException e) {
-            LOG.error("Error in PIT search", e);
             throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED, e.getMessage());
         }
     }

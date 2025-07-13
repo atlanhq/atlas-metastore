@@ -523,11 +523,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
      * Performs a search operation using the Elasticsearch low-level client.
      *
      * @param searchRequest the search request containing query and indices
-     * @return SearchResponse containing search results
+     * @return Map containing raw search results
      * @throws AtlasBaseException if the search operation fails
      */
-    public SearchResponse search(SearchRequest searchRequest) throws AtlasBaseException {
-
+    public Map<String, Object> search(SearchRequest searchRequest) throws AtlasBaseException {
         String indexName = "";
         if (searchRequest.indices() != null && searchRequest.indices().length > 0) {
             indexName = searchRequest.indices()[0];
@@ -542,18 +541,45 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             }
 
             Response response = lowLevelClient.performRequest(request);
-
-            try (XContentParser parser = XContentFactory.xContent(XContentType.JSON)
-                    .createParser(NamedXContentRegistry.EMPTY,
-                            DeprecationHandler.THROW_UNSUPPORTED_OPERATION,
-                            response.getEntity().getContent())) {
-                SearchResponse searchResponse = SearchResponse.fromXContent(parser);
-                LOG.debug("<== ESBasedAuditRepository.search() - found {} hits",
-                        searchResponse.getHits().getTotalHits().value);
-                return searchResponse;
-            }
+            String responseString = EntityUtils.toString(response.getEntity());
+            
+            // Parse the raw JSON response into a Map
+            Map<String, Object> searchResponse = AtlasType.fromJson(responseString, Map.class);
+            LOG.debug("<== ESBasedAuditRepository.search() - found {} hits",
+                    ((Map)((Map)searchResponse.get("hits")).get("total")).get("value"));
+            return searchResponse;
         } catch (IOException e) {
             LOG.error("Error performing search on index {}: {}", indexName, e.getMessage(), e);
+            throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED,
+                    String.format("Search failed on index %s: %s", indexName, e.getMessage()));
+        }
+    }
+
+    /**
+     * Performs a direct search operation using raw JSON query.
+     *
+     * @param indexName the index to search in
+     * @param queryJson the raw JSON query
+     * @return Map containing raw search results
+     * @throws AtlasBaseException if the search operation fails
+     */
+    public Map<String, Object> searchWithRawJson(String indexName, String queryJson) throws AtlasBaseException {
+        LOG.debug("==> ESBasedAuditRepository.searchWithRawJson(index={}, query={})", indexName, queryJson);
+
+        try {
+            Request request = new Request("POST", indexName + "/_search");
+            request.setJsonEntity(queryJson);
+
+            Response response = lowLevelClient.performRequest(request);
+            String responseString = EntityUtils.toString(response.getEntity());
+            
+            // Parse the raw JSON response into a Map
+            Map<String, Object> searchResponse = AtlasType.fromJson(responseString, Map.class);
+            LOG.debug("<== ESBasedAuditRepository.searchWithRawJson() - found {} hits",
+                    ((Map)((Map)searchResponse.get("hits")).get("total")).get("value"));
+            return searchResponse;
+        } catch (IOException e) {
+            LOG.error("Error performing raw JSON search on index {}: {}", indexName, e.getMessage(), e);
             throw new AtlasBaseException(AtlasErrorCode.DISCOVERY_QUERY_FAILED,
                     String.format("Search failed on index %s: %s", indexName, e.getMessage()));
         }
