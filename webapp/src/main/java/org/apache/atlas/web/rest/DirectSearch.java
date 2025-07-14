@@ -133,7 +133,7 @@ public class DirectSearch {
     private boolean hasPitSection(Map<String, Object> query) {
         if (query == null || !query.containsKey("query")) return false;
         Map<String, Object> innerQuery = (Map<String, Object>) query.get("query");
-        return innerQuery != null && innerQuery.containsKey("pit");
+        return innerQuery != null && query.containsKey("pit");
     }
 
     private Map<String, Object> handleSimpleSearch(DirectSearchRequest request) throws IOException, AtlasBaseException {
