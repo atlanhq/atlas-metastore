@@ -25,9 +25,7 @@ import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
 import javax.servlet.http.HttpServletRequest;
-import java.util.Enumeration;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 @Component
 public class HeadersUtil {
@@ -54,7 +52,7 @@ public class HeadersUtil {
     public static final String X_REQUESTED_WITH_VALUE = "XMLHttpRequest";
     public static final int SC_AUTHENTICATION_TIMEOUT = 419;
 
-    private static final String ATLAN_HEADER_PREFIX_PATTERN = "x-atlan-";
+    private static final Set<String> LOG_HEADER_NAMES = Set.of("x-atlan-", "origin", "x-amzn-trace-id", "content-length");
 
 
     HeadersUtil() {
@@ -83,8 +81,8 @@ public class HeadersUtil {
 
         while (headerNames.hasMoreElements()) {
             String headerName = headerNames.nextElement();
-            MDC.put(headerName, request.getHeader(headerName)); // Log the header for debugging purposes
-            if (headerName.toLowerCase().startsWith(ATLAN_HEADER_PREFIX_PATTERN.toLowerCase())) {
+            if (LOG_HEADER_NAMES.contains(headerName.toLowerCase())) {
+                MDC.put(headerName, request.getHeader(headerName)); // Log the header for debugging purposes
                 context.addRequestContextHeader(headerName, request.getHeader(headerName));
             }
         }
