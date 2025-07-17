@@ -1205,13 +1205,7 @@ public abstract class DeleteHandlerV1 {
     private void deleteAllClassificationsV2(AtlasVertex deletionCandidateVertex) throws AtlasBaseException {
         // Create Delete propagation task only for direct tags, propagated tags will be handled in refresh task created later in the same flow
         List<Tag> tags = tagDAO.getAllDirectTagsForVertex(deletionCandidateVertex.getIdForDisplay());
-        try {
-            tagDAO.deleteTags(tags);
-            tags.forEach(t -> createAndQueueTaskWithoutCheckV2(CLASSIFICATION_PROPAGATION_DELETE, deletionCandidateVertex, null, t.getTagTypeName()));
-        } catch (AtlasBaseException e) {
-            LOG.error("Error while deleting tags for vertex: {}", deletionCandidateVertex.getIdForDisplay());
-            throw e;
-        }
+        tags.forEach(t -> createAndQueueTaskWithoutCheckV2(CLASSIFICATION_PROPAGATION_DELETE, deletionCandidateVertex, null, t.getTagTypeName()));
     }
 
     /**
