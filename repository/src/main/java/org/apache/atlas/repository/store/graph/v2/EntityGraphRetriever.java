@@ -1560,10 +1560,13 @@ public class EntityGraphRetriever {
             RequestContext context = RequestContext.get();
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
-            if(includeClassifications){
-                ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
-            } else if (!includeClassifications && includeClassificationNames) {
-                ret.setClassificationNames(getAllTraitNamesFromAttribute(entityVertex));
+            if(includeClassifications || includeClassificationNames){
+                List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+
+                if (includeClassifications) {
+                    ret.setClassifications(tags);
+                }
+                ret.setClassificationNames(getAllTagNames(tags));
             }
 //            ret.setIsIncomplete(isIncomplete);
             ret.setLabels(getLabels(entityVertex));
