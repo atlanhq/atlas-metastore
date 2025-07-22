@@ -27,7 +27,7 @@ on:
       - development
       - master
       - staging
-      - MLH-841
+      - mlh841
 
 jobs:
   build:
