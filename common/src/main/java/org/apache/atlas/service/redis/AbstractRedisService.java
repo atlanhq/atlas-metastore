@@ -15,6 +15,8 @@ import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
@@ -34,6 +36,11 @@ public abstract class AbstractRedisService implements RedisService {
     private static final int DEFAULT_REDIS_LEASE_TIME_MS = 60_000;
     private static final String ATLAS_METASTORE_SERVICE = "atlas-metastore-service";
 
+    private final ScheduledExecutorService heartbeatExecutor = Executors.newScheduledThreadPool(1);
+    private final long LEASE_TIME_MS = 30000; // 30 seconds
+    private final long HEARTBEAT_INTERVAL_MS = 10000; // 10 seconds
+    private volatile boolean isRunning = false;
+
     RedissonClient redisClient;
     RedissonClient redisCacheClient;
     Map<String, RLock> keyLockMap;
@@ -44,23 +51,31 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public boolean acquireDistributedLock(String key) throws Exception {
-        getLogger().info("Attempting to acquire distributed lock for {}, host:{}", key, getHostAddress());
-        boolean isLockAcquired;
-        try {
-            RLock lock = redisClient.getFairLock(key);
-            isLockAcquired = lock.tryLock(waitTimeInMS, leaseTimeInMS, TimeUnit.MILLISECONDS);
-            if (isLockAcquired) {
-                keyLockMap.put(key, lock);
-            } else {
-                getLogger().info("Attempt failed as lock {} is already acquired, host: {}.", key, getHostAddress());
-            }
-        } catch (InterruptedException e) {
-            getLogger().error("Failed to acquire distributed lock for {}, host: {}", key, getHostAddress(), e);
-            throw new AtlasException(e);
+        RLock lock = redisClient.getFairLock(key);
+        boolean isLockAcquired = lock.tryLock(waitTimeInMS, LEASE_TIME_MS, TimeUnit.MILLISECONDS);
+
+        if (isLockAcquired) {
+            isRunning = true;
+            keyLockMap.put(key, lock);
+
+            // Start heartbeat to continuously renew the lock
+            heartbeatExecutor.scheduleAtFixedRate(() -> {
+                if (isRunning && keyLockMap.containsKey(key)) {
+                    try {
+                        RLock currentLock = keyLockMap.get(key);
+                        if (currentLock != null && currentLock.isHeldByCurrentThread()) {
+                            boolean renewed = currentLock.tryLock(0, LEASE_TIME_MS, TimeUnit.MILLISECONDS);
+                            getLogger().debug("Lock heartbeat for {}: {}", key, renewed ? "renewed" : "failed");
+                        }
+                    } catch (Exception e) {
+                        getLogger().error("Failed to renew lock for {}", key, e);
+                    }
+                }
+            }, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
         }
+
         return isLockAcquired;
     }
-
     @Override
     public Lock acquireDistributedLockV2(String key) throws Exception {
         getLogger().info("Attempting to acquire distributed lock for {}, host:{}", key, getHostAddress());
