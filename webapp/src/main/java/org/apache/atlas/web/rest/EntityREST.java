@@ -831,7 +831,6 @@ public class EntityREST {
         }
 
         AtlasPerfTracer perf = null;
-        RequestContext.get().setEnableCache(false);
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
         RequestContext.get().setAllowCustomGuid(allowCustomGuid);
         RequestContext.get().setAllowCustomQualifiedName(allowCustomQualifiedName);
