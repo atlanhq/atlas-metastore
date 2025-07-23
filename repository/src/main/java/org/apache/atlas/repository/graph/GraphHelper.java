@@ -2108,6 +2108,7 @@ public final class GraphHelper {
                     .V(vertex.getId())
                     .bothE()
                     .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                    .dedup().by(T.label).by(TYPE_NAME_PROPERTY_KEY)  // Dedup at graph level
                     .project(LABEL_PROPERTY_KEY, TYPE_NAME_PROPERTY_KEY)
                     .by(T.label)
                     .by(TYPE_NAME_PROPERTY_KEY)
@@ -2117,18 +2118,15 @@ public final class GraphHelper {
                         Object typeName = m.get(TYPE_NAME_PROPERTY_KEY);
                         String labelStr = (label != null) ? label.toString() : "";
                         String typeNameStr = (typeName != null) ? typeName.toString() : "";
-
                         return new AbstractMap.SimpleEntry<>(labelStr, typeNameStr);
                     })
                     .filter(entry -> !entry.getKey().isEmpty())
-                    .distinct()
                     .collect(Collectors.toSet());
 
         } catch (Exception e) {
             LOG.error("Error while getting labels of active edges", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
-        }
-        finally {
+        } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
