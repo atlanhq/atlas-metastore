@@ -31,7 +31,7 @@ on:
       - poctagprophashedrebased
       - staging
       - tagscanary
-      - reduced_redis_lease
+      - redused_redis_lease
 
 jobs:
   build:
