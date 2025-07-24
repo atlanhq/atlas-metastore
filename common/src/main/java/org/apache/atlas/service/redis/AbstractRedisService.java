@@ -31,7 +31,7 @@ public abstract class AbstractRedisService implements RedisService {
     private static final String ATLAS_REDIS_LEASE_TIME_MS = "atlas.redis.lease_time.ms";
     private static final int DEFAULT_REDIS_WAIT_TIME_MS = 15_000;
     private static final int DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS = 600_000;
-    private static final int DEFAULT_REDIS_LEASE_TIME_MS = 60_000;
+    private static final int DEFAULT_REDIS_LEASE_TIME_MS = 10_000;
     private static final String ATLAS_METASTORE_SERVICE = "atlas-metastore-service";
 
     RedissonClient redisClient;
