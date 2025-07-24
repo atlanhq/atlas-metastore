@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
@@ -37,9 +38,8 @@ public abstract class AbstractRedisService implements RedisService {
     private static final String ATLAS_METASTORE_SERVICE = "atlas-metastore-service";
 
     private final ScheduledExecutorService heartbeatExecutor = Executors.newScheduledThreadPool(1);
-    private final long LEASE_TIME_MS = 30000; // 30 seconds
     private final long HEARTBEAT_INTERVAL_MS = 10000; // 10 seconds
-    private volatile boolean isRunning = false;
+    private final Map<String, ScheduledFuture<?>> heartbeatTasks = new ConcurrentHashMap<>();
 
     RedissonClient redisClient;
     RedissonClient redisCacheClient;
@@ -51,27 +51,43 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public boolean acquireDistributedLock(String key) throws Exception {
+        getLogger().info("Attempting to acquire distributed lock for {}, host:{}", key, getHostAddress());
         RLock lock = redisClient.getFairLock(key);
-        boolean isLockAcquired = lock.tryLock(waitTimeInMS, LEASE_TIME_MS, TimeUnit.MILLISECONDS);
+        boolean isLockAcquired;
+        
+        try {
+            isLockAcquired = lock.tryLock(waitTimeInMS, leaseTimeInMS, TimeUnit.MILLISECONDS);
+            
+            if (isLockAcquired) {
+                getLogger().info("Lock with key {} is acquired, host: {}.", key, getHostAddress());
+                keyLockMap.put(key, lock);
 
-        if (isLockAcquired) {
-            isRunning = true;
-            keyLockMap.put(key, lock);
-
-            // Start heartbeat to continuously renew the lock
-            heartbeatExecutor.scheduleAtFixedRate(() -> {
-                if (isRunning && keyLockMap.containsKey(key)) {
+                // Start heartbeat to continuously renew the lock
+                ScheduledFuture<?> heartbeatTask = heartbeatExecutor.scheduleAtFixedRate(() -> {
                     try {
                         RLock currentLock = keyLockMap.get(key);
                         if (currentLock != null && currentLock.isHeldByCurrentThread()) {
-                            boolean renewed = currentLock.tryLock(0, LEASE_TIME_MS, TimeUnit.MILLISECONDS);
+                            boolean renewed = currentLock.tryLock(0, leaseTimeInMS, TimeUnit.MILLISECONDS);
                             getLogger().debug("Lock heartbeat for {}: {}", key, renewed ? "renewed" : "failed");
+                        } else {
+                            // Lock is no longer held, cancel this heartbeat task
+                            ScheduledFuture<?> task = heartbeatTasks.remove(key);
+                            if (task != null) {
+                                task.cancel(false);
+                            }
                         }
                     } catch (Exception e) {
                         getLogger().error("Failed to renew lock for {}", key, e);
                     }
-                }
-            }, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                }, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                
+                heartbeatTasks.put(key, heartbeatTask);
+            } else {
+                getLogger().info("Attempt failed as fair lock {} is already acquired, host: {}.", key, getHostAddress());
+            }
+        } catch (InterruptedException e) {
+            getLogger().error("Failed to acquire distributed lock for {}, host: {}", key, getHostAddress(), e);
+            throw new AtlasException(e);
         }
 
         return isLockAcquired;
@@ -112,6 +128,15 @@ public abstract class AbstractRedisService implements RedisService {
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
+            
+            // Cancel and remove the heartbeat task for this lock
+            ScheduledFuture<?> heartbeatTask = heartbeatTasks.remove(key);
+            if (heartbeatTask != null) {
+                heartbeatTask.cancel(false);
+            }
+            
+            // Remove the lock from the map
+            keyLockMap.remove(key);
 
         } catch (Exception e) {
             getLogger().error("Failed to release distributed lock for {}", key, e);
@@ -237,6 +262,28 @@ public abstract class AbstractRedisService implements RedisService {
 
     @PreDestroy
     public void flushLocks(){
-        keyLockMap.keySet().stream().forEach(k->keyLockMap.get(k).unlock());
+        // Cancel all heartbeat tasks
+        heartbeatTasks.values().forEach(task -> task.cancel(false));
+        heartbeatTasks.clear();
+        
+        // Release all locks
+        keyLockMap.keySet().stream().forEach(k -> {
+            RLock lock = keyLockMap.get(k);
+            if (lock != null && lock.isHeldByCurrentThread()) {
+                lock.unlock();
+            }
+        });
+        keyLockMap.clear();
+        
+        // Shutdown the heartbeat executor
+        heartbeatExecutor.shutdown();
+        try {
+            if (!heartbeatExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
+                heartbeatExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            heartbeatExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
     }
 }
