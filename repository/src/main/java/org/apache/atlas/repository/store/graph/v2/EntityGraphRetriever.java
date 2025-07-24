@@ -1118,8 +1118,13 @@ public class EntityGraphRetriever {
 
     private void retrieveEdgeLabels(AtlasVertex entityVertex, Set<String> attributes, Map<String, Set<String>> relationshipsLookup,Map<String, Object> propertiesMap) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("retrieveEdgeLabels");
+        Set<AbstractMap.SimpleEntry<String, String>> edgeLabelAndTypeName;
         try {
-            Set<AbstractMap.SimpleEntry<String, String>> edgeLabelAndTypeName = graphHelper.retrieveEdgeLabelsAndTypeName(entityVertex);
+            if (AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_OPTIMISED_RELATIONS_PROCESSING.getBoolean()) {
+                edgeLabelAndTypeName = graphHelper.retrieveEdgeLabelsAndTypeNameV2(entityVertex);
+            } else {
+                edgeLabelAndTypeName = graphHelper.retrieveEdgeLabelsAndTypeName(entityVertex);
+            }
 
             Set<String> edgeLabels = new HashSet<>();
             edgeLabelAndTypeName.stream().filter(Objects::nonNull).forEach(edgeLabelMap -> attributes.forEach(attribute->{

@@ -63,6 +63,8 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.structure.*;
+import org.janusgraph.core.JanusGraphEdge;
+import org.janusgraph.core.JanusGraphVertex;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -2123,6 +2125,50 @@ public final class GraphHelper {
                     .filter(entry -> !entry.getKey().isEmpty())
                     .collect(Collectors.toSet());
 
+        } catch (Exception e) {
+            LOG.error("Error while getting labels of active edges", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    public Set<AbstractMap.SimpleEntry<String, String>> retrieveEdgeLabelsAndTypeNameV2(AtlasVertex vertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeNameV2");
+        try {
+            JanusGraphVertex jgVertex = (JanusGraphVertex) ((AtlasJanusVertex) vertex).getWrappedElement();
+
+            // Use a Set with composite key for deduplication
+            Set<String> seenCombinations = new HashSet<>();
+            Set<AbstractMap.SimpleEntry<String, String>> result = new HashSet<>();
+
+            // Direct vertex-centric query - much more efficient for high-degree vertices
+            Iterator<JanusGraphEdge> edges = jgVertex.query()
+                    .edges()
+                    .iterator();
+
+            while (edges.hasNext()) {
+                Edge edge = edges.next();
+                String label = edge.label();
+                String state= edge.property(STATE_PROPERTY_KEY).orElse("").toString();
+
+                if (!ACTIVE_STATE_VALUE.equals(state)) {
+                    continue; // Skip edges that are not active
+                }
+                if (label == null || label.isEmpty()) {
+                    continue;
+                }
+
+                Object typeNameObj = edge.property(TYPE_NAME_PROPERTY_KEY).orElse("");
+                String typeName = typeNameObj.toString();
+
+                // Create composite key for deduplication
+                String key = label + "|" + typeName;
+                if (seenCombinations.add(key)) { // add returns false if already present
+                    result.add(new AbstractMap.SimpleEntry<>(label, typeName));
+                }
+            }
+            return result;
         } catch (Exception e) {
             LOG.error("Error while getting labels of active edges", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
