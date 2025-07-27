@@ -105,6 +105,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final SuggestionsProvider             suggestionsProvider;
     private final DSLQueryExecutor                dslQueryExecutor;
     private final StatsClient                     statsClient;
+    private final ElasticsearchDslOptimizer dslOptimizer;
 
     @Inject
     public EntityDiscoveryService(AtlasTypeRegistry typeRegistry,
@@ -129,11 +130,13 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.dslQueryExecutor         = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
                                             ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
                                             : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
+        this.dslOptimizer             = ElasticsearchDslOptimizer.getInstance();
     }
 
     @Override
     @GraphTransaction
     public AtlasSearchResult searchUsingDslQuery(String dslQuery, int limit, int offset) throws AtlasBaseException {
+        dslQuery = dslOptimizer.optimizeQuery(dslQuery).getOptimizedQuery();
         AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
 
         scrubSearchResults(ret);
@@ -166,6 +169,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                                    String attrValuePrefix, boolean excludeDeletedEntities, int limit,
                                                    int offset) throws AtlasBaseException {
 
+        query = dslOptimizer.optimizeQuery(query).getOptimizedQuery();
         AtlasSearchResult ret = new AtlasSearchResult(AtlasQueryType.BASIC);
 
         if (LOG.isDebugEnabled()) {
@@ -1013,6 +1017,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
 
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
+            searchParams.setQuery(dslOptimizer.optimizeQuery(searchParams.getQuery()).getOptimizedQuery());
             DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
             if (indexQueryResult == null) {
                 return null;
