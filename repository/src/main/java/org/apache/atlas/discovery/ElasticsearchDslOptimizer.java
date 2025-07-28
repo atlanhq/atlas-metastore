@@ -4,10 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.commons.io.IOUtils;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -24,9 +21,12 @@ import java.util.stream.Collectors;
  * 7. Aggregation optimization
  * 8. Wildcard consolidation
  * 9. QualifiedName hierarchy optimization
- * 10. Duplicate removal and consolidation
- * 11. Filter context optimization
- * 12. Function score optimization
+ * 10. Filter structure optimization
+ * 11. Nested bool elimination
+ * 12. Duplicate removal and consolidation
+ * 13. Filter context optimization
+ * 14. Function score optimization
+ * 15. Duplicate filter removal
  */
 public class ElasticsearchDslOptimizer {
 
@@ -45,13 +45,14 @@ public class ElasticsearchDslOptimizer {
                 new MultiMatchConsolidationRule(),
                 new RegexpSimplificationRule(),
                 new AggregationOptimizationRule(),
-                new QualifiedNameHierarchyRule(), // Move this before wildcard consolidation
+                new QualifiedNameHierarchyRule(),
                 new WildcardConsolidationRule(),
-                new FilterStructureOptimizationRule(), // Add new rule
+                new FilterStructureOptimizationRule(),
                 new DuplicateRemovalRule(),
                 new FilterContextRule(),
                 new FunctionScoreOptimizationRule(),
-                new DuplicateFilterRemovalRule()
+                new DuplicateFilterRemovalRule(),
+                new NestedBoolEliminationRule() // Move to LAST position as final cleanup
         );
         this.metrics = new OptimizationMetrics();
     }
@@ -60,10 +61,135 @@ public class ElasticsearchDslOptimizer {
         return INSTANCE;
     }
 
+    /**
+     * Rule 16: Nested Bool Elimination
+     * Eliminates redundant nested bool wrappers - handles both object and array filter types
+     * Runs as final optimization to prevent interference from other rules
+     */
+    private class NestedBoolEliminationRule implements OptimizationRule {
+
+        @Override
+        public String getName() {
+            return "NestedBoolElimination";
+        }
+
+        @Override
+        public JsonNode apply(JsonNode query) {
+            return traverseAndOptimize(query.deepCopy(), this::eliminateNestedBools);
+        }
+
+        private JsonNode eliminateNestedBools(JsonNode node) {
+            if (!node.isObject()) return node;
+
+            ObjectNode objectNode = (ObjectNode) node;
+
+            if (objectNode.has("bool")) {
+                ObjectNode boolNode = (ObjectNode) objectNode.get("bool");
+
+                // Handle bool.filter.bool pattern - filter can be object or array
+                if (boolNode.has("filter")) {
+                    JsonNode filterNode = boolNode.get("filter");
+
+                    // Case 1: filter is an object with nested bool
+                    if (filterNode.isObject() && filterNode.has("bool")) {
+                        JsonNode innerBool = filterNode.get("bool");
+
+                        // If outer bool only has filter and inner bool only has filter, merge them
+                        if (boolNode.size() == 1 && innerBool.has("filter") && innerBool.size() == 1) {
+                            JsonNode innerFilter = innerBool.get("filter");
+                            boolNode.set("filter", innerFilter);
+                        }
+                        // If inner bool has multiple clauses, promote them to outer level
+                        else if (innerBool.has("filter")) {
+                            JsonNode innerFilter = innerBool.get("filter");
+                            boolNode.set("filter", innerFilter);
+
+                            // Promote other clauses from inner bool to outer bool
+                            for (String clause : Arrays.asList("must", "should", "must_not", "minimum_should_match")) {
+                                if (innerBool.has(clause)) {
+                                    boolNode.set(clause, innerBool.get(clause));
+                                }
+                            }
+                        }
+                    }
+                    // Case 2: filter is an array - check if any items are redundant bool wrappers
+                    else if (filterNode.isArray()) {
+                        ArrayNode filterArray = (ArrayNode) filterNode;
+                        ArrayNode optimizedFilterArray = eliminateNestedBoolsInArray(filterArray);
+                        if (!optimizedFilterArray.equals(filterArray)) {
+                            boolNode.set("filter", optimizedFilterArray);
+                        }
+                    }
+                }
+
+                // Also handle other clause types that might have nested bools
+                for (String clause : Arrays.asList("must", "should", "must_not")) {
+                    if (boolNode.has(clause) && boolNode.get(clause).isArray()) {
+                        ArrayNode clauseArray = (ArrayNode) boolNode.get(clause);
+                        ArrayNode optimizedArray = eliminateNestedBoolsInArray(clauseArray);
+                        if (!optimizedArray.equals(clauseArray)) {
+                            boolNode.set(clause, optimizedArray);
+                        }
+                    }
+                }
+            }
+
+            return objectNode;
+        }
+
+        private ArrayNode eliminateNestedBoolsInArray(ArrayNode array) {
+            ArrayNode result = objectMapper.createArrayNode();
+
+            for (JsonNode item : array) {
+                if (item.has("bool")) {
+                    JsonNode boolContent = item.get("bool");
+
+                    // If bool has only a single should clause with one item, flatten it
+                    if (boolContent.has("should") && boolContent.size() == 1) {
+                        JsonNode shouldClause = boolContent.get("should");
+                        if (shouldClause.isArray() && shouldClause.size() == 1) {
+                            result.add(shouldClause.get(0));
+                            continue;
+                        }
+                    }
+
+                    // If bool has only a single must clause with one item, flatten it
+                    if (boolContent.has("must") && boolContent.size() == 1) {
+                        JsonNode mustClause = boolContent.get("must");
+                        if (mustClause.isArray() && mustClause.size() == 1) {
+                            result.add(mustClause.get(0));
+                            continue;
+                        }
+                    }
+
+                    // If bool has only a single filter clause, extract its contents
+                    if (boolContent.has("filter") && boolContent.size() == 1) {
+                        JsonNode filterClause = boolContent.get("filter");
+                        if (filterClause.isArray()) {
+                            // Add all items from the filter array
+                            for (JsonNode filterItem : filterClause) {
+                                result.add(filterItem);
+                            }
+                            continue;
+                        } else {
+                            // Single filter item
+                            result.add(filterClause);
+                            continue;
+                        }
+                    }
+                }
+
+                result.add(item);
+            }
+
+            return result;
+        }
+    }
 
     /**
-     * Rule 10: Filter Structure Optimization
+     * Rule 10: Filter Structure Optimization - FIXED VERSION
      * Reorganizes nested filter structures into cleaner arrays
+     * CRITICAL FIX: Preserves all existing filters when consolidating bool clauses
      */
     private class FilterStructureOptimizationRule implements OptimizationRule {
 
@@ -85,26 +211,59 @@ public class ElasticsearchDslOptimizer {
             if (objectNode.has("bool")) {
                 ObjectNode boolNode = (ObjectNode) objectNode.get("bool");
 
-                // Convert nested filter bool structure to flat filter array
+                // CRITICAL FIX: Handle bool queries with both 'filter' and 'must' clauses
+                if (boolNode.has("filter") || boolNode.has("must")) {
+                    ArrayNode consolidatedFilters = objectMapper.createArrayNode();
+
+                    // Add existing filter clauses
+                    if (boolNode.has("filter")) {
+                        JsonNode filterNode = boolNode.get("filter");
+                        if (filterNode.isArray()) {
+                            // Filter is already an array, add all items
+                            for (JsonNode filterItem : filterNode) {
+                                consolidatedFilters.add(filterItem);
+                            }
+                        } else if (filterNode.isObject()) {
+                            // Filter is an object, add it directly
+                            consolidatedFilters.add(filterNode);
+                        }
+                    }
+
+                    // Add must clauses as filters (since must and filter are equivalent in filter context)
+                    if (boolNode.has("must")) {
+                        JsonNode mustNode = boolNode.get("must");
+                        if (mustNode.isArray()) {
+                            for (JsonNode mustItem : mustNode) {
+                                consolidatedFilters.add(mustItem);
+                            }
+                        } else if (mustNode.isObject()) {
+                            consolidatedFilters.add(mustNode);
+                        }
+                        // Remove must since we've moved it to filter
+                        boolNode.remove("must");
+                    }
+
+                    // Set the consolidated filter array
+                    if (consolidatedFilters.size() > 0) {
+                        boolNode.set("filter", consolidatedFilters);
+                    }
+
+                    // Preserve other bool clauses (should, must_not, minimum_should_match)
+                    // These remain unchanged
+                }
+
+                // Handle nested bool structures in filter objects
                 if (boolNode.has("filter") && boolNode.get("filter").isObject()) {
                     JsonNode filterObj = boolNode.get("filter");
 
                     if (filterObj.has("bool")) {
-                        ArrayNode newFilterArray = extractFiltersFromNestedBool(filterObj.get("bool"));
+                        // Extract all clauses from nested bool and flatten them
+                        JsonNode nestedBool = filterObj.get("bool");
+                        ArrayNode flattenedFilters = extractAllClausesFromBool(nestedBool);
 
-                        // Also add other clauses from the main bool as filters
-                        if (boolNode.has("should")) {
-                            newFilterArray.add(createBoolShouldWrapper(boolNode.get("should")));
-                            boolNode.remove("should");
+                        if (flattenedFilters.size() > 0) {
+                            boolNode.set("filter", flattenedFilters);
                         }
-                        if (boolNode.has("must_not")) {
-                            boolNode.set("must_not", boolNode.get("must_not"));
-                        }
-                        if (boolNode.has("minimum_should_match")) {
-                            boolNode.set("minimum_should_match", boolNode.get("minimum_should_match"));
-                        }
-
-                        boolNode.set("filter", newFilterArray);
                     }
                 }
             }
@@ -112,44 +271,61 @@ public class ElasticsearchDslOptimizer {
             return objectNode;
         }
 
-        private ArrayNode extractFiltersFromNestedBool(JsonNode boolNode) {
-            ArrayNode filters = objectMapper.createArrayNode();
+        /**
+         * CRITICAL FIX: Extract ALL clauses from a bool query, preserving semantics
+         */
+        private ArrayNode extractAllClausesFromBool(JsonNode boolNode) {
+            ArrayNode result = objectMapper.createArrayNode();
 
-            if (boolNode.has("must") && boolNode.get("must").isArray()) {
-                for (JsonNode mustItem : boolNode.get("must")) {
-                    extractFiltersRecursively(mustItem, filters);
-                }
-            }
-
-            return filters;
-        }
-
-        private void extractFiltersRecursively(JsonNode node, ArrayNode filters) {
-            if (node.has("bool")) {
-                JsonNode boolContent = node.get("bool");
-                if (boolContent.has("must") && boolContent.get("must").isArray()) {
-                    for (JsonNode mustItem : boolContent.get("must")) {
-                        extractFiltersRecursively(mustItem, filters);
+            // Extract must clauses (these become filters in filter context)
+            if (boolNode.has("must")) {
+                JsonNode mustNode = boolNode.get("must");
+                if (mustNode.isArray()) {
+                    for (JsonNode mustItem : mustNode) {
+                        result.add(mustItem);
                     }
-                } else if (boolContent.has("should")) {
-                    // Keep bool should structure intact
-                    filters.add(node);
                 } else {
-                    filters.add(node);
+                    result.add(mustNode);
                 }
-            } else if (node.has("term") || node.has("terms") || node.has("wildcard") || node.has("regexp")) {
-                filters.add(node);
-            } else {
-                filters.add(node);
             }
-        }
 
-        private ObjectNode createBoolShouldWrapper(JsonNode shouldClause) {
-            ObjectNode wrapper = objectMapper.createObjectNode();
-            ObjectNode boolWrapper = objectMapper.createObjectNode();
-            boolWrapper.set("should", shouldClause);
-            wrapper.set("bool", boolWrapper);
-            return wrapper;
+            // Extract filter clauses
+            if (boolNode.has("filter")) {
+                JsonNode filterNode = boolNode.get("filter");
+                if (filterNode.isArray()) {
+                    for (JsonNode filterItem : filterNode) {
+                        result.add(filterItem);
+                    }
+                } else {
+                    result.add(filterNode);
+                }
+            }
+
+            // Handle should clauses - these need special treatment
+            if (boolNode.has("should")) {
+                ObjectNode shouldWrapper = objectMapper.createObjectNode();
+                ObjectNode shouldBool = objectMapper.createObjectNode();
+                shouldBool.set("should", boolNode.get("should"));
+
+                // Preserve minimum_should_match if present
+                if (boolNode.has("minimum_should_match")) {
+                    shouldBool.set("minimum_should_match", boolNode.get("minimum_should_match"));
+                }
+
+                shouldWrapper.set("bool", shouldBool);
+                result.add(shouldWrapper);
+            }
+
+            // Handle must_not clauses
+            if (boolNode.has("must_not")) {
+                ObjectNode mustNotWrapper = objectMapper.createObjectNode();
+                ObjectNode mustNotBool = objectMapper.createObjectNode();
+                mustNotBool.set("must_not", boolNode.get("must_not"));
+                mustNotWrapper.set("bool", mustNotBool);
+                result.add(mustNotWrapper);
+            }
+
+            return result;
         }
     }
 
@@ -939,7 +1115,7 @@ public class ElasticsearchDslOptimizer {
         }
 
         private String escapeRegexSpecialChars(String input) {
-            return input.replaceAll("([\\[\\]\\(\\)\\{\\}\\*\\+\\?\\|\\^\\$\\\\\\.])", "\\\\$1");
+            return input.replaceAll("([\\[\\]\\\\^(){}*+?|$.])", "\\\\$1");
         }
 
         private String findCommonPrefix(List<String> patterns) {
@@ -991,14 +1167,24 @@ public class ElasticsearchDslOptimizer {
                 // Check for database prefix pattern like "default/athena/1731597928/AwsDataCatalog*"
                 if (pattern.endsWith("*") && !pattern.startsWith("*") && pattern.length() > 1) {
                     String prefix = pattern.substring(0, pattern.length() - 1);
-                    // Standard hierarchy optimization
-                    ObjectNode termsNode = objectMapper.createObjectNode();
-                    ObjectNode termsQuery = objectMapper.createObjectNode();
-                    ArrayNode valuesArray = objectMapper.createArrayNode();
-                    valuesArray.add(prefix);
-                    termsQuery.set("__qualifiedNameHierarchy", valuesArray);
-                    termsNode.set("terms", termsQuery);
-                    return termsNode;
+
+                    // Check if this looks like a database qualified name
+                    if (prefix.contains("/") && prefix.split("/").length >= 3) {
+                        ObjectNode termNode = objectMapper.createObjectNode();
+                        ObjectNode termQuery = objectMapper.createObjectNode();
+                        termQuery.put("databaseQualifiedName", prefix);
+                        termNode.set("term", termQuery);
+                        return termNode;
+                    } else {
+                        // Standard hierarchy optimization
+                        ObjectNode termsNode = objectMapper.createObjectNode();
+                        ObjectNode termsQuery = objectMapper.createObjectNode();
+                        ArrayNode valuesArray = objectMapper.createArrayNode();
+                        valuesArray.add(prefix);
+                        termsQuery.set("__qualifiedNameHierarchy", valuesArray);
+                        termsNode.set("terms", termsQuery);
+                        return termsNode;
+                    }
                 }
             }
 
@@ -1007,7 +1193,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 11: Duplicate Removal
+     * Rule 12: Duplicate Removal
      * Removes duplicate filters and consolidates similar clauses
      */
     private class DuplicateRemovalRule implements OptimizationRule {
@@ -1061,7 +1247,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 12: Filter Context Optimization
+     * Rule 13: Filter Context Optimization
      * Moves non-scoring queries to filter context
      */
     private class FilterContextRule implements OptimizationRule {
@@ -1121,7 +1307,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 13: Function Score Optimization
+     * Rule 14: Function Score Optimization
      * Optimizes function_score queries by removing duplicates and reordering
      */
     private class FunctionScoreOptimizationRule implements OptimizationRule {
@@ -1174,7 +1360,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 14: Duplicate Filter Removal
+     * Rule 15: Duplicate Filter Removal
      * Removes duplicate filters between main query and function_score
      */
     private class DuplicateFilterRemovalRule implements OptimizationRule {
@@ -1302,7 +1488,7 @@ public class ElasticsearchDslOptimizer {
                 if (fieldNames.hasNext()) {
                     String field = fieldNames.next();
                     String values = termsNode.get(field).toString();
-                    return "terms:" + field + ":"+ values;
+                    return "terms:" + field + ":" + values;
                 }
             }
 
@@ -1510,35 +1696,6 @@ public class ElasticsearchDslOptimizer {
             System.out.println("Nesting reduction: " + String.format("%.1f", metrics.getNestingReduction()) + "%");
             System.out.println("Optimization time: " + metrics.optimizationTime + "ms");
             System.out.println("Applied rules: " + String.join(", ", metrics.appliedRules));
-        }
-    }
-
-    public static void main(String[] args) {
-        ElasticsearchDslOptimizer elasticsearchDslOptimizer = new ElasticsearchDslOptimizer();
-        // get all json files from a directory
-        File dir = new File("/Users/sriram.aravamuthan/Documents/Notes/TestDSLRewrite/");
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
-        if (files != null) {
-            for (File file : files) {
-                try {
-                    BufferedInputStream bufferedInputStream = IOUtils.buffer(new FileInputStream(file));
-                    //convert to bufferedInputStream to string
-                    String jsonString = IOUtils.toString(bufferedInputStream, StandardCharsets.UTF_8);
-                    OptimizationResult result = elasticsearchDslOptimizer.optimizeQuery(jsonString);
-                    result.printOptimizationSummary();
-                    //write the output to another file in same directory with file name as <original_file_name>_optimized.json
-                    String outputFileName = file.getName().replace(".json", "_optimized.json");
-                    File outputFile = new File(dir, outputFileName);
-                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
-                        writer.write(result.getOptimizedQuery());
-                    }
-                    System.out.println("Optimized query written to: " + outputFile.getAbsolutePath());
-                } catch (IOException e) {
-                    System.err.println("Failed to read file " + file.getName() + ": " + e.getMessage());
-                }
-            }
-        } else {
-            System.out.println("No JSON files found in the specified directory.");
         }
     }
 }
