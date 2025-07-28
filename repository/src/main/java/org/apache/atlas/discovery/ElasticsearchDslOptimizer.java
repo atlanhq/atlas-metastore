@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.commons.io.IOUtils;
 
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -32,7 +35,7 @@ public class ElasticsearchDslOptimizer {
     private final OptimizationMetrics metrics;
     private static final ElasticsearchDslOptimizer INSTANCE = new ElasticsearchDslOptimizer();
 
-    private ElasticsearchDslOptimizer() {
+    public ElasticsearchDslOptimizer() {
         this.objectMapper = new ObjectMapper();
         this.optimizationRules = Arrays.asList(
                 new StructureSimplificationRule(),
@@ -42,8 +45,9 @@ public class ElasticsearchDslOptimizer {
                 new MultiMatchConsolidationRule(),
                 new RegexpSimplificationRule(),
                 new AggregationOptimizationRule(),
+                new QualifiedNameHierarchyRule(), // Move this before wildcard consolidation
                 new WildcardConsolidationRule(),
-                new QualifiedNameHierarchyRule(),
+                new FilterStructureOptimizationRule(), // Add new rule
                 new DuplicateRemovalRule(),
                 new FilterContextRule(),
                 new FunctionScoreOptimizationRule(),
@@ -52,9 +56,101 @@ public class ElasticsearchDslOptimizer {
         this.metrics = new OptimizationMetrics();
     }
 
-    // introduce singleton method for this class
     public static ElasticsearchDslOptimizer getInstance() {
         return INSTANCE;
+    }
+
+
+    /**
+     * Rule 10: Filter Structure Optimization
+     * Reorganizes nested filter structures into cleaner arrays
+     */
+    private class FilterStructureOptimizationRule implements OptimizationRule {
+
+        @Override
+        public String getName() {
+            return "FilterStructureOptimization";
+        }
+
+        @Override
+        public JsonNode apply(JsonNode query) {
+            return traverseAndOptimize(query.deepCopy(), this::optimizeFilterStructure);
+        }
+
+        private JsonNode optimizeFilterStructure(JsonNode node) {
+            if (!node.isObject()) return node;
+
+            ObjectNode objectNode = (ObjectNode) node;
+
+            if (objectNode.has("bool")) {
+                ObjectNode boolNode = (ObjectNode) objectNode.get("bool");
+
+                // Convert nested filter bool structure to flat filter array
+                if (boolNode.has("filter") && boolNode.get("filter").isObject()) {
+                    JsonNode filterObj = boolNode.get("filter");
+
+                    if (filterObj.has("bool")) {
+                        ArrayNode newFilterArray = extractFiltersFromNestedBool(filterObj.get("bool"));
+
+                        // Also add other clauses from the main bool as filters
+                        if (boolNode.has("should")) {
+                            newFilterArray.add(createBoolShouldWrapper(boolNode.get("should")));
+                            boolNode.remove("should");
+                        }
+                        if (boolNode.has("must_not")) {
+                            boolNode.set("must_not", boolNode.get("must_not"));
+                        }
+                        if (boolNode.has("minimum_should_match")) {
+                            boolNode.set("minimum_should_match", boolNode.get("minimum_should_match"));
+                        }
+
+                        boolNode.set("filter", newFilterArray);
+                    }
+                }
+            }
+
+            return objectNode;
+        }
+
+        private ArrayNode extractFiltersFromNestedBool(JsonNode boolNode) {
+            ArrayNode filters = objectMapper.createArrayNode();
+
+            if (boolNode.has("must") && boolNode.get("must").isArray()) {
+                for (JsonNode mustItem : boolNode.get("must")) {
+                    extractFiltersRecursively(mustItem, filters);
+                }
+            }
+
+            return filters;
+        }
+
+        private void extractFiltersRecursively(JsonNode node, ArrayNode filters) {
+            if (node.has("bool")) {
+                JsonNode boolContent = node.get("bool");
+                if (boolContent.has("must") && boolContent.get("must").isArray()) {
+                    for (JsonNode mustItem : boolContent.get("must")) {
+                        extractFiltersRecursively(mustItem, filters);
+                    }
+                } else if (boolContent.has("should")) {
+                    // Keep bool should structure intact
+                    filters.add(node);
+                } else {
+                    filters.add(node);
+                }
+            } else if (node.has("term") || node.has("terms") || node.has("wildcard") || node.has("regexp")) {
+                filters.add(node);
+            } else {
+                filters.add(node);
+            }
+        }
+
+        private ObjectNode createBoolShouldWrapper(JsonNode shouldClause) {
+            ObjectNode wrapper = objectMapper.createObjectNode();
+            ObjectNode boolWrapper = objectMapper.createObjectNode();
+            boolWrapper.set("should", shouldClause);
+            wrapper.set("bool", boolWrapper);
+            return wrapper;
+        }
     }
 
     /**
@@ -108,37 +204,103 @@ public class ElasticsearchDslOptimizer {
             if (objectNode.has("bool")) {
                 ObjectNode boolNode = (ObjectNode) objectNode.get("bool");
 
-                // Flatten single-item bool clauses
+                // Flatten nested bool structures
                 for (String clause : Arrays.asList("must", "should", "filter", "must_not")) {
-                    if (boolNode.has(clause) && boolNode.get(clause).isArray()) {
-                        ArrayNode array = (ArrayNode) boolNode.get(clause);
+                    if (boolNode.has(clause)) {
+                        JsonNode clauseNode = boolNode.get(clause);
 
-                        // Remove empty arrays
-                        if (array.size() == 0) {
-                            boolNode.remove(clause);
+                        // Handle single objects that are not arrays
+                        if (clauseNode.isObject() && !clauseNode.isArray()) {
+                            // Convert single object to array for consistent processing
+                            ArrayNode arrayNode = objectMapper.createArrayNode();
+                            arrayNode.add(clauseNode);
+                            boolNode.set(clause, arrayNode);
+                            clauseNode = arrayNode;
                         }
-                        // Flatten single bool clauses of same type
-                        else if (array.size() == 1 &&
-                                array.get(0).has("bool") &&
-                                array.get(0).get("bool").has(clause)) {
-                            JsonNode innerClause = array.get(0).get("bool").get(clause);
-                            boolNode.set(clause, innerClause);
+
+                        if (clauseNode.isArray()) {
+                            ArrayNode array = (ArrayNode) clauseNode;
+
+                            // Remove empty arrays
+                            if (array.size() == 0) {
+                                boolNode.remove(clause);
+                                continue;
+                            }
+
+                            // Flatten deeply nested bool structures
+                            ArrayNode flattenedArray = flattenNestedBoolArray(array, clause);
+                            if (flattenedArray.size() != array.size() || !flattenedArray.equals(array)) {
+                                boolNode.set(clause, flattenedArray);
+                            }
                         }
                     }
                 }
 
-                // Remove bool wrapper if only one clause remains
-                if (boolNode.size() == 1) {
-                    String singleClause = boolNode.fieldNames().next();
-                    JsonNode clauseValue = boolNode.get(singleClause);
-
-                    if (clauseValue.isArray() && clauseValue.size() == 1) {
-                        return clauseValue.get(0);
+                // Convert filter object to filter array if needed
+                if (boolNode.has("filter") && boolNode.get("filter").isObject() && !boolNode.get("filter").isArray()) {
+                    JsonNode filterObj = boolNode.get("filter");
+                    if (filterObj.has("bool")) {
+                        // Extract content from nested bool and flatten
+                        JsonNode innerBool = filterObj.get("bool");
+                        if (innerBool.has("must") && innerBool.get("must").isArray()) {
+                            ArrayNode mustArray = (ArrayNode) innerBool.get("must");
+                            ArrayNode flattenedFilters = flattenFilterStructure(mustArray);
+                            boolNode.set("filter", flattenedFilters);
+                        }
                     }
                 }
             }
 
             return objectNode;
+        }
+
+        private ArrayNode flattenNestedBoolArray(ArrayNode array, String clauseType) {
+            ArrayNode result = objectMapper.createArrayNode();
+
+            for (JsonNode item : array) {
+                if (item.has("bool")) {
+                    JsonNode boolContent = item.get("bool");
+
+                    // If this bool only has the same clause type, flatten it
+                    if (boolContent.has(clauseType) && boolContent.size() == 1) {
+                        JsonNode innerClause = boolContent.get(clauseType);
+                        if (innerClause.isArray()) {
+                            for (JsonNode innerItem : innerClause) {
+                                result.add(innerItem);
+                            }
+                        } else {
+                            result.add(innerClause);
+                        }
+                    } else {
+                        result.add(item);
+                    }
+                } else {
+                    result.add(item);
+                }
+            }
+
+            return result;
+        }
+
+        private ArrayNode flattenFilterStructure(ArrayNode mustArray) {
+            ArrayNode result = objectMapper.createArrayNode();
+
+            for (JsonNode mustItem : mustArray) {
+                if (mustItem.has("bool") && mustItem.get("bool").has("must")) {
+                    JsonNode innerMust = mustItem.get("bool").get("must");
+                    if (innerMust.isArray()) {
+                        for (JsonNode innerItem : innerMust) {
+                            result.add(innerItem);
+                        }
+                    } else {
+                        result.add(innerMust);
+                    }
+                } else {
+                    result.add(mustItem);
+                }
+            }
+
+            return result;
         }
     }
 
@@ -804,7 +966,7 @@ public class ElasticsearchDslOptimizer {
 
     /**
      * Rule 9: QualifiedName Hierarchy Optimization
-     * Converts suffix wildcards to qualifiedNameHierarchy term queries
+     * Converts suffix wildcards to qualifiedNameHierarchy term queries and database term queries
      */
     private class QualifiedNameHierarchyRule implements OptimizationRule {
 
@@ -826,16 +988,16 @@ public class ElasticsearchDslOptimizer {
             if (objectNode.has("wildcard") && objectNode.get("wildcard").has("qualifiedName")) {
                 String pattern = objectNode.get("wildcard").get("qualifiedName").asText();
 
+                // Check for database prefix pattern like "default/athena/1731597928/AwsDataCatalog*"
                 if (pattern.endsWith("*") && !pattern.startsWith("*") && pattern.length() > 1) {
                     String prefix = pattern.substring(0, pattern.length() - 1);
-
+                    // Standard hierarchy optimization
                     ObjectNode termsNode = objectMapper.createObjectNode();
                     ObjectNode termsQuery = objectMapper.createObjectNode();
                     ArrayNode valuesArray = objectMapper.createArrayNode();
                     valuesArray.add(prefix);
                     termsQuery.set("__qualifiedNameHierarchy", valuesArray);
                     termsNode.set("terms", termsQuery);
-
                     return termsNode;
                 }
             }
@@ -845,7 +1007,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 10: Duplicate Removal
+     * Rule 11: Duplicate Removal
      * Removes duplicate filters and consolidates similar clauses
      */
     private class DuplicateRemovalRule implements OptimizationRule {
@@ -899,7 +1061,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 11: Filter Context Optimization
+     * Rule 12: Filter Context Optimization
      * Moves non-scoring queries to filter context
      */
     private class FilterContextRule implements OptimizationRule {
@@ -959,7 +1121,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 12: Function Score Optimization
+     * Rule 13: Function Score Optimization
      * Optimizes function_score queries by removing duplicates and reordering
      */
     private class FunctionScoreOptimizationRule implements OptimizationRule {
@@ -1012,7 +1174,7 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 13: Duplicate Filter Removal
+     * Rule 14: Duplicate Filter Removal
      * Removes duplicate filters between main query and function_score
      */
     private class DuplicateFilterRemovalRule implements OptimizationRule {
@@ -1140,7 +1302,7 @@ public class ElasticsearchDslOptimizer {
                 if (fieldNames.hasNext()) {
                     String field = fieldNames.next();
                     String values = termsNode.get(field).toString();
-                    return "terms:" + field + ":" +values;
+                    return "terms:" + field + ":"+ values;
                 }
             }
 
@@ -1348,6 +1510,35 @@ public class ElasticsearchDslOptimizer {
             System.out.println("Nesting reduction: " + String.format("%.1f", metrics.getNestingReduction()) + "%");
             System.out.println("Optimization time: " + metrics.optimizationTime + "ms");
             System.out.println("Applied rules: " + String.join(", ", metrics.appliedRules));
+        }
+    }
+
+    public static void main(String[] args) {
+        ElasticsearchDslOptimizer elasticsearchDslOptimizer = new ElasticsearchDslOptimizer();
+        // get all json files from a directory
+        File dir = new File("/Users/sriram.aravamuthan/Documents/Notes/TestDSLRewrite/");
+        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
+        if (files != null) {
+            for (File file : files) {
+                try {
+                    BufferedInputStream bufferedInputStream = IOUtils.buffer(new FileInputStream(file));
+                    //convert to bufferedInputStream to string
+                    String jsonString = IOUtils.toString(bufferedInputStream, StandardCharsets.UTF_8);
+                    OptimizationResult result = elasticsearchDslOptimizer.optimizeQuery(jsonString);
+                    result.printOptimizationSummary();
+                    //write the output to another file in same directory with file name as <original_file_name>_optimized.json
+                    String outputFileName = file.getName().replace(".json", "_optimized.json");
+                    File outputFile = new File(dir, outputFileName);
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
+                        writer.write(result.getOptimizedQuery());
+                    }
+                    System.out.println("Optimized query written to: " + outputFile.getAbsolutePath());
+                } catch (IOException e) {
+                    System.err.println("Failed to read file " + file.getName() + ": " + e.getMessage());
+                }
+            }
+        } else {
+            System.out.println("No JSON files found in the specified directory.");
         }
     }
 }
