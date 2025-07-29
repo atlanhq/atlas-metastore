@@ -28,7 +28,6 @@ on:
       - master
       - staging
       - downloadimpactreport
-      - mlh-865-staging
 
 jobs:
   build:
