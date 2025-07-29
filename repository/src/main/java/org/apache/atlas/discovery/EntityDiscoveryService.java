@@ -60,6 +60,7 @@ import org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery;
 import org.apache.atlas.util.SearchPredicateUtil;
 import org.apache.atlas.util.SearchTracker;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections4.IteratorUtils;
@@ -82,14 +83,17 @@ import static org.apache.atlas.SortOrder.ASCENDING;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.repository.Constants.*;
+import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.BASIC_SEARCH_STATE_FILTER;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.TO_RANGE_LIST;
 
 @Component
 public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(EntityDiscoveryService.class);
+    private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("discovery.EntityDiscoveryService");
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
     public static final String USE_BULK_FETCH_INDEXSEARCH = "discovery_use_bulk_fetch_indexsearch";
+    public static final String USE_DSL_OPTIMISATION = "discovery_use_dsl_optimisation";
 
     private final AtlasGraph                      graph;
     private final EntityGraphRetriever            entityRetriever;
@@ -136,12 +140,26 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     @Override
     @GraphTransaction
     public AtlasSearchResult searchUsingDslQuery(String dslQuery, int limit, int offset) throws AtlasBaseException {
-        dslQuery = dslOptimizer.optimizeQuery(dslQuery).getOptimizedQuery();
-        AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
+        AtlasPerfTracer perf = null;
+        try {
+            String clientOrigin = RequestContext.get().getClientOrigin();
+            if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
+                    CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
+                dslQuery = dslOptimizer.optimizeQuery(dslQuery).getOptimizedQuery();
+                if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.searchUsingDslQuery(" + dslQuery + ")");
+                }
+            }
+            AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
 
-        scrubSearchResults(ret);
+            scrubSearchResults(ret);
 
-        return ret;
+            return ret;
+        } finally {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                AtlasPerfTracer.log(perf);
+            }
+        }
     }
 
     @Override
@@ -169,7 +187,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                                                    String attrValuePrefix, boolean excludeDeletedEntities, int limit,
                                                    int offset) throws AtlasBaseException {
 
-        query = dslOptimizer.optimizeQuery(query).getOptimizedQuery();
         AtlasSearchResult ret = new AtlasSearchResult(AtlasQueryType.BASIC);
 
         if (LOG.isDebugEnabled()) {
@@ -991,7 +1008,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
         RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
         RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
-
+        String clientOrigin = RequestContext.get().getClientOrigin();
         AtlasSearchResult ret = new AtlasSearchResult();
         AtlasIndexQuery indexQuery;
 
@@ -1002,7 +1019,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         if (CollectionUtils.isNotEmpty(searchParams.getAttributes())) {
             resultAttributes.addAll(searchParams.getAttributes());
         }
-
+        AtlasPerfTracer perf = null;
         try {
             if(LOG.isDebugEnabled()){
                 LOG.debug("Performing ES search for the params ({})", searchParams);
@@ -1017,7 +1034,15 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
 
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
-            searchParams.setQuery(dslOptimizer.optimizeQuery(searchParams.getQuery()).getOptimizedQuery());
+            if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
+                    CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
+                String dslOptimised = dslOptimizer.optimizeQuery(searchParams.getQuery()).getOptimizedQuery();
+                searchParams.setQuery(dslOptimised);
+                if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.directIndexSearch(" + dslOptimised + ")");
+                }
+            }
+
             DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
             if (indexQueryResult == null) {
                 return null;
@@ -1030,6 +1055,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         } catch (Exception e) {
             LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
             throw e;
+        } finally {
+            if (perf != null) {
+                AtlasPerfTracer.log(perf);
+            }
         }
         return ret;
     }
