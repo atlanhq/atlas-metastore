@@ -286,18 +286,6 @@ public class AtlasElasticsearchDatabase {
             
             // Add request interceptor for performance monitoring and optimization
             configured.addInterceptorFirst((org.apache.http.HttpRequestInterceptor) (request, context) -> {
-                // Set optimal buffer sizes for streaming through K8s load balancer
-                if (!request.containsHeader("Content-Length")) {
-                    // Enable chunked encoding for large payloads
-                    request.addHeader("Transfer-Encoding", "chunked");
-                }
-                
-                // Optimize for bulk operations
-                if (request.getRequestLine().getUri().contains("_bulk")) {
-                    // Increase buffer size for bulk operations
-                    request.addHeader("X-Buffer-Size", "65536");
-                }
-                
                 // Add request timing for monitoring
                 context.setAttribute("request-start-time", System.currentTimeMillis());
             });
