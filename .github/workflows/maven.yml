@@ -28,7 +28,7 @@ on:
       - master
       - staging
       - downloadimpactreport
-      - mlh-865-removeHeader
+      - mlh-865-removeheaders
 
 jobs:
   build:
