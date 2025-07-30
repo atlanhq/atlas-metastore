@@ -1,0 +1,10 @@
+{
+  "query": {
+    "bool": {
+      "should": [
+        {"wildcard": {"qualifiedName": "default/domain/test*"}},
+        {"wildcard": {"qualifiedName": "default/domain/prod*"}}
+      ]
+    }
+  }
+}

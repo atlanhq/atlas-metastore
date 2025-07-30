@@ -1,0 +1,9 @@
+{
+  "query": {
+    "bool": {
+      "should": [
+        {"terms": {"__qualifiedNameHierarchy": ["prefix1", "prefix2"]}}
+      ]
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "query": {
+    "bool": {
+      "must": [
+        {"term": {"status": "active"}},
+        {"match": {"name": "test"}}
+      ]
+    }
+  }
+}
