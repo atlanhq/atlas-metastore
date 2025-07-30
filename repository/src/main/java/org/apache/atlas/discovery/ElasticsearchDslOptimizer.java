@@ -26,11 +26,12 @@ import java.util.stream.Collectors;
  * 9. Multiple terms consolidation (post-hierarchy)
  * 10. Wildcard consolidation
  * 11. Filter structure optimization (scoring-safe)
- * 12. Nested bool elimination
- * 13. Duplicate removal and consolidation
- * 14. Context-aware filter optimization (safe must->filter in function_score)
- * 15. Function score optimization
- * 16. Duplicate filter removal
+ * 12. Bool flattening (must+must_not to filter+must_not)
+ * 13. Nested bool elimination
+ * 14. Duplicate removal and consolidation
+ * 15. Context-aware filter optimization (safe must->filter in function_score)
+ * 16. Function score optimization
+ * 17. Duplicate filter removal
  */
 public class ElasticsearchDslOptimizer {
 
@@ -53,6 +54,7 @@ public class ElasticsearchDslOptimizer {
                 new MultipleTermsConsolidationRule(), // Second consolidation after hierarchy conversion
                 new WildcardConsolidationRule(),
                 new FilterStructureOptimizationRule(),
+                new BoolFlatteningRule(), // Add new rule for bool flattening
                 new DuplicateRemovalRule(),
                 new FilterContextRule(),
                 new FunctionScoreOptimizationRule(),
@@ -1545,6 +1547,130 @@ public class ElasticsearchDslOptimizer {
             }
 
             return filter.toString();
+        }
+    }
+
+    /**
+     * Rule 12: Bool Flattening
+     * Flattens bool queries that contain only must and must_not clauses.
+     * Converts filter.bool.must to filter array and preserves must_not clauses.
+     * 
+     * Example:
+     * filter: { bool: { must: [...], must_not: [...] } }
+     * becomes:
+     * bool: { filter: [...], must_not: [...] }
+     */
+    private class BoolFlatteningRule implements OptimizationRule {
+
+        @Override
+        public String getName() {
+            return "BoolFlattening";
+        }
+
+        @Override
+        public JsonNode apply(JsonNode query) {
+            return traverseAndOptimize(query.deepCopy(), this::flattenBoolStructures);
+        }
+
+        private JsonNode flattenBoolStructures(JsonNode node) {
+            if (!node.isObject()) return node;
+
+            ObjectNode objectNode = (ObjectNode) node;
+
+            // Look for filter.bool patterns that can be flattened
+            if (objectNode.has("filter")) {
+                JsonNode filterNode = objectNode.get("filter");
+                
+                // Case 1: filter is an object with a bool
+                if (filterNode.isObject() && filterNode.has("bool")) {
+                    JsonNode boolNode = filterNode.get("bool");
+                    
+                    // Check if this bool has only must and must_not (no should, no existing filter)
+                    if (canFlattenBool(boolNode)) {
+                        JsonNode optimizedNode = createFlattenedBool(boolNode, objectNode);
+                        if (optimizedNode != null) {
+                            return optimizedNode;
+                        }
+                    }
+                }
+                
+                // Case 2: filter is an array with nested bool patterns
+                else if (filterNode.isArray()) {
+                    ArrayNode filterArray = (ArrayNode) filterNode;
+                    if (filterArray.size() == 1) {
+                        JsonNode singleFilter = filterArray.get(0);
+                        if (singleFilter.has("bool")) {
+                            JsonNode boolNode = singleFilter.get("bool");
+                            if (canFlattenBool(boolNode)) {
+                                JsonNode optimizedNode = createFlattenedBool(boolNode, objectNode);
+                                if (optimizedNode != null) {
+                                    return optimizedNode;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            return objectNode;
+        }
+
+        private boolean canFlattenBool(JsonNode boolNode) {
+            // Can flatten if:
+            // 1. Has must clauses (the positive conditions)
+            // 2. May have must_not clauses (the negative conditions)
+            // 3. No should clauses (would change scoring semantics)
+            // 4. No existing filter clauses (would complicate merging)
+            return boolNode.has("must") && 
+                   !boolNode.has("should") && 
+                   !boolNode.has("filter");
+        }
+
+        private JsonNode createFlattenedBool(JsonNode originalBool, ObjectNode parentNode) {
+            try {
+                ObjectNode flattenedBool = objectMapper.createObjectNode();
+                ObjectNode boolContent = objectMapper.createObjectNode();
+
+                // Convert must clauses to filter clauses (better for caching)
+                if (originalBool.has("must")) {
+                    JsonNode mustNode = originalBool.get("must");
+                    if (mustNode.isArray()) {
+                        boolContent.set("filter", mustNode);
+                    } else {
+                        // Single must clause -> single item filter array
+                        ArrayNode filterArray = objectMapper.createArrayNode();
+                        filterArray.add(mustNode);
+                        boolContent.set("filter", filterArray);
+                    }
+                }
+
+                // Preserve must_not clauses exactly as they are
+                if (originalBool.has("must_not")) {
+                    boolContent.set("must_not", originalBool.get("must_not"));
+                }
+
+                // Copy any other bool-level properties (like minimum_should_match, boost)
+                originalBool.fieldNames().forEachRemaining(fieldName -> {
+                    if (!fieldName.equals("must") && !fieldName.equals("must_not")) {
+                        boolContent.set(fieldName, originalBool.get(fieldName));
+                    }
+                });
+
+                flattenedBool.set("bool", boolContent);
+
+                // Copy any parent-level properties except the filter we're replacing
+                parentNode.fieldNames().forEachRemaining(fieldName -> {
+                    if (!fieldName.equals("filter")) {
+                        flattenedBool.set(fieldName, parentNode.get(fieldName));
+                    }
+                });
+
+                return flattenedBool;
+
+            } catch (Exception e) {
+                // If anything goes wrong, return null to skip optimization
+                return null;
+            }
         }
     }
 
