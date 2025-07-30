@@ -29,6 +29,9 @@ on:
       - staging
       - downloadimpactreport
       - mlh-797-staging
+      - tagscanary
+      - tagscanarymerge
+      - fixlabels
 
 jobs:
   build:
