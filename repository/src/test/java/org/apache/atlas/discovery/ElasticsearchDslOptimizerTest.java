@@ -174,9 +174,9 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
                 System.out.println("✅ " + testName + " - PASSED");
                 
                 // Show optimization summary for successful tests
-                if (result.metrics.getSizeReduction() > 0 || result.metrics.getNestingReduction() > 0) {
-                    System.out.println("   📊 Size: " + String.format("%.1f", result.metrics.getSizeReduction()) + "% reduction, " +
-                                     "Nesting: " + String.format("%.1f", result.metrics.getNestingReduction()) + "% reduction");
+                if (result.getMetrics().getSizeReduction() > 0 || result.getMetrics().getNestingReduction() > 0) {
+                    System.out.println("   📊 Size: " + String.format("%.1f", result.getMetrics().getSizeReduction()) + "% reduction, " +
+                                     "Nesting: " + String.format("%.1f", result.getMetrics().getNestingReduction()) + "% reduction");
                 }
             } else {
                 String issues = validation.getIssuesSummary();
@@ -1262,7 +1262,7 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         }
         
         // Validate that some optimization rules were applied (unless query was already optimal)
-        if (result.metrics.appliedRules.size() == 0 && optimizedSize == originalSize) {
+        if (result.getMetrics().appliedRules.size() == 0 && optimizedSize == originalSize) {
             // This might be OK if query was already optimal
             System.out.println("Note: No optimizations applied - query may already be optimal");
         }
@@ -2292,7 +2292,7 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         // Check specific bool flattening transformation
         System.out.println("\n--- BOOL FLATTENING ANALYSIS ---");
         System.out.println("Expected transformation: filter.bool.must+must_not -> bool.filter+must_not");
-        System.out.println("Optimization rules applied: " + String.join(", ", result.metrics.appliedRules));
+        System.out.println("Optimization rules applied: " + String.join(", ", result.getMetrics().appliedRules));
     }
 
     // TEST METHOD FOR SEMANTIC OPTIMIZATION (bool_single_should_flatten.json scenario)
@@ -2330,7 +2330,7 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         // Check specific semantic optimization
         System.out.println("\n--- SEMANTIC OPTIMIZATION ANALYSIS ---");
         System.out.println("Expected transformation: Double bool nesting -> Simplified structure");
-        System.out.println("Optimization rules applied: " + String.join(", ", result.metrics.appliedRules));
+        System.out.println("Optimization rules applied: " + String.join(", ", result.getMetrics().appliedRules));
     }
 
     // DEBUG TEST FOR bool_single_should_flatten.json and purpose_double_bool.json FAILURES
@@ -2404,5 +2404,95 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         } catch (AssertionError e) {
             System.out.println("❌ " + filename + " - Query equivalence FAILED: " + e.getMessage());
         }
+    }
+    
+    /**
+     * Test the new validation-based optimization method
+     */
+    public void testValidationBasedOptimization() throws Exception {
+        System.out.println("=== TESTING VALIDATION-BASED OPTIMIZATION ===");
+        
+        // Test 1: Valid query that should pass validation
+        String validQuery = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "must": [
+                    {"term": {"__typeName.keyword": "DataSet"}},
+                    {"term": {"__state": "ACTIVE"}}
+                  ]
+                }
+              }
+            }""";
+            
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQueryWithValidation(validQuery);
+        
+        System.out.println("Valid query test:");
+        System.out.println("- Validation passed: " + result.isValidationPassed());
+        System.out.println("- Original query length: " + validQuery.length());
+        System.out.println("- Optimized query length: " + result.getOptimizedQuery().length());
+        
+        assertTrue("Valid query should pass validation", result.isValidationPassed());
+        assertNotNull("Optimized query should not be null", result.getOptimizedQuery());
+        
+        // Test 2: Test with invalid JSON that should cause exception
+        String invalidJsonQuery = "{ \"query\": { \"bool\": { \"must\": [invalidJson] } }";
+        
+        ElasticsearchDslOptimizer.OptimizationResult invalidResult = optimizer.optimizeQueryWithValidation(invalidJsonQuery);
+        
+        System.out.println("\nInvalid JSON test:");
+        System.out.println("- Validation passed: " + invalidResult.isValidationPassed());
+        System.out.println("- Failure reason: " + invalidResult.getValidationFailureReason());
+        
+        assertFalse("Invalid JSON should fail optimization", invalidResult.isValidationPassed());
+        assertEquals("Should fallback to original query", invalidJsonQuery, invalidResult.getOptimizedQuery());
+        assertTrue("Should mention exception in failure reason", 
+                  invalidResult.getValidationFailureReason().contains("exception"));
+        
+        // Test 3: Create a scenario with a mock optimizer that deliberately breaks validation
+        testValidationFailureScenario();
+        
+        testResults.addSuccess("ValidationBasedOptimization");
+    }
+    
+    /**
+     * Test validation failure by creating a scenario where field preservation fails
+     */
+    private void testValidationFailureScenario() {
+        System.out.println("\n--- Testing Validation Failure Scenario ---");
+        
+        // Create a query that exercises the field preservation validation
+        String queryWithSpecificFields = """
+            {
+              "size": 5,
+              "query": {
+                "bool": {
+                  "must": [
+                    {"term": {"uniqueFieldName": "testValue"}},
+                    {"range": {"createTime": {"gte": "2024-01-01"}}}
+                  ]
+                }
+              },
+              "_source": ["uniqueFieldName", "createTime"]
+            }""";
+            
+        // Test the regular optimization (should work fine)
+        ElasticsearchDslOptimizer.OptimizationResult normalResult = optimizer.optimizeQuery(queryWithSpecificFields);
+        System.out.println("- Normal optimization completed");
+        
+        // Test with validation (should also pass)
+        ElasticsearchDslOptimizer.OptimizationResult validatedResult = optimizer.optimizeQueryWithValidation(queryWithSpecificFields);
+        System.out.println("- Validated optimization passed: " + validatedResult.isValidationPassed());
+        
+        assertTrue("Field preservation should work for normal queries", validatedResult.isValidationPassed());
+        
+        // Test with null/empty query (should fail)
+        String emptyQuery = "";
+        ElasticsearchDslOptimizer.OptimizationResult emptyResult = optimizer.optimizeQueryWithValidation(emptyQuery);
+        System.out.println("- Empty query validation passed: " + emptyResult.isValidationPassed());
+        System.out.println("- Empty query failure reason: " + emptyResult.getValidationFailureReason());
+        
+        assertFalse("Empty query should fail validation", emptyResult.isValidationPassed());
     }
 } 

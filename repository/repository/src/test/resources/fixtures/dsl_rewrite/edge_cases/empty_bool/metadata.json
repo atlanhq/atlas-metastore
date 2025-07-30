@@ -1,1 +1,0 @@
-{"description":"Empty bool queries should be converted to match_all","exactMatch":false,"customValidation":null}

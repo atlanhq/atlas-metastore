@@ -148,7 +148,14 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
             if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
                     CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
-                dslQuery = dslOptimizer.optimizeQuery(dslQuery).getOptimizedQuery();
+                ElasticsearchDslOptimizer.OptimizationResult result = dslOptimizer.optimizeQueryWithValidation(dslQuery);
+                dslQuery = result.getOptimizedQuery();
+                
+                // Log validation status for monitoring
+                if (!result.isValidationPassed()) {
+                    LOG.warn("DSL optimization validation failed: {} - falling back to original query", 
+                             result.getValidationFailureReason());
+                }
             }
             AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
 
@@ -1036,8 +1043,16 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
             if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
                     CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
-                String dslOptimised = dslOptimizer.optimizeQuery(searchParams.getQuery()).getOptimizedQuery();
+                ElasticsearchDslOptimizer.OptimizationResult result = dslOptimizer.optimizeQueryWithValidation(searchParams.getQuery());
+                String dslOptimised = result.getOptimizedQuery();
                 searchParams.setQuery(dslOptimised);
+                
+                // Log validation status for monitoring
+                if (!result.isValidationPassed()) {
+                    LOG.warn("DSL optimization validation failed: {} - falling back to original query", 
+                             result.getValidationFailureReason());
+                }
+                
                 if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                     perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.directIndexSearch(" + dslOptimised + ")");
                 }

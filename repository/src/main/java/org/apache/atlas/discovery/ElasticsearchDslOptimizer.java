@@ -354,6 +354,179 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
+     * Optimizes query with validation-based safety net
+     * Falls back to original query if optimization validation fails
+     */
+    public OptimizationResult optimizeQueryWithValidation(String originalQuery) {
+        try {
+            OptimizationResult result = optimizeQuery(originalQuery);
+            
+            // Validate the optimization
+            if (isOptimizationValid(originalQuery, result.getOptimizedQuery())) {
+                result.setValidationPassed(true);
+                return result;
+                         } else {
+                 // Validation failed - return original query with warning
+                 OptimizationResult fallbackResult = new OptimizationResult();
+                 fallbackResult.setOriginalQuery(originalQuery);
+                 fallbackResult.setOptimizedQuery(originalQuery); // Fallback to original
+                 fallbackResult.setValidationPassed(false);
+                 fallbackResult.setValidationFailureReason("Optimization validation failed - falling back to original query");
+                 return fallbackResult;
+             }
+         } catch (Exception e) {
+             // Optimization threw exception - return original query
+             OptimizationResult fallbackResult = new OptimizationResult();
+             fallbackResult.setOriginalQuery(originalQuery);
+             fallbackResult.setOptimizedQuery(originalQuery); // Fallback to original
+             fallbackResult.setValidationPassed(false);
+             fallbackResult.setValidationFailureReason("Optimization exception: " + e.getMessage());
+             return fallbackResult;
+        }
+    }
+    
+    /**
+     * Validates optimization using the same logic as the test suite
+     */
+    private boolean isOptimizationValid(String originalQuery, String optimizedQuery) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode original = mapper.readTree(originalQuery);
+            JsonNode optimized = mapper.readTree(optimizedQuery);
+            
+            // Lightweight validation checks (subset of test validations)
+            return validateBasicStructure(original, optimized) &&
+                   validateFieldPreservation(original, optimized) &&
+                   validateCriticalClauses(original, optimized);
+                   
+        } catch (Exception e) {
+            return false; // If we can't validate, don't use optimization
+        }
+    }
+    
+    private boolean validateBasicStructure(JsonNode original, JsonNode optimized) {
+        // Ensure both have query sections
+        if (original.has("query") != optimized.has("query")) {
+            return false;
+        }
+        
+        // Ensure critical fields are preserved
+        for (String field : Arrays.asList("size", "from", "sort", "_source", "track_total_hits")) {
+            if (original.has(field)) {
+                if (!optimized.has(field) || !original.get(field).equals(optimized.get(field))) {
+                    return false;
+                }
+            }
+        }
+        
+        return true;
+    }
+    
+    private boolean validateFieldPreservation(JsonNode original, JsonNode optimized) {
+        Set<String> originalFields = extractAllFieldNames(original);
+        Set<String> optimizedFields = extractAllFieldNames(optimized);
+        
+        // Allow for valid transformations like qualifiedName -> __qualifiedNameHierarchy
+        for (String field : originalFields) {
+            if (!optimizedFields.contains(field) && !isValidFieldTransformation(field, optimizedFields)) {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+    
+         private boolean validateCriticalClauses(JsonNode original, JsonNode optimized) {
+         // Ensure total number of conditions is preserved (allowing for consolidation)
+         int originalConditions = countTotalConditions(original);
+         int optimizedConditions = countTotalConditions(optimized);
+         
+         // Allow for reasonable consolidation but not major losses
+         return optimizedConditions >= (originalConditions * 0.8); // Allow 20% consolidation
+     }
+     
+     private Set<String> extractAllFieldNames(JsonNode query) {
+         Set<String> fieldNames = new HashSet<>();
+         extractFieldNamesRecursive(query, fieldNames);
+         return fieldNames;
+     }
+     
+     private void extractFieldNamesRecursive(JsonNode node, Set<String> fieldNames) {
+         if (node == null) return;
+         
+         if (node.isObject()) {
+             // Extract field names from query types
+             if (node.has("term")) {
+                 node.get("term").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("terms")) {
+                 node.get("terms").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("range")) {
+                 node.get("range").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("wildcard")) {
+                 node.get("wildcard").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("match")) {
+                 node.get("match").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("regexp")) {
+                 node.get("regexp").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("prefix")) {
+                 node.get("prefix").fieldNames().forEachRemaining(fieldNames::add);
+             } else if (node.has("exists")) {
+                 JsonNode existsNode = node.get("exists");
+                 if (existsNode.has("field")) {
+                     fieldNames.add(existsNode.get("field").asText());
+                 }
+             }
+             
+             // Recursively check children
+             for (JsonNode child : node) {
+                 extractFieldNamesRecursive(child, fieldNames);
+             }
+         } else if (node.isArray()) {
+             for (JsonNode arrayItem : node) {
+                 extractFieldNamesRecursive(arrayItem, fieldNames);
+             }
+         }
+     }
+     
+     private boolean isValidFieldTransformation(String originalField, Set<String> optimizedFields) {
+         // Known valid transformations
+         if (originalField.equals("qualifiedName") && optimizedFields.contains("__qualifiedNameHierarchy")) {
+             return true;
+         }
+         return false;
+     }
+     
+     private int countTotalConditions(JsonNode query) {
+         return countConditionsRecursive(query);
+     }
+     
+     private int countConditionsRecursive(JsonNode node) {
+         if (node == null) return 0;
+         
+         int count = 0;
+         
+         if (node.isObject()) {
+             // Count leaf conditions
+             if (node.has("term") || node.has("terms") || node.has("range") || 
+                 node.has("wildcard") || node.has("match") || node.has("exists") ||
+                 node.has("regexp") || node.has("prefix")) {
+                 count++;
+             }
+             
+             // Recursively count in children
+             for (JsonNode child : node) {
+                 count += countConditionsRecursive(child);
+             }
+         } else if (node.isArray()) {
+             for (JsonNode arrayItem : node) {
+                 count += countConditionsRecursive(arrayItem);
+             }
+         }
+         
+         return count;
+     }
+
+    /**
      * Rule 1: Structure Simplification
      * Flattens unnecessary nested bool queries and removes single-item wrappers
      */
@@ -1856,24 +2029,67 @@ public class ElasticsearchDslOptimizer {
     }
 
     public static class OptimizationResult {
-        public final String optimizedQuery;
-        public final OptimizationMetrics.Result metrics;
+        private String optimizedQuery;
+        private OptimizationMetrics.Result metrics;
+        private String originalQuery;
+        private boolean validationPassed = true;
+        private String validationFailureReason;
 
         OptimizationResult(String optimizedQuery, OptimizationMetrics.Result metrics) {
             this.optimizedQuery = optimizedQuery;
             this.metrics = metrics;
         }
+        
+        // Constructor for validation failure cases
+        public OptimizationResult() {
+            this.optimizedQuery = null;
+            this.metrics = null;
+        }
+
+        public OptimizationMetrics.Result getMetrics() {
+            return metrics;
+        }
+        
+        public void setOptimizedQuery(String optimizedQuery) {
+            this.optimizedQuery = optimizedQuery;
+        }
 
         public String getOptimizedQuery() {
             return optimizedQuery;
         }
+        
+        public void setOriginalQuery(String originalQuery) {
+            this.originalQuery = originalQuery;
+        }
+        
+        public void setValidationPassed(boolean validationPassed) {
+            this.validationPassed = validationPassed;
+        }
+        
+        public void setValidationFailureReason(String validationFailureReason) {
+            this.validationFailureReason = validationFailureReason;
+        }
+        
+        public boolean isValidationPassed() {
+            return validationPassed;
+        }
+        
+        public String getValidationFailureReason() {
+            return validationFailureReason;
+        }
 
         public void printOptimizationSummary() {
             System.out.println("=== Optimization Summary ===");
-            System.out.println("Size reduction: " + String.format("%.1f", metrics.getSizeReduction()) + "%");
-            System.out.println("Nesting reduction: " + String.format("%.1f", metrics.getNestingReduction()) + "%");
-            System.out.println("Optimization time: " + metrics.optimizationTime + "ms");
-            System.out.println("Applied rules: " + String.join(", ", metrics.appliedRules));
+            if (validationPassed && metrics != null) {
+                System.out.println("Size reduction: " + String.format("%.1f", metrics.getSizeReduction()) + "%");
+                System.out.println("Nesting reduction: " + String.format("%.1f", metrics.getNestingReduction()) + "%");
+                System.out.println("Optimization time: " + metrics.optimizationTime + "ms");
+                System.out.println("Applied rules: " + String.join(", ", metrics.appliedRules));
+                System.out.println("Validation: PASSED");
+            } else {
+                System.out.println("Validation: FAILED - " + validationFailureReason);
+                System.out.println("Using original query as fallback");
+            }
         }
     }
 
