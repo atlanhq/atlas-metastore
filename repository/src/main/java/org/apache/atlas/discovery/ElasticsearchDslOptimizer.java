@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.commons.io.IOUtils;
 
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -14,19 +17,20 @@ import java.util.stream.Collectors;
  * Optimizes queries through multiple optimization pipelines:
  * 1. Structure simplification (flatten nested bools)
  * 2. Empty bool elimination
- * 3. Multiple terms consolidation
+ * 3. Multiple terms consolidation (pre-hierarchy)
  * 4. Array deduplication
  * 5. Multi-match consolidation
  * 6. Regexp simplification
  * 7. Aggregation optimization
- * 8. Wildcard consolidation
- * 9. QualifiedName hierarchy optimization
- * 10. Filter structure optimization
- * 11. Nested bool elimination
- * 12. Duplicate removal and consolidation
- * 13. Filter context optimization
- * 14. Function score optimization
- * 15. Duplicate filter removal
+ * 8. QualifiedName hierarchy optimization
+ * 9. Multiple terms consolidation (post-hierarchy)
+ * 10. Wildcard consolidation
+ * 11. Filter structure optimization (scoring-safe)
+ * 12. Nested bool elimination
+ * 13. Duplicate removal and consolidation
+ * 14. Context-aware filter optimization (safe must->filter in function_score)
+ * 15. Function score optimization
+ * 16. Duplicate filter removal
  */
 public class ElasticsearchDslOptimizer {
 
@@ -46,6 +50,7 @@ public class ElasticsearchDslOptimizer {
                 new RegexpSimplificationRule(),
                 new AggregationOptimizationRule(),
                 new QualifiedNameHierarchyRule(),
+                new MultipleTermsConsolidationRule(), // Second consolidation after hierarchy conversion
                 new WildcardConsolidationRule(),
                 new FilterStructureOptimizationRule(),
                 new DuplicateRemovalRule(),
@@ -187,9 +192,10 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 10: Filter Structure Optimization - FIXED VERSION
+     * Rule 10: Filter Structure Optimization - SCORING-SAFE VERSION
      * Reorganizes nested filter structures into cleaner arrays
      * CRITICAL FIX: Preserves all existing filters when consolidating bool clauses
+     * SCORING PRESERVATION: Never moves must clauses to filter context as this breaks scoring semantics
      */
     private class FilterStructureOptimizationRule implements OptimizationRule {
 
@@ -229,19 +235,9 @@ public class ElasticsearchDslOptimizer {
                         }
                     }
 
-                    // Add must clauses as filters (since must and filter are equivalent in filter context)
-                    if (boolNode.has("must")) {
-                        JsonNode mustNode = boolNode.get("must");
-                        if (mustNode.isArray()) {
-                            for (JsonNode mustItem : mustNode) {
-                                consolidatedFilters.add(mustItem);
-                            }
-                        } else if (mustNode.isObject()) {
-                            consolidatedFilters.add(mustNode);
-                        }
-                        // Remove must since we've moved it to filter
-                        boolNode.remove("must");
-                    }
+                    // IMPORTANT: Do NOT move must clauses to filter context as this breaks scoring semantics
+                    // Must clauses contribute to document scoring while filter clauses do not
+                    // Preserve must clauses in their original context to maintain search relevance
 
                     // Set the consolidated filter array
                     if (consolidatedFilters.size() > 0) {
@@ -1168,23 +1164,14 @@ public class ElasticsearchDslOptimizer {
                 if (pattern.endsWith("*") && !pattern.startsWith("*") && pattern.length() > 1) {
                     String prefix = pattern.substring(0, pattern.length() - 1);
 
-                    // Check if this looks like a database qualified name
-                    if (prefix.contains("/") && prefix.split("/").length >= 3) {
-                        ObjectNode termNode = objectMapper.createObjectNode();
-                        ObjectNode termQuery = objectMapper.createObjectNode();
-                        termQuery.put("databaseQualifiedName", prefix);
-                        termNode.set("term", termQuery);
-                        return termNode;
-                    } else {
-                        // Standard hierarchy optimization
-                        ObjectNode termsNode = objectMapper.createObjectNode();
-                        ObjectNode termsQuery = objectMapper.createObjectNode();
-                        ArrayNode valuesArray = objectMapper.createArrayNode();
-                        valuesArray.add(prefix);
-                        termsQuery.set("__qualifiedNameHierarchy", valuesArray);
-                        termsNode.set("terms", termsQuery);
-                        return termsNode;
-                    }
+                    // Standard hierarchy optimization
+                    ObjectNode termsNode = objectMapper.createObjectNode();
+                    ObjectNode termsQuery = objectMapper.createObjectNode();
+                    ArrayNode valuesArray = objectMapper.createArrayNode();
+                    valuesArray.add(prefix);
+                    termsQuery.set("__qualifiedNameHierarchy", valuesArray);
+                    termsNode.set("terms", termsQuery);
+                    return termsNode;
                 }
             }
 
@@ -1247,27 +1234,47 @@ public class ElasticsearchDslOptimizer {
     }
 
     /**
-     * Rule 13: Filter Context Optimization
-     * Moves non-scoring queries to filter context
+     * Rule 13: Context-Aware Filter Optimization
+     * Intelligently moves must clauses to filter context when safe to do so
+     * 
+     * SAFE CASES:
+     * 1. Inside function_score queries (scoring handled by function_score)
+     * 2. When explicit filter-only context is detected
+     * 
+     * PRESERVES SCORING: 
+     * - Regular bool queries keep must clauses for scoring
+     * - Only optimizes when scoring semantics won't be affected
      */
     private class FilterContextRule implements OptimizationRule {
 
         @Override
         public String getName() {
-            return "FilterContext";
+            return "ContextAwareFilterOptimization";
         }
 
         @Override
         public JsonNode apply(JsonNode query) {
-            return traverseAndOptimize(query.deepCopy(), this::optimizeFilterContext);
+            return traverseAndOptimizeWithContext(query.deepCopy(), this::optimizeFilterContext, false);
         }
 
-        private JsonNode optimizeFilterContext(JsonNode node) {
+        private JsonNode optimizeFilterContext(JsonNode node, boolean isInFunctionScore) {
             if (!node.isObject()) return node;
 
             ObjectNode objectNode = (ObjectNode) node;
 
-            if (objectNode.has("bool")) {
+            // Detect if we're entering a function_score context
+            if (objectNode.has("function_score")) {
+                JsonNode functionScoreQuery = objectNode.get("function_score").get("query");
+                if (functionScoreQuery != null) {
+                    // Recursively optimize the inner query in function_score context
+                    JsonNode optimizedInnerQuery = optimizeFilterContext(functionScoreQuery, true);
+                    ((ObjectNode) objectNode.get("function_score")).set("query", optimizedInnerQuery);
+                }
+                return objectNode;
+            }
+
+            // Only optimize must->filter when in function_score context or other safe contexts
+            if (isInFunctionScore && objectNode.has("bool")) {
                 ObjectNode boolNode = (ObjectNode) objectNode.get("bool");
 
                 if (boolNode.has("must") && boolNode.get("must").isArray()) {
@@ -1278,13 +1285,17 @@ public class ElasticsearchDslOptimizer {
                             : objectMapper.createArrayNode();
 
                     for (JsonNode clause : mustArray) {
+                        // In function_score context, it's safe to move filter-like clauses to filter context
                         if (isFilterCandidate(clause)) {
                             filterArray.add(clause);
+                            // Optimization is tracked at rule level by recordRuleApplication
                         } else {
+                            // Keep complex scoring clauses in must (like match, multi_match with boost)
                             newMustArray.add(clause);
                         }
                     }
 
+                    // Update the bool query
                     if (newMustArray.size() > 0) {
                         boolNode.set("must", newMustArray);
                     } else {
@@ -1301,8 +1312,49 @@ public class ElasticsearchDslOptimizer {
         }
 
         private boolean isFilterCandidate(JsonNode clause) {
+            // These query types don't contribute meaningful scoring and are safe to move to filter context
             return clause.has("term") || clause.has("terms") || clause.has("range") ||
-                    clause.has("exists") || clause.has("regexp") || clause.has("wildcard");
+                    clause.has("exists") || clause.has("regexp") || clause.has("wildcard") ||
+                    clause.has("ids") || clause.has("prefix");
+        }
+
+        /**
+         * Enhanced traversal that tracks function_score context
+         */
+        private JsonNode traverseAndOptimizeWithContext(JsonNode node, 
+                java.util.function.BiFunction<JsonNode, Boolean, JsonNode> optimizer, 
+                boolean isInFunctionScore) {
+            
+            if (node.isObject()) {
+                ObjectNode objectNode = (ObjectNode) node.deepCopy();
+                
+                // Check if this node introduces function_score context
+                boolean newFunctionScoreContext = isInFunctionScore || objectNode.has("function_score");
+                
+                // Apply optimization with context
+                objectNode = (ObjectNode) optimizer.apply(objectNode, newFunctionScoreContext);
+                
+                // Recursively traverse children with context
+                Iterator<Map.Entry<String, JsonNode>> fields = objectNode.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> field = fields.next();
+                    JsonNode optimizedChild = traverseAndOptimizeWithContext(
+                        field.getValue(), optimizer, newFunctionScoreContext);
+                    objectNode.set(field.getKey(), optimizedChild);
+                }
+                
+                return objectNode;
+            } else if (node.isArray()) {
+                ArrayNode arrayNode = objectMapper.createArrayNode();
+                for (JsonNode item : node) {
+                    JsonNode optimizedItem = traverseAndOptimizeWithContext(
+                        item, optimizer, isInFunctionScore);
+                    arrayNode.add(optimizedItem);
+                }
+                return arrayNode;
+            }
+            
+            return node;
         }
     }
 
@@ -1696,6 +1748,35 @@ public class ElasticsearchDslOptimizer {
             System.out.println("Nesting reduction: " + String.format("%.1f", metrics.getNestingReduction()) + "%");
             System.out.println("Optimization time: " + metrics.optimizationTime + "ms");
             System.out.println("Applied rules: " + String.join(", ", metrics.appliedRules));
+        }
+    }
+
+    public static void main(String[] args) {
+        ElasticsearchDslOptimizer elasticsearchDslOptimizer = new ElasticsearchDslOptimizer();
+        // get all json files from a directory
+        File dir = new File("/Users/sriram.aravamuthan/Documents/Notes/TestDSLRewrite/");
+        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
+        if (files != null) {
+            for (File file : files) {
+                try {
+                    BufferedInputStream bufferedInputStream = IOUtils.buffer(new FileInputStream(file));
+                    //convert to bufferedInputStream to string
+                    String jsonString = IOUtils.toString(bufferedInputStream, StandardCharsets.UTF_8);
+                    OptimizationResult result = elasticsearchDslOptimizer.optimizeQuery(jsonString);
+                    result.printOptimizationSummary();
+                    //write the output to another file in same directory with file name as <original_file_name>_optimized.json
+                    String outputFileName = file.getName().replace(".json", "_optimized.json");
+                    File outputFile = new File(dir, outputFileName);
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
+                        writer.write(result.getOptimizedQuery());
+                    }
+                    System.out.println("Optimized query written to: " + outputFile.getAbsolutePath());
+                } catch (IOException e) {
+                    System.err.println("Failed to read file " + file.getName() + ": " + e.getMessage());
+                }
+            }
+        } else {
+            System.out.println("No JSON files found in the specified directory.");
         }
     }
 }
