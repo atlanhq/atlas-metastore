@@ -143,12 +143,12 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         AtlasPerfTracer perf = null;
         try {
             String clientOrigin = RequestContext.get().getClientOrigin();
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.searchUsingDslQuery(" + dslQuery + ")");
+            }
             if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
                     CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
                 dslQuery = dslOptimizer.optimizeQuery(dslQuery).getOptimizedQuery();
-                if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.searchUsingDslQuery(" + dslQuery + ")");
-                }
             }
             AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
 
@@ -156,7 +156,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
             return ret;
         } finally {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+            if (perf != null) {
                 AtlasPerfTracer.log(perf);
             }
         }
