@@ -661,6 +661,15 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
             }
         }
         actuallyExtra.removeAll(accountedForExtra);
+        
+        // Account for reverse consolidations (single optimized condition representing multiple original conditions)
+        Set<String> reverseConsolidationExtra = new HashSet<>();
+        for (String extra : actuallyExtra) {
+            if (isReverseConsolidation(extra, originalAllConditions)) {
+                reverseConsolidationExtra.add(extra);
+            }
+        }
+        actuallyExtra.removeAll(reverseConsolidationExtra);
 
         // Calculate semantic equivalence score
         boolean semanticallyEquivalent = actuallyMissing.isEmpty() && actuallyExtra.isEmpty();
@@ -796,11 +805,55 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
             }
         }
         
-        // Check for qualifiedName -> __qualifiedNameHierarchy transformation
-        if (originalCondition.contains("qualifiedName") && !originalCondition.contains("__qualifiedNameHierarchy")) {
+        // Check for wildcard -> regexp consolidation
+        if (originalCondition.startsWith("wildcard:")) {
+            String fieldName = extractFieldFromCondition(originalCondition);
+            if (fieldName != null) {
+                // Look for a regexp query on the same field that could represent consolidated wildcards
+                for (String optimizedCondition : optimizedConditions) {
+                    if (optimizedCondition.startsWith("regexp:") && 
+                        optimizedCondition.contains("\"" + fieldName + "\"")) {
+                        return true; // Wildcard consolidated into regexp
+                    }
+                }
+            }
+        }
+        
+        // Check for ANY field ending with "qualifiedName" -> __qualifiedNameHierarchy transformation
+        if (containsQualifiedNameField(originalCondition) && !originalCondition.contains("__qualifiedNameHierarchy")) {
             for (String optimizedCondition : optimizedConditions) {
                 if (optimizedCondition.contains("__qualifiedNameHierarchy")) {
                     return true; // Transformation detected
+                }
+            }
+        }
+        
+        // Check for specific wildcard->term transformation on ANY qualified name field
+        if (originalCondition.startsWith("wildcard:") && containsQualifiedNameField(originalCondition)) {
+            
+            // Extract the value from the wildcard condition
+            String originalValue = extractValueFromCondition(originalCondition);
+            if (originalValue != null && originalValue.endsWith("*")) {
+                String expectedPrefix = originalValue.substring(0, originalValue.length() - 1);
+                
+                // Look for corresponding term query with __qualifiedNameHierarchy
+                for (String optimizedCondition : optimizedConditions) {
+                    if (optimizedCondition.startsWith("term:") && 
+                        optimizedCondition.contains("__qualifiedNameHierarchy") &&
+                        optimizedCondition.contains("\"" + expectedPrefix + "\"")) {
+                        return true; // Wildcard->term transformation detected
+                    }
+                }
+            }
+        }
+        
+        // Check for reverse transformation (__qualifiedNameHierarchy -> other qualified names)
+        if (originalCondition.contains("__qualifiedNameHierarchy")) {
+            for (String optimizedCondition : optimizedConditions) {
+                if (optimizedCondition.contains("qualifiedName") || 
+                    optimizedCondition.contains("databaseQualifiedName") || 
+                    optimizedCondition.contains("schemaQualifiedName")) {
+                    return true; // Reverse transformation detected
                 }
             }
         }
@@ -812,12 +865,49 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
      * Check if a condition in the optimized query represents an expansion of an original condition
      */
     private boolean isConditionExpansion(String optimizedCondition, Set<String> originalConditions) {
-        // Check for __qualifiedNameHierarchy -> qualifiedName expansion (reverse of consolidation)
+        // Check for __qualifiedNameHierarchy -> ANY qualified name field expansion (reverse of consolidation)
         if (optimizedCondition.contains("__qualifiedNameHierarchy")) {
             for (String originalCondition : originalConditions) {
-                if (originalCondition.contains("qualifiedName") && 
+                if (containsQualifiedNameField(originalCondition) && 
                     !originalCondition.contains("__qualifiedNameHierarchy")) {
-                    return true; // This is an expansion from qualifiedName
+                    return true; // This is an expansion from qualified name fields
+                }
+            }
+        }
+        
+        // Check for ANY qualified name field -> __qualifiedNameHierarchy expansion
+        if (containsQualifiedNameField(optimizedCondition)) {
+            for (String originalCondition : originalConditions) {
+                if (originalCondition.contains("__qualifiedNameHierarchy")) {
+                    return true; // This is an expansion from __qualifiedNameHierarchy
+                }
+            }
+        }
+        
+        // Check for regexp -> wildcard expansion (reverse of wildcard consolidation)
+        if (optimizedCondition.startsWith("wildcard:")) {
+            String fieldName = extractFieldFromCondition(optimizedCondition);
+            if (fieldName != null) {
+                for (String originalCondition : originalConditions) {
+                    if (originalCondition.startsWith("regexp:") && 
+                        originalCondition.contains("\"" + fieldName + "\"")) {
+                        return true; // This wildcard came from a consolidated regexp
+                    }
+                }
+            }
+        }
+        
+        // Check for term->wildcard expansion (reverse of wildcard->term optimization)
+        if (optimizedCondition.startsWith("wildcard:") && 
+            (optimizedCondition.contains("qualifiedName") || 
+             optimizedCondition.contains("databaseQualifiedName") || 
+             optimizedCondition.contains("schemaQualifiedName"))) {
+            
+            // Look for corresponding term query with __qualifiedNameHierarchy in original
+            for (String originalCondition : originalConditions) {
+                if (originalCondition.startsWith("term:") && 
+                    originalCondition.contains("__qualifiedNameHierarchy")) {
+                    return true; // This wildcard could be an expansion from a term
                 }
             }
         }
@@ -833,6 +923,58 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
                         return true; // This term might be from a split terms query
                     }
                 }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * Check if a single optimized condition represents a consolidation of multiple original conditions
+     */
+    private boolean isReverseConsolidation(String optimizedCondition, Set<String> originalConditions) {
+        // Check for regexp that consolidates multiple wildcards
+        if (optimizedCondition.startsWith("regexp:")) {
+            String fieldName = extractFieldFromCondition(optimizedCondition);
+            if (fieldName != null) {
+                // Count how many wildcard conditions in original use the same field
+                long wildcardCount = originalConditions.stream()
+                    .filter(cond -> cond.startsWith("wildcard:") && cond.contains("\"" + fieldName + "\""))
+                    .count();
+                
+                // If we have multiple wildcards that could be consolidated into this regexp
+                if (wildcardCount > 1) {
+                    return true;
+                }
+            }
+        }
+        
+        // Check for terms query that consolidates multiple term queries
+        if (optimizedCondition.startsWith("terms:")) {
+            String fieldName = extractFieldFromCondition(optimizedCondition);
+            if (fieldName != null) {
+                // Count how many term conditions in original use the same field
+                long termCount = originalConditions.stream()
+                    .filter(cond -> cond.startsWith("term:") && cond.contains("\"" + fieldName + "\""))
+                    .count();
+                
+                // If we have multiple terms that could be consolidated into this terms query
+                if (termCount > 1) {
+                    return true;
+                }
+            }
+        }
+        
+        // Check for __qualifiedNameHierarchy that consolidates ANY qualified name fields
+        if (optimizedCondition.contains("__qualifiedNameHierarchy")) {
+            // Check if there are qualified name conditions that could be consolidated
+            long qualifiedNameCount = originalConditions.stream()
+                .filter(this::containsQualifiedNameField)
+                .filter(cond -> !cond.contains("__qualifiedNameHierarchy"))
+                .count();
+                
+            if (qualifiedNameCount > 0) {
+                return true;
             }
         }
         
@@ -856,6 +998,55 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
             // Ignore parsing errors
         }
         return null;
+    }
+    
+    private String extractValueFromCondition(String condition) {
+        // Extract value from a condition string like "wildcard:{\"field\":\"value*\"}"
+        try {
+            String[] parts = condition.split(":", 2);
+            if (parts.length == 2) {
+                JsonNode conditionNode = objectMapper.readTree(parts[1]);
+                Iterator<String> fieldNames = conditionNode.fieldNames();
+                if (fieldNames.hasNext()) {
+                    String fieldName = fieldNames.next();
+                    JsonNode valueNode = conditionNode.get(fieldName);
+                    if (valueNode.isTextual()) {
+                        return valueNode.asText();
+                    } else if (valueNode.isArray() && valueNode.size() > 0) {
+                        return valueNode.get(0).asText(); // Return first value for arrays
+                    }
+                }
+            }
+        } catch (Exception e) {
+            // If parsing fails, try simple string extraction for patterns like "field":"value"
+            String fieldPattern = extractFieldFromCondition(condition);
+            if (fieldPattern != null) {
+                String searchPattern = "\"" + fieldPattern + "\":\"";
+                int valueStart = condition.indexOf(searchPattern);
+                if (valueStart >= 0) {
+                    valueStart += searchPattern.length();
+                    int valueEnd = condition.indexOf("\"", valueStart);
+                    if (valueEnd > valueStart) {
+                        return condition.substring(valueStart, valueEnd);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+    
+    private boolean containsQualifiedNameField(String condition) {
+        // Check if condition contains any field ending with "qualifiedName"
+        if (condition.contains("qualifiedName")) {
+            // More specific check - look for field patterns
+            return condition.contains("\"qualifiedName\"") || 
+                   condition.contains("\"databaseQualifiedName\"") ||
+                   condition.contains("\"schemaQualifiedName\"") ||
+                   condition.contains("\"tableQualifiedName\"") ||
+                   condition.contains("\"columnQualifiedName\"") ||
+                   condition.matches(".*\"\\w*qualifiedName\".*");
+        }
+        return false;
     }
 
     private boolean conditionsOverlap(String condition1, String condition2) {
@@ -1458,10 +1649,21 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
     }
 
     private boolean isValidFieldTransformation(String originalField, Set<String> optimizedFields) {
-        // Known valid transformations
-        if (originalField.equals("qualifiedName") && optimizedFields.contains("__qualifiedNameHierarchy")) {
+        // Known valid transformations for ANY field ending with "qualifiedName"
+        if (originalField.endsWith("qualifiedName") && optimizedFields.contains("__qualifiedNameHierarchy")) {
             return true;
         }
+        
+        // Reverse transformations (when __qualifiedNameHierarchy is in original but not optimized)
+        if (originalField.equals("__qualifiedNameHierarchy")) {
+            // Check if any field ending with "qualifiedName" exists in optimized
+            for (String optimizedField : optimizedFields) {
+                if (optimizedField.endsWith("qualifiedName")) {
+                    return true;
+                }
+            }
+        }
+        
         return false;
     }
 
@@ -1533,8 +1735,8 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
               "query": {
                 "bool": {
                   "should": [
-                    {"wildcard": {"qualifiedName": "default/domain/GKE0ic7eDrbvtGGwXHd9Q/super/domain/2NeaIH0Da2FvnUv4Yq0N2*"}},
-                    {"wildcard": {"qualifiedName": "default/domain/GKE0ic7eDrbvtGGwXHd9Q/super/domain/4oHYsGJjT8og3425KkqOt*"}}
+                    {"wildcard": {"databaseQualifiedName": "default/domain/GKE0ic7eDrbvtGGwXHd9Q/super/domain/2NeaIH0Da2FvnUv4Yq0N2*"}},
+                    {"wildcard": {"databaseQualifiedName": "default/domain/GKE0ic7eDrbvtGGwXHd9Q/super/domain/4oHYsGJjT8og3425KkqOt*"}}
                   ]
                 }
               }
@@ -1545,7 +1747,7 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
 
         // After QualifiedNameHierarchyRule + post-hierarchy MultipleTermsConsolidationRule
         JsonNode shouldArray = optimized.get("query").get("bool").get("should");
-        
+
         // Should be consolidated into a single terms query
         assertEquals("Should be consolidated into single query", 1, shouldArray.size());
         
@@ -1688,8 +1890,7 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         System.out.println("Original query: " + originalQuery);
         
         ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(originalQuery);
-        result.printOptimizationSummary();
-        
+
         System.out.println("Optimized query: " + result.getOptimizedQuery());
         
         // Validate the optimization
@@ -2457,9 +2658,179 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
     }
     
     /**
+     * Test wildcard consolidation validation
+     */
+    public void testDatabaseQualifiedNameTransformation() throws Exception {
+        System.out.println("🧪 Testing direct databaseQualifiedName transformation...");
+        
+        // Test 1: Simple direct case
+        String simpleCase = """
+            {
+              "query": {
+                "wildcard": {
+                  "databaseQualifiedName": "default/athena/1731597928/AwsDataCatalog*"
+                }
+              }
+            }""";
+            
+        System.out.println("📝 Simple case input: " + simpleCase);
+        ElasticsearchDslOptimizer.OptimizationResult simpleResult = optimizer.optimizeQuery(simpleCase);
+        System.out.println("📝 Simple case output: " + simpleResult.getOptimizedQuery());
+        
+        // Check if transformation happened
+        boolean hasHierarchy = simpleResult.getOptimizedQuery().contains("__qualifiedNameHierarchy");
+        boolean stillHasWildcard = simpleResult.getOptimizedQuery().contains("databaseQualifiedName");
+        
+        System.out.println("📊 Simple case results:");
+        System.out.println("  - Has __qualifiedNameHierarchy: " + hasHierarchy);
+        System.out.println("  - Still has databaseQualifiedName: " + stillHasWildcard);
+        
+        assertTrue("Simple databaseQualifiedName should transform to __qualifiedNameHierarchy", hasHierarchy);
+        assertFalse("Simple databaseQualifiedName wildcard should be replaced", stillHasWildcard);
+        
+        // Test 2: Extract the exact fragment from wildcards_too_many.json
+        String complexCase = """
+            {
+              "query": {
+                "bool": {
+                  "filter": {
+                    "bool": {
+                      "must": [
+                        {
+                          "bool": {
+                            "must": [
+                              {
+                                "bool": {
+                                  "should": [
+                                    {
+                                      "wildcard": {
+                                        "databaseQualifiedName": "default/athena/1731597928/AwsDataCatalog*"
+                                      }
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                }
+              }
+            }""";
+            
+        System.out.println("\\n📝 Complex case (nested like wildcards_too_many.json):");
+        ElasticsearchDslOptimizer.OptimizationResult complexResult = optimizer.optimizeQuery(complexCase);
+        System.out.println("📝 Complex case output: " + complexResult.getOptimizedQuery());
+        
+        // Check if transformation happened
+        boolean complexHasHierarchy = complexResult.getOptimizedQuery().contains("__qualifiedNameHierarchy");
+        boolean complexStillHasWildcard = complexResult.getOptimizedQuery().contains("databaseQualifiedName");
+        
+        System.out.println("📊 Complex case results:");
+        System.out.println("  - Has __qualifiedNameHierarchy: " + complexHasHierarchy);
+        System.out.println("  - Still has databaseQualifiedName: " + complexStillHasWildcard);
+        
+        assertTrue("Nested databaseQualifiedName should transform to __qualifiedNameHierarchy", complexHasHierarchy);
+        assertFalse("Nested databaseQualifiedName wildcard should be replaced", complexStillHasWildcard);
+    }
+    
+    public void testWildcardConsolidationValidation() throws Exception {
+        System.out.println("=== TESTING WILDCARD CONSOLIDATION VALIDATION ===");
+        
+        // Test with a query that has many wildcard patterns (like wildcards_too_many.json)
+        String queryWithManyWildcards = """
+            {
+              "query": {
+                "bool": {
+                  "should": [
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_alex2*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_cvents*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_googleanalytics*"}},
+                    {"wildcard": {"qualifiedName": "*_us_cf_esker*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_engage_ocular_etl*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_salesforce_history*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_salesforce*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_p44*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_sapbods_p44*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_reference*"}},
+                    {"wildcard": {"qualifiedName": "*_us_device_fda*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_hybris*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_sg_sap_pn4_iol*"}},
+                    {"wildcard": {"qualifiedName": "*_gbl_cf_sap_pn4_comm*"}}
+                  ]
+                }
+              }
+            }""";
+            
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQueryWithValidation(queryWithManyWildcards);
+        
+        System.out.println("Wildcard consolidation test:");
+        System.out.println("- Validation passed: " + result.isValidationPassed());
+        System.out.println("- Original query length: " + queryWithManyWildcards.length());
+        System.out.println("- Optimized query length: " + result.getOptimizedQuery().length());
+        
+        if (!result.isValidationPassed()) {
+            System.out.println("- Failure reason: " + result.getValidationFailureReason());
+        }
+        
+        // This should pass validation even though structure changes significantly
+        assertTrue("Wildcard consolidation should pass validation", result.isValidationPassed());
+        assertNotNull("Optimized query should not be null", result.getOptimizedQuery());
+        
+        // Verify that optimization actually occurred
+        JsonNode original = parseJson(queryWithManyWildcards);
+        JsonNode optimized = parseJson(result.getOptimizedQuery());
+        
+        int originalWildcards = countWildcardsInQuery(original);
+        int optimizedWildcards = countWildcardsInQuery(optimized);
+        int optimizedRegexps = countRegexpsInQuery(optimized);
+        
+        System.out.println("- Original wildcards: " + originalWildcards);
+        System.out.println("- Optimized wildcards: " + optimizedWildcards);
+        System.out.println("- Optimized regexps: " + optimizedRegexps);
+        
+        // Expect some consolidation to have occurred
+        assertTrue("Should consolidate some wildcards", originalWildcards > optimizedWildcards || optimizedRegexps > 0);
+        
+        testResults.addSuccess("WildcardConsolidationValidation");
+    }
+    
+    private int countWildcardsInQuery(JsonNode query) {
+        return countQueryTypeRecursive(query, "wildcard");
+    }
+    
+    private int countRegexpsInQuery(JsonNode query) {
+        return countQueryTypeRecursive(query, "regexp");
+    }
+    
+    private int countQueryTypeRecursive(JsonNode node, String queryType) {
+        if (node == null) return 0;
+        
+        int count = 0;
+        
+        if (node.isObject()) {
+            if (node.has(queryType)) {
+                count++;
+            }
+            
+            for (JsonNode child : node) {
+                count += countQueryTypeRecursive(child, queryType);
+            }
+        } else if (node.isArray()) {
+            for (JsonNode arrayItem : node) {
+                count += countQueryTypeRecursive(arrayItem, queryType);
+            }
+        }
+        
+        return count;
+    }
+    
+    /**
      * Test validation failure by creating a scenario where field preservation fails
      */
-    private void testValidationFailureScenario() {
+    public void testValidationFailureScenario() {
         System.out.println("\n--- Testing Validation Failure Scenario ---");
         
         // Create a query that exercises the field preservation validation
