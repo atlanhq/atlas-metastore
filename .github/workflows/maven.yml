@@ -28,7 +28,7 @@ on:
       - master
       - staging
       - downloadimpactreport
-      - mlh-797-staging
+      - mlh-755-staging
 
 jobs:
   build:
