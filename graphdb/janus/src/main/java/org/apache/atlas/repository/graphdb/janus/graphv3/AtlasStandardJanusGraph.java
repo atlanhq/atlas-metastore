@@ -129,7 +129,7 @@ import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.RE
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.REPLACE_INSTANCE_IF_EXISTS;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.SCRIPT_EVAL_ENABLED;
 
-public class AtlasStandardJanusGraph extends StandardJanusGraph {
+public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends JanusGraphBlueprintsGraph {
 
     private static final Logger log =
             LoggerFactory.getLogger(AtlasStandardJanusGraph.class);
@@ -499,7 +499,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {
 
     public RecordIterator<Object> getVertexIDs(final BackendTransaction tx) {
         Preconditions.checkArgument(backend.getStoreFeatures().hasOrderedScan() ||
-                        backend.getStoreFeatures().hasUnorderedScan(),
+                backend.getStoreFeatures().hasUnorderedScan(),
                 "The configured storage backend does not support global graph operations - use Faunus instead");
 
         final KeyIterator keyIterator;
@@ -599,7 +599,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {
     private ModifiableConfiguration getGlobalSystemConfig(Backend backend) {
 
         return new ModifiableConfiguration(GraphDatabaseConfiguration.ROOT_NS,
-                backend.getGlobalSystemConfig(), BasicConfiguration.Restriction.GLOBAL);
+            backend.getGlobalSystemConfig(), BasicConfiguration.Restriction.GLOBAL);
     }
 
     // ################### WRITE #########################
