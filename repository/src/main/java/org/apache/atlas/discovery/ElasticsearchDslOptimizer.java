@@ -4,13 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
-import java.io.*;
-import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -358,6 +355,9 @@ public class ElasticsearchDslOptimizer {
                 }
             }
 
+            // CRITICAL: Validate no invalid bool->bool nesting was created
+            validateNoBoolNesting(query);
+            
             String optimizedQueryJson = objectMapper.writeValueAsString(query);
             OptimizationMetrics.Result result = metrics.finishOptimization(originalQuery, query);
             
@@ -394,6 +394,48 @@ public class ElasticsearchDslOptimizer {
             MDC.put("optimization.total_time_ms", String.valueOf(totalTime));
             
             throw new RuntimeException("Failed to optimize query", e);
+        }
+    }
+    
+    /**
+     * Validates that no invalid bool->bool nesting exists in the query
+     * This prevents Elasticsearch parsing errors
+     */
+    private void validateNoBoolNesting(JsonNode node) {
+        if (node.isObject()) {
+            // Check if this is a bool query with invalid bool nesting
+            if (node.has("bool")) {
+                JsonNode boolNode = node.get("bool");
+                if (boolNode.has("bool")) {
+                    String invalidStructure = boolNode.toString();
+                    log.error("CRITICAL: Invalid Elasticsearch syntax detected - bool query cannot contain another bool field directly");
+                    log.error("Invalid structure: {}", invalidStructure);
+                    throw new IllegalArgumentException("Invalid Elasticsearch syntax: bool query cannot contain another bool field directly. Found: bool.bool");
+                }
+                
+                // Recursively check bool clauses
+                for (String clause : Arrays.asList("must", "should", "filter", "must_not")) {
+                    if (boolNode.has(clause)) {
+                        JsonNode clauseNode = boolNode.get(clause);
+                        if (clauseNode.isArray()) {
+                            for (JsonNode item : clauseNode) {
+                                validateNoBoolNesting(item);
+                            }
+                        } else {
+                            validateNoBoolNesting(clauseNode);
+                        }
+                    }
+                }
+            } else {
+                // Recursively check all child nodes
+                for (JsonNode child : node) {
+                    validateNoBoolNesting(child);
+                }
+            }
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                validateNoBoolNesting(item);
+            }
         }
     }
 
@@ -640,20 +682,22 @@ public class ElasticsearchDslOptimizer {
      }
      
      private boolean isValidFieldTransformation(String originalField, Set<String> optimizedFields) {
-         // ANY field ending with "qualifiedName" can transform to __qualifiedNameHierarchy
-         if (originalField.endsWith("qualifiedName") && optimizedFields.contains("__qualifiedNameHierarchy")) {
-             return true;
-         }
-         
-         // Reverse transformations (when __qualifiedNameHierarchy is in original but not optimized)
-         if (originalField.equals("__qualifiedNameHierarchy")) {
-             // Check if any field ending with "qualifiedName" exists in optimized
-             for (String optimizedField : optimizedFields) {
-                 if (optimizedField.endsWith("qualifiedName")) {
-                     return true;
-                 }
-             }
-         }
+                 // ANY field ending with qualified name patterns can transform to __qualifiedNameHierarchy
+        boolean isOriginalQualifiedName = originalField.endsWith("qualifiedName") || originalField.endsWith("QualifiedName");
+        if (isOriginalQualifiedName && optimizedFields.contains("__qualifiedNameHierarchy")) {
+            return true;
+        }
+        
+        // Reverse transformations (when __qualifiedNameHierarchy is in original but not optimized)
+        if (originalField.equals("__qualifiedNameHierarchy")) {
+            // Check if any field ending with qualified name patterns exists in optimized
+            for (String optimizedField : optimizedFields) {
+                boolean isOptimizedQualifiedName = optimizedField.endsWith("qualifiedName") || optimizedField.endsWith("QualifiedName");
+                if (isOptimizedQualifiedName) {
+                    return true;
+                }
+            }
+        }
          
          // Wildcard consolidation: field remains the same but query type changes wildcard->regexp
          // This is handled at the condition level, not field level, so we preserve all fields
@@ -1472,24 +1516,39 @@ public class ElasticsearchDslOptimizer {
             if (objectNode.has("wildcard")) {
                 JsonNode wildcardNode = objectNode.get("wildcard");
                 
-                // GENERIC CHECK: Handle ANY field ending with "qualifiedName"
+                // ROBUST CHECK: Handle ANY field ending with qualified name patterns (both cases)
                 Iterator<String> fieldNames = wildcardNode.fieldNames();
                 while (fieldNames.hasNext()) {
                     String currentField = fieldNames.next();
-                    if (currentField.endsWith("QualifiedName")) {
+                    
+                    // Support both "qualifiedName" and "QualifiedName" patterns for maximum compatibility
+                    boolean isQualifiedNameField = currentField.endsWith("qualifiedName") || 
+                                                  currentField.endsWith("QualifiedName");
+                    
+                    if (isQualifiedNameField) {
                         String pattern = wildcardNode.get(currentField).asText();
+                        
+                        log.debug("QualifiedNameHierarchyRule: Checking field '{}' with pattern '{}'", currentField, pattern);
+                        
                         if (pattern.endsWith("*") && !pattern.startsWith("*") && 
                             pattern.length() > 1 && pattern.contains("/")) {
                             
                             String prefix = pattern.substring(0, pattern.length() - 1);
                             if (!prefix.contains("*")) {
+                                log.debug("QualifiedNameHierarchyRule: Transforming {} to __qualifiedNameHierarchy with prefix '{}'", 
+                                         currentField, prefix);
+                                
                                 // Create term query with __qualifiedNameHierarchy
                                 ObjectNode termNode = objectMapper.createObjectNode();
                                 ObjectNode termQuery = objectMapper.createObjectNode();
                                 termQuery.put("__qualifiedNameHierarchy", prefix);
                                 termNode.set("term", termQuery);
                                 return termNode;
+                            } else {
+                                log.debug("QualifiedNameHierarchyRule: Skipping {} - prefix contains '*': '{}'", currentField, prefix);
                             }
+                        } else {
+                            log.debug("QualifiedNameHierarchyRule: Skipping {} - pattern doesn't match criteria: '{}'", currentField, pattern);
                         }
                     }
                 }
@@ -1639,11 +1698,17 @@ public class ElasticsearchDslOptimizer {
         }
 
         /**
-         * Enhanced traversal that tracks function_score context
+         * Enhanced traversal that tracks function_score context and skips aggregations
          */
         private JsonNode traverseAndOptimizeWithContext(JsonNode node, 
                 java.util.function.BiFunction<JsonNode, Boolean, JsonNode> optimizer, 
                 boolean isInFunctionScore) {
+            return traverseAndOptimizeWithAggContext(node, optimizer, isInFunctionScore, false);
+        }
+        
+        private JsonNode traverseAndOptimizeWithAggContext(JsonNode node, 
+                java.util.function.BiFunction<JsonNode, Boolean, JsonNode> optimizer, 
+                boolean isInFunctionScore, boolean inAggregationContext) {
             
             if (node.isObject()) {
                 ObjectNode objectNode = (ObjectNode) node.deepCopy();
@@ -1651,15 +1716,23 @@ public class ElasticsearchDslOptimizer {
                 // Check if this node introduces function_score context
                 boolean newFunctionScoreContext = isInFunctionScore || objectNode.has("function_score");
                 
-                // Apply optimization with context
-                objectNode = (ObjectNode) optimizer.apply(objectNode, newFunctionScoreContext);
+                // Apply optimization with context ONLY if not in aggregation
+                if (!inAggregationContext) {
+                    objectNode = (ObjectNode) optimizer.apply(objectNode, newFunctionScoreContext);
+                } else {
+                    log.debug("FilterContextRule: Skipping optimization in aggregation context");
+                }
                 
                 // Recursively traverse children with context
                 Iterator<Map.Entry<String, JsonNode>> fields = objectNode.fields();
                 while (fields.hasNext()) {
                     Map.Entry<String, JsonNode> field = fields.next();
-                    JsonNode optimizedChild = traverseAndOptimizeWithContext(
-                        field.getValue(), optimizer, newFunctionScoreContext);
+                    
+                    // Check if we're entering an aggregation context
+                    boolean childInAggContext = inAggregationContext || field.getKey().equals("aggs");
+                    
+                    JsonNode optimizedChild = traverseAndOptimizeWithAggContext(
+                        field.getValue(), optimizer, newFunctionScoreContext, childInAggContext);
                     objectNode.set(field.getKey(), optimizedChild);
                 }
                 
@@ -1667,8 +1740,8 @@ public class ElasticsearchDslOptimizer {
             } else if (node.isArray()) {
                 ArrayNode arrayNode = objectMapper.createArrayNode();
                 for (JsonNode item : node) {
-                    JsonNode optimizedItem = traverseAndOptimizeWithContext(
-                        item, optimizer, isInFunctionScore);
+                    JsonNode optimizedItem = traverseAndOptimizeWithAggContext(
+                        item, optimizer, isInFunctionScore, inAggregationContext);
                     arrayNode.add(optimizedItem);
                 }
                 return arrayNode;
@@ -1903,12 +1976,20 @@ public class ElasticsearchDslOptimizer {
                 if (filterNode.isObject() && filterNode.has("bool")) {
                     JsonNode boolNode = filterNode.get("bool");
                     
+                    log.debug("BoolFlattening: Found filter.bool structure to analyze: {}", boolNode.toString());
+                    
                     // Check if this bool has only must and must_not (no should, no existing filter)
                     if (canFlattenBool(boolNode)) {
+                        log.debug("BoolFlattening: Bool structure can be flattened");
                         JsonNode optimizedNode = createFlattenedBool(boolNode, objectNode);
                         if (optimizedNode != null) {
+                            log.debug("BoolFlattening: Successfully flattened structure");
                             return optimizedNode;
+                        } else {
+                            log.warn("BoolFlattening: createFlattenedBool returned null");
                         }
+                    } else {
+                        log.debug("BoolFlattening: Bool structure cannot be flattened (has should/filter clauses)");
                     }
                 }
                 
@@ -1946,46 +2027,43 @@ public class ElasticsearchDslOptimizer {
 
         private JsonNode createFlattenedBool(JsonNode originalBool, ObjectNode parentNode) {
             try {
-                ObjectNode flattenedBool = objectMapper.createObjectNode();
-                ObjectNode boolContent = objectMapper.createObjectNode();
-
-                // Convert must clauses to filter clauses (better for caching)
+                // FIXED: Instead of creating a new wrapper, modify the existing parent bool structure
+                ObjectNode resultNode = parentNode.deepCopy();
+                
+                // Extract flattened filter array from the nested bool.must
+                ArrayNode flattenedFilter = objectMapper.createArrayNode();
                 if (originalBool.has("must")) {
                     JsonNode mustNode = originalBool.get("must");
                     if (mustNode.isArray()) {
-                        boolContent.set("filter", mustNode);
+                        for (JsonNode mustItem : mustNode) {
+                            flattenedFilter.add(mustItem);
+                        }
                     } else {
-                        // Single must clause -> single item filter array
-                        ArrayNode filterArray = objectMapper.createArrayNode();
-                        filterArray.add(mustNode);
-                        boolContent.set("filter", filterArray);
+                        flattenedFilter.add(mustNode);
                     }
                 }
-
-                // Preserve must_not clauses exactly as they are
+                
+                // Set the flattened filter array directly on the parent bool
+                resultNode.set("filter", flattenedFilter);
+                
+                // If original bool had must_not, add it to the parent bool level
                 if (originalBool.has("must_not")) {
-                    boolContent.set("must_not", originalBool.get("must_not"));
+                    resultNode.set("must_not", originalBool.get("must_not"));
                 }
-
-                // Copy any other bool-level properties (like minimum_should_match, boost)
+                
+                // Copy any other properties from original bool (like minimum_should_match, boost)
                 originalBool.fieldNames().forEachRemaining(fieldName -> {
-                    if (!fieldName.equals("must") && !fieldName.equals("must_not")) {
-                        boolContent.set(fieldName, originalBool.get(fieldName));
+                    if (!fieldName.equals("must") && !fieldName.equals("must_not") && !fieldName.equals("filter")) {
+                        resultNode.set(fieldName, originalBool.get(fieldName));
                     }
                 });
-
-                flattenedBool.set("bool", boolContent);
-
-                // Copy any parent-level properties except the filter we're replacing
-                parentNode.fieldNames().forEachRemaining(fieldName -> {
-                    if (!fieldName.equals("filter")) {
-                        flattenedBool.set(fieldName, parentNode.get(fieldName));
-                    }
-                });
-
-                return flattenedBool;
+                
+                log.debug("BoolFlattening: Flattened nested filter.bool.must structure");
+                
+                return resultNode;
 
             } catch (Exception e) {
+                log.error("Error in BoolFlattening createFlattenedBool: {}", e.getMessage(), e);
                 // If anything goes wrong, return null to skip optimization
                 return null;
             }
@@ -2056,6 +2134,10 @@ public class ElasticsearchDslOptimizer {
     }
 
     private JsonNode traverseAndOptimize(JsonNode node, java.util.function.Function<JsonNode, JsonNode> optimizer) {
+        return traverseAndOptimizeWithContext(node, optimizer, false);
+    }
+    
+    private JsonNode traverseAndOptimizeWithContext(JsonNode node, java.util.function.Function<JsonNode, JsonNode> optimizer, boolean inAggregationContext) {
         if (node.isObject()) {
             ObjectNode objectNode = (ObjectNode) node;
 
@@ -2066,10 +2148,25 @@ public class ElasticsearchDslOptimizer {
 
             fieldNames.forEachRemaining(fieldName -> {
                 JsonNode childNode = objectNode.get(fieldName);
-                JsonNode optimizedChild = traverseAndOptimize(childNode, optimizer);
-                if (optimizedChild != childNode) {
-                    fieldsToUpdate.add(fieldName);
-                    newValues.put(fieldName, optimizedChild);
+                
+                // SKIP OPTIMIZATION IN AGGREGATIONS: Check if we're entering an aggregation context
+                boolean childInAggContext = inAggregationContext || fieldName.equals("aggs");
+                
+                if (childInAggContext) {
+                    log.debug("Skipping optimization in aggregation context for field: {}", fieldName);
+                    // In aggregation context, just preserve the structure without optimization
+                    JsonNode preservedChild = preserveAggregationStructure(childNode);
+                    if (preservedChild != childNode) {
+                        fieldsToUpdate.add(fieldName);
+                        newValues.put(fieldName, preservedChild);
+                    }
+                } else {
+                    // Normal optimization for non-aggregation context
+                    JsonNode optimizedChild = traverseAndOptimizeWithContext(childNode, optimizer, false);
+                    if (optimizedChild != childNode) {
+                        fieldsToUpdate.add(fieldName);
+                        newValues.put(fieldName, optimizedChild);
+                    }
                 }
             });
 
@@ -2078,19 +2175,72 @@ public class ElasticsearchDslOptimizer {
                 objectNode.set(field, newValues.get(field));
             }
 
-            // Then optimize this node
-            return optimizer.apply(objectNode);
+            // Then optimize this node ONLY if not in aggregation context
+            if (inAggregationContext) {
+                log.debug("Preserving node structure in aggregation context");
+                return objectNode;
+            } else {
+                return optimizer.apply(objectNode);
+            }
         } else if (node.isArray()) {
             ArrayNode arrayNode = (ArrayNode) node;
             ArrayNode optimizedArray = objectMapper.createArrayNode();
 
             for (JsonNode child : arrayNode) {
-                optimizedArray.add(traverseAndOptimize(child, optimizer));
+                if (inAggregationContext) {
+                    // Preserve array items in aggregation context
+                    optimizedArray.add(preserveAggregationStructure(child));
+                } else {
+                    optimizedArray.add(traverseAndOptimizeWithContext(child, optimizer, false));
+                }
             }
 
             return optimizedArray;
         }
 
+        return node;
+    }
+    
+    /**
+     * Preserves aggregation structure without applying optimization rules
+     * Recursively preserves nested aggregation structures
+     */
+    private JsonNode preserveAggregationStructure(JsonNode node) {
+        if (node.isObject()) {
+            ObjectNode objectNode = (ObjectNode) node;
+            ObjectNode result = objectNode.deepCopy();
+            
+            // Recursively preserve all child structures in aggregation context
+            Iterator<String> fieldNames = result.fieldNames();
+            List<String> fieldsToUpdate = new ArrayList<>();
+            Map<String, JsonNode> newValues = new HashMap<>();
+            
+            fieldNames.forEachRemaining(fieldName -> {
+                JsonNode childNode = result.get(fieldName);
+                JsonNode preservedChild = preserveAggregationStructure(childNode);
+                if (preservedChild != childNode) {
+                    fieldsToUpdate.add(fieldName);
+                    newValues.put(fieldName, preservedChild);
+                }
+            });
+            
+            // Update any modified fields
+            for (String field : fieldsToUpdate) {
+                result.set(field, newValues.get(field));
+            }
+            
+            return result;
+        } else if (node.isArray()) {
+            ArrayNode arrayNode = (ArrayNode) node;
+            ArrayNode result = objectMapper.createArrayNode();
+            
+            for (JsonNode child : arrayNode) {
+                result.add(preserveAggregationStructure(child));
+            }
+            
+            return result;
+        }
+        
         return node;
     }
 
@@ -2255,104 +2405,4 @@ public class ElasticsearchDslOptimizer {
         }
     }
 
-    public static void main(String[] args) {
-        ElasticsearchDslOptimizer elasticsearchDslOptimizer = new ElasticsearchDslOptimizer();
-        
-        // FIRST: Test simple databaseQualifiedName transformation
-        log.info("=== Testing Simple databaseQualifiedName Transformation ===");
-        String simpleTest = """
-            {
-              "query": {
-                "wildcard": {
-                  "databaseQualifiedName": "default/athena/1731597928/AwsDataCatalog*"
-                }
-              }
-            }""";
-        
-        try {
-            OptimizationResult simpleResult = elasticsearchDslOptimizer.optimizeQuery(simpleTest);
-            log.info("Simple test result:");
-            log.info("  Original: {}", simpleTest.replaceAll("\\s+", " "));
-            log.info("  Optimized: {}", simpleResult.getOptimizedQuery());
-            log.info("  Has __qualifiedNameHierarchy: {}", simpleResult.getOptimizedQuery().contains("__qualifiedNameHierarchy"));
-            log.info("  Still has databaseQualifiedName: {}", simpleResult.getOptimizedQuery().contains("databaseQualifiedName"));
-            
-            if (simpleResult.getMetrics() != null) {
-                log.info("  Applied rules: {}", String.join(", ", simpleResult.getMetrics().appliedRules));
-            }
-        } catch (Exception e) {
-            log.error("Error in simple test: {}", e.getMessage(), e);
-        }
-        
-        // Test the specific wildcards_too_many.json file
-        try {
-            File wildcardFile = new File("src/test/resources/fixtures/dsl_rewrite/wildcards_too_many.json");
-            if (wildcardFile.exists()) {
-                log.info("=== Testing wildcards_too_many.json ===");
-                String jsonString = IOUtils.toString(new FileInputStream(wildcardFile), StandardCharsets.UTF_8);
-                
-                log.info("Original query length: {}", jsonString.length());
-                
-                // Test with validation
-                OptimizationResult validatedResult = elasticsearchDslOptimizer.optimizeQueryWithValidation(jsonString);
-                log.info("Validation passed: {}", validatedResult.isValidationPassed());
-                if (!validatedResult.isValidationPassed()) {
-                    log.warn("Validation failure reason: {}", validatedResult.getValidationFailureReason());
-                }
-                log.info("Validated optimized query length: {}", validatedResult.getOptimizedQuery().length());
-                
-                // Test standard optimization
-                OptimizationResult standardResult = elasticsearchDslOptimizer.optimizeQuery(jsonString);
-                log.info("Standard optimization:");
-                standardResult.logOptimizationSummary();
-                
-                // Check specific transformations
-                String optimizedQuery = standardResult.getOptimizedQuery();
-                boolean hasHierarchy = optimizedQuery.contains("__qualifiedNameHierarchy");
-                boolean hasRegexp = optimizedQuery.contains("regexp");
-                boolean stillHasDatabaseQualifiedName = optimizedQuery.contains("databaseQualifiedName");
-                boolean stillHasWildcard = optimizedQuery.contains("wildcard");
-                
-                log.info("Transformation Analysis for wildcards_too_many.json:");
-                log.info("  - Has __qualifiedNameHierarchy: {}", hasHierarchy);
-                log.info("  - Has regexp (consolidation): {}", hasRegexp);
-                log.info("  - Still has databaseQualifiedName: {}", stillHasDatabaseQualifiedName);
-                log.info("  - Still has wildcard queries: {}", stillHasWildcard);
-                
-                if (standardResult.getMetrics() != null) {
-                    log.info("  - Applied rules: {}", String.join(", ", standardResult.getMetrics().appliedRules));
-                }
-                
-                return;
-            }
-        } catch (IOException e) {
-            log.error("Error testing wildcards_too_many.json: {}", e.getMessage(), e);
-        }
-        
-        // Fallback to original behavior
-        File dir = new File("/Users/sriram.aravamuthan/Documents/Notes/TestDSLRewrite/");
-        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
-        if (files != null) {
-            for (File file : files) {
-                try {
-                    BufferedInputStream bufferedInputStream = IOUtils.buffer(new FileInputStream(file));
-                    //convert to bufferedInputStream to string
-                    String jsonString = IOUtils.toString(bufferedInputStream, StandardCharsets.UTF_8);
-                    OptimizationResult result = elasticsearchDslOptimizer.optimizeQuery(jsonString);
-                    result.logOptimizationSummary();
-                    //write the output to another file in same directory with file name as <original_file_name>_optimized.json
-                    String outputFileName = file.getName().replace(".json", "_optimized.json");
-                    File outputFile = new File(dir, outputFileName);
-                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
-                        writer.write(result.getOptimizedQuery());
-                    }
-                    log.info("Optimized query written to: {}", outputFile.getAbsolutePath());
-                } catch (IOException e) {
-                    log.error("Failed to read file {}: {}", file.getName(), e.getMessage(), e);
-                }
-            }
-        } else {
-            log.info("No JSON files found in the specified directory.");
-        }
-    }
 }
