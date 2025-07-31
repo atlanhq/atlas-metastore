@@ -28,6 +28,10 @@ on:
       - master
       - staging
       - downloadimpactreport
+      - mlh-797-staging
+      - tagscanary
+      - tagscanarymerge
+      - fixlabels
       - mlh-755-staging
 
 jobs:
