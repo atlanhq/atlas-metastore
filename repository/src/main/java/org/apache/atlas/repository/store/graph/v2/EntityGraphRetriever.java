@@ -1066,6 +1066,10 @@ public class EntityGraphRetriever {
 
         AtlasAttribute atlasAttribute = entityType.getRelationshipAttribute(attribute, null);
         if (atlasAttribute != null && atlasAttribute.getAttributeType() != null) {
+
+            if (CollectionUtils.isEmpty(RequestContext.get().getRelationAttrsForSearch())) {
+                return;
+            }
             edgeLabels.add(atlasAttribute.getRelationshipEdgeLabel());
         } else {
             LOG.debug("Ignoring non-relationship type attribute: {}", attribute);
