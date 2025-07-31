@@ -22,6 +22,7 @@ import com.sun.jersey.multipart.FormDataParam;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.authorize.AtlasAdminAccessRequest;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
 import org.apache.atlas.authorize.AtlasPrivilege;
@@ -47,6 +48,7 @@ import org.apache.atlas.model.metrics.AtlasMetrics;
 import org.apache.atlas.model.patches.AtlasPatch.AtlasPatches;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.audit.AtlasAuditService;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.repository.impexp.AtlasServerService;
 import org.apache.atlas.repository.impexp.ExportImportAuditService;
 import org.apache.atlas.repository.impexp.ExportService;
@@ -76,6 +78,7 @@ import org.apache.commons.configuration.ConfigurationException;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.commons.lang.RandomStringUtils;
 import org.apache.commons.lang.StringUtils;
+import org.elasticsearch.client.RequestOptions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
@@ -321,6 +324,7 @@ public class AdminResource {
     @GET
     @Path("status")
     @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
     public Response getStatus() {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> AdminResource.getStatus()");
@@ -416,6 +420,7 @@ public class AdminResource {
     @GET
     @Path("health")
     @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
     public Response healthCheck() {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> AdminResource.healthCheck()");
@@ -426,6 +431,7 @@ public class AdminResource {
         AtlasGraph<Object, Object> graph = AtlasGraphProvider.getGraphInstance();
 
         boolean cassandraFailed = false;
+        boolean elasticSearchFailed = false;
         try {
             List<HealthStatus> healthStatuses = atlasHealthStatus.getHealthStatuses();
             for (final HealthStatus healthStatus : healthStatuses) {
@@ -440,11 +446,19 @@ public class AdminResource {
             cassandraFailed = true;
         }
 
+        try {
+            boolean isConnected = AtlasElasticsearchDatabase.getClient().ping(RequestOptions.DEFAULT);
+            result.put("elasticsearch", new HealthStatus("elasticsearch", isConnected ? "ok" : "error", isConnected, new Date().toString(), ""));
+        } catch (Exception e) {
+            result.put("elasticsearch", new HealthStatus("elasticsearch", "error", false, new Date().toString(), e.toString()));
+            elasticSearchFailed = true;
+        }
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== AdminResource.healthCheck()");
         }
 
-        if (cassandraFailed || atlasHealthStatus.isAtleastOneComponentUnHealthy()) {
+        if (cassandraFailed || elasticSearchFailed || atlasHealthStatus.isAtleastOneComponentUnHealthy()) {
             return Response.status(500).entity(result).build();
         }
 

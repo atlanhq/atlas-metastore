@@ -1930,9 +1930,10 @@ public class EntityGraphMapper {
         Map<String, Object> newMap      = new HashMap<>();
         AtlasMapType        mapType     = (AtlasMapType) ctx.getAttrType();
         AtlasAttribute      attribute   = ctx.getAttribute();
-        Map<String, Object> currentMap  = getMapElementsProperty(mapType, ctx.getReferringVertex(), ctx.getVertexProperty(), attribute);
+        Map<String, Object> currentMap  = getMapElementsProperty(mapType, ctx.getReferringVertex(), AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty()), attribute);
         boolean             isReference = isReference(mapType.getValueType());
         boolean             isSoftReference = ctx.getAttribute().getAttributeDef().isSoftReferenced();
+        String propertyName = ctx.getVertexProperty();
 
         if (PARTIAL_UPDATE.equals(ctx.getOp()) && attribute.getAttributeDef().isAppendOnPartialUpdate() && MapUtils.isNotEmpty(currentMap)) {
             if (MapUtils.isEmpty(newVal)) {
@@ -1956,7 +1957,6 @@ public class EntityGraphMapper {
             newVal = new HashMap<>();
         }
 
-        String propertyName = ctx.getVertexProperty();
 
         if (isReference) {
             for (Map.Entry<Object, Object> entry : newVal.entrySet()) {
@@ -6322,6 +6322,12 @@ public class EntityGraphMapper {
                 throw new AtlasBaseException(String.format("Classification with typeName %s not found for entity %s and parentEntity %s", classificationTypeName, sourceEntityGuid, parentEntityGuid));
             }
         }
+
+        if (!tag.isPropagate()) {
+            LOG.warn("Invalid Refresh Prop task, not to be processed, classification with typeName {} is not propagated", tag.getTypeName());
+            return;
+        }
+
         Boolean restrictPropagationThroughLineage = tag.getRestrictPropagationThroughLineage();
         Boolean restrictPropagationThroughHierarchy = tag.getRestrictPropagationThroughHierarchy();
 
