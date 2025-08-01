@@ -110,9 +110,11 @@ public class TaskQueueWatcher implements Runnable {
                     submitAll(tasks, latch);
                     LOG.info("Submitted {} tasks to the queue", tasks.size());
                     waitForTasksToComplete(latch);
+                    redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                    LOG.info("TaskQueueWatcher: Released Lock after task completion, Current task queue size: {}", tasks.size());
                 } else {
                     redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
-                    LOG.info("TaskQueueWatcher: Released Task Lock due to empty ES fetch", pollInterval);
+                    LOG.info("TaskQueueWatcher: Released Task Lock due to empty ES fetch {}", pollInterval);
                 }
                 LOG.info("TaskQueueWatcher: Sleeping for pollInterval: {}", pollInterval);
                 Thread.sleep(pollInterval);
