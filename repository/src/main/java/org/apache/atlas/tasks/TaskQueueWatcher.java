@@ -94,12 +94,14 @@ public class TaskQueueWatcher implements Runnable {
             RequestContext requestContext = RequestContext.get();
             requestContext.setMetricRegistry(this.metricRegistry);
             TasksFetcher fetcher = new TasksFetcher(registry);
+            boolean lockAcquired = false;
             try {
                 if (!redisService.acquireDistributedLock(ATLAS_TASK_LOCK)) {
                     Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
                     continue;
                 }
                 LOG.info("TaskQueueWatcher: Acquired distributed lock: {}", ATLAS_TASK_LOCK);
+                lockAcquired = true;
 
                 List<AtlasTask> tasks = fetcher.getTasks();
                 if (CollectionUtils.isNotEmpty(tasks)) {
@@ -108,20 +110,31 @@ public class TaskQueueWatcher implements Runnable {
                     LOG.info("Submitted {} tasks to the queue", tasks.size());
                     waitForTasksToComplete(latch);
                 } else {
-                    redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                    LOG.info("TaskQueueWatcher: No tasks fetched during this cycle.");
                 }
-                Thread.sleep(pollInterval);
             } catch (InterruptedException interruptedException) {
                 LOG.error("TaskQueueWatcher: Interrupted: thread is terminated, new tasks will not be loaded into the queue until next restart");
                 break;
             } catch (Exception e) {
                 LOG.error("TaskQueueWatcher: Exception occurred " + e.getMessage(), e);
             } finally {
-                redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                if (lockAcquired) {
+                    redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                    LOG.info("TaskQueueWatcher: Released Task Lock in finally");
+                    lockAcquired = false;
+                }
                 fetcher.clearTasks();
             }
+            try{
+                LOG.info("TaskQueueWatcher: Sleeping for pollInterval: {}", pollInterval);
+                Thread.sleep(pollInterval);}
+            catch (Exception e){
+                LOG.warn("TaskQueueWatcher: Sleep interrupted, exiting.");
+                break;
+            }
         }
-    }
+        }
+
 
     private void waitForTasksToComplete(final CountDownLatch latch) throws InterruptedException {
         if (latch.getCount() != 0) {
