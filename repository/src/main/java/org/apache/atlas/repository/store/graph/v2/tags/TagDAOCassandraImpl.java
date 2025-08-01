@@ -58,6 +58,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     private static final int BATCH_SIZE_LIMIT = 100;
     private static final int BATCH_SIZE_LIMIT_FOR_DELETION = 1000;
     private static final Duration CONNECTION_TIMEOUT = Duration.ofSeconds(5);
+    private static final Duration REQUEST_TIMEOUT = Duration.ofSeconds(120);
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(30);
     public static final String DEFAULT_HOST = "localhost";
     public static final String DATACENTER = "datacenter1";
@@ -104,6 +105,9 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     private final PreparedStatement insertPropagationBySourceStmt;
     private final PreparedStatement deletePropagationStmt;
 
+    // Health check prepared statement
+    private final PreparedStatement healthCheckStmt;
+
 
     private TagDAOCassandraImpl() throws AtlasBaseException {
         try {
@@ -111,6 +115,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             Map<String, String> replicationConfig = Map.of("class", "SimpleStrategy", "replication_factor", ApplicationProperties.get().getString(CASSANDRA_REPLICATION_FACTOR_PROPERTY, "3"));
 
             DriverConfigLoader configLoader = DriverConfigLoader.programmaticBuilder()
+                    .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, REQUEST_TIMEOUT)
                     .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, CONNECTION_TIMEOUT)
                     .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, CONNECTION_TIMEOUT)
                     .withDuration(DefaultDriverOption.CONTROL_CONNECTION_TIMEOUT, CONNECTION_TIMEOUT)
@@ -169,6 +174,9 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
             deletePropagationStmt = prepare(String.format(
                     "DELETE FROM %s.%s WHERE source_id = ? AND tag_type_name = ? AND propagated_asset_id = ?", KEYSPACE, PROPAGATED_TAGS_TABLE_NAME));
+
+            // === Health check statement ===
+            healthCheckStmt = prepare("SELECT release_version FROM system.local");
 
         } catch (Exception e) {
             LOG.error("Failed to initialize TagDAO", e);
@@ -594,13 +602,23 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             PaginatedTagResult result;
             String pagingState = null;
             String cacheKey = "full_fetch_" + sourceVertexId + "|" + tagTypeName;
+            int pageCount = 0;
+            LOG.info("Starting full propagation fetch for sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName);
             do {
+                pageCount++;
                 result = getPropagationsForAttachmentBatchWithPagination(sourceVertexId, tagTypeName, pagingState, 500, cacheKey);
+                int fetchedCount = result.getTags().size();
                 allTags.addAll(result.getTags());
                 pagingState = result.getPagingState();
+                LOG.info("sourceVertexId={}, tagTypeName={}: Page {}: Fetched {} propagations. Total fetched: {}. Has next page: {}",
+                        sourceVertexId, tagTypeName, pageCount, fetchedCount, allTags.size(), !result.isDone());
             } while (!result.isDone());
+
             if (allTags.isEmpty()) {
                 LOG.warn("No propagations found for sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName);
+            } else {
+                LOG.info("Finished full propagation fetch for sourceVertexId={}, tagTypeName={}. Total propagations loaded: {}",
+                        sourceVertexId, tagTypeName, allTags.size());
             }
             return allTags;
         } catch (Exception e) {
@@ -752,6 +770,44 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
     public static AtlasClassification toAtlasClassification(Map<String, Object> tagMetaJsonMap) {
         return objectMapper.convertValue(tagMetaJsonMap, AtlasClassification.class);
+    }
+
+    /**
+     * Performs a lightweight health check against Cassandra to verify connectivity and availability.
+     * This method executes a simple query against the system.local table which is always available.
+     * 
+     * @return true if Cassandra is healthy and responsive, false otherwise
+     */
+    public boolean isHealthy() {
+        try {
+            Instant start = Instant.now();
+            
+            // Execute a lightweight query against system.local
+            ResultSet rs = cassSession.execute(healthCheckStmt.bind());
+            
+            // Verify we get at least one row back
+            boolean hasResults = rs.iterator().hasNext();
+            
+            Duration duration = Duration.between(start, Instant.now());
+            
+            if (hasResults) {
+                LOG.debug("Cassandra health check successful in {}ms", duration.toMillis());
+                return true;
+            } else {
+                LOG.warn("Cassandra health check failed - no results returned from system.local");
+                return false;
+            }
+            
+        } catch (DriverTimeoutException e) {
+            LOG.warn("Cassandra health check failed due to timeout: {}", e.getMessage());
+            return false;
+        } catch (NoHostAvailableException e) {
+            LOG.warn("Cassandra health check failed - no hosts available: {}", e.getMessage());
+            return false;
+        } catch (Exception e) {
+            LOG.warn("Cassandra health check failed due to unexpected error: {}", e.getMessage(), e);
+            return false;
+        }
     }
 
     @Override
