@@ -130,6 +130,9 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
+import io.reactivex.rxjava3.core.Single;
+import io.reactivex.rxjava3.schedulers.Schedulers;
+import java.util.concurrent.TimeUnit;
 
 @Component
 public class EntityGraphRetriever {
@@ -1123,6 +1126,7 @@ public class EntityGraphRetriever {
     public VertexEdgePropertiesCache enrichVertexPropertiesByVertexIds(Set<String> vertexIds, Set<String> attributes) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("enrichVertexPropertiesByVertexIds");
        try {
+           long timeout = AtlasConfiguration.MIN_TIMEOUT_SUPER_VERTEX.getLong();
            VertexEdgePropertiesCache ret = new VertexEdgePropertiesCache();
            if (CollectionUtils.isEmpty(vertexIds)) {
                return null;
@@ -1146,19 +1150,31 @@ public class EntityGraphRetriever {
            Set<String> vertexIdsToProcess = new HashSet<>();
            if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
                // Get all edges
-               GraphTraversal<Edge, Map<String, Object>> edgeTraversal =
-                       ((AtlasJanusGraph) graph).V(vertexIds)
+               List<Map<String, Object>> results;
+               try {
+                   GraphTraversal<Edge, Map<String, Object>> edgeTraversal = Single.fromCallable(() -> {
+                       return ((AtlasJanusGraph) graph).V(vertexIds)
                                .bothE()
                                .has(STATE_PROPERTY_KEY, ACTIVE.name())
                                .project( "id", "valueMap","label", "inVertexId", "outVertexId")
-                               .by(__.id()) // Returns the edge id
-                               .by(__.valueMap(true)) // Returns the valueMap
-                               .by(__.label()) // Returns the edge label
-                               .by(__.inV().id())  // Returns the inVertexId
-                               .by(__.outV().id()); // Returns the outVertexId
-
-               List<Map<String, Object>> results = edgeTraversal.toList();
-
+                               .by(__.id())
+                               .by(__.valueMap(true))
+                               .by(__.label())
+                               .by(__.inV().id())
+                               .by(__.outV().id());
+                   })
+                   .timeout(timeout, TimeUnit.SECONDS)
+                   .subscribeOn(Schedulers.io())
+                   .onErrorReturn(e -> {
+                       LOG.warn("Super vertex detected: vertex id = {}", vertexIds);
+                       return getBoundedEdgeLabels(vertexIds);
+                   })
+                   .blockingGet();
+                   results = edgeTraversal != null ? edgeTraversal.toList() : Collections.emptyList();
+               } catch (Exception e) {
+                   LOG.error("unexpected error in edgeTraversal", e);
+                   results = Collections.emptyList();
+               }
 
                for(String vertexId : vertexIds) {
                    for (Map<String, Object> result : results) {
@@ -1205,6 +1221,21 @@ public class EntityGraphRetriever {
        } finally {
            RequestContext.get().endMetricRecord(metricRecorder);
        }
+    }
+
+    private GraphTraversal<Edge, Map<String, Object>> getBoundedEdgeLabels(Set<String> vertexIds) {
+        long limit = AtlasConfiguration.MIN_EDGES_SUPER_VERTEX.getInt();
+        return ((AtlasJanusGraph) graph).V(vertexIds)
+                .local(__.bothE().has(STATE_PROPERTY_KEY, ACTIVE.name()).group().by(__.label()).by(__.limit(limit).fold()))
+                .unfold()
+                .select(Column.values)
+                .unfold()
+                .project("id", "valueMap", "label", "inVertexId", "outVertexId")
+                .by(__.id())
+                .by(__.valueMap(true))
+                .by(__.label())
+                .by(__.inV().id())
+                .by(__.outV().id());
     }
 
     private AtlasEntity mapVertexToAtlasEntity(AtlasVertex entityVertex, AtlasEntityExtInfo entityExtInfo) throws AtlasBaseException {
