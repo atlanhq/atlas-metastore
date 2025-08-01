@@ -127,9 +127,15 @@ public class TaskQueueWatcher implements Runnable {
                 }
                 fetcher.clearTasks();
             }
-            LOG.info("TaskQueueWatcher: Sleeping for pollInterval: {}", pollInterval);
-            Thread.sleep(pollInterval);
-        }
+            try{
+                LOG.info("TaskQueueWatcher: Sleeping for pollInterval: {}", pollInterval);
+                Thread.sleep(pollInterval);}
+            catch (Exception e){
+                LOG.warn("TaskQueueWatcher: Sleep interrupted, exiting.");
+                break;
+                }
+            }
+
     }
 
     private void waitForTasksToComplete(final CountDownLatch latch) throws InterruptedException {
