@@ -59,6 +59,7 @@ import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEnt
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.lineage.ProcessPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
@@ -81,6 +82,7 @@ import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.util.FileUtils;
+import org.apache.atlas.util.NanoIdUtils;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
@@ -103,6 +105,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSo
 import static java.lang.Boolean.FALSE;
 import static org.apache.atlas.AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
+import static org.apache.atlas.AtlasConfiguration.ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE;
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.authorize.AtlasPrivilege.*;
 import static org.apache.atlas.bulkimport.BulkImportResponse.ImportStatus.FAILED;
@@ -146,6 +149,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final ESAliasStore esAliasStore;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
+
+    private static final Boolean isConnectionLineageEnabled = ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean();
 
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
@@ -1034,26 +1039,52 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     @Override
     @GraphTransaction
-    public void repairClassificationMappings(final String guid) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> repairClassificationMappings({})", guid);
+    public void repairClassificationMappings(List<String> guids) throws AtlasBaseException {
+        for (String guid : guids) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("==> repairClassificationMappings({})", guid);
+            }
+
+            if (StringUtils.isEmpty(guid)) {
+                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+            }
+
+            AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+
+            if (entityVertex == null) {
+                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+            }
+
+            entityGraphMapper.repairClassificationMappings(entityVertex);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== repairClassificationMappings({})", guid);
+            }
+        }
+    }
+
+    public Map<String, String> repairClassificationMappingsV2(List<String> guids) throws AtlasBaseException {
+        Map<String, String> errorMap = new HashMap<>(0);
+
+        List<AtlasVertex> verticesToRepair = new ArrayList<>(guids.size());
+        for (String guid : guids) {
+            if (StringUtils.isEmpty(guid)) {
+                errorMap.put(NanoIdUtils.randomNanoId(), AtlasErrorCode.INSTANCE_GUID_NOT_FOUND.getFormattedErrorMessage(guid));
+                continue;
+            }
+
+            AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+            if (entityVertex == null) {
+                errorMap.put(guid, AtlasErrorCode.INSTANCE_GUID_NOT_FOUND.getFormattedErrorMessage(guid));
+                continue;
+            }
+
+            verticesToRepair.add(entityVertex);
         }
 
-        if (StringUtils.isEmpty(guid)) {
-            throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
-        }
+        errorMap.putAll(entityGraphMapper.repairClassificationMappingsV2(verticesToRepair));
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
-
-        if (entityVertex == null) {
-            throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
-        }
-
-        entityGraphMapper.repairClassificationMappings(entityVertex);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("<== repairClassificationMappings({})", guid);
-        }
+        return errorMap;
     }
 
     @Override
@@ -1732,7 +1763,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapper entityGraphMapper, boolean isPartialUpdate) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
-        this.graph.setEnableCache(RequestContext.get().isCacheEnabled());
         EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapper);
         EntityGraphDiscoveryContext discoveryContext = graphDiscoverer.discoverEntities();
         EntityMutationContext       context          = new EntityMutationContext(discoveryContext);
@@ -1790,7 +1820,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         graphDiscoverer.validateAndNormalize(entity);
 
                         //Create vertices which do not exist in the repository
-                        if (RequestContext.get().isImportInProgress() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
+                        if (RequestContext.get().isAllowCustomGuid() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
                             vertex = entityGraphMapper.createVertexWithGuid(entity, entity.getGuid());
                         } else {
                             vertex = entityGraphMapper.createVertex(entity);
@@ -2072,6 +2102,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
                 preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
                 break;
+
+            case PROCESS_ENTITY_TYPE:
+                if(isConnectionLineageEnabled){
+                    preProcessors.add(new ProcessPreProcessor(typeRegistry, entityRetriever, graph, this));
+                }
         }
 
         //  The default global pre-processor for all AssetTypes

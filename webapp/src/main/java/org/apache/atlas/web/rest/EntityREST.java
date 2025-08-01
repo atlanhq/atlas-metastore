@@ -400,13 +400,15 @@ public class EntityREST {
     public EntityMutationResponse createOrUpdate(AtlasEntityWithExtInfo entity,
                                                  @QueryParam("replaceClassifications") @DefaultValue("false") boolean replaceClassifications,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
-                                                 @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes) throws AtlasBaseException {
+                                                 @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
+                                                 @QueryParam("allowCustomQualifiedName") @DefaultValue("false") boolean allowCustomQualifiedName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.createOrUpdate()");
             }
+            RequestContext.get().setAllowCustomQualifiedName(allowCustomQualifiedName);
             validateAttributeLength(Lists.newArrayList(entity.getEntity()));
 
             BulkRequestContext context = new BulkRequestContext.Builder()
@@ -811,7 +813,9 @@ public class EntityREST {
                                                  @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
-                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
+                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration,
+                                                 @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid,
+                                                 @QueryParam("allowCustomQualifiedName") @DefaultValue("false") boolean allowCustomQualifiedName
     ) throws AtlasBaseException {
 
         if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
@@ -819,8 +823,9 @@ public class EntityREST {
         }
 
         AtlasPerfTracer perf = null;
-        RequestContext.get().setEnableCache(false);
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
+        RequestContext.get().setAllowCustomGuid(allowCustomGuid);
+        RequestContext.get().setAllowCustomQualifiedName(allowCustomQualifiedName);
         try {
 
             if (CollectionUtils.isEmpty(entities.getEntities())) {
@@ -1232,8 +1237,26 @@ public class EntityREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairClassifications()");
             }
 
-            entitiesStore.repairClassificationMappings(guid);
-            // TODO: Fix this API for V2 to fix assets tag attributes
+            entityMutationService.repairClassificationMappings(Collections.singletonList(guid));
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    @POST
+    @Path("bulk/repairClassificationsMappings")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Consumes(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Map<String, String> repairClassificationsMappings(Set<String> guids) throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairClassificationsMappings()");
+            }
+
+            return entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
         } finally {
             AtlasPerfTracer.log(perf);
         }

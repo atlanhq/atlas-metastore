@@ -14,6 +14,9 @@ import javax.servlet.http.HttpServletResponse;
 import javax.validation.constraints.NotNull;
 import java.io.IOException;
 
+import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
+import static org.apache.commons.lang.StringUtils.isEmpty;
+
 /**
  * Filter used to record HTTP request & response metrics
  */
@@ -34,7 +37,12 @@ public class MetricsFilter extends OncePerRequestFilter {
             timerSample = metricUtils.start(request.getRequestURI());
             filterChain.doFilter(request, response);
         } finally {
-            metricUtils.recordHttpTimer(timerSample, request.getMethod(), request.getRequestURI(), response.getStatus());
+            String clientOrigin = request.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            if (isEmpty(clientOrigin)) {
+                clientOrigin = "other";
+            }
+            metricUtils.recordHttpTimer(timerSample, request.getMethod(), request.getRequestURI(), response.getStatus(), 
+                                      "origin", clientOrigin);
         }
     }
 }

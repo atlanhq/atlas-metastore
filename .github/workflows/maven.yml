@@ -27,11 +27,13 @@ on:
       - development
       - master
       - staging
+      - downloadimpactreport
+      - mlh-797-staging
       - tagscanary
       - tagscanarymerge
       - fixlabels
       - interceptapis
-      - taglock
+      - mlh-755-staging
 
 jobs:
   build:
