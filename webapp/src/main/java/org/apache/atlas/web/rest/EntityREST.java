@@ -1253,7 +1253,7 @@ public class EntityREST {
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairClassificationsMappings()");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairClassificationsMappings(" + guids.size() + ")");
             }
 
             return entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
