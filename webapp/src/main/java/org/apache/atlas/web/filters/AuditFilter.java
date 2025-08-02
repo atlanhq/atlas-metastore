@@ -133,6 +133,14 @@ public class AuditFilter implements Filter {
             httpResponse.setHeader(X_ATLAN_REQUEST_ID, MDC.get(X_ATLAN_REQUEST_ID));
             currentThread.setName(oldName);
             RequestContext.clear();
+            
+            // MEMORY LEAK FIX: Clear audit buffers to prevent ThreadLocal memory accumulation
+            try {
+                org.apache.atlas.repository.audit.EntityAuditListenerV2.clearAuditBuffer();
+            } catch (Exception e) {
+                LOG.warn("Failed to clear audit buffer during request cleanup", e);
+            }
+            
             MDC.clear();
         }
     }

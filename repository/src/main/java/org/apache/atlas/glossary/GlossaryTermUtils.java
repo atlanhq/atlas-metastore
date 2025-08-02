@@ -1039,4 +1039,67 @@ public class GlossaryTermUtils extends GlossaryUtils {
         }
         return qName + "@" + glossary.getQualifiedName();
     }
+    
+    /**
+     * MEMORY LEAK FIX: Clear all ThreadLocal glossary caches to prevent memory accumulation
+     * These caches can grow over time in long-lived threads, especially in multi-pod environments
+     */
+    public static void clearGlossaryCaches() {
+        try {
+            // Clear glossary name to GUID cache
+            Map<String, String> nameCache = glossaryNameGuidCache.get();
+            if (nameCache != null) {
+                nameCache.clear();
+            }
+            glossaryNameGuidCache.remove();
+            
+            // Clear term order cache
+            Map<String, Integer> orderCache = glossaryTermOrderCache.get();
+            if (orderCache != null) {
+                orderCache.clear();
+            }
+            glossaryTermOrderCache.remove();
+            
+            // Clear term qualified name to GUID cache
+            Map<String, String> qNameCache = glossaryTermQNameGuidCache.get();
+            if (qNameCache != null) {
+                qNameCache.clear();
+            }
+            glossaryTermQNameGuidCache.remove();
+            
+        } catch (Exception e) {
+            // Non-critical error, continue execution
+        }
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Periodic cleanup to limit cache sizes during active operations
+     * This prevents unlimited growth within active threads
+     */
+    public static void limitCacheSizes() {
+        try {
+            final int MAX_CACHE_SIZE = 1000;
+            
+            // Limit glossary name cache size
+            Map<String, String> nameCache = glossaryNameGuidCache.get();
+            if (nameCache != null && nameCache.size() > MAX_CACHE_SIZE) {
+                nameCache.clear();
+            }
+            
+            // Limit term order cache size
+            Map<String, Integer> orderCache = glossaryTermOrderCache.get();
+            if (orderCache != null && orderCache.size() > MAX_CACHE_SIZE) {
+                orderCache.clear();
+            }
+            
+            // Limit term qualified name cache size
+            Map<String, String> qNameCache = glossaryTermQNameGuidCache.get();
+            if (qNameCache != null && qNameCache.size() > MAX_CACHE_SIZE) {
+                qNameCache.clear();
+            }
+            
+        } catch (Exception e) {
+            // Non-critical error, continue execution
+        }
+    }
 }

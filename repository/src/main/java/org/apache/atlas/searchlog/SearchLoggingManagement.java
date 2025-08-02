@@ -30,6 +30,8 @@ import javax.inject.Inject;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.PreDestroy;
 
 @Component
 public class SearchLoggingManagement {
@@ -53,5 +55,38 @@ public class SearchLoggingManagement {
     public void log(SearchRequestLogData searchRequestLogData) {
         SearchLoggingConsumer loggerConsumer = new SearchLoggingConsumer(esSearchLoggers, searchRequestLogData);
         this.executorService.submit(loggerConsumer);
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Proper cleanup of executor service to prevent thread leaks
+     * This is critical in multi-pod environments where services restart frequently
+     */
+    @PreDestroy
+    public void cleanup() {
+        if (executorService != null && !executorService.isShutdown()) {
+            LOG.info("Shutting down SearchLoggingManagement executor service");
+            
+            try {
+                // Shutdown gracefully
+                executorService.shutdown();
+                
+                // Wait for tasks to complete
+                if (!executorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    LOG.warn("SearchLoggingManagement executor did not terminate gracefully, forcing shutdown");
+                    executorService.shutdownNow();
+                    
+                    // Wait a bit more for force shutdown
+                    if (!executorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                        LOG.error("SearchLoggingManagement executor did not terminate even after forced shutdown");
+                    }
+                }
+                
+                LOG.info("SearchLoggingManagement executor service shutdown completed");
+            } catch (InterruptedException e) {
+                LOG.warn("Interrupted while shutting down SearchLoggingManagement executor", e);
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
     }
 }

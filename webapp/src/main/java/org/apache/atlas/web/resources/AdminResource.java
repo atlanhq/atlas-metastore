@@ -109,6 +109,7 @@ import org.apache.atlas.model.general.HealthStatus;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
+import org.apache.atlas.services.AtlasMemoryCleanupService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.SecureRandom;
@@ -124,6 +125,7 @@ import java.util.TimeZone;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 import java.util.*;
+import java.util.Date;
 
 import static org.apache.atlas.AtlasErrorCode.DEPRECATED_API;
 import static org.apache.atlas.AtlasErrorCode.DISABLED_API;
@@ -195,6 +197,7 @@ public class AdminResource {
     private final  boolean                  isOnDemandLineageEnabled;
     private final  int                      defaultLineageNodeCount;
     private final  MetricsRegistry          metricsRegistry;
+    private final  AtlasMemoryCleanupService memoryCleanupService;
 
     static {
         try {
@@ -211,7 +214,8 @@ public class AdminResource {
                          AtlasServerService serverService,
                          ExportImportAuditService exportImportAuditService, AtlasEntityStore entityStore,
                          AtlasPatchManager patchManager, AtlasAuditService auditService,
-                         TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry) {
+                         TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry,
+                         AtlasMemoryCleanupService memoryCleanupService) {
         this.serviceState              = serviceState;
         this.metricsService            = metricsService;
         this.exportService             = exportService;
@@ -228,6 +232,7 @@ public class AdminResource {
         this.taskManagement            = taskManagement;
         this.debugMetricsRESTSink      = debugMetricsRESTSink;
         this.metricsRegistry           = metricsRegistry;
+        this.memoryCleanupService      = memoryCleanupService;
 
         if (atlasProperties != null) {
             this.defaultUIVersion = atlasProperties.getString(DEFAULT_UI_VERSION, UI_VERSION_V2);
@@ -982,6 +987,116 @@ public class AdminResource {
     public void deleteFeatureFlag(@PathParam("flag") String key) throws AtlasBaseException {
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_FEATURE_FLAG_CUD), "featureFlag");
         FeatureFlagStore.deleteFlag(key);
+    }
+
+    /**
+     * MEMORY LEAK FIX: Manual memory cleanup endpoint for admin operations
+     * Useful for triggering cleanup during high memory usage or before maintenance
+     */
+    @POST
+    @Path("memory/cleanup")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response triggerMemoryCleanup(@QueryParam("force") @DefaultValue("false") boolean forceGC) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.triggerMemoryCleanup(force={})", forceGC);
+        }
+
+        try {
+            long startTime = System.currentTimeMillis();
+            Runtime runtime = Runtime.getRuntime();
+            long beforeCleanup = runtime.totalMemory() - runtime.freeMemory();
+
+            if (forceGC) {
+                // Perform aggressive cleanup with garbage collection
+                memoryCleanupService.emergencyCleanup();
+            } else {
+                // Standard comprehensive cleanup
+                memoryCleanupService.comprehensiveCleanup();
+            }
+
+            long afterCleanup = runtime.totalMemory() - runtime.freeMemory();
+            long duration = System.currentTimeMillis() - startTime;
+            long memoryFreed = beforeCleanup - afterCleanup;
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "completed");
+            response.put("durationMs", duration);
+            response.put("memoryFreedMB", memoryFreed / (1024 * 1024));
+            response.put("forceGC", forceGC);
+            response.put("beforeCleanupMB", beforeCleanup / (1024 * 1024));
+            response.put("afterCleanupMB", afterCleanup / (1024 * 1024));
+            response.put("cleanupStats", memoryCleanupService.getCleanupStats());
+
+            LOG.info("Memory cleanup completed: freed {}MB in {}ms", memoryFreed / (1024 * 1024), duration);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== AdminResource.triggerMemoryCleanup()");
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error during manual memory cleanup", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return Response.status(500).entity(errorResponse).build();
+        }
+    }
+
+    /**
+     * MEMORY LEAK FIX: Memory status endpoint for monitoring memory usage and cleanup statistics
+     */
+    @GET
+    @Path("memory/status")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response getMemoryStatus() {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.getMemoryStatus()");
+        }
+
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            long totalMemory = runtime.totalMemory();
+            long freeMemory = runtime.freeMemory();
+            long usedMemory = totalMemory - freeMemory;
+            long maxMemory = runtime.maxMemory();
+
+            Map<String, Object> memoryInfo = new HashMap<>();
+            memoryInfo.put("totalMemoryMB", totalMemory / (1024 * 1024));
+            memoryInfo.put("freeMemoryMB", freeMemory / (1024 * 1024));
+            memoryInfo.put("usedMemoryMB", usedMemory / (1024 * 1024));
+            memoryInfo.put("maxMemoryMB", maxMemory / (1024 * 1024));
+            memoryInfo.put("memoryUsagePercent", Math.round((double) usedMemory / totalMemory * 100.0));
+            memoryInfo.put("cleanupNeeded", memoryCleanupService.isMemoryCleanupNeeded());
+            memoryInfo.put("cleanupStats", memoryCleanupService.getCleanupStats());
+
+            // Add JVM info
+            Map<String, Object> jvmInfo = new HashMap<>();
+            jvmInfo.put("availableProcessors", runtime.availableProcessors());
+            jvmInfo.put("jvmName", System.getProperty("java.vm.name"));
+            jvmInfo.put("jvmVersion", System.getProperty("java.vm.version"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("memory", memoryInfo);
+            response.put("jvm", jvmInfo);
+            response.put("timestamp", new Date().toString());
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== AdminResource.getMemoryStatus()");
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error getting memory status", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return Response.status(500).entity(errorResponse).build();
+        }
     }
     private String getEditableEntityTypes(Configuration config) {
         String ret = DEFAULT_EDITABLE_ENTITY_TYPES;

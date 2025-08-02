@@ -268,7 +268,10 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
         }
 
         if (!hiveTablesToIgnore.isEmpty() || !hiveTablesToPrune.isEmpty()) {
-            hiveTablesCache = new LruCache<>(applicationProperties.getInt(CONSUMER_PREPROCESS_HIVE_TABLE_CACHE_SIZE, 10000), 0);
+            // MEMORY LEAK FIX: Reduce cache size from 10K to 1K to prevent memory bloat in multi-pod environments
+            // Also add TTL to prevent indefinite accumulation
+            int cacheSize = applicationProperties.getInt(CONSUMER_PREPROCESS_HIVE_TABLE_CACHE_SIZE, 1000); // Reduced from 10000
+            hiveTablesCache = new LruCache<>(Math.min(cacheSize, 1000), 3600000); // 1 hour TTL
         } else {
             hiveTablesCache = Collections.emptyMap();
         }
@@ -390,6 +393,9 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
             }
 
             notificationInterface.close();
+            
+            // MEMORY LEAK FIX: Clear all caches and patterns during shutdown to prevent memory leaks
+            cleanupCaches();
         } catch (InterruptedException e) {
             LOG.error("Failure in shutting down consumers");
         }
@@ -407,6 +413,49 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
         }
 
         LOG.info("<== stopConsumerThreads()");
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Clean up all caches and collections to prevent memory accumulation
+     * This is especially important in multi-pod environments where pods are restarted frequently
+     */
+    private void cleanupCaches() {
+        try {
+            LOG.info("==> cleanupCaches()");
+            
+            // Clear Hive table caches
+            if (hiveTablesCache != null && !hiveTablesCache.isEmpty()) {
+                LOG.info("Clearing hiveTablesCache with {} entries", hiveTablesCache.size());
+                hiveTablesCache.clear();
+            }
+            
+            // Clear authentication cache if present
+            if (authnCache != null && !authnCache.isEmpty()) {
+                LOG.info("Clearing authnCache with {} entries", authnCache.size());
+                authnCache.clear();
+            }
+            
+            // Clear partition offset tracking
+            if (lastCommittedPartitionOffset != null && !lastCommittedPartitionOffset.isEmpty()) {
+                LOG.info("Clearing lastCommittedPartitionOffset with {} entries", lastCommittedPartitionOffset.size());
+                lastCommittedPartitionOffset.clear();
+            }
+            
+            // Clear pattern lists (they hold compiled regex which can consume memory)
+            if (!hiveTablesToIgnore.isEmpty()) {
+                LOG.info("Clearing hiveTablesToIgnore with {} patterns", hiveTablesToIgnore.size());
+                hiveTablesToIgnore.clear();
+            }
+            
+            if (!hiveTablesToPrune.isEmpty()) {
+                LOG.info("Clearing hiveTablesToPrune with {} patterns", hiveTablesToPrune.size());
+                hiveTablesToPrune.clear();
+            }
+            
+            LOG.info("<== cleanupCaches()");
+        } catch (Exception e) {
+            LOG.warn("Error during cache cleanup - non-critical", e);
+        }
     }
 
     /**

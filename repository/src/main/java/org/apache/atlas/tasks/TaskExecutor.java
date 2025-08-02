@@ -33,6 +33,8 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import javax.annotation.PreDestroy;
 
 
 public class TaskExecutor {
@@ -84,6 +86,57 @@ public class TaskExecutor {
     public void stopQueueWatcher() {
         if (watcher != null) {
             watcher.shutdown();
+        }
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Comprehensive cleanup of TaskExecutor resources
+     * This ensures proper shutdown of all thread pools and prevents resource leaks
+     */
+    @PreDestroy
+    public void cleanup() {
+        try {
+            LOG.info("==> TaskExecutor.cleanup()");
+            
+            // Stop the queue watcher first
+            stopQueueWatcher();
+            
+            // Shutdown the task executor service
+            if (taskExecutorService != null && !taskExecutorService.isShutdown()) {
+                LOG.info("Shutting down TaskExecutor service");
+                
+                taskExecutorService.shutdown();
+                
+                // Wait for running tasks to complete
+                if (!taskExecutorService.awaitTermination(10, TimeUnit.SECONDS)) {
+                    LOG.warn("TaskExecutor did not terminate gracefully, forcing shutdown");
+                    taskExecutorService.shutdownNow();
+                    
+                    // Wait a bit more for forced shutdown
+                    if (!taskExecutorService.awaitTermination(5, TimeUnit.SECONDS)) {
+                        LOG.error("TaskExecutor did not terminate even after forced shutdown");
+                    }
+                }
+                
+                LOG.info("TaskExecutor service shutdown completed");
+            }
+            
+            // Interrupt and cleanup watcher thread if still running
+            if (watcherThread != null && watcherThread.isAlive()) {
+                LOG.info("Interrupting watcher thread");
+                watcherThread.interrupt();
+                try {
+                    watcherThread.join(5000); // Wait 5 seconds for thread to finish
+                } catch (InterruptedException e) {
+                    LOG.warn("Interrupted while waiting for watcher thread to finish");
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
+            LOG.info("<== TaskExecutor.cleanup()");
+            
+        } catch (Exception e) {
+            LOG.error("Error during TaskExecutor cleanup", e);
         }
     }
 

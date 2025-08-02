@@ -55,6 +55,11 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
 
     private final AtlasGraph     graph;
 
+    // MEMORY LEAK FIX: Add cleanup tracking and size limits for ThreadLocal caches
+    private static final int MAX_CACHE_SIZE_PER_THREAD = 1000; // Prevent unlimited growth
+    private static final long CLEANUP_INTERVAL_MS = 300000; // 5 minutes
+    private static volatile long lastCleanupTime = System.currentTimeMillis();
+
     private static final ThreadLocal<Map<Object, String>> vertexGuidCache =
             new ThreadLocal<Map<Object, String>>() {
                 @Override
@@ -78,6 +83,84 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
                     return new HashMap<Object, AtlasEntity.Status>();
                 }
             };
+
+    /**
+     * MEMORY LEAK FIX: Cleanup all ThreadLocal caches to prevent memory accumulation
+     * This is called after each transaction to ensure threads don't accumulate data
+     */
+    public static void cleanupThreadLocalCaches() {
+        try {
+            // Clear all ThreadLocal caches for current thread
+            Map<String, AtlasVertex> guidCache = guidVertexCache.get();
+            if (guidCache != null) {
+                guidCache.clear();
+            }
+            
+            Map<Object, String> vGuidCache = vertexGuidCache.get();
+            if (vGuidCache != null) {
+                vGuidCache.clear();
+            }
+            
+            Map<Object, AtlasEntity.Status> vStateCache = vertexStateCache.get();
+            if (vStateCache != null) {
+                vStateCache.clear();
+            }
+            
+            Map<Object, AtlasEntity.Status> eStateCache = edgeStateCache.get();
+            if (eStateCache != null) {
+                eStateCache.clear();
+            }
+            
+            // Clear the ThreadLocal references completely
+            guidVertexCache.remove();
+            vertexGuidCache.remove();
+            vertexStateCache.remove();
+            edgeStateCache.remove();
+            
+        } catch (Exception e) {
+            LOG.warn("Error during ThreadLocal cache cleanup - non-critical", e);
+        }
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Periodic cleanup to prevent cache growth over time
+     * Called periodically to limit cache sizes even within active transactions
+     */
+    public static void periodicCacheCleanup() {
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastCleanupTime > CLEANUP_INTERVAL_MS) {
+            try {
+                // Limit cache sizes if they grow too large
+                Map<String, AtlasVertex> guidCache = guidVertexCache.get();
+                if (guidCache != null && guidCache.size() > MAX_CACHE_SIZE_PER_THREAD) {
+                    guidCache.clear();
+                    LOG.debug("Cleared oversized guidVertexCache with {} entries", guidCache.size());
+                }
+                
+                Map<Object, String> vGuidCache = vertexGuidCache.get();
+                if (vGuidCache != null && vGuidCache.size() > MAX_CACHE_SIZE_PER_THREAD) {
+                    vGuidCache.clear();
+                    LOG.debug("Cleared oversized vertexGuidCache with {} entries", vGuidCache.size());
+                }
+                
+                Map<Object, AtlasEntity.Status> vStateCache = vertexStateCache.get();
+                if (vStateCache != null && vStateCache.size() > MAX_CACHE_SIZE_PER_THREAD) {
+                    vStateCache.clear();
+                    LOG.debug("Cleared oversized vertexStateCache with {} entries", vStateCache.size());
+                }
+                
+                Map<Object, AtlasEntity.Status> eStateCache = edgeStateCache.get();
+                if (eStateCache != null && eStateCache.size() > MAX_CACHE_SIZE_PER_THREAD) {
+                    eStateCache.clear();
+                    LOG.debug("Cleared oversized edgeStateCache with {} entries", eStateCache.size());
+                }
+                
+                lastCleanupTime = currentTime;
+            } catch (Exception e) {
+                LOG.warn("Error during periodic cache cleanup - non-critical", e);
+            }
+        }
+    }
 
     @Inject
     public GraphTransactionInterceptor(AtlasGraph graph) {
@@ -104,6 +187,9 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
 
         try {
             try {
+                // MEMORY LEAK FIX: Periodic cleanup to prevent cache growth during long transactions
+                periodicCacheCleanup();
+                
                 Object response = invocation.proceed();
 
                 if (isInnerTxn) {
@@ -168,6 +254,10 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
             }
 
             OBJECT_UPDATE_SYNCHRONIZER.releaseLockedObjects();
+            
+            // MEMORY LEAK FIX: Always cleanup ThreadLocal caches after transaction completes
+            // This prevents memory accumulation in long-lived threads (e.g., in multi-pod environments)
+            cleanupThreadLocalCaches();
         }
     }
 

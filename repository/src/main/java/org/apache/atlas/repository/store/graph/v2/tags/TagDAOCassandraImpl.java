@@ -810,6 +810,14 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
     }
 
+    /**
+     * MEMORY LEAK FIX: Clear paging state cache to prevent memory accumulation
+     * This is a public method to allow external cleanup coordination
+     */
+    public static void clearPagingStateCache() {
+        PagingStateCache.clearAll();
+    }
+
     @Override
     public void close() {
         if (cassSession != null && !cassSession.isClosed()) {
@@ -818,14 +826,38 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     }
 
     private static class PagingStateCache {
-        private static final Map<String, String> pagingStates = new java.util.concurrent.ConcurrentHashMap<>();
-        public static String getState(String key) { return pagingStates.get(key); }
+        // MEMORY LEAK FIX: Replace unlimited ConcurrentHashMap with size-limited cache with TTL
+        private static final com.github.benmanes.caffeine.cache.Cache<String, String> pagingStates = 
+            com.github.benmanes.caffeine.cache.Caffeine.newBuilder()
+                .maximumSize(1000) // Limit to 1000 entries
+                .expireAfterWrite(30, java.util.concurrent.TimeUnit.MINUTES) // 30 minute TTL
+                .build();
+                
+        public static String getState(String key) { 
+            return pagingStates.getIfPresent(key); 
+        }
+        
         public static void setState(String key, String state) {
             if (state == null || state.isEmpty()) {
-                pagingStates.remove(key);
+                pagingStates.invalidate(key);
             } else {
                 pagingStates.put(key, state);
             }
+        }
+        
+        /**
+         * MEMORY LEAK FIX: Manual cleanup method for explicit cache clearing
+         * Useful during shutdown or memory pressure situations
+         */
+        public static void clearAll() {
+            pagingStates.invalidateAll();
+        }
+        
+        /**
+         * Get cache stats for monitoring
+         */
+        public static long getCacheSize() {
+            return pagingStates.estimatedSize();
         }
     }
 }
