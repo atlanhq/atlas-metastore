@@ -17,9 +17,11 @@ public class RedisServiceImpl extends AbstractRedisService{
 
     @PostConstruct
     public void init() throws AtlasException {
+        // Memory optimization: Use single Redisson client for both operations to halve thread count
+        // This prevents dual Netty thread pools (8 threads → 4 threads)
         redisClient = Redisson.create(getProdConfig());
-        redisCacheClient = Redisson.create(getCacheImplConfig());
-        LOG.debug("Sentinel redis client created successfully.");
+        redisCacheClient = redisClient;  // Reuse same client for cache operations
+        LOG.info("Sentinel redis client created successfully with shared instance (memory optimized).");
     }
 
     @Override
