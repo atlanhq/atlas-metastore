@@ -109,6 +109,7 @@ import org.apache.atlas.model.general.HealthStatus;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
+import org.apache.atlas.web.service.AtlasCircuitBreakerService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.SecureRandom;
@@ -195,6 +196,7 @@ public class AdminResource {
     private final  boolean                  isOnDemandLineageEnabled;
     private final  int                      defaultLineageNodeCount;
     private final  MetricsRegistry          metricsRegistry;
+    private final  AtlasCircuitBreakerService circuitBreakerService;
 
     static {
         try {
@@ -211,7 +213,8 @@ public class AdminResource {
                          AtlasServerService serverService,
                          ExportImportAuditService exportImportAuditService, AtlasEntityStore entityStore,
                          AtlasPatchManager patchManager, AtlasAuditService auditService,
-                         TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry) {
+                         TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry,
+                         AtlasCircuitBreakerService circuitBreakerService) {
         this.serviceState              = serviceState;
         this.metricsService            = metricsService;
         this.exportService             = exportService;
@@ -228,6 +231,7 @@ public class AdminResource {
         this.taskManagement            = taskManagement;
         this.debugMetricsRESTSink      = debugMetricsRESTSink;
         this.metricsRegistry           = metricsRegistry;
+        this.circuitBreakerService     = circuitBreakerService;
 
         if (atlasProperties != null) {
             this.defaultUIVersion = atlasProperties.getString(DEFAULT_UI_VERSION, UI_VERSION_V2);
@@ -983,6 +987,93 @@ public class AdminResource {
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_FEATURE_FLAG_CUD), "featureFlag");
         FeatureFlagStore.deleteFlag(key);
     }
+
+    /**
+     * CIRCUIT BREAKER: Get circuit breaker status and system metrics for monitoring overload protection
+     * Uses direct JVM management beans - no external metrics dependencies required
+     */
+    @GET
+    @Path("circuitbreaker/status")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response getCircuitBreakerStatus() {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.getCircuitBreakerStatus()");
+        }
+
+        try {
+            Map<String, Object> response = new HashMap<>();
+
+            // Circuit breaker state
+            Map<String, Object> circuitState = new HashMap<>();
+            circuitState.put("enabled", circuitBreakerService.isEnabled());
+            circuitState.put("state", circuitBreakerService.getState().name());
+            circuitState.put("circuitOpen", circuitBreakerService.isCircuitOpen());
+
+            // Current metrics
+            Map<String, Object> currentMetrics = new HashMap<>();
+            currentMetrics.put("cpuUsagePercent", Math.round(circuitBreakerService.getCurrentCpuUsage() * 10.0) / 10.0);
+            currentMetrics.put("heapUsagePercent", Math.round(circuitBreakerService.getCurrentHeapUsage() * 10.0) / 10.0);
+
+            // Request statistics
+            Map<String, Object> requestStats = new HashMap<>();
+            requestStats.put("totalRequests", circuitBreakerService.getTotalRequestCount());
+            requestStats.put("rejectedRequests", circuitBreakerService.getRejectedRequestCount());
+
+            long totalRequests = circuitBreakerService.getTotalRequestCount();
+            long rejectedRequests = circuitBreakerService.getRejectedRequestCount();
+            double rejectionRate = totalRequests > 0 ? (double) rejectedRequests / totalRequests * 100.0 : 0.0;
+            requestStats.put("rejectionRatePercent", Math.round(rejectionRate * 100.0) / 100.0);
+
+            // System health assessment
+            Map<String, Object> healthAssessment = new HashMap<>();
+            boolean isHealthy = !circuitBreakerService.isCircuitOpen();
+            healthAssessment.put("overallStatus", isHealthy ? "HEALTHY" : "OVERLOADED");
+            healthAssessment.put("acceptingRequests", isHealthy);
+
+            // Recommendations based on current state
+            Map<String, Object> recommendations = new HashMap<>();
+            if (!isHealthy) {
+                recommendations.put("immediate", Arrays.asList(
+                    "Reduce request rate",
+                    "Implement exponential backoff",
+                    "Check system resources"
+                ));
+                recommendations.put("longTerm", Arrays.asList(
+                    "Scale system resources",
+                    "Optimize application performance",
+                    "Implement request queuing"
+                ));
+            } else {
+                recommendations.put("monitoring", Arrays.asList(
+                    "Continue monitoring metrics",
+                    "Set up alerting for high usage",
+                    "Review capacity planning"
+                ));
+            }
+
+            response.put("circuitBreaker", circuitState);
+            response.put("metrics", currentMetrics);
+            response.put("requests", requestStats);
+            response.put("health", healthAssessment);
+            response.put("recommendations", recommendations);
+            response.put("timestamp", System.currentTimeMillis());
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== AdminResource.getCircuitBreakerStatus()");
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error getting circuit breaker status", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return Response.status(500).entity(errorResponse).build();
+        }
+    }
+
     private String getEditableEntityTypes(Configuration config) {
         String ret = DEFAULT_EDITABLE_ENTITY_TYPES;
 
