@@ -31,6 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
+import org.springframework.core.annotation.Order;
 import org.springframework.web.context.support.SpringBeanAutowiringSupport;
 
 import javax.inject.Inject;
@@ -55,6 +56,7 @@ import static org.apache.commons.lang.StringUtils.EMPTY;
  * and also introduces a UUID into request and response for tracing requests in logs.
  */
 @Component
+@Order(2) // Run after AtlasCircuitBreakerFilter (Order 1) to avoid processing rejected requests
 public class AuditFilter implements Filter {
     private static final Logger LOG       = LoggerFactory.getLogger(AuditFilter.class);
     private static final Logger AUDIT_LOG = LoggerFactory.getLogger("AUDIT");
