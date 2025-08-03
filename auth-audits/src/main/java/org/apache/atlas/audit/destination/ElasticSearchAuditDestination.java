@@ -19,54 +19,30 @@
 
 package org.apache.atlas.audit.destination;
 
-import org.apache.commons.lang3.StringUtils;
-import org.apache.commons.logging.Log;
-import org.apache.commons.logging.LogFactory;
-import org.apache.http.HttpHost;
-import org.apache.http.client.CredentialsProvider;
 import org.apache.atlas.audit.model.AuditEventBase;
 import org.apache.atlas.audit.model.AuthzAuditEvent;
 import org.apache.atlas.audit.provider.MiscUtil;
-import org.apache.atlas.audit.utils.CredentialsProviderUtil;
-import org.elasticsearch.action.admin.indices.open.OpenIndexRequest;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
+import org.apache.commons.logging.Log;
+import org.apache.commons.logging.LogFactory;
 import org.elasticsearch.action.bulk.BulkItemResponse;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.client.RequestOptions;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.RestHighLevelClient;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.Locale;
-import java.util.Map;
-import java.util.Properties;
-import java.util.concurrent.TimeUnit;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicLong;
 
 public class ElasticSearchAuditDestination extends AuditDestination {
     private static final Log LOG = LogFactory.getLog(ElasticSearchAuditDestination.class);
 
-    public static final String CONFIG_URLS = "urls";
-    public static final String CONFIG_PORT = "port";
-    public static final String CONFIG_USER = "user";
-    public static final String CONFIG_PWRD = "password";
-    public static final String CONFIG_PROTOCOL = "protocol";
     public static final String CONFIG_INDEX = "index";
     public static final String CONFIG_PREFIX = "ranger.audit.elasticsearch";
     public static final String DEFAULT_INDEX = "ranger-audit";
 
     private String index = "index";
-    private volatile RestHighLevelClient client = null;
-    private String protocol;
-    private String user;
-    private int port;
-    private String password;
-    private String hosts;
 
     public ElasticSearchAuditDestination() {
         propPrefix = CONFIG_PREFIX;
@@ -76,18 +52,7 @@ public class ElasticSearchAuditDestination extends AuditDestination {
     @Override
     public void init(Properties props, String propPrefix) {
         super.init(props, propPrefix);
-        this.protocol = getStringProperty(props, propPrefix + "." + CONFIG_PROTOCOL, "http");
-        this.user = getStringProperty(props, propPrefix + "." + CONFIG_USER, "");
-        this.password = getStringProperty(props, propPrefix + "." + CONFIG_PWRD, "");
-        this.port = MiscUtil.getIntProperty(props, propPrefix + "." + CONFIG_PORT, 9200);
         this.index = getStringProperty(props, propPrefix + "." + CONFIG_INDEX, DEFAULT_INDEX);
-        this.hosts = getHosts();
-        LOG.info("Connecting to ElasticSearch: " + connectionString());
-        getClient(); // Initialize client
-    }
-
-    private String connectionString() {
-        return String.format(Locale.ROOT, "User:%s, %s://%s:%s/%s", user, protocol, hosts, port, index);
     }
 
     @Override
@@ -103,12 +68,8 @@ public class ElasticSearchAuditDestination extends AuditDestination {
             logStatusIfRequired();
             addTotalCount(events.size());
 
-            RestHighLevelClient client = getClient();
-            if (null == client) {
-                // ElasticSearch is still not initialized. So need return error
-                addDeferredCount(events.size());
-                return ret;
-            }
+            // Using centralized ES client from AtlasElasticsearchDatabase
+            RestHighLevelClient client = AtlasElasticsearchDatabase.getClient();
 
             ArrayList<AuditEventBase> eventList = new ArrayList<>(events);
             BulkRequest bulkRequest = new BulkRequest();
@@ -165,88 +126,7 @@ public class ElasticSearchAuditDestination extends AuditDestination {
         return true;
     }
 
-    synchronized RestHighLevelClient getClient() {
-        if (client == null) {
-            synchronized (ElasticSearchAuditDestination.class) {
-                if (client == null) {
-                    client = newClient();
-                }
-            }
-        }
-        return client;
-    }
-
     private final AtomicLong lastLoggedAt = new AtomicLong(0);
-
-    public static RestClientBuilder getRestClientBuilder(String urls, String protocol, String user, String password, int port) {
-        RestClientBuilder restClientBuilder = RestClient.builder(
-                MiscUtil.toArray(urls, ",").stream()
-                        .map(x -> new HttpHost(x, port, protocol))
-                        .<HttpHost>toArray(i -> new HttpHost[i])
-        );
-        if (StringUtils.isNotBlank(user) && StringUtils.isNotBlank(password) && !user.equalsIgnoreCase("NONE") && !password.equalsIgnoreCase("NONE")) {
-
-            final CredentialsProvider credentialsProvider =
-                        CredentialsProviderUtil.getBasicCredentials(user, password);
-            restClientBuilder.setHttpClientConfigCallback(clientBuilder ->
-                        clientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-
-        } else {
-            LOG.error("ElasticSearch Credentials not provided!!");
-            final CredentialsProvider credentialsProvider = null;
-            restClientBuilder.setHttpClientConfigCallback(clientBuilder ->
-                    clientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        return restClientBuilder;
-    }
-
-    private RestHighLevelClient newClient() {
-        try {
-            RestClientBuilder restClientBuilder =
-                    getRestClientBuilder(hosts, protocol, user, password, port);
-            RestHighLevelClient restHighLevelClient = new RestHighLevelClient(restClientBuilder);
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Initialized client");
-            }
-            boolean exits = false;
-            try {
-                exits = restHighLevelClient.indices().open(new OpenIndexRequest(this.index), RequestOptions.DEFAULT).isShardsAcknowledged();
-            } catch (Exception e) {
-                LOG.warn("Error validating index " + this.index);
-            }
-            if(exits) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Index exists");
-                }
-            } else {
-                LOG.info("Index does not exist");
-            }
-            return restHighLevelClient;
-        } catch (Throwable t) {
-            lastLoggedAt.updateAndGet(lastLoggedAt -> {
-                long now = System.currentTimeMillis();
-                long elapsed = now - lastLoggedAt;
-                if (elapsed > TimeUnit.MINUTES.toMillis(1)) {
-                    LOG.fatal("Can't connect to ElasticSearch server: " + connectionString(), t);
-                    return now;
-                } else {
-                    return lastLoggedAt;
-                }
-            });
-            return null;
-        }
-    }
-
-    private String getHosts() {
-        String urls = MiscUtil.getStringProperty(props, propPrefix + "." + CONFIG_URLS);
-        if (urls != null) {
-            urls = urls.trim();
-        }
-        if ("NONE".equalsIgnoreCase(urls)) {
-            urls = null;
-        }
-        return urls;
-    }
 
     private String getStringProperty(Properties props, String propName, String defaultValue) {
         String value = MiscUtil.getStringProperty(props, propName);

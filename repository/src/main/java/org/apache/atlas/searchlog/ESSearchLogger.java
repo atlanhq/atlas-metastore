@@ -17,21 +17,18 @@
  */
 package org.apache.atlas.searchlog;
 
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.searchlog.SearchRequestLogData;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.service.Service;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.apache.http.util.EntityUtils;
-import org.elasticsearch.client.RestClientBuilder;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
-import org.elasticsearch.client.RestClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -44,8 +41,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
-
 @Component
 public class ESSearchLogger implements SearchLogger, Service {
     private static final Logger LOG = LoggerFactory.getLogger(ESSearchLogger.class);
@@ -53,8 +48,6 @@ public class ESSearchLogger implements SearchLogger, Service {
     public static final String INDEX_NAME          = "search_logs";
     public static final String MAPPINGS_FILE_NAME  = "es-search-logs-mappings.json";
     public static final String ENDPOINT_CREATE_DOC = INDEX_NAME + "/_doc";
-
-    private RestClient lowLevelClient;
 
     @Override
     public void log(SearchRequestLogData searchRequestLogData) {
@@ -66,7 +59,7 @@ public class ESSearchLogger implements SearchLogger, Service {
             Request request = new Request("POST", ENDPOINT_CREATE_DOC);
             request.setEntity(entity);
 
-            Response response = lowLevelClient.performRequest(request);
+            Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
             int responseCode = response.getStatusLine().getStatusCode();
 
             if (responseCode != 200 && responseCode != 201) {
@@ -95,8 +88,8 @@ public class ESSearchLogger implements SearchLogger, Service {
 
     @Override
     public void start() throws AtlasException {
-        LOG.info("ESSearchLogger: start!");
-        setLowLevelClient();
+        LOG.info("ESSearchLogger: start! (Using shared ES client)");
+        // Using centralized ES client from AtlasElasticsearchDatabase
         try {
             if (!indexExists()) {
                 LOG.info("Create ES index for entity search logging in ES based logger");
@@ -114,41 +107,13 @@ public class ESSearchLogger implements SearchLogger, Service {
 
     @Override
     public void stop() throws AtlasException {
-        try {
-            LOG.info("ESSearchLogger: stop!");
-            if (lowLevelClient != null) {
-                lowLevelClient.close();
-                lowLevelClient = null;
-            }
-        } catch (IOException e) {
-            LOG.error("ESSearchLogger: Failed to close ES client", e);
-            throw new AtlasException(e);
-        }
-    }
-
-    private void setLowLevelClient() throws AtlasException {
-        synchronized (ESSearchLogger.class) {
-            if (lowLevelClient == null) {
-                try {
-                    List<HttpHost> httpHosts = getHttpHosts();
-
-                    RestClientBuilder builder = RestClient.builder(httpHosts.get(0));
-                    builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
-                            .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
-                            .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()));
-
-                    lowLevelClient = builder.build();
-                } catch (AtlasException e) {
-                    LOG.error("Failed to initialize low level rest client for ES");
-                    throw new AtlasException(e);
-                }
-            }
-        }
+        LOG.info("ESSearchLogger: stop! (Using shared ES client - no cleanup needed)");
+        // No client cleanup needed - using shared AtlasElasticsearchDatabase client
     }
 
     private boolean indexExists() throws IOException {
         Request request = new Request("HEAD", INDEX_NAME);
-        Response response = lowLevelClient.performRequest(request);
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
         int statusCode = response.getStatusLine().getStatusCode();
         if (statusCode == 200) {
             LOG.info("ESSearchLogger: {} index exists!", INDEX_NAME);
@@ -165,7 +130,7 @@ public class ESSearchLogger implements SearchLogger, Service {
         HttpEntity entity = new NStringEntity(esMappingsString, ContentType.APPLICATION_JSON);
         Request request = new Request("PUT", INDEX_NAME);
         request.setEntity(entity);
-        Response response = lowLevelClient.performRequest(request);
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
 
         return response.getStatusLine().getStatusCode() == 200;
     }

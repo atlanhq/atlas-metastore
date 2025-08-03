@@ -863,6 +863,44 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         FixedBufferList<EntityAuditEventV2> ret = AUDIT_EVENTS_BUFFER.get();
         ret.reset();
         return ret;
-
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Clean up ThreadLocal audit buffer to prevent memory accumulation
+     * This should be called after request processing to prevent thread-local memory leaks
+     */
+    public static void clearAuditBuffer() {
+        try {
+            FixedBufferList<EntityAuditEventV2> buffer = AUDIT_EVENTS_BUFFER.get();
+            if (buffer != null) {
+                buffer.reset();
+            }
+            AUDIT_EVENTS_BUFFER.remove();
+        } catch (Exception e) {
+            LOG.warn("Error clearing audit buffer - non-critical", e);
+        }
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Clear audit excluded attributes cache periodically to prevent unbounded growth
+     * This cache can accumulate over time with different entity types
+     */
+    public void clearAuditExcludedAttributesCache() {
+        try {
+            if (auditExcludedAttributesCache != null && !auditExcludedAttributesCache.isEmpty()) {
+                LOG.debug("Clearing auditExcludedAttributesCache with {} entries", auditExcludedAttributesCache.size());
+                auditExcludedAttributesCache.clear();
+            }
+        } catch (Exception e) {
+            LOG.warn("Error clearing audit excluded attributes cache - non-critical", e);
+        }
+    }
+    
+    /**
+     * MEMORY LEAK FIX: Comprehensive cleanup for all audit-related caches and ThreadLocals
+     */
+    public void cleanupAuditCaches() {
+        clearAuditBuffer();
+        clearAuditExcludedAttributesCache();
     }
 }

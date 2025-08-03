@@ -229,7 +229,7 @@ public final class Atlas {
                                                 )
                                                 // MEMORY LEAK FIX: Configure smaller batches and frequent exports
                                                 .setMaxExportBatchSize(50)      // Default: 512 (reduce by 90%)
-                                                .setExportTimeout(Duration.ofSeconds(2))   // Default: 30s (faster export)
+                                                .setExporterTimeout(Duration.ofSeconds(2))   // Default: 30s (faster export)
                                                 .setScheduleDelay(Duration.ofSeconds(1))   // Default: 1s (more frequent)
                                                 .setMaxQueueSize(1024)          // Default: 2048 (reduce by 50%)
                                                 .build()

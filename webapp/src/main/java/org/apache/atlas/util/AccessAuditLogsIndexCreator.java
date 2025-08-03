@@ -16,20 +16,16 @@
  */
 package org.apache.atlas.util;
 
-import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.audit.utils.CredentialsProviderUtil;
-import org.apache.commons.collections.CollectionUtils;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
-import org.apache.http.client.CredentialsProvider;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -39,14 +35,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
-import java.util.StringTokenizer;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
-
-import static org.apache.atlas.repository.audit.ESBasedAuditRepository.INDEX_BACKEND_CONF;
 
 public class AccessAuditLogsIndexCreator extends Thread {
     private static final Logger LOG = LoggerFactory.getLogger(AccessAuditLogsIndexCreator.class);
@@ -71,7 +61,6 @@ public class AccessAuditLogsIndexCreator extends Thread {
     private static final int DEFAULT_ES_BOOTSTRAP_MAX_RETRY = 3;
 
     private final AtomicLong lastLoggedAt = new AtomicLong(0);
-    private volatile RestClient client = null;
     private Long time_interval;
 
     private String user;
@@ -92,9 +81,6 @@ public class AccessAuditLogsIndexCreator extends Thread {
         LOG.debug("Starting Ranger audit schema setup in ElasticSearch.");
         time_interval = configuration.getLong(ES_TIME_INTERVAL, DEFAULT_ES_TIME_INTERVAL_MS);
         user = configuration.getString(ES_CONFIG_USERNAME);
-
-        hosts = getHttpHosts(configuration);
-        port = getPort(configuration);
 
         protocol = configuration.getString(ES_CONFIG_PROTOCOL, "http");
         index = configuration.getString(ES_CONFIG_INDEX, DEFAULT_INDEX_NAME);
@@ -118,113 +104,29 @@ public class AccessAuditLogsIndexCreator extends Thread {
         }
     }
 
-    private String connectionString() {
-        return String.format(Locale.ROOT,"User:%s, %s://%s:%s/%s", user, protocol, hosts, port, index);
-    }
-
     @Override
     public void run() {
         LOG.debug("Started run method");
-        if (CollectionUtils.isNotEmpty(hosts)) {
-            LOG.debug("Elastic search hosts=" + hosts + ", index=" + index);
-            while (!is_completed && (max_retry == TRY_UNTIL_SUCCESS || retry_counter < max_retry)) {
-                try {
-                    LOG.debug("Trying to acquire elastic search connection");
-                    if (connect()) {
-                        LOG.debug("Connection to elastic search established successfully");
-                        if (createIndex()) {
-                            is_completed = true;
-                            break;
-                        } else {
-                            logErrorMessageAndWait("Error while performing operations on elasticsearch. ", null);
-                        }
-                    } else {
-                        logErrorMessageAndWait(
-                                "Cannot connect to elasticsearch kindly check the elasticsearch related configs. ",
-                                null);
-                    }
-                } catch (Exception ex) {
-                    logErrorMessageAndWait("Error while validating elasticsearch index ", ex);
-                } finally {
-                    try {
-                        if (client != null) {
-                            client.close();
-                        }
-                    } catch (IOException e) {
-                        LOG.warn("AccessAuditLogsIndexCreator: Failed to close ES client", e);
-                    }
-                }
-            }
-        } else {
-            LOG.error("elasticsearch hosts values are empty. Please set property " + INDEX_BACKEND_CONF);
-        }
-
-    }
-
-    private synchronized boolean connect() {
-        if (client == null) {
-            synchronized (AccessAuditLogsIndexCreator.class) {
-                if (client == null) {
-                    try {
-                        createClient();
-                    } catch (Exception ex) {
-                        LOG.error("Can't connect to elasticsearch server. host=" + hosts + ", index=" + index + ex);
-                    }
-                }
-            }
-        }
-        return client != null;
-    }
-
-    private void createClient() {
-        try {
-            RestClientBuilder builder = RestClient.builder(hosts.get(0));
-            builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
-                    .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
-                    .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()));
-
-            client = builder.build();
-        } catch (Throwable t) {
-            lastLoggedAt.updateAndGet(lastLoggedAt -> {
-                long now = System.currentTimeMillis();
-                long elapsed = now - lastLoggedAt;
-                if (elapsed > TimeUnit.MINUTES.toMillis(1)) {
-                    LOG.error("Can't connect to ElasticSearch server: " + connectionString() + t);
-                    return now;
+        LOG.debug("Elastic search hosts=" + hosts + ", index=" + index);
+        while (!is_completed && (max_retry == TRY_UNTIL_SUCCESS || retry_counter < max_retry)) {
+            try {
+                if (createIndex()) {
+                    is_completed = true;
+                    break;
                 } else {
-                    return lastLoggedAt;
+                    logErrorMessageAndWait("Error while performing operations on elasticsearch. ", null);
                 }
-            });
+            } catch (Exception ex) {
+                logErrorMessageAndWait("Error while validating elasticsearch index ", ex);
+            } finally {
+                // No client cleanup needed - using shared AtlasElasticsearchDatabase client
+            }
         }
-    }
-
-    public static RestClientBuilder getRestClientBuilder(String urls, String protocol, String user, String password, int port) {
-        RestClientBuilder restClientBuilder = RestClient.builder(
-                toArray(urls, ",").stream()
-                        .map(x -> new HttpHost(x, port, protocol))
-                        .<HttpHost>toArray(i -> new HttpHost[i])
-        );
-        if (StringUtils.isNotBlank(user) && StringUtils.isNotBlank(password) && !user.equalsIgnoreCase("NONE") && !password.equalsIgnoreCase("NONE")) {
-
-            final CredentialsProvider credentialsProvider =
-                    CredentialsProviderUtil.getBasicCredentials(user, password);
-            restClientBuilder.setHttpClientConfigCallback(clientBuilder ->
-                    clientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-
-        } else {
-            LOG.error("ElasticSearch Credentials not provided!!");
-            final CredentialsProvider credentialsProvider = null;
-            restClientBuilder.setHttpClientConfigCallback(clientBuilder ->
-                    clientBuilder.setDefaultCredentialsProvider(credentialsProvider));
-        }
-        return restClientBuilder;
     }
 
     private boolean createIndex() {
         boolean exists = false;
-        if (client == null) {
-            connect();
-        }
+        RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
         if (client != null) {
             try {
                 Request request = new Request("HEAD", index);
@@ -293,64 +195,5 @@ public class AccessAuditLogsIndexCreator extends Thread {
         } catch (InterruptedException ex) {
             LOG.info("sleep interrupted: " + ex.getMessage());
         }
-    }
-
-    private static String getHosts(Configuration configuration) {
-        StringBuilder urls = new StringBuilder();
-        String indexConf = configuration.getString(INDEX_BACKEND_CONF);
-        String[] hosts = indexConf.split(",");
-        for (String host : hosts) {
-            host = host.trim();
-            String[] hostAndPort = host.split(":");
-            urls.append(hostAndPort[0]);
-
-        }
-        return urls.toString();
-    }
-
-    public static List<HttpHost> getHttpHosts(Configuration configuration) {
-        List<HttpHost> httpHosts = new ArrayList<>();
-
-        String indexConf = configuration.getString(INDEX_BACKEND_CONF);
-        String[] hosts = indexConf.split(",");
-        for (String host : hosts) {
-            host = host.trim();
-            String[] hostAndPort = host.split(":");
-            if (hostAndPort.length == 1) {
-                httpHosts.add(new HttpHost(hostAndPort[0]));
-            } else if (hostAndPort.length == 2) {
-                httpHosts.add(new HttpHost(hostAndPort[0], Integer.parseInt(hostAndPort[1])));
-            }
-        }
-        return httpHosts;
-    }
-
-
-    private static int getPort(Configuration configuration) {
-        int port = 9200;
-        StringBuilder urls = new StringBuilder();
-        String indexConf = configuration.getString(INDEX_BACKEND_CONF);
-        try {
-            String[] hosts = indexConf.split(",");
-            String host = hosts[0];
-            host = host.trim();
-            String[] hostAndPort = host.split(":");
-            port = Integer.parseInt(hostAndPort[1]);
-        } catch (Exception e) {
-            LOG.warn("Setting ES port to default {}", port);
-        }
-
-        return port;
-    }
-
-    public static List<String> toArray(String destListStr, String delim) {
-        List<String> list = new ArrayList<String>();
-        if (StringUtils.isNotBlank(destListStr)) {
-            StringTokenizer tokenizer = new StringTokenizer(destListStr, delim.trim());
-            while (tokenizer.hasMoreTokens()) {
-                list.add(tokenizer.nextToken());
-            }
-        }
-        return list;
     }
 }

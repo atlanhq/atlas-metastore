@@ -160,7 +160,9 @@ public class RangerTagEnricher extends RangerAbstractContextEnricher {
 				tagDownloadTimer = new Timer("policyDownloadTimer", true);
 
 				try {
-					tagDownloadTimer.schedule(new DownloaderTask(tagDownloadQueue), pollingIntervalMs, pollingIntervalMs);
+					// MEMORY LEAK FIX: Re-enable with increased interval and memory management
+					long memoryOptimizedInterval = Math.max(300000, pollingIntervalMs * 3); // At least 5 minutes
+					tagDownloadTimer.schedule(new DownloaderTask(tagDownloadQueue), memoryOptimizedInterval, memoryOptimizedInterval);
 					if (LOG.isDebugEnabled()) {
 						LOG.debug("Scheduled tagDownloadRefresher to download tags every " + pollingIntervalMs + " milliseconds");
 					}

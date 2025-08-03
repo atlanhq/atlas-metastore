@@ -6,6 +6,7 @@ import com.google.common.collect.Iterators;
 import com.google.common.collect.LinkedListMultimap;
 import com.google.common.collect.Multimap;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ByteArrayEntity;
@@ -43,7 +44,6 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
 import static org.janusgraph.diskstorage.es.ElasticSearchConstants.ES_DOC_KEY;
 import static org.janusgraph.util.encoding.StringEncoding.UTF8_CHARSET;
 
@@ -65,14 +65,7 @@ public class AtlanElasticSearchIndex {
         private static final String REQUEST_TYPE_POST = "POST";
 
         public AtlanElasticSearchIndex() throws AtlasException {
-            List<HttpHost> httpHosts = getHttpHosts();
-
-            restClient = RestClient
-                    .builder(httpHosts.get(0))
-                    .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
-                    .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
-                    .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()))
-                    .build();
+            restClient = AtlasElasticsearchDatabase.getLowLevelClient();
 
             final SimpleModule module = new SimpleModule();
             module.addSerializer(new Geoshape.GeoshapeGsonSerializerV2d0());

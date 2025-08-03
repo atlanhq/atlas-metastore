@@ -57,8 +57,8 @@ public class AtlasElasticsearchDatabase {
     
     // Simple, conservative connection pool configuration
     // Optimized for 2-8 pod deployments without overwhelming Elasticsearch
-    private static final int DEFAULT_CONNECTIONS_TOTAL = 15;  // Conservative per pod
-    private static final int DEFAULT_CONNECTIONS_PER_ROUTE = 10;  // 70% of total
+    private static final int DEFAULT_CONNECTIONS_TOTAL = 10;  // Reduced from 15 - conservative per pod
+    private static final int DEFAULT_CONNECTIONS_PER_ROUTE = 6;  // Reduced from 10 - 60% of total
     
     // Allow override via configuration if needed
     private static final int BASE_CONNECTIONS_TOTAL;
@@ -66,11 +66,13 @@ public class AtlasElasticsearchDatabase {
     
     private static final int CONNECTION_REQUEST_TIMEOUT = 5000; // 5 seconds
     private static final int CONNECTION_TIME_TO_LIVE = 300000; // 5 minutes
-    private static final int IO_THREAD_COUNT = Runtime.getRuntime().availableProcessors();
+    // Fixed thread count to prevent explosion with multiple ES clients (was: Runtime.getRuntime().availableProcessors())
+    private static final int IO_THREAD_COUNT;  // Now configurable
     
     // Configuration keys for Atlas properties (optional overrides)
     private static final String ES_CONNECTION_POOL_SIZE_CONF = "atlas.graph.index.search.connection.pool.size";
     private static final String ES_CONNECTION_PER_ROUTE_CONF = "atlas.graph.index.search.connection.per.route";
+    private static final String ES_IO_THREAD_COUNT_CONF = "atlas.graph.index.search.io.thread.count";
 
     // Single static initializer block - executes once during class loading  
     static {
@@ -82,8 +84,11 @@ public class AtlasElasticsearchDatabase {
             BASE_CONNECTIONS_TOTAL = configuration.getInt(ES_CONNECTION_POOL_SIZE_CONF, DEFAULT_CONNECTIONS_TOTAL);
             BASE_CONNECTIONS_PER_ROUTE = configuration.getInt(ES_CONNECTION_PER_ROUTE_CONF, DEFAULT_CONNECTIONS_PER_ROUTE);
             
-            LOG.info("Elasticsearch connection pool configured: Total={}, PerRoute={}", 
-                    BASE_CONNECTIONS_TOTAL, BASE_CONNECTIONS_PER_ROUTE);
+            // Configure IO thread count
+            IO_THREAD_COUNT = configuration.getInt(ES_IO_THREAD_COUNT_CONF, 4); // Default to 4 if not configured
+            
+            LOG.info("Elasticsearch connection pool configured: Total={}, PerRoute={}, IOThreads={}", 
+                    BASE_CONNECTIONS_TOTAL, BASE_CONNECTIONS_PER_ROUTE, IO_THREAD_COUNT);
                     
             // Validate configuration
             if (BASE_CONNECTIONS_TOTAL > 50) {
