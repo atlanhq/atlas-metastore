@@ -173,6 +173,81 @@ public class GlossaryTermUtils extends GlossaryUtils {
         glossaryTermQNameGuidCache.get().clear();
     }
 
+    /**
+     * Comprehensive cleanup of all glossary ThreadLocal caches.
+     * Memory leak fix: Clears and removes all ThreadLocal variables to prevent memory accumulation.
+     */
+    public static void clearGlossaryCaches() {
+        try {
+            // Clear caches with size limits
+            if (glossaryNameGuidCache.get() != null) {
+                if (glossaryNameGuidCache.get().size() > 1000) {
+                    glossaryNameGuidCache.get().clear();
+                }
+            }
+            if (glossaryTermOrderCache.get() != null) {
+                if (glossaryTermOrderCache.get().size() > 1000) {
+                    glossaryTermOrderCache.get().clear();
+                }
+            }
+            if (glossaryTermQNameGuidCache.get() != null) {
+                if (glossaryTermQNameGuidCache.get().size() > 1000) {
+                    glossaryTermQNameGuidCache.get().clear();
+                }
+            }
+            
+            // Remove ThreadLocal references
+            glossaryNameGuidCache.remove();
+            glossaryTermOrderCache.remove();
+            glossaryTermQNameGuidCache.remove();
+            
+        } catch (Exception e) {
+            // Log quietly to avoid noise during cleanup
+        }
+    }
+
+    /**
+     * Limit cache sizes without removing ThreadLocal references.
+     * Memory leak fix: Conservative cleanup that only clears caches when they exceed safe limits.
+     */
+    public static void limitCacheSizes() {
+        try {
+            // Conservative cache size limits (smaller than clearGlossaryCaches)
+            if (glossaryNameGuidCache.get() != null && glossaryNameGuidCache.get().size() > 500) {
+                // Keep most recent 250 entries
+                Map<String, String> cache = glossaryNameGuidCache.get();
+                if (cache instanceof LinkedHashMap) {
+                    // For LinkedHashMap, keep insertion order and remove oldest entries
+                    while (cache.size() > 250) {
+                        String firstKey = cache.keySet().iterator().next();
+                        cache.remove(firstKey);
+                    }
+                } else {
+                    cache.clear(); // Fallback for other map types
+                }
+            }
+            
+            if (glossaryTermOrderCache.get() != null && glossaryTermOrderCache.get().size() > 500) {
+                // Clear half of the cache entries
+                Map<String, Integer> cache = glossaryTermOrderCache.get();
+                if (cache.size() > 250) {
+                    cache.clear(); // Simple clear for order cache
+                }
+            }
+            
+            if (glossaryTermQNameGuidCache.get() != null && glossaryTermQNameGuidCache.get().size() > 500) {
+                // Clear half of the cache entries
+                Map<String, String> cache = glossaryTermQNameGuidCache.get();
+                if (cache.size() > 250) {
+                    cache.clear(); // Simple clear for QName cache
+                }
+            }
+            
+        } catch (Exception e) {
+            // Log quietly to avoid noise during cleanup
+        }
+    }
+
     private boolean isRelationshipGuidSame(AtlasRelatedObjectId storeObject, AtlasRelatedObjectId relatedObjectId) {
         return StringUtils.equals(relatedObjectId.getRelationshipGuid(), storeObject.getRelationshipGuid());
     }

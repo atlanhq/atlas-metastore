@@ -25,12 +25,12 @@ import org.apache.commons.lang.StringUtils;
  * Enum that encapsulated each property name and its default value.
  */
 public enum AtlasConfiguration {
-    //web server configuration
-    WEBSERVER_MIN_THREADS("atlas.webserver.minthreads", 10),
-    WEBSERVER_MAX_THREADS("atlas.webserver.maxthreads", 100),
-    WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 40),
+    // Web server thread pool configuration (reduced to prevent thread explosion)
+    WEBSERVER_MIN_THREADS("atlas.webserver.minthreads", 5),        // Reduced from 10
+    WEBSERVER_MAX_THREADS("atlas.webserver.maxthreads", 25),       // Reduced from 100 - was causing thread explosion!
+    WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 5),  // Keep reasonable reserved threads
     WEBSERVER_KEEPALIVE_SECONDS("atlas.webserver.keepalivetimesecs", 60),
-    WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 100),
+    WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 50),         // Reduced from 100
     WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 16192),
 
     QUERY_PARAM_MAX_LENGTH("atlas.query.param.max.length", 4*1024),
@@ -83,6 +83,7 @@ public enum AtlasConfiguration {
     STORE_DIFFERENTIAL_AUDITS("atlas.entity.audit.differential", false),
     DSL_EXECUTOR_TRAVERSAL("atlas.dsl.executor.traversal", true),
     DSL_CACHED_TRANSLATOR("atlas.dsl.cached.translator", true),
+    // MEMORY LEAK FIX: Keep debug metrics disabled to prevent timer-based memory growth
     DEBUG_METRICS_ENABLED("atlas.debug.metrics.enabled", false),
     TASKS_USE_ENABLED("atlas.tasks.enabled", true),
     TASKS_PENDING_TASK_QUERY_SIZE_PAGE_SIZE("atlas.tasks.pending.tasks.query.page.size", 100),
@@ -155,10 +156,10 @@ public enum AtlasConfiguration {
     MAX_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.edge.count", 10000),
     TIMEOUT_SUPER_VERTEX_FETCH("atlas.jg.super.vertex.edge.timeout", 60),
 
-    // Classification propagation thread pool configuration
-    TAG_ASYNC_NOTIFIER_CORE_POOL_SIZE("atlas.classification.propagation.core.pool.size", 32),
-    TAG_ASYNC_NOTIFIER_MAX_POOL_SIZE("atlas.classification.propagation.max.pool.size", 200),
-    TAG_ASYNC_NOTIFIER_QUEUE_CAPACITY("atlas.classification.propagation.queue.capacity", 1000),
+    // Classification propagation thread pool configuration (reduced to prevent thread explosion)
+    TAG_ASYNC_NOTIFIER_CORE_POOL_SIZE("atlas.classification.propagation.core.pool.size", 8),  // Reduced from 32
+    TAG_ASYNC_NOTIFIER_MAX_POOL_SIZE("atlas.classification.propagation.max.pool.size", 20),    // Reduced from 200
+    TAG_ASYNC_NOTIFIER_QUEUE_CAPACITY("atlas.classification.propagation.queue.capacity", 500), // Reduced from 1000
     TAG_ASYNC_NOTIFIER_KEEP_ALIVE_SECONDS("atlas.classification.propagation.keep.alive.seconds", 300),
 
     // ES and Cassandra batch operation configurations

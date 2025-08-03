@@ -17,9 +17,10 @@ public class RedisServiceLocalImpl extends AbstractRedisService {
 
     @PostConstruct
     public void init() throws AtlasException {
+        // Memory optimization: Use single Redisson client for both operations to halve thread count
         redisClient = Redisson.create(getLocalConfig());
-        redisCacheClient = Redisson.create(getLocalConfig());
-        LOG.info("Local redis client created successfully.");
+        redisCacheClient = redisClient;  // Reuse same client for cache operations
+        LOG.info("Local redis client created successfully with shared instance (memory optimized).");
     }
 
     @Override

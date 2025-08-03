@@ -445,4 +445,93 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
             }
         }
     }
+
+    /**
+     * Comprehensive cleanup of all ThreadLocal caches and variables.
+     * Memory leak fix: Clears all ThreadLocal variables to prevent memory accumulation.
+     */
+    public static void cleanupThreadLocalCaches() {
+        try {
+            // Clear existing cache method
+            clearCache();
+            
+            // Clear ThreadLocal variables
+            if (postTransactionHooks.get() != null) {
+                postTransactionHooks.get().clear();
+            }
+            postTransactionHooks.remove();
+            
+            isTxnOpen.remove();
+            innerFailure.remove();
+            
+            // Clear ThreadLocal caches with size limits
+            if (guidVertexCache.get() != null && guidVertexCache.get().size() > 1000) {
+                guidVertexCache.get().clear();
+            }
+            if (vertexGuidCache.get() != null && vertexGuidCache.get().size() > 1000) {
+                vertexGuidCache.get().clear();
+            }
+            if (vertexStateCache.get() != null && vertexStateCache.get().size() > 1000) {
+                vertexStateCache.get().clear();
+            }
+            if (edgeStateCache.get() != null && edgeStateCache.get().size() > 1000) {
+                edgeStateCache.get().clear();
+            }
+            
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("GraphTransactionInterceptor ThreadLocal caches cleaned up");
+            }
+        } catch (Exception e) {
+            LOG.warn("Error during GraphTransactionInterceptor cleanup", e);
+        }
+    }
+
+    /**
+     * Periodic cache cleanup for regular maintenance.
+     * Memory leak fix: Lighter cleanup suitable for frequent execution without removing ThreadLocal references.
+     */
+    public static void periodicCacheCleanup() {
+        try {
+            // Conservative cache size limits (smaller than full cleanup)
+            if (guidVertexCache.get() != null && guidVertexCache.get().size() > 500) {
+                Map<String, AtlasVertex> cache = guidVertexCache.get();
+                // Clear oldest half of entries (simple approach)
+                if (cache.size() > 250) {
+                    cache.clear(); // For periodic cleanup, simple clear is sufficient
+                }
+            }
+            
+            if (vertexGuidCache.get() != null && vertexGuidCache.get().size() > 500) {
+                Map<Object, String> cache = vertexGuidCache.get();
+                if (cache.size() > 250) {
+                    cache.clear();
+                }
+            }
+            
+            if (vertexStateCache.get() != null && vertexStateCache.get().size() > 500) {
+                Map<Object, AtlasEntity.Status> cache = vertexStateCache.get();
+                if (cache.size() > 250) {
+                    cache.clear();
+                }
+            }
+            
+            if (edgeStateCache.get() != null && edgeStateCache.get().size() > 500) {
+                Map<Object, AtlasEntity.Status> cache = edgeStateCache.get();
+                if (cache.size() > 250) {
+                    cache.clear();
+                }
+            }
+            
+            // Clear postTransactionHooks if they accumulate
+            if (postTransactionHooks.get() != null && postTransactionHooks.get().size() > 100) {
+                postTransactionHooks.get().clear();
+            }
+            
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("GraphTransactionInterceptor periodic cache cleanup completed");
+            }
+        } catch (Exception e) {
+            LOG.warn("Error during GraphTransactionInterceptor periodic cleanup", e);
+        }
+    }
 }

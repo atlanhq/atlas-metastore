@@ -19,12 +19,34 @@ public class VertexEdgeCache {
     public List<AtlasEdge> getEdges(AtlasVertex vertex, AtlasEdgeDirection direction, String edgeLabel) {
         CachedVertexEdgesKey key = new CachedVertexEdgesKey(vertex.getId(), direction, edgeLabel);
         Map<CachedVertexEdgesKey, List<AtlasEdge>> cache = edgeCache.get();
+        
+        // Memory leak fix: Limit cache size
+        if (cache.size() > 500) {
+            cache.clear();
+        }
+        
         if (cache.containsKey(key)) {
             return cache.get(key);
         } else {
             List<AtlasEdge> edges = newArrayList(vertex.getEdges(direction, edgeLabel));
             cache.put(key, edges);
             return edges;
+        }
+    }
+
+    /**
+     * Clear the ThreadLocal edge cache.
+     * Memory leak fix: Clears all cached edges to prevent memory accumulation.
+     */
+    public void clearCache() {
+        try {
+            Map<CachedVertexEdgesKey, List<AtlasEdge>> cache = edgeCache.get();
+            if (cache != null) {
+                cache.clear();
+            }
+            edgeCache.remove();
+        } catch (Exception e) {
+            // Log quietly to avoid noise
         }
     }
 }

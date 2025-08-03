@@ -1,23 +1,13 @@
 package org.apache.atlas.repository.store.graph.v2;
 
-import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.MapUtils;
-import org.apache.http.HttpEntity;
-import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
-import org.apache.http.nio.entity.NStringEntity;
-import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
-import org.elasticsearch.client.Response;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
-import org.janusgraph.util.StringUtils;
 import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,42 +16,17 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.*;
 
-import static org.apache.atlas.repository.Constants.CLASSIFICATION_NAMES_KEY;
-import static org.apache.atlas.repository.Constants.CLASSIFICATION_TEXT_KEY;
-import static org.apache.atlas.repository.Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY;
-import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;import static org.apache.atlas.repository.audit.ESBasedAuditRepository.getHttpHosts;
+import static org.apache.atlas.repository.Constants.*;
 
 public class ESConnector implements Closeable {
     private static final Logger LOG      = LoggerFactory.getLogger(ESConnector.class);
-
-    private static RestClient lowLevelClient;
 
     private static Set<String> DENORM_ATTRS;
     private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
 
     static {
-        try {
-            lowLevelClient = initializeClient();
-            DENORM_ATTRS = initializeDenormAttributes();
-        } catch (AtlasException e) {
-            throw new RuntimeException("Failed to initialize ESConnector", e);
-        }
-    }
-
-    private static RestClient initializeClient() throws AtlasException {
-        try {
-            List<HttpHost> httpHosts = getHttpHosts();
-            RestClientBuilder builder = RestClient.builder(httpHosts.get(0))
-                    .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
-                            .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
-                            .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()));
-
-            return builder.build();
-        } catch (Exception e) {
-            throw new AtlasException("Failed to initialize Elasticsearch client", e);
-        }
+        // Using centralized ES client from AtlasElasticsearchDatabase
+        DENORM_ATTRS = initializeDenormAttributes();
     }
 
     private static Set<String> initializeDenormAttributes() {
@@ -128,7 +93,7 @@ public class ESConnector implements Closeable {
             request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
 
             try {
-                lowLevelClient.performRequest(request);
+                AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
             } catch (IOException e) {
                 LOG.error("Failed to update ES doc for denorm attributes");
                 throw new RuntimeException(e);
@@ -140,8 +105,6 @@ public class ESConnector implements Closeable {
 
     @Override
     public void close() throws IOException {
-        if (lowLevelClient != null) {
-            lowLevelClient.close();
-        }
+        // No client cleanup needed - using shared AtlasElasticsearchDatabase client
     }
 }

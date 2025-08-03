@@ -28,6 +28,8 @@ import io.opentelemetry.sdk.resources.ResourceBuilder;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
 import io.opentelemetry.semconv.ResourceAttributes;
+
+import java.time.Duration;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.security.SecurityProperties;
 import org.apache.atlas.util.AccessAuditLogsIndexCreator;
@@ -124,11 +126,9 @@ public final class Atlas {
 
     public static void main(String[] args) throws Exception {
 
-        // Initialize OpenTelemetry as early as possible
+        // MEMORY LEAK FIX: Re-enable OpenTelemetry with proper memory limits and cleanup
         OpenTelemetry openTelemetry = initializeOpenTelemetry();
-        // Install OpenTelemetry in logback appender
-        io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender.install(
-                openTelemetry);
+        io.opentelemetry.instrumentation.logback.appender.v1_0.OpenTelemetryAppender.install(openTelemetry);
 
         CommandLine cmd = parseArgs(args);
         PropertiesConfiguration buildConfiguration = new PropertiesConfiguration("atlas-buildinfo.properties");
@@ -227,6 +227,11 @@ public final class Atlas {
                                                                 .setEndpoint(otelEndpoint)
                                                                 .build()
                                                 )
+                                                // MEMORY LEAK FIX: Configure smaller batches and frequent exports
+                                                .setMaxExportBatchSize(50)      // Default: 512 (reduce by 90%)
+                                                .setExporterTimeout(Duration.ofSeconds(2))   // Default: 30s (faster export)
+                                                .setScheduleDelay(Duration.ofSeconds(1))   // Default: 1s (more frequent)
+                                                .setMaxQueueSize(1024)          // Default: 2048 (reduce by 50%)
                                                 .build()
                                 )
                                 .build()

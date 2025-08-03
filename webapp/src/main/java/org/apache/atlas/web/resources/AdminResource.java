@@ -59,6 +59,7 @@ import org.apache.atlas.repository.patches.AtlasPatchManager;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.metrics.MetricsRegistry;
+import org.apache.atlas.services.AtlasMemoryCleanupService;
 import org.apache.atlas.services.MetricsService;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasType;
@@ -109,6 +110,7 @@ import org.apache.atlas.model.general.HealthStatus;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
+import org.apache.atlas.web.service.AtlasCircuitBreakerService;
 import java.io.IOException;
 import java.io.InputStream;
 import java.security.SecureRandom;
@@ -195,6 +197,8 @@ public class AdminResource {
     private final  boolean                  isOnDemandLineageEnabled;
     private final  int                      defaultLineageNodeCount;
     private final  MetricsRegistry          metricsRegistry;
+    private final  AtlasCircuitBreakerService circuitBreakerService;
+    private final AtlasMemoryCleanupService memoryCleanupService;
 
     static {
         try {
@@ -211,7 +215,9 @@ public class AdminResource {
                          AtlasServerService serverService,
                          ExportImportAuditService exportImportAuditService, AtlasEntityStore entityStore,
                          AtlasPatchManager patchManager, AtlasAuditService auditService,
-                         TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry) {
+                         TaskManagement taskManagement, AtlasDebugMetricsSink debugMetricsRESTSink, MetricsRegistry metricsRegistry,
+                         AtlasCircuitBreakerService circuitBreakerService,
+                         AtlasMemoryCleanupService memoryCleanupService) {
         this.serviceState              = serviceState;
         this.metricsService            = metricsService;
         this.exportService             = exportService;
@@ -228,6 +234,8 @@ public class AdminResource {
         this.taskManagement            = taskManagement;
         this.debugMetricsRESTSink      = debugMetricsRESTSink;
         this.metricsRegistry           = metricsRegistry;
+        this.circuitBreakerService     = circuitBreakerService;
+        this.memoryCleanupService      = memoryCleanupService;
 
         if (atlasProperties != null) {
             this.defaultUIVersion = atlasProperties.getString(DEFAULT_UI_VERSION, UI_VERSION_V2);
@@ -983,6 +991,203 @@ public class AdminResource {
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_FEATURE_FLAG_CUD), "featureFlag");
         FeatureFlagStore.deleteFlag(key);
     }
+
+    /**
+     * MEMORY LEAK FIX: Manual memory cleanup endpoint for admin operations
+     * Useful for triggering cleanup during high memory usage or before maintenance
+     */
+    @POST
+    @Path("memory/cleanup")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response triggerMemoryCleanup(@QueryParam("force") @DefaultValue("false") boolean forceGC) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.triggerMemoryCleanup(force={})", forceGC);
+        }
+
+        try {
+            long startTime = System.currentTimeMillis();
+            Runtime runtime = Runtime.getRuntime();
+            long beforeCleanup = runtime.totalMemory() - runtime.freeMemory();
+
+            if (forceGC) {
+                // Perform aggressive cleanup with garbage collection
+                memoryCleanupService.emergencyCleanup();
+            } else {
+                // Standard comprehensive cleanup
+                memoryCleanupService.comprehensiveCleanup();
+            }
+
+            long afterCleanup = runtime.totalMemory() - runtime.freeMemory();
+            long duration = System.currentTimeMillis() - startTime;
+            long memoryFreed = beforeCleanup - afterCleanup;
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("status", "completed");
+            response.put("durationMs", duration);
+            response.put("memoryFreedMB", memoryFreed / (1024 * 1024));
+            response.put("forceGC", forceGC);
+            response.put("beforeCleanupMB", beforeCleanup / (1024 * 1024));
+            response.put("afterCleanupMB", afterCleanup / (1024 * 1024));
+            response.put("cleanupStats", memoryCleanupService.getCleanupStats());
+
+            LOG.info("Memory cleanup completed: freed {}MB in {}ms", memoryFreed / (1024 * 1024), duration);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== AdminResource.triggerMemoryCleanup()");
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error during manual memory cleanup", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return Response.status(500).entity(errorResponse).build();
+        }
+    }
+
+    /**
+     * MEMORY LEAK FIX: Memory status endpoint for monitoring memory usage and cleanup statistics
+     */
+    @GET
+    @Path("memory/status")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response getMemoryStatus() {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.getMemoryStatus()");
+        }
+
+        try {
+            Runtime runtime = Runtime.getRuntime();
+            long totalMemory = runtime.totalMemory();
+            long freeMemory = runtime.freeMemory();
+            long usedMemory = totalMemory - freeMemory;
+            long maxMemory = runtime.maxMemory();
+
+            Map<String, Object> memoryInfo = new HashMap<>();
+            memoryInfo.put("totalMemoryMB", totalMemory / (1024 * 1024));
+            memoryInfo.put("freeMemoryMB", freeMemory / (1024 * 1024));
+            memoryInfo.put("usedMemoryMB", usedMemory / (1024 * 1024));
+            memoryInfo.put("maxMemoryMB", maxMemory / (1024 * 1024));
+            memoryInfo.put("memoryUsagePercent", Math.round((double) usedMemory / totalMemory * 100.0));
+            memoryInfo.put("cleanupNeeded", memoryCleanupService.isMemoryCleanupNeeded());
+            memoryInfo.put("cleanupStats", memoryCleanupService.getCleanupStats());
+
+            // Add JVM info
+            Map<String, Object> jvmInfo = new HashMap<>();
+            jvmInfo.put("availableProcessors", runtime.availableProcessors());
+            jvmInfo.put("jvmName", System.getProperty("java.vm.name"));
+            jvmInfo.put("jvmVersion", System.getProperty("java.vm.version"));
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("memory", memoryInfo);
+            response.put("jvm", jvmInfo);
+            response.put("timestamp", new Date().toString());
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== AdminResource.getMemoryStatus()");
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error getting memory status", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return Response.status(500).entity(errorResponse).build();
+        }
+    }
+
+    /**
+     * CIRCUIT BREAKER: Get circuit breaker status and system metrics for monitoring overload protection
+     * Uses direct JVM management beans - no external metrics dependencies required
+     */
+    @GET
+    @Path("circuitbreaker/status")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response getCircuitBreakerStatus() {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.getCircuitBreakerStatus()");
+        }
+
+        try {
+            Map<String, Object> response = new HashMap<>();
+
+            // Circuit breaker state
+            Map<String, Object> circuitState = new HashMap<>();
+            circuitState.put("enabled", circuitBreakerService.isEnabled());
+            circuitState.put("state", circuitBreakerService.getState().name());
+            circuitState.put("circuitOpen", circuitBreakerService.isCircuitOpen());
+
+            // Current metrics
+            Map<String, Object> currentMetrics = new HashMap<>();
+            currentMetrics.put("cpuUsagePercent", Math.round(circuitBreakerService.getCurrentCpuUsage() * 10.0) / 10.0);
+            currentMetrics.put("heapUsagePercent", Math.round(circuitBreakerService.getCurrentHeapUsage() * 10.0) / 10.0);
+
+            // Request statistics
+            Map<String, Object> requestStats = new HashMap<>();
+            requestStats.put("totalRequests", circuitBreakerService.getTotalRequestCount());
+            requestStats.put("rejectedRequests", circuitBreakerService.getRejectedRequestCount());
+
+            long totalRequests = circuitBreakerService.getTotalRequestCount();
+            long rejectedRequests = circuitBreakerService.getRejectedRequestCount();
+            double rejectionRate = totalRequests > 0 ? (double) rejectedRequests / totalRequests * 100.0 : 0.0;
+            requestStats.put("rejectionRatePercent", Math.round(rejectionRate * 100.0) / 100.0);
+
+            // System health assessment
+            Map<String, Object> healthAssessment = new HashMap<>();
+            boolean isHealthy = !circuitBreakerService.isCircuitOpen();
+            healthAssessment.put("overallStatus", isHealthy ? "HEALTHY" : "OVERLOADED");
+            healthAssessment.put("acceptingRequests", isHealthy);
+
+            // Recommendations based on current state
+            Map<String, Object> recommendations = new HashMap<>();
+            if (!isHealthy) {
+                recommendations.put("immediate", Arrays.asList(
+                    "Reduce request rate",
+                    "Implement exponential backoff",
+                    "Check system resources"
+                ));
+                recommendations.put("longTerm", Arrays.asList(
+                    "Scale system resources",
+                    "Optimize application performance",
+                    "Implement request queuing"
+                ));
+            } else {
+                recommendations.put("monitoring", Arrays.asList(
+                    "Continue monitoring metrics",
+                    "Set up alerting for high usage",
+                    "Review capacity planning"
+                ));
+            }
+
+            response.put("circuitBreaker", circuitState);
+            response.put("metrics", currentMetrics);
+            response.put("requests", requestStats);
+            response.put("health", healthAssessment);
+            response.put("recommendations", recommendations);
+            response.put("timestamp", System.currentTimeMillis());
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== AdminResource.getCircuitBreakerStatus()");
+            }
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Error getting circuit breaker status", e);
+            Map<String, Object> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", e.getMessage());
+            return Response.status(500).entity(errorResponse).build();
+        }
+    }
+
     private String getEditableEntityTypes(Configuration config) {
         String ret = DEFAULT_EDITABLE_ENTITY_TYPES;
 

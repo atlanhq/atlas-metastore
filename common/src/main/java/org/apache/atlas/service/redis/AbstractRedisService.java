@@ -33,6 +33,14 @@ public abstract class AbstractRedisService implements RedisService {
     private static final int DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS = 600_000;
     private static final int DEFAULT_REDIS_LEASE_TIME_MS = 60_000;
     private static final String ATLAS_METASTORE_SERVICE = "atlas-metastore-service";
+    
+    // Thread limiting configuration for Redisson (prevent thread explosion)
+    private static final String ATLAS_REDIS_NETTY_THREADS = "atlas.redis.netty.threads";
+    private static final String ATLAS_REDIS_CONNECTION_POOL_SIZE = "atlas.redis.connection.pool.size";
+    private static final String ATLAS_REDIS_CONNECTION_MIN_IDLE = "atlas.redis.connection.min.idle";
+    private static final int DEFAULT_NETTY_THREADS = 4;  // Conservative Netty thread count
+    private static final int DEFAULT_CONNECTION_POOL_SIZE = 8;  // Reduced from 20
+    private static final int DEFAULT_CONNECTION_MIN_IDLE = 4;   // Reduced from 10
 
     RedissonClient redisClient;
     RedissonClient redisCacheClient;
@@ -162,48 +170,80 @@ public abstract class AbstractRedisService implements RedisService {
 
     Config getLocalConfig() throws AtlasException {
         Config config = initAtlasConfig();
+        
+        // Configure Netty thread pool for local development (prevent thread explosion)
+        int nettyThreads = atlasConfig.getInt(ATLAS_REDIS_NETTY_THREADS, DEFAULT_NETTY_THREADS);
+        config.setNettyThreads(nettyThreads);
+        
         config.useSingleServer()
                 .setAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_URL))[0])
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD));
+                
+        getLogger().info("Redisson local config configured: NettyThreads={}", nettyThreads);
         return config;
     }
 
     Config getProdConfig() throws AtlasException {
         Config config = initAtlasConfig();
+        
+        // Configure Netty thread pool to prevent thread explosion
+        int nettyThreads = atlasConfig.getInt(ATLAS_REDIS_NETTY_THREADS, DEFAULT_NETTY_THREADS);
+        int connectionPoolSize = atlasConfig.getInt(ATLAS_REDIS_CONNECTION_POOL_SIZE, DEFAULT_CONNECTION_POOL_SIZE);
+        int connectionMinIdle = atlasConfig.getInt(ATLAS_REDIS_CONNECTION_MIN_IDLE, DEFAULT_CONNECTION_MIN_IDLE);
+        
+        // Set Netty threads (prevents default CPU_CORES * 2 thread explosion)
+        config.setNettyThreads(nettyThreads);
+        
         config.useSentinelServers()
                 .setClientName(ATLAS_METASTORE_SERVICE)
                 .setReadMode(ReadMode.MASTER_SLAVE)
                 .setCheckSentinelsList(false)
                 .setKeepAlive(true)
-                .setMasterConnectionMinimumIdleSize(10)
-                .setMasterConnectionPoolSize(20)
-                .setSlaveConnectionMinimumIdleSize(10)
-                .setSlaveConnectionPoolSize(20)
+                .setMasterConnectionMinimumIdleSize(connectionMinIdle)     // Reduced from 10
+                .setMasterConnectionPoolSize(connectionPoolSize)          // Reduced from 20
+                .setSlaveConnectionMinimumIdleSize(connectionMinIdle)     // Reduced from 10
+                .setSlaveConnectionPoolSize(connectionPoolSize)          // Reduced from 20
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD));
+                
+        getLogger().info("Redisson redisClient configured: NettyThreads={}, PoolSize={}, MinIdle={}", 
+                nettyThreads, connectionPoolSize, connectionMinIdle);
         return config;
     }
 
-    Config getCacheImplConfig() {
+    Config getCacheImplConfig() throws AtlasException {
         Config config = new Config();
+        
+        // Configure Netty thread pool to prevent thread explosion (cache client)
+        int nettyThreads = atlasConfig.getInt(ATLAS_REDIS_NETTY_THREADS, DEFAULT_NETTY_THREADS);
+        int connectionPoolSize = atlasConfig.getInt(ATLAS_REDIS_CONNECTION_POOL_SIZE, DEFAULT_CONNECTION_POOL_SIZE);
+        int connectionMinIdle = atlasConfig.getInt(ATLAS_REDIS_CONNECTION_MIN_IDLE, DEFAULT_CONNECTION_MIN_IDLE);
+        
+        // Set Netty threads (prevents default CPU_CORES * 2 thread explosion)
+        config.setNettyThreads(nettyThreads);
+        config.setLockWatchdogTimeout(watchdogTimeoutInMS);
+        
         config.useSentinelServers()
                 .setClientName(ATLAS_METASTORE_SERVICE+"-redisCache")
                 .setReadMode(ReadMode.MASTER_SLAVE)
                 .setCheckSentinelsList(false)
                 .setKeepAlive(true)
-                .setMasterConnectionMinimumIdleSize(10)
-                .setMasterConnectionPoolSize(20)
-                .setSlaveConnectionMinimumIdleSize(10)
-                .setSlaveConnectionPoolSize(20)
+                .setMasterConnectionMinimumIdleSize(connectionMinIdle)     // Reduced from 10
+                .setMasterConnectionPoolSize(connectionPoolSize)          // Reduced from 20
+                .setSlaveConnectionMinimumIdleSize(connectionMinIdle)     // Reduced from 10
+                .setSlaveConnectionPoolSize(connectionPoolSize)          // Reduced from 20
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
                 .setTimeout(50) //Setting UP timeout to 50ms
                 .setRetryAttempts(0);
+                
+        getLogger().info("Redisson redisCacheClient configured: NettyThreads={}, PoolSize={}, MinIdle={}", 
+                nettyThreads, connectionPoolSize, connectionMinIdle);
         return config;
     }
 

@@ -210,13 +210,18 @@ public class PolicyRefresher extends Thread {
 				loadPolicy();
 				loadUserStore();
 			} catch(InterruptedException excp) {
-				LOG.info("PolicyRefreshxer(serviceName=" + serviceName + ").run(): interrupted! Exiting thread", excp);
+				LOG.warn("PolicyRefreshxer(serviceName=" + serviceName + ").run(): interrupted! Exiting thread", excp);
 				break;
 			} finally {
 				if (trigger != null) {
 					trigger.signalCompletion();
 				}
-			}
+                try {
+                    Thread.sleep(300000);
+                } catch (InterruptedException e) {
+					LOG.warn("PolicyRefreshxer(serviceName=" + serviceName + ").run(): interrupted! Exiting thread", e);
+                }
+            }
 		}
 
 		if(LOG.isDebugEnabled()) {

@@ -33,6 +33,7 @@ on:
       - tagscanarymerge
       - fixlabels
       - mlh-755-staging
+      - mlh-909-memory-cleanup
 
 jobs:
   build:

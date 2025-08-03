@@ -20,8 +20,6 @@ package org.apache.atlas.repository.audit;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.google.common.annotations.VisibleForTesting;
-import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
@@ -30,6 +28,7 @@ import org.apache.atlas.model.EntityAuditEvent;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
 import org.apache.atlas.model.audit.EntityAuditSearchResult;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -38,14 +37,11 @@ import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.NotImplementedException;
 import org.apache.commons.lang.StringUtils;
 import org.apache.http.HttpEntity;
-import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
-import org.elasticsearch.client.RestClient;
-import org.elasticsearch.client.RestClientBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.annotation.Order;
@@ -92,13 +88,15 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final Set<String> ALLOWED_LINKED_ATTRIBUTES = new HashSet<>(Arrays.asList(DOMAIN_GUIDS));
     private static final String ENTITY_AUDITS_INDEX = "entity_audits";
 
+    // Static ObjectMapper to prevent memory allocations on each request (memory leak fix)
+    private static final ObjectMapper STATIC_OBJECT_MAPPER = new ObjectMapper();
+
     /*
     *    created   → event creation time
          timestamp → entity modified timestamp
          eventKey  → entityId:timestamp
     * */
 
-    private RestClient lowLevelClient;
     private final Configuration configuration;
     private EntityGraphRetriever entityGraphRetriever;
 
@@ -152,7 +150,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 HttpEntity entity = new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON);
                 Request request = new Request("POST", endpoint);
                 request.setEntity(entity);
-                Response response = lowLevelClient.performRequest(request);
+                Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
                 int statusCode = response.getStatusLine().getStatusCode();
                 if (statusCode != 200) {
                     throw new AtlasException("Unable to push entity audits to ES");
@@ -311,7 +309,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         String endPoint = INDEX_NAME + "/_search";
         Request request = new Request("GET", endPoint);
         request.setEntity(entity);
-        Response response = lowLevelClient.performRequest(request);
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
         return EntityUtils.toString(response.getEntity());
     }
 
@@ -334,7 +332,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     void createSession() throws AtlasException {
         LOG.info("Create ES Session in ES Based Audit Repo");
-        setLowLevelClient();
+        // Using centralized ES client from AtlasElasticsearchDatabase
         try {
             boolean indexExists = checkIfIndexExists();
             if (!indexExists) {
@@ -355,7 +353,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private boolean checkIfIndexExists() throws IOException {
         Request request = new Request("HEAD", INDEX_NAME);
-        Response response = lowLevelClient.performRequest(request);
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
         int statusCode = response.getStatusLine().getStatusCode();
         if (statusCode == 200) {
             LOG.info("Entity audits index exists!");
@@ -371,7 +369,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         HttpEntity entity = new NStringEntity(esMappingsString, ContentType.APPLICATION_JSON);
         Request request = new Request("PUT", INDEX_NAME);
         request.setEntity(entity);
-        Response response = lowLevelClient.performRequest(request);
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
         return isSuccess(response);
     }
 
@@ -389,13 +387,14 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private JsonNode getIndexFieldLimit() throws IOException {
         Request request = new Request("GET", INDEX_NAME + "/_settings");
-        Response response = lowLevelClient.performRequest(request);
-        ObjectMapper objectMapper = new ObjectMapper();
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
+        // Use static ObjectMapper to prevent memory allocation (memory leak fix)
         String fieldPath = String.format("/%s/settings/index/mapping/total_fields/limit", INDEX_NAME);
 
-        return objectMapper.readTree(copyToString(response.getEntity().getContent(), Charset.defaultCharset())).at(fieldPath);
+        return STATIC_OBJECT_MAPPER.readTree(copyToString(response.getEntity().getContent(), Charset.defaultCharset())).at(fieldPath);
     }
 
+    // Memory optimization note: For very large responses, consider streaming parsing instead of copyToString
     private void updateFieldLimit() {
         Request request = new Request("PUT", INDEX_NAME + "/_settings");
         String requestBody = String.format("{\"index.mapping.total_fields.limit\": %d}", configuration.getInt(TOTAL_FIELD_LIMIT));
@@ -403,7 +402,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         request.setEntity(entity);
         Response response;
         try {
-            response = lowLevelClient.performRequest(request);
+            response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
             if (response.getStatusLine().getStatusCode() != 200) {
                 LOG.error("Error while updating the Elasticsearch total field limits! Error: " + copyToString(response.getEntity().getContent(), defaultCharset()));
             } else {
@@ -416,9 +415,9 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private void updateMappingsIfChanged() throws IOException, AtlasException {
         LOG.info("ESBasedAuditRepo - updateMappings!");
-        ObjectMapper mapper = new ObjectMapper();
-        Map<String, JsonNode> activeIndexMappings = getActiveIndexMappings(mapper);
-        JsonNode indexInformationFromConfigurationFile = mapper.readTree(getAuditIndexMappings());
+        // Use static ObjectMapper to prevent memory allocation (memory leak fix)
+        Map<String, JsonNode> activeIndexMappings = getActiveIndexMappings(STATIC_OBJECT_MAPPER);
+        JsonNode indexInformationFromConfigurationFile = STATIC_OBJECT_MAPPER.readTree(getAuditIndexMappings());
         for (String activeAuditIndex : activeIndexMappings.keySet()) {
             if (!areConfigurationsSame(activeIndexMappings.get(activeAuditIndex), indexInformationFromConfigurationFile)) {
                 Response response = updateMappings(indexInformationFromConfigurationFile);
@@ -434,7 +433,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     private Map<String, JsonNode> getActiveIndexMappings(ObjectMapper mapper) throws IOException {
         Request request = new Request("GET", INDEX_NAME);
-        Response response = lowLevelClient.performRequest(request);
+        Response response = AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
         String responseString = copyToString(response.getEntity().getContent(), Charset.defaultCharset());
         Map<String, JsonNode> indexMappings = new TreeMap<>();
         JsonNode rootNode = mapper.readTree(responseString);
@@ -457,7 +456,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         Request request = new Request("PUT", INDEX_NAME + "/_mapping");
         HttpEntity entity = new NStringEntity(indexInformationFromConfigurationFile.get("mappings").toString(), ContentType.APPLICATION_JSON);
         request.setEntity(entity);
-        return lowLevelClient.performRequest(request);
+        return AtlasElasticsearchDatabase.getLowLevelClient().performRequest(request);
     }
 
     private String getAuditIndexMappings() throws IOException {
@@ -469,54 +468,8 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     @Override
     public void stop() throws AtlasException {
-        try {
-            LOG.info("ESBasedAuditRepo - stop!");
-            if (lowLevelClient != null) {
-                lowLevelClient.close();
-                lowLevelClient = null;
-            }
-        } catch (IOException e) {
-            LOG.error("ESBasedAuditRepo - error while closing es lowlevel client", e);
-            throw new AtlasException(e);
-        }
-    }
-
-    private void setLowLevelClient() throws AtlasException {
-        if (lowLevelClient == null) {
-            try {
-                LOG.info("ESBasedAuditRepo - setLowLevelClient!");
-                List<HttpHost> httpHosts = getHttpHosts();
-
-                RestClientBuilder builder = RestClient.builder(httpHosts.get(0));
-                builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
-                        .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
-                        .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()));
-
-                lowLevelClient = builder.build();
-            } catch (AtlasException e) {
-                LOG.error("Failed to initialize low level rest client for ES");
-                throw new AtlasException(e);
-            }
-        }
-    }
-
-    public static List<HttpHost> getHttpHosts() throws AtlasException {
-        List<HttpHost> httpHosts = new ArrayList<>();
-        Configuration configuration = ApplicationProperties.get();
-        String indexConf = configuration.getString(INDEX_BACKEND_CONF);
-        String[] hosts = indexConf.split(",");
-        for (String host : hosts) {
-            host = host.trim();
-            String[] hostAndPort = host.split(":");
-            if (hostAndPort.length == 1) {
-                httpHosts.add(new HttpHost(hostAndPort[0]));
-            } else if (hostAndPort.length == 2) {
-                httpHosts.add(new HttpHost(hostAndPort[0], Integer.parseInt(hostAndPort[1])));
-            } else {
-                throw new AtlasException("Invalid config");
-            }
-        }
-        return httpHosts;
+        LOG.info("ESBasedAuditRepo - stop! (Using shared ES client - no cleanup needed)");
+        // No client cleanup needed - using shared AtlasElasticsearchDatabase client
     }
 
     private boolean isSuccess(Response response) {

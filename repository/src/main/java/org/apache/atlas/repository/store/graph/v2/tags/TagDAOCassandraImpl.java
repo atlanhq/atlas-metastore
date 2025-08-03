@@ -122,6 +122,9 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                     .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, calculateOptimalLocalPoolSize())
                     .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, calculateOptimalRemotePoolSize())
                     .withDuration(DefaultDriverOption.HEARTBEAT_INTERVAL, HEARTBEAT_INTERVAL)
+                    // Memory optimization: Limit I/O threads to prevent thread explosion (default = CPU cores)
+                    .withInt(DefaultDriverOption.NETTY_IO_SIZE, 4)  // Fixed 4 I/O threads instead of CPU_CORES
+                    .withInt(DefaultDriverOption.NETTY_ADMIN_SIZE, 2)  // Admin thread pool limit
                     .build();
 
             cassSession = CqlSession.builder()
@@ -826,6 +829,54 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             } else {
                 pagingStates.put(key, state);
             }
+        }
+        
+        /**
+         * Clear all paging states from cache.
+         * Memory leak fix: Removes accumulated paging state entries.
+         */
+        public static void clearAll() {
+            pagingStates.clear();
+        }
+        
+        /**
+         * Get current cache size for monitoring.
+         */
+        public static int getCacheSize() {
+            return pagingStates.size();
+        }
+    }
+
+    /**
+     * Clear the static paging state cache.
+     * Memory leak fix: Clears accumulated paging states to prevent memory growth.
+     */
+    public static void clearPagingStateCache() {
+        try {
+            PagingStateCache.clearAll();
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("TagDAOCassandraImpl paging state cache cleared");
+            }
+        } catch (Exception e) {
+            LOG.warn("Error clearing paging state cache", e);
+        }
+    }
+
+    /**
+     * Limit paging state cache size for periodic maintenance.
+     * Memory leak fix: Conservative cleanup that only clears cache when it grows too large.
+     */
+    public static void limitPagingStateCacheSize() {
+        try {
+            int cacheSize = PagingStateCache.getCacheSize();
+            if (cacheSize > 1000) {
+                PagingStateCache.clearAll();
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("TagDAOCassandraImpl paging state cache cleared due to size limit: {} entries", cacheSize);
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Error limiting paging state cache size", e);
         }
     }
 }
