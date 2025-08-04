@@ -123,7 +123,7 @@ public class RequestContext {
     // Track Cassandra operations for rollback
     private final Map<String, Stack<CassandraTagOperation>> cassandraTagOperations = new HashMap<>();
     private final List<ESDeferredOperation> esDeferredOperations = new ArrayList<>();
-    private static final String X_ATLAN_CLIENT_ORIGIN = "x-atlan-client-origin";
+    private static final String X_ATLAN_CLIENT_ORIGIN = "X-Atlan-Client-Origin";
     private static final String CLIENT_ORIGIN_PRODUCT = "product_webapp";
 
     Map<String, Object> tagsDiff = new HashMap<>();
@@ -823,9 +823,12 @@ public class RequestContext {
 
     public boolean isInvokedByProduct() {
         Map<String, String> requestContextHeaders = getRequestContextHeaders();
-        return MapUtils.isNotEmpty(requestContextHeaders) &&
-                StringUtils.isNotEmpty(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN))
-                && requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN).equals(CLIENT_ORIGIN_PRODUCT);
+        if (MapUtils.isEmpty(requestContextHeaders)) {
+            return false;
+        }
+
+        return CLIENT_ORIGIN_PRODUCT.equals(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN)) ||
+                CLIENT_ORIGIN_PRODUCT.equals(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN.toLowerCase()));
     }
 
     public void setIsInvokedByLineage(boolean isInvokedByLineage) {
