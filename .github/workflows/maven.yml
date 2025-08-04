@@ -24,9 +24,13 @@ on:
     branches:
       - alpha
       - beta
-      - idxsearch-jg1
+      - development
       - master
       - staging
+      - tagscanary
+      - tagscanarymerge
+      - fixlabels
+      - interceptapis
 
 jobs:
   build:

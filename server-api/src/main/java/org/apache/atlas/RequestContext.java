@@ -18,6 +18,8 @@
 
 package org.apache.atlas;
 
+import org.apache.atlas.model.CassandraTagOperation;
+import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.instance.*;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.tasks.AtlasTask;
@@ -118,6 +120,9 @@ public class RequestContext {
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
 
+    // Track Cassandra operations for rollback
+    private final Map<String, Stack<CassandraTagOperation>> cassandraTagOperations = new HashMap<>();
+    private final List<ESDeferredOperation> esDeferredOperations = new ArrayList<>();
     private static final String X_ATLAN_CLIENT_ORIGIN = "X-Atlan-Client-Origin";
     private static final String CLIENT_ORIGIN_PRODUCT = "product_webapp";
 
@@ -186,6 +191,8 @@ public class RequestContext {
         this.delayTagNotifications = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
+        esDeferredOperations.clear();
+        this.cassandraTagOperations.clear();
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -671,6 +678,12 @@ public class RequestContext {
         }
     }
 
+    public void setRequestContextHeaders(Map<String, String> requestContextHeaders) {
+        if (requestContextHeaders != null) {
+            this.requestContextHeaders.putAll(requestContextHeaders);
+        }
+    }
+
     public Map<String, String> getRequestContextHeaders() {
         return requestContextHeaders;
     }
@@ -898,4 +911,21 @@ public class RequestContext {
     public boolean isEdgeLabelAlreadyProcessed(String processEdgeLabel) {
         return edgeLabels.contains(processEdgeLabel);
     }
+
+    public void addCassandraTagOperation(String entityGuid, CassandraTagOperation operation) {
+        cassandraTagOperations.computeIfAbsent(entityGuid, k -> new Stack<>()).push(operation);
+    }
+
+    public Map<String, Stack<CassandraTagOperation>> getCassandraTagOperations() {
+        return cassandraTagOperations;
+    }
+
+    public void addESDeferredOperation(ESDeferredOperation op) {
+        esDeferredOperations.add(op);
+    }
+
+    public List<ESDeferredOperation> getESDeferredOperations() {
+        return esDeferredOperations;
+    }
+
 }
