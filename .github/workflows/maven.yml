@@ -32,6 +32,7 @@ on:
       - tagscanary
       - tagscanarymerge
       - fixlabels
+      - interceptapis
       - mlh-755-staging
 
 jobs:
