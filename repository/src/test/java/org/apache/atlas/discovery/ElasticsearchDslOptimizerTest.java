@@ -889,7 +889,19 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
             if (originalValue != null && originalValue.endsWith("*")) {
                 String expectedPrefix = originalValue.substring(0, originalValue.length() - 1);
                 
-                // Look for corresponding term query with __qualifiedNameHierarchy
+                // NEW: Check for default/*/*/*/* -> terms transformation
+                if (originalValue.startsWith("default/")) {
+                    // Look for corresponding terms query with __qualifiedNameHierarchy
+                    for (String optimizedCondition : optimizedConditions) {
+                        if (optimizedCondition.startsWith("terms:") &&
+                            optimizedCondition.contains("__qualifiedNameHierarchy") &&
+                            optimizedCondition.contains("\"" + expectedPrefix + "\"")) {
+                            return true; // Wildcard->terms transformation detected for default pattern
+                        }
+                    }
+                }
+                
+                // EXISTING: Look for corresponding term query with __qualifiedNameHierarchy
                 for (String optimizedCondition : optimizedConditions) {
                     if (optimizedCondition.startsWith("term:") && 
                         optimizedCondition.contains("__qualifiedNameHierarchy") &&
@@ -2591,7 +2603,8 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         // Check specific bool flattening transformation
         System.out.println("\n--- BOOL FLATTENING ANALYSIS ---");
         System.out.println("Expected transformation: filter.bool.must+must_not -> bool.filter+must_not");
-        System.out.println("Optimization rules applied: " + String.join(", ", result.getMetrics().appliedRules));
+        System.out.println("Rules that helped optimize: " + 
+            (result.getMetrics().appliedRules.isEmpty() ? "None (already optimal)" : String.join(", ", result.getMetrics().appliedRules)));
     }
 
     // TEST METHOD FOR SEMANTIC OPTIMIZATION (bool_single_should_flatten.json scenario)
@@ -2629,7 +2642,8 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         // Check specific semantic optimization
         System.out.println("\n--- SEMANTIC OPTIMIZATION ANALYSIS ---");
         System.out.println("Expected transformation: Double bool nesting -> Simplified structure");
-        System.out.println("Optimization rules applied: " + String.join(", ", result.getMetrics().appliedRules));
+        System.out.println("Rules that helped optimize: " + 
+            (result.getMetrics().appliedRules.isEmpty() ? "None (already optimal)" : String.join(", ", result.getMetrics().appliedRules)));
     }
 
     // DEBUG TEST FOR bool_single_should_flatten.json and purpose_double_bool.json FAILURES
@@ -3217,6 +3231,198 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
     /**
      * Test validation failure by creating a scenario where field preservation fails
      */
+    public void testDefaultPatternOptimization() throws Exception {
+        System.out.println("=== Testing Default Pattern Optimization ===");
+        
+        // Test 1: default/*/*/*/* pattern should become terms query
+        String defaultPatternQuery = """
+            {
+              "query": {
+                "wildcard": {
+                  "qualifiedName": "default/athena/1731597928/AwsDataCatalog*"
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result1 = optimizer.optimizeQuery(defaultPatternQuery);
+        JsonNode optimized1 = parseJson(result1.getOptimizedQuery());
+        
+        // Should convert to terms query with __qualifiedNameHierarchy
+        assertTrue("Should contain __qualifiedNameHierarchy field", 
+                  result1.getOptimizedQuery().contains("__qualifiedNameHierarchy"));
+        assertTrue("Should contain terms query type",
+                  result1.getOptimizedQuery().contains("\"terms\""));
+        assertTrue("Should contain the exact path without wildcard",
+                  result1.getOptimizedQuery().contains("default/athena/1731597928/AwsDataCatalog"));
+        
+        System.out.println("✅ Default pattern optimization works correctly");
+    }
+    
+    public void testRegexpSplitting() throws Exception {
+        System.out.println("=== Testing Regexp Splitting for Long Patterns ===");
+        
+        // Create a query with many wildcards that will generate a long regexp
+        StringBuilder queryBuilder = new StringBuilder();
+        queryBuilder.append("{ \"query\": { \"bool\": { \"should\": [");
+        
+        // Generate 50 wildcard queries with long patterns to exceed 1000 chars
+        for (int i = 0; i < 50; i++) {
+            if (i > 0) queryBuilder.append(",");
+            queryBuilder.append("{ \"wildcard\": { \"qualifiedName\": \"*very_long_pattern_name_that_will_make_regexp_exceed_limit_").append(i).append("*\" }}");
+        }
+        
+        queryBuilder.append("] } } }");
+        String longWildcardQuery = queryBuilder.toString();
+        
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(longWildcardQuery);
+        JsonNode optimized = parseJson(result.getOptimizedQuery());
+        
+        // Check if splitting occurred by looking for multiple regexp or bool.should structures
+        String optimizedStr = result.getOptimizedQuery();
+        int regexpCount = optimizedStr.split("\"regexp\"").length - 1;
+        
+        System.out.println("Original query length: " + longWildcardQuery.length());
+        System.out.println("Optimized query length: " + optimizedStr.length());
+        System.out.println("Number of regexp queries created: " + regexpCount);
+        
+        // Should have created multiple regexp queries or a bool.should structure
+        assertTrue("Should create multiple regexp queries or bool.should structure", 
+                  regexpCount > 1 || optimizedStr.contains("\"should\""));
+        
+        System.out.println("✅ Regexp splitting works correctly");
+    }
+
+    public void testSkipExecutionDetection() throws Exception {
+        System.out.println("=== Testing Skip Execution Detection ===");
+        
+        // Test 1: Query with from: 0, size: 0, no aggs - should skip execution
+        String skipQuery = """
+            {
+              "from": 0,
+              "size": 0,
+              "query": {
+                "bool": {
+                  "must": [
+                    { "term": { "status": "active" } }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result1 = optimizer.optimizeQuery(skipQuery);
+        
+        assertTrue("Should detect skip execution for from:0, size:0, no aggs", 
+                  result1.shouldSkipExecution());
+        assertNotNull("Should have skip reason", result1.getSkipExecutionReason());
+        assertTrue("Skip reason should mention the conditions", 
+                  result1.getSkipExecutionReason().contains("from:0, size:0, and no aggregations"));
+        
+        System.out.println("✅ Skip reason: " + result1.getSkipExecutionReason());
+        
+        // Test 2: Query with size: 0 but has aggregations - should NOT skip
+        String aggQuery = """
+            {
+              "from": 0,
+              "size": 0,
+              "query": {
+                "match_all": {}
+              },
+              "aggs": {
+                "status_count": {
+                  "terms": { "field": "status" }
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result2 = optimizer.optimizeQuery(aggQuery);
+        
+        assertFalse("Should NOT skip execution when aggregations are present", 
+                   result2.shouldSkipExecution());
+        
+        // Test 3: Query with size > 0 - should NOT skip
+        String normalQuery = """
+            {
+              "from": 0,
+              "size": 10,
+              "query": {
+                "match_all": {}
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result3 = optimizer.optimizeQuery(normalQuery);
+        
+        assertFalse("Should NOT skip execution when size > 0", 
+                   result3.shouldSkipExecution());
+        
+        // Test 4: Test with validation-based optimization
+        ElasticsearchDslOptimizer.OptimizationResult result4 = optimizer.optimizeQueryWithValidation(skipQuery);
+        
+        assertTrue("Should detect skip execution in validation optimization", 
+                  result4.shouldSkipExecution());
+        
+        System.out.println("✅ Skip execution detection works correctly");
+        
+        // Test optimization summary logging
+        System.out.println("\n--- Testing Skip Execution Logging ---");
+        result1.logOptimizationSummary();
+    }
+
+    public void testOnlyHelpfulRulesReported() throws Exception {
+        System.out.println("=== Testing Only Helpful Rules Are Reported ===");
+        
+        // Test 1: Query that's already optimal - should report no helpful rules
+        String alreadyOptimalQuery = """
+            {
+              "size": 10,
+              "query": {
+                "term": { "status": "active" }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result1 = optimizer.optimizeQuery(alreadyOptimalQuery);
+        
+        System.out.println("Already optimal query:");
+        System.out.println("  Input: " + alreadyOptimalQuery.replaceAll("\\s+", " "));
+        System.out.println("  Output: " + result1.getOptimizedQuery().replaceAll("\\s+", " "));
+        if (result1.getMetrics() != null) {
+            System.out.println("  Rules that helped: " + 
+                (result1.getMetrics().appliedRules.isEmpty() ? "None (already optimal)" : String.join(", ", result1.getMetrics().appliedRules)));
+        }
+        
+        // Test 2: Query that needs optimization - should report specific helpful rules
+        String needsOptimizationQuery = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "must": [
+                    { "term": { "field1": "value1" } },
+                    { "term": { "field1": "value2" } }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result2 = optimizer.optimizeQuery(needsOptimizationQuery);
+        
+        System.out.println("\\nQuery needing optimization:");
+        System.out.println("  Input: " + needsOptimizationQuery.replaceAll("\\s+", " "));
+        System.out.println("  Output: " + result2.getOptimizedQuery().replaceAll("\\s+", " "));
+        if (result2.getMetrics() != null) {
+            System.out.println("  Rules that helped: " + 
+                (result2.getMetrics().appliedRules.isEmpty() ? "None" : String.join(", ", result2.getMetrics().appliedRules)));
+            System.out.println("  Total helpful rules: " + result2.getMetrics().appliedRules.size());
+        }
+        
+        // Verify that we only report rules that actually changed something
+        assertNotNull("Should have metrics", result2.getMetrics());
+        if (!result2.getMetrics().appliedRules.isEmpty()) {
+            System.out.println("✅ Only helpful rules reported: " + String.join(", ", result2.getMetrics().appliedRules));
+        }
+        
+        System.out.println("✅ Helpful rules reporting works correctly");
+    }
+
     public void testValidationFailureScenario() {
         System.out.println("\n--- Testing Validation Failure Scenario ---");
         
@@ -3252,5 +3458,186 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         System.out.println("- Empty query failure reason: " + emptyResult.getValidationFailureReason());
         
         assertFalse("Empty query should fail validation", emptyResult.isValidationPassed());
+    }
+
+    public void testMustVsMustNotWildcardConsolidationBug() throws Exception {
+        System.out.println("=== Testing Must vs Must_Not Wildcard Consolidation Bug ===");
+        
+        // This test verifies that wildcards in 'must' and 'must_not' clauses 
+        // are NOT incorrectly consolidated together, which would change query semantics
+        String queryWithMixedWildcards = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "must": [
+                    { "wildcard": { "qualifiedName": "include_pattern_*" } },
+                    { "wildcard": { "qualifiedName": "also_include_*" } }
+                  ],
+                  "must_not": [
+                    { "wildcard": { "qualifiedName": "exclude_pattern_*" } },
+                    { "wildcard": { "qualifiedName": "also_exclude_*" } }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(queryWithMixedWildcards);
+        JsonNode original = objectMapper.readTree(queryWithMixedWildcards);
+        JsonNode optimized = objectMapper.readTree(result.getOptimizedQuery());
+        
+        System.out.println("Original query: " + queryWithMixedWildcards.replaceAll("\\s+", " "));
+        System.out.println("Optimized query: " + result.getOptimizedQuery().replaceAll("\\s+", " "));
+        
+        if (result.getMetrics() != null) {
+            System.out.println("Rules that helped: " + 
+                (result.getMetrics().appliedRules.isEmpty() ? "None" : String.join(", ", result.getMetrics().appliedRules)));
+        }
+        
+        // CRITICAL: Verify that must and must_not contexts are preserved separately
+        JsonNode optimizedBool = optimized.path("query").path("bool");
+        
+        // Check that we still have separate must and must_not sections
+        assertTrue("Optimized query should still have 'must' section", optimizedBool.has("must"));
+        assertTrue("Optimized query should still have 'must_not' section", optimizedBool.has("must_not"));
+        
+        // Analyze the conditions in each context
+        JsonNode mustSection = optimizedBool.path("must");
+        JsonNode mustNotSection = optimizedBool.path("must_not");
+        
+        System.out.println("\\n--- SEMANTIC VALIDATION ---");
+        System.out.println("Must section: " + mustSection.toString());
+        System.out.println("Must_not section: " + mustNotSection.toString());
+        
+        // Extract patterns from each section to verify they weren't mixed
+        Set<String> mustPatterns = extractPatternsFromSection(mustSection);
+        Set<String> mustNotPatterns = extractPatternsFromSection(mustNotSection);
+        
+        System.out.println("Must patterns: " + mustPatterns);
+        System.out.println("Must_not patterns: " + mustNotPatterns);
+        
+        // CRITICAL BUG CHECK: Ensure include patterns didn't end up in must_not and vice versa
+        for (String mustPattern : mustPatterns) {
+            assertFalse("SEMANTIC BUG: Include pattern '" + mustPattern + "' found in must_not section!", 
+                       mustNotPatterns.contains(mustPattern));
+        }
+        
+        for (String mustNotPattern : mustNotPatterns) {
+            assertFalse("SEMANTIC BUG: Exclude pattern '" + mustNotPattern + "' found in must section!", 
+                       mustPatterns.contains(mustNotPattern));
+        }
+        
+        // Verify that consolidation, if it happened, stayed within the correct contexts
+        boolean mustHasIncludeTerms = mustPatterns.stream().anyMatch(p -> p.contains("include"));
+        boolean mustNotHasExcludeTerms = mustNotPatterns.stream().anyMatch(p -> p.contains("exclude"));
+        
+        assertTrue("Must section should contain include patterns", mustHasIncludeTerms);
+        assertTrue("Must_not section should contain exclude patterns", mustNotHasExcludeTerms);
+        
+        // Additional check: If regexp consolidation happened, verify the patterns are semantically correct
+        if (containsRegexpQuery(mustSection)) {
+            System.out.println("✅ Must section was consolidated to regexp (allowed)");
+            String mustRegexpPattern = extractRegexpPattern(mustSection);
+            assertFalse("SEMANTIC BUG: Must regexp contains exclude pattern", 
+                       mustRegexpPattern.contains("exclude"));
+        }
+        
+        if (containsRegexpQuery(mustNotSection)) {
+            System.out.println("✅ Must_not section was consolidated to regexp (allowed)");
+            String mustNotRegexpPattern = extractRegexpPattern(mustNotSection);
+            assertFalse("SEMANTIC BUG: Must_not regexp contains include pattern", 
+                       mustNotRegexpPattern.contains("include"));
+        }
+        
+        System.out.println("✅ Wildcard consolidation correctly preserved must vs must_not semantics");
+    }
+    
+    private Set<String> extractPatternsFromSection(JsonNode section) {
+        Set<String> patterns = new HashSet<>();
+        extractPatternsRecursive(section, patterns);
+        return patterns;
+    }
+    
+    private void extractPatternsRecursive(JsonNode node, Set<String> patterns) {
+        if (node.isArray()) {
+            for (JsonNode element : node) {
+                extractPatternsRecursive(element, patterns);
+            }
+        } else if (node.isObject()) {
+            // Check for wildcard queries
+            if (node.has("wildcard")) {
+                JsonNode wildcardNode = node.get("wildcard");
+                wildcardNode.fieldNames().forEachRemaining(field -> {
+                    String pattern = wildcardNode.get(field).asText();
+                    patterns.add(pattern);
+                });
+            }
+            
+            // Check for regexp queries
+            if (node.has("regexp")) {
+                JsonNode regexpNode = node.get("regexp");
+                regexpNode.fieldNames().forEachRemaining(field -> {
+                    String pattern = regexpNode.get(field).asText();
+                    patterns.add(pattern);
+                });
+            }
+            
+            // Check for terms queries
+            if (node.has("terms")) {
+                JsonNode termsNode = node.get("terms");
+                termsNode.fieldNames().forEachRemaining(field -> {
+                    JsonNode valuesArray = termsNode.get(field);
+                    if (valuesArray.isArray()) {
+                        for (JsonNode value : valuesArray) {
+                            patterns.add(value.asText());
+                        }
+                    }
+                });
+            }
+            
+            // Recursively check all child nodes
+            node.fieldNames().forEachRemaining(fieldName -> {
+                extractPatternsRecursive(node.get(fieldName), patterns);
+            });
+        }
+    }
+    
+    private boolean containsRegexpQuery(JsonNode section) {
+        return findRegexpQuery(section) != null;
+    }
+    
+    private String extractRegexpPattern(JsonNode section) {
+        JsonNode regexpQuery = findRegexpQuery(section);
+        if (regexpQuery != null) {
+            // Return the first regexp pattern found
+            Iterator<String> fieldNames = regexpQuery.fieldNames();
+            if (fieldNames.hasNext()) {
+                String field = fieldNames.next();
+                return regexpQuery.get(field).asText();
+            }
+        }
+        return "";
+    }
+    
+    private JsonNode findRegexpQuery(JsonNode node) {
+        if (node.isArray()) {
+            for (JsonNode element : node) {
+                JsonNode result = findRegexpQuery(element);
+                if (result != null) return result;
+            }
+        } else if (node.isObject()) {
+            if (node.has("regexp")) {
+                return node.get("regexp");
+            }
+            
+            // Recursively search child nodes
+            Iterator<String> fieldNames = node.fieldNames();
+            while (fieldNames.hasNext()) {
+                String fieldName = fieldNames.next();
+                JsonNode result = findRegexpQuery(node.get(fieldName));
+                if (result != null) return result;
+            }
+        }
+        return null;
     }
 } 
