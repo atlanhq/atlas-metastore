@@ -4,17 +4,24 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.commons.io.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 
+import java.io.*;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.stream.Collectors;
 
 /**
  * Generic Elasticsearch DSL Query Optimizer
  *
- * Optimizes queries through multiple optimization pipelines:
+ * Optimizes queries through multiple optimization pipelines.
+ * Reports only rules that actually help optimize (make changes).
+ * 
+ * Available optimization rules:
+ * 0. No execution needed detection (from:0, size:0, no aggs)
  * 1. Structure simplification (flatten nested bools)
  * 2. Empty bool elimination
  * 3. Multiple terms consolidation (pre-hierarchy)
@@ -22,9 +29,9 @@ import java.util.stream.Collectors;
  * 5. Multi-match consolidation
  * 6. Regexp simplification
  * 7. Aggregation optimization
- * 8. QualifiedName hierarchy optimization
+ * 8. QualifiedName hierarchy optimization (default/* patterns)
  * 9. Multiple terms consolidation (post-hierarchy)
- * 10. Wildcard consolidation
+ * 10. Wildcard consolidation (with 1000-char regexp splitting)
  * 11. Filter structure optimization (scoring-safe)
  * 12. Bool flattening (must+must_not to filter+must_not)
  * 13. Nested bool elimination
@@ -32,6 +39,12 @@ import java.util.stream.Collectors;
  * 15. Context-aware filter optimization (safe must->filter in function_score)
  * 16. Function score optimization
  * 17. Duplicate filter removal
+ * 
+ * Performance Features:
+ * - Only reports rules that made actual changes
+ * - Detects queries that don't need Elasticsearch execution
+ * - Splits large regexp patterns to avoid 1000-char limits
+ * - Optimizes default/* patterns to __qualifiedNameHierarchy
  */
 public class ElasticsearchDslOptimizer {
 
@@ -44,6 +57,7 @@ public class ElasticsearchDslOptimizer {
     public ElasticsearchDslOptimizer() {
         this.objectMapper = new ObjectMapper();
         this.optimizationRules = Arrays.asList(
+                new NoExecutionNeededRule(), // FIRST - can completely skip execution
                 new StructureSimplificationRule(),
                 new EmptyBoolEliminationRule(),
                 new NestedBoolEliminationRule(), // Flatten structures first
@@ -344,14 +358,31 @@ public class ElasticsearchDslOptimizer {
             metrics.startOptimization(query);
 
             // Apply optimization rules in sequence
+            boolean shouldSkipExecution = false;
+            String skipReason = null;
+            
             for (OptimizationRule rule : optimizationRules) {
                 JsonNode beforeRule = query.deepCopy();
                 query = rule.apply(query);
-                metrics.recordRuleApplication(rule.getName());
                 
-                // Log rule application if query changed
+                // Check if NoExecutionNeededRule detected skip condition
+                if (rule instanceof NoExecutionNeededRule) {
+                    NoExecutionNeededRule skipRule = (NoExecutionNeededRule) rule;
+                    if (skipRule.shouldSkipExecution(originalQuery)) {
+                        shouldSkipExecution = true;
+                        skipReason = "Query has from:0, size:0, and no aggregations - execution unnecessary";
+                        log.warn("SKIP EXECUTION: {}", skipReason);
+                        metrics.recordRuleApplication(rule.getName()); // Record skip rule as applied
+                        break; // No need to apply further optimizations
+                    }
+                }
+                
+                // IMPROVED: Only record rules that actually made changes
                 if (!beforeRule.equals(query)) {
-                    log.debug("Rule '{}' modified query for hash: {}", rule.getName(), queryHash);
+                    metrics.recordRuleApplication(rule.getName());
+                    log.debug("Rule '{}' OPTIMIZED query for hash: {} (made changes)", rule.getName(), queryHash);
+                } else {
+                    log.debug("Rule '{}' applied but made no changes for hash: {}", rule.getName(), queryHash);
                 }
             }
 
@@ -368,7 +399,11 @@ public class ElasticsearchDslOptimizer {
             log.info("Size reduction: {}%, Nesting reduction: {}%", 
                     String.format("%.1f", result.getSizeReduction()),
                     String.format("%.1f", result.getNestingReduction()));
-            log.debug("Applied rules: {}", String.join(", ", result.appliedRules));
+            if (result.appliedRules.isEmpty()) {
+                log.info("No optimization rules helped (query already optimal)");
+            } else {
+                log.info("Rules that helped optimize: {}", String.join(", ", result.appliedRules));
+            }
             
             // Add comprehensive optimization metrics to MDC
             MDC.put("optimization.query_hash", queryHash);
@@ -377,10 +412,27 @@ public class ElasticsearchDslOptimizer {
             MDC.put("optimization.original_nesting", String.valueOf(result.originalNesting));
             MDC.put("optimization.optimized_nesting", String.valueOf(result.optimizedNesting));
             MDC.put("optimization.total_time_ms", String.valueOf(totalTime));
-            MDC.put("optimization.rules_applied", String.join("|", result.appliedRules));
-            MDC.put("optimization.rules_count", String.valueOf(result.appliedRules.size()));
+            MDC.put("optimization.rules_that_helped", String.join("|", result.appliedRules));
+            MDC.put("optimization.helpful_rules_count", String.valueOf(result.appliedRules.size()));
             
-            return new OptimizationResult(optimizedQueryJson, result);
+            OptimizationResult optimizationResult = new OptimizationResult(optimizedQueryJson, result);
+            optimizationResult.setOriginalQuery(queryJson);
+            
+            // Set skip execution flags if detected
+            if (shouldSkipExecution) {
+                optimizationResult.setShouldSkipExecution(true);
+                optimizationResult.setSkipExecutionReason(skipReason);
+                
+                // Add skip execution info to MDC for ClickHouse tracking
+                MDC.put("execution.skip", "true");
+                MDC.put("execution.skip_reason", skipReason);
+                
+                log.warn("🚫 EXECUTION SKIP DETECTED: {}", skipReason);
+            } else {
+                MDC.put("execution.skip", "false");
+            }
+            
+            return optimizationResult;
 
         } catch (Exception e) {
             long totalTime = System.currentTimeMillis() - startTime;
@@ -452,6 +504,20 @@ public class ElasticsearchDslOptimizer {
         try {
             OptimizationResult result = optimizeQuery(originalQuery);
             long optimizationTime = System.currentTimeMillis() - startTime;
+            
+            // CRITICAL: Check for execution skip first - bypass validation if execution should be skipped
+            if (result.shouldSkipExecution()) {
+                log.warn("SKIP EXECUTION detected during validation optimization for query hash: {}", queryHash);
+                
+                // Add skip execution info to MDC
+                MDC.put("query.hash", queryHash);
+                MDC.put("query.original_length", String.valueOf(originalQuery.length()));
+                MDC.put("validation.status", "SKIPPED_EXECUTION");
+                MDC.put("validation.skip_reason", result.getSkipExecutionReason());
+                MDC.put("execution.recommendation", "SKIP");
+                
+                return result; // Return with skip flag set
+            }
             
             // Validate the optimization
             if (isOptimizationValid(originalQuery, result.getOptimizedQuery())) {
@@ -737,6 +803,65 @@ public class ElasticsearchDslOptimizer {
          
          return count;
      }
+
+    /**
+     * Rule 0: No Execution Needed Detection
+     * Detects queries that don't need Elasticsearch execution at all
+     * (from: 0, size: 0, no aggregations = pointless query)
+     */
+    private class NoExecutionNeededRule implements OptimizationRule {
+
+        @Override
+        public String getName() {
+            return "NoExecutionNeeded";
+        }
+
+        @Override
+        public JsonNode apply(JsonNode query) {
+            // This rule doesn't modify the query structure, but sets execution skip flag
+            if (shouldSkipExecution(query)) {
+                log.info("NoExecutionNeededRule: Query should be skipped - from:0, size:0, no aggregations");
+                // We'll set the flag in the main optimization method
+            }
+            return query; // Return unchanged - skip flag is handled in optimizeQuery
+        }
+        
+        public boolean shouldSkipExecution(JsonNode query) {
+            if (query == null || !query.isObject()) {
+                return false;
+            }
+            
+            ObjectNode queryObj = (ObjectNode) query;
+            
+            // Check for from: 0 (or missing, which defaults to 0)
+            boolean fromIsZero = true;
+            if (queryObj.has("from")) {
+                JsonNode fromNode = queryObj.get("from");
+                fromIsZero = fromNode.isNumber() && fromNode.asInt() == 0;
+            }
+            
+            // Check for size: 0
+            boolean sizeIsZero = false;
+            if (queryObj.has("size")) {
+                JsonNode sizeNode = queryObj.get("size");
+                sizeIsZero = sizeNode.isNumber() && sizeNode.asInt() == 0;
+            }
+            
+            // Check for no aggregations
+            boolean hasNoAggs = !queryObj.has("aggs") && !queryObj.has("aggregations");
+            
+            boolean shouldSkip = fromIsZero && sizeIsZero && hasNoAggs;
+            
+            if (shouldSkip) {
+                log.debug("NoExecutionNeededRule: Detected skip conditions - from:{}, size:{}, hasAggs:{}", 
+                         queryObj.has("from") ? queryObj.get("from").asInt() : 0,
+                         queryObj.has("size") ? queryObj.get("size").asInt() : "missing",
+                         !hasNoAggs);
+            }
+            
+            return shouldSkip;
+        }
+    }
 
     /**
      * Rule 1: Structure Simplification
@@ -1402,24 +1527,39 @@ public class ElasticsearchDslOptimizer {
                     if (clauseNode.isArray()) {
                         ArrayNode clauseArray = (ArrayNode) clauseNode;
                         
-                        // Group wildcards by field
-                        Map<String, List<JsonNode>> wildcardsByField = new HashMap<>();
+                        // ENHANCED: Handle both direct wildcards AND nested bool wildcards
+                        Map<String, List<JsonNode>> directWildcardsByField = new HashMap<>();
+                        Map<String, List<JsonNode>> nestedWildcardsByField = new HashMap<>();
                         List<JsonNode> nonWildcards = new ArrayList<>();
                         
                         for (JsonNode clause : clauseArray) {
                             if (clause.has("wildcard")) {
+                                // Direct wildcard in the array
                                 JsonNode wildcardNode = clause.get("wildcard");
                                 Iterator<String> fieldNames = wildcardNode.fieldNames();
                                 if (fieldNames.hasNext()) {
                                     String field = fieldNames.next();
-                                    wildcardsByField.computeIfAbsent(field, k -> new ArrayList<>()).add(clause);
+                                    directWildcardsByField.computeIfAbsent(field, k -> new ArrayList<>()).add(clause);
+                                }
+                            } else if (clause.has("bool") && isSimpleWildcardWrapper(clause)) {
+                                // NESTED: Extract wildcards from simple bool wrappers
+                                JsonNode nestedWildcard = extractWildcardFromSimpleWrapper(clause);
+                                if (nestedWildcard != null) {
+                                    JsonNode wildcardNode = nestedWildcard.get("wildcard");
+                                    Iterator<String> fieldNames = wildcardNode.fieldNames();
+                                    if (fieldNames.hasNext()) {
+                                        String field = fieldNames.next();
+                                        nestedWildcardsByField.computeIfAbsent(field, k -> new ArrayList<>()).add(clause);
+                                    }
+                                } else {
+                                    nonWildcards.add(clause);
                                 }
                             } else {
                                 nonWildcards.add(clause);
                             }
                         }
                         
-                        // Check if any field has enough wildcards to consolidate
+                        // Consolidate both direct and nested wildcards
                         boolean hasConsolidation = false;
                         ArrayNode newArray = objectMapper.createArrayNode();
                         
@@ -1428,36 +1568,11 @@ public class ElasticsearchDslOptimizer {
                             newArray.add(nonWildcard);
                         }
                         
-                        // Process wildcards by field
-                        for (Map.Entry<String, List<JsonNode>> entry : wildcardsByField.entrySet()) {
-                            String field = entry.getKey();
-                            List<JsonNode> wildcards = entry.getValue();
-                            
-                            if (wildcards.size() > 3) {
-                                // Extract patterns and create regexp
-                                List<String> patterns = new ArrayList<>();
-                                for (JsonNode wildcard : wildcards) {
-                                    String pattern = wildcard.get("wildcard").get(field).asText();
-                                    patterns.add(pattern);
-                                }
-                                
-                                String regexpPattern = createRegexpPattern(patterns);
-                                
-                                // Create regexp node
-                                ObjectNode regexpNode = objectMapper.createObjectNode();
-                                ObjectNode regexpQuery = objectMapper.createObjectNode();
-                                regexpQuery.put(field, regexpPattern);
-                                regexpNode.set("regexp", regexpQuery);
-                                newArray.add(regexpNode);
-                                
-                                hasConsolidation = true;
-                            } else {
-                                // Keep original wildcards if not enough to consolidate
-                                for (JsonNode wildcard : wildcards) {
-                                    newArray.add(wildcard);
-                                }
-                            }
-                        }
+                        // Process direct wildcards
+                        hasConsolidation |= processWildcardGroup(directWildcardsByField, newArray, false);
+                        
+                        // Process nested wildcards (preserve the bool wrapper context)
+                        hasConsolidation |= processWildcardGroup(nestedWildcardsByField, newArray, true);
                         
                         // Replace the array if we made consolidations
                         if (hasConsolidation) {
@@ -1469,9 +1584,179 @@ public class ElasticsearchDslOptimizer {
             
             return objectNode;
         }
+        
+        /**
+         * Checks if a bool node is a simple wrapper around a single wildcard query
+         */
+        private boolean isSimpleWildcardWrapper(JsonNode boolWrapper) {
+            if (!boolWrapper.has("bool")) return false;
+            
+            JsonNode bool = boolWrapper.get("bool");
+            
+            // Check for single-clause bool with one wildcard
+            int clauseCount = 0;
+            JsonNode targetClause = null;
+            
+            for (String clauseType : Arrays.asList("must", "should", "filter", "must_not")) {
+                if (bool.has(clauseType)) {
+                    clauseCount++;
+                    targetClause = bool.get(clauseType);
+                }
+            }
+            
+            // Must be exactly one clause type
+            if (clauseCount != 1 || targetClause == null) return false;
+            
+            // Check if the clause contains exactly one wildcard
+            if (targetClause.isArray()) {
+                ArrayNode array = (ArrayNode) targetClause;
+                return array.size() == 1 && array.get(0).has("wildcard");
+            } else {
+                return targetClause.has("wildcard");
+            }
+        }
+        
+        /**
+         * Extracts the wildcard query from a simple bool wrapper
+         */
+        private JsonNode extractWildcardFromSimpleWrapper(JsonNode boolWrapper) {
+            JsonNode bool = boolWrapper.get("bool");
+            
+            for (String clauseType : Arrays.asList("must", "should", "filter", "must_not")) {
+                if (bool.has(clauseType)) {
+                    JsonNode clause = bool.get(clauseType);
+                    if (clause.isArray()) {
+                        ArrayNode array = (ArrayNode) clause;
+                        if (array.size() == 1 && array.get(0).has("wildcard")) {
+                            return array.get(0);
+                        }
+                    } else if (clause.has("wildcard")) {
+                        return clause;
+                    }
+                }
+            }
+            return null;
+        }
+        
+        /**
+         * Processes a group of wildcards (either direct or nested) for consolidation
+         */
+        private boolean processWildcardGroup(Map<String, List<JsonNode>> wildcardsByField, 
+                                           ArrayNode targetArray, 
+                                           boolean preserveWrapper) {
+            boolean hasConsolidation = false;
+            
+            for (Map.Entry<String, List<JsonNode>> entry : wildcardsByField.entrySet()) {
+                String field = entry.getKey();
+                List<JsonNode> wildcards = entry.getValue();
+                
+                if (wildcards.size() > 3) {
+                    // Extract patterns and create regexp
+                    List<String> patterns = new ArrayList<>();
+                    String wrapperContext = null;  // For preserving must_not, should, etc.
+                    
+                    for (JsonNode wildcardContainer : wildcards) {
+                        JsonNode wildcardNode;
+                        if (wildcardContainer.has("wildcard")) {
+                            wildcardNode = wildcardContainer.get("wildcard");
+                        } else {
+                            // Extract from nested bool
+                            wildcardNode = extractWildcardFromSimpleWrapper(wildcardContainer).get("wildcard");
+                            if (wrapperContext == null && preserveWrapper) {
+                                // Determine the wrapper context (must_not, should, etc.)
+                                JsonNode bool = wildcardContainer.get("bool");
+                                for (String clauseType : Arrays.asList("must", "should", "filter", "must_not")) {
+                                    if (bool.has(clauseType)) {
+                                        wrapperContext = clauseType;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        
+                        String pattern = wildcardNode.get(field).asText();
+                        patterns.add(pattern);
+                    }
+                    
+                    // ENHANCED: Handle 1000+ character regexp splitting
+                    List<String> regexpPatterns = createRegexpPatterns(patterns);
+                    
+                    if (regexpPatterns.size() == 1) {
+                        // Single regexp - use existing logic
+                        ObjectNode regexpNode = objectMapper.createObjectNode();
+                        ObjectNode regexpQuery = objectMapper.createObjectNode();
+                        regexpQuery.put(field, regexpPatterns.get(0));
+                        regexpNode.set("regexp", regexpQuery);
+                        
+                        // Wrap in the same context if needed (preserve must_not, should, etc.)
+                        if (preserveWrapper && wrapperContext != null) {
+                            ObjectNode wrapperNode = objectMapper.createObjectNode();
+                            ObjectNode boolNode = objectMapper.createObjectNode();
+                            ArrayNode clauseArray = objectMapper.createArrayNode();
+                            clauseArray.add(regexpNode);
+                            boolNode.set(wrapperContext, clauseArray);
+                            wrapperNode.set("bool", boolNode);
+                            targetArray.add(wrapperNode);
+                        } else {
+                            targetArray.add(regexpNode);
+                        }
+                    } else {
+                        // Multiple regexps - create bool.should to OR them together
+                        ArrayNode shouldArray = objectMapper.createArrayNode();
+                        
+                        for (String regexpPattern : regexpPatterns) {
+                            ObjectNode regexpNode = objectMapper.createObjectNode();
+                            ObjectNode regexpQuery = objectMapper.createObjectNode();
+                            regexpQuery.put(field, regexpPattern);
+                            regexpNode.set("regexp", regexpQuery);
+                            shouldArray.add(regexpNode);
+                        }
+                        
+                        // Create bool.should wrapper for multiple regexps
+                        ObjectNode multiRegexpBool = objectMapper.createObjectNode();
+                        ObjectNode multiRegexpBoolContent = objectMapper.createObjectNode();
+                        multiRegexpBoolContent.set("should", shouldArray);
+                        multiRegexpBool.set("bool", multiRegexpBoolContent);
+                        
+                        // Wrap in the same context if needed (preserve must_not, should, etc.)
+                        if (preserveWrapper && wrapperContext != null) {
+                            ObjectNode wrapperNode = objectMapper.createObjectNode();
+                            ObjectNode boolNode = objectMapper.createObjectNode();
+                            ArrayNode clauseArray = objectMapper.createArrayNode();
+                            clauseArray.add(multiRegexpBool);
+                            boolNode.set(wrapperContext, clauseArray);
+                            wrapperNode.set("bool", boolNode);
+                            targetArray.add(wrapperNode);
+                        } else {
+                            targetArray.add(multiRegexpBool);
+                        }
+                        
+                        log.debug("WildcardConsolidation: Split large regexp into {} parts for field '{}' due to 1000-char limit", 
+                                 regexpPatterns.size(), field);
+                    }
+                    
+                    hasConsolidation = true;
+                    
+                    log.debug("WildcardConsolidation: Consolidated {} wildcards for field '{}' into regexp", 
+                             wildcards.size(), field);
+                } else {
+                    // Keep original wildcards if not enough to consolidate
+                    for (JsonNode wildcard : wildcards) {
+                        targetArray.add(wildcard);
+                    }
+                }
+            }
+            
+            return hasConsolidation;
+        }
 
-        private String createRegexpPattern(List<String> patterns) {
-            if (patterns.isEmpty()) return ".*";
+        /**
+         * Creates regexp patterns with automatic splitting when exceeding 1000 characters
+         * @param patterns List of wildcard patterns to convert
+         * @return List of regexp patterns (1 if under limit, multiple if split needed)
+         */
+        private List<String> createRegexpPatterns(List<String> patterns) {
+            if (patterns.isEmpty()) return Arrays.asList(".*");
             
             // Remove asterisks and clean patterns for regexp
             List<String> cleanPatterns = patterns.stream()
@@ -1479,12 +1764,74 @@ public class ElasticsearchDslOptimizer {
                 .filter(p -> !p.isEmpty())
                 .collect(Collectors.toList());
             
-            if (cleanPatterns.isEmpty()) return ".*";
+            if (cleanPatterns.isEmpty()) return Arrays.asList(".*");
 
-            String alternatives = cleanPatterns.stream()
+            // Escape patterns for regexp usage
+            List<String> escapedPatterns = cleanPatterns.stream()
                     .map(this::escapeRegexSpecialChars)
-                    .collect(Collectors.joining("|"));
-            return ".*(" + alternatives + ").*";
+                    .collect(Collectors.toList());
+            
+            // Try to create a single regexp pattern
+            String allAlternatives = escapedPatterns.stream().collect(Collectors.joining("|"));
+            String singlePattern = ".*(" + allAlternatives + ").*";
+            
+            // If single pattern is under 1000 chars, return it
+            if (singlePattern.length() <= 1000) {
+                log.debug("WildcardConsolidation: Created single regexp pattern ({} chars)", singlePattern.length());
+                return Arrays.asList(singlePattern);
+            }
+            
+            // SPLIT LOGIC: Pattern exceeds 1000 chars, need to split
+            log.debug("WildcardConsolidation: Pattern exceeds 1000 chars ({}), splitting...", singlePattern.length());
+            
+            List<String> resultPatterns = new ArrayList<>();
+            List<String> currentGroup = new ArrayList<>();
+            int currentLength = 6; // Start with ".*().*" base length
+            
+            for (String escapedPattern : escapedPatterns) {
+                int patternLength = escapedPattern.length() + 1; // +1 for "|" separator
+                
+                // Check if adding this pattern would exceed the limit
+                if (currentLength + patternLength > 995) { // Leave 5 chars buffer
+                    // Finalize current group if it has patterns
+                    if (!currentGroup.isEmpty()) {
+                        String groupAlternatives = currentGroup.stream().collect(Collectors.joining("|"));
+                        String groupPattern = ".*(" + groupAlternatives + ").*";
+                        resultPatterns.add(groupPattern);
+                        log.debug("WildcardConsolidation: Created split regexp part {} ({} chars, {} patterns)", 
+                                 resultPatterns.size(), groupPattern.length(), currentGroup.size());
+                    }
+                    
+                    // Start new group
+                    currentGroup = new ArrayList<>();
+                    currentLength = 6; // Reset to base length
+                }
+                
+                currentGroup.add(escapedPattern);
+                currentLength += patternLength;
+            }
+            
+            // Add final group if it has patterns
+            if (!currentGroup.isEmpty()) {
+                String groupAlternatives = currentGroup.stream().collect(Collectors.joining("|"));
+                String groupPattern = ".*(" + groupAlternatives + ").*";
+                resultPatterns.add(groupPattern);
+                log.debug("WildcardConsolidation: Created final split regexp part {} ({} chars, {} patterns)", 
+                         resultPatterns.size(), groupPattern.length(), currentGroup.size());
+            }
+            
+            log.info("WildcardConsolidation: Split {} patterns into {} regexp queries to stay under 1000-char limit", 
+                     patterns.size(), resultPatterns.size());
+            
+            return resultPatterns;
+        }
+        
+        /**
+         * Legacy method for backward compatibility - returns first pattern only
+         */
+        private String createRegexpPattern(List<String> patterns) {
+            List<String> regexpPatterns = createRegexpPatterns(patterns);
+            return regexpPatterns.isEmpty() ? ".*" : regexpPatterns.get(0);
         }
 
         private String escapeRegexSpecialChars(String input) {
@@ -1530,6 +1877,24 @@ public class ElasticsearchDslOptimizer {
                         
                         log.debug("QualifiedNameHierarchyRule: Checking field '{}' with pattern '{}'", currentField, pattern);
                         
+                        // NEW: Special handling for default/*/*/*/* patterns - convert to terms query
+                        if (pattern.startsWith("default/") && pattern.endsWith("*")) {
+                            String pathWithoutTrailingWildcard = pattern.substring(0, pattern.length() - 1);
+                            String[] pathSegments = pathWithoutTrailingWildcard.split("/");
+                            
+                            log.debug("QualifiedNameHierarchyRule: Found default/*/*/*/* pattern, converting to terms query: '{}'", pathWithoutTrailingWildcard);
+                            
+                            // Create terms query with __qualifiedNameHierarchy for better performance
+                            ObjectNode termsNode = objectMapper.createObjectNode();
+                            ObjectNode termsQuery = objectMapper.createObjectNode();
+                            ArrayNode termsArray = objectMapper.createArrayNode();
+                            termsArray.add(pathWithoutTrailingWildcard);
+                            termsQuery.set("__qualifiedNameHierarchy", termsArray);
+                            termsNode.set("terms", termsQuery);
+                            return termsNode;
+                        }
+                        
+                        // EXISTING: Handle suffix wildcards for simple prefixes
                         if (pattern.endsWith("*") && !pattern.startsWith("*") && 
                             pattern.length() > 1 && pattern.contains("/")) {
                             
@@ -2329,6 +2694,8 @@ public class ElasticsearchDslOptimizer {
         private String originalQuery;
         private boolean validationPassed = true;
         private String validationFailureReason;
+        private boolean shouldSkipExecution = false;
+        private String skipExecutionReason;
 
         OptimizationResult(String optimizedQuery, OptimizationMetrics.Result metrics) {
             this.optimizedQuery = optimizedQuery;
@@ -2372,36 +2739,114 @@ public class ElasticsearchDslOptimizer {
         public String getValidationFailureReason() {
             return validationFailureReason;
         }
+        
+        public boolean shouldSkipExecution() {
+            return shouldSkipExecution;
+        }
+        
+        public void setShouldSkipExecution(boolean shouldSkipExecution) {
+            this.shouldSkipExecution = shouldSkipExecution;
+        }
+        
+        public String getSkipExecutionReason() {
+            return skipExecutionReason;
+        }
+        
+        public void setSkipExecutionReason(String skipExecutionReason) {
+            this.skipExecutionReason = skipExecutionReason;
+        }
 
         public void logOptimizationSummary() {
             log.info("=== Optimization Summary ===");
+            
+            // CRITICAL: Check for execution skip first
+            if (shouldSkipExecution) {
+                log.warn("🚫 EXECUTION SHOULD BE SKIPPED: {}", skipExecutionReason);
+                log.warn("⚠️  This query would return no results and provides no aggregations");
+                log.warn("💡 Recommendation: Skip Elasticsearch execution entirely to save resources");
+                
+                // Add to MDC for ClickHouse tracking - execution skip
+                MDC.put("optimization.execution_skip", "true");
+                MDC.put("optimization.skip_reason", skipExecutionReason);
+                MDC.put("optimization.recommendation", "SKIP_EXECUTION");
+                
+                return; // Don't log other optimization details if execution should be skipped
+            }
+            
             if (validationPassed && metrics != null) {
                 log.info("Size reduction: {}%", String.format("%.1f", metrics.getSizeReduction()));
                 log.info("Nesting reduction: {}%", String.format("%.1f", metrics.getNestingReduction()));
                 log.info("Optimization time: {}ms", metrics.optimizationTime);
-                log.info("Applied rules: {}", String.join(", ", metrics.appliedRules));
+                if (metrics.appliedRules.isEmpty()) {
+                    log.info("🔍 No optimization rules helped (query was already optimal)");
+                } else {
+                    log.info("🔧 Rules that helped: {}", String.join(", ", metrics.appliedRules));
+                    log.info("📊 Total helpful rules: {}", metrics.appliedRules.size());
+                }
                 log.info("Validation: PASSED");
+                log.info("✅ Execute this optimized query on Elasticsearch");
                 
                 // Add to MDC for ClickHouse tracking
                 MDC.put("optimization.size_reduction", String.format("%.1f", metrics.getSizeReduction()));
                 MDC.put("optimization.nesting_reduction", String.format("%.1f", metrics.getNestingReduction()));
                 MDC.put("optimization.time_ms", String.valueOf(metrics.optimizationTime));
-                MDC.put("optimization.applied_rules", String.join(", ", metrics.appliedRules));
+                MDC.put("optimization.rules_that_helped", String.join(", ", metrics.appliedRules));
                 MDC.put("optimization.validation_status", "PASSED");
                 MDC.put("optimization.optimized_query", optimizedQuery);
+                MDC.put("optimization.execution_skip", "false");
+                MDC.put("optimization.recommendation", "EXECUTE_OPTIMIZED");
                 
                 log.info("Query optimization completed successfully - metrics added to MDC");
             } else {
                 log.warn("Validation: FAILED - {}", validationFailureReason);
                 log.warn("Using original query as fallback");
+                log.warn("⚠️  Execute original query on Elasticsearch (optimization failed)");
                 
                 // Add to MDC for ClickHouse tracking - validation failure
                 MDC.put("optimization.validation_status", "FAILED");
                 MDC.put("optimization.failure_reason", validationFailureReason);
                 MDC.put("optimization.fallback_used", "true");
+                MDC.put("optimization.execution_skip", "false");
+                MDC.put("optimization.recommendation", "EXECUTE_ORIGINAL");
                 
                 log.warn("Query optimization failed validation - fallback to original query");
             }
+        }
+    }
+
+    public static void main(String[] args) {
+        ElasticsearchDslOptimizer elasticsearchDslOptimizer = new ElasticsearchDslOptimizer();
+        // get all json files from a directory
+        File dir = new File("/Users/sriram.aravamuthan/Documents/Notes/TestDSLRewrite/test");
+        File[] files = dir.listFiles((d, name) -> name.endsWith(".json"));
+        if (files != null) {
+            for (File file : files) {
+                try {
+                    BufferedInputStream bufferedInputStream = IOUtils.buffer(new FileInputStream(file));
+                    //convert to bufferedInputStream to string
+                    String jsonString = IOUtils.toString(bufferedInputStream, StandardCharsets.UTF_8);
+                    OptimizationResult result = elasticsearchDslOptimizer.optimizeQuery(jsonString);
+                    
+                    // NEW: Check for skip execution recommendation
+                    if (result.shouldSkipExecution()) {
+                        System.out.println("🚫 SKIP EXECUTION for " + file.getName() + ": " + result.getSkipExecutionReason());
+                        continue; // Don't write optimized file if execution should be skipped
+                    }
+                    
+                    //result.printOptimizationSummary();
+                    //write the output to another file in same directory with file name as <original_file_name>_optimized.json
+                    String outputFileName = file.getName().replace(".json", "_optimized.json");
+                    File outputFile = new File(dir, outputFileName);
+                    try (BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
+                        writer.write(result.getOptimizedQuery());
+                    }
+                    System.out.println("Optimized query written to: " + outputFile.getAbsolutePath());
+                } catch (IOException e) {
+                    System.err.println("Failed to read file " + file.getName() + ": " + e.getMessage());
+                }
+            }
+        } else {
+            System.out.println("No JSON files found in the specified directory.");
         }
     }
 
