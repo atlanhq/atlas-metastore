@@ -24,7 +24,7 @@ on:
     branches:
       - alpha
       - beta
-      - development
+      - idxsearch-jg1
       - master
       - staging
       - tagscanary
