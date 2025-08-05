@@ -13,6 +13,7 @@ import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
@@ -156,6 +157,9 @@ public class AtlasTaskService implements TaskService {
         TaskSearchParams taskSearchParams = getMatchQuery(taskGuid);
         AtlasIndexQuery atlasIndexQuery = searchTask(taskSearchParams);
         DirectIndexQueryResult indexQueryResult = atlasIndexQuery.vertices(taskSearchParams);
+        if (indexQueryResult == null || !indexQueryResult.getIterator().hasNext()) {
+            return;
+        }
 
         AtlasVertex atlasVertex = getTaskVertex(indexQueryResult.getIterator(), taskGuid);
 
@@ -187,7 +191,7 @@ public class AtlasTaskService implements TaskService {
                 if (!supportedTypes.contains(taskType)) {
                     throw new AtlasBaseException(AtlasErrorCode.TASK_TYPE_NOT_SUPPORTED, task.getType());
                 }
-                if (isClassificationTaskType(taskType) && !taskType.equals(ClassificationPropagateTaskFactory.CLEANUP_CLASSIFICATION_PROPAGATION)) {
+                if (!FeatureFlagStore.isTagV2Enabled() && isClassificationTaskType(taskType) && !taskType.equals(ClassificationPropagateTaskFactory.CLEANUP_CLASSIFICATION_PROPAGATION)) {
                     String classificationName = task.getTagTypeName();
                     String entityGuid = task.getEntityGuid();
                     String classificationId = StringUtils.isEmpty(task.getClassificationId()) ? resolveAndReturnClassificationId(classificationName, entityGuid) : task.getClassificationId();
@@ -308,6 +312,7 @@ public class AtlasTaskService implements TaskService {
         setEncodedProperty(ret, Constants.TASK_PARAMETERS, AtlasJson.toJson(task.getParameters()));
         setEncodedProperty(ret, Constants.TASK_ATTEMPT_COUNT, task.getAttemptCount());
         setEncodedProperty(ret, Constants.TASK_ERROR_MESSAGE, task.getErrorMessage());
+        setEncodedProperty(ret, Constants.TASK_WARNING_MESSAGE, task.getWarningMessage());
 
         LOG.info("Creating task vertex: {}: {}, {}: {}, {}: {} ",
                 Constants.TASK_TYPE, task.getType(),

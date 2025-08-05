@@ -22,17 +22,9 @@ name: Java CI with Maven
 on:
   push:
     branches:
-      - alpha
       - beta
-      - development
       - master
       - staging
-      - downloadimpactreport
-      - mlh-797-staging
-      - tagscanary
-      - tagscanarymerge
-      - fixlabels
-      - mlh-755-staging
 
 jobs:
   build:

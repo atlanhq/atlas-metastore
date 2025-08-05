@@ -432,6 +432,9 @@ public final class AccessControlUtils {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(vertexIndexName);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
+        if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
+            return false;
+        }
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();
 
         while (iterator.hasNext()) {
@@ -471,6 +474,9 @@ public final class AccessControlUtils {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(VERTEX_INDEX_NAME);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
+        if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
+            return false;
+        }
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();
 
         while (iterator.hasNext()) {

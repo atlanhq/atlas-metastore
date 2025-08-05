@@ -1197,6 +1197,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private void prepareSearchResult(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults,
                                      boolean useVertexEdgeBulkFetching) throws AtlasBaseException {
         SearchParams searchParams = ret.getSearchParameters();
+        AtlasPerfMetrics.MetricRecorder prepareSearchResultMetrics = RequestContext.get().startMetricRecord("prepareSearchResult");
         boolean useBulkFetch = useVertexEdgeBulkFetching && FeatureFlagStore.evaluate(USE_BULK_FETCH_INDEXSEARCH, "true");
         try {
             if(LOG.isDebugEnabled()){
@@ -1287,6 +1288,8 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
         } catch (Exception e) {
                 throw e;
+        } finally {
+            RequestContext.get().endMetricRecord(prepareSearchResultMetrics);
         }
 
         if (!searchParams.getEnableFullRestriction()) {
