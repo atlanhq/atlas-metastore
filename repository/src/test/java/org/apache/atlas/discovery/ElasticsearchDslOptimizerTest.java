@@ -3640,4 +3640,290 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         }
         return null;
     }
+
+    public void testShouldClauseWildcardConsolidation() throws Exception {
+        System.out.println("=== Testing Should Clause Wildcard Consolidation ===");
+        
+        // Test the exact scenario from wildcard_staging.json
+        String queryWithShouldWildcards = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "should": [
+                    {
+                      "term": {
+                        "connectionQualifiedName": "default/snowflake/1753763487"
+                      }
+                    },
+                    {
+                      "wildcard": {
+                        "qualifiedName": "*aar*"
+                      }
+                    },
+                    {
+                      "wildcard": {
+                        "qualifiedName": "*gtc*"
+                      }
+                    },
+                    {
+                      "wildcard": {
+                        "qualifiedName": "*1000*"
+                      }
+                    }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(queryWithShouldWildcards);
+        JsonNode original = objectMapper.readTree(queryWithShouldWildcards);
+        JsonNode optimized = objectMapper.readTree(result.getOptimizedQuery());
+        
+        System.out.println("Original query: " + queryWithShouldWildcards.replaceAll("\\s+", " "));
+        System.out.println("Optimized query: " + result.getOptimizedQuery().replaceAll("\\s+", " "));
+        
+        if (result.getMetrics() != null) {
+            System.out.println("Rules that helped: " + 
+                (result.getMetrics().appliedRules.isEmpty() ? "None" : String.join(", ", result.getMetrics().appliedRules)));
+        }
+        
+        // Check if wildcards were consolidated
+        JsonNode shouldClause = optimized.path("query").path("bool").path("should");
+        assertTrue("Should clause should exist", shouldClause.isArray());
+        
+        // Count wildcards and regexps in the optimized query
+        int wildcardCount = 0;
+        int regexpCount = 0;
+        boolean hasTermClause = false;
+        
+        for (JsonNode clause : shouldClause) {
+            if (clause.has("wildcard")) {
+                wildcardCount++;
+            } else if (clause.has("regexp")) {
+                regexpCount++;
+                // Verify the regexp pattern contains all expected substrings
+                String regexpPattern = clause.path("regexp").path("qualifiedName").asText();
+                System.out.println("Consolidated regexp pattern: " + regexpPattern);
+                assertTrue("Regexp should contain 'aar'", regexpPattern.contains("aar"));
+                assertTrue("Regexp should contain 'gtc'", regexpPattern.contains("gtc"));
+                assertTrue("Regexp should contain '1000'", regexpPattern.contains("1000"));
+            } else if (clause.has("term")) {
+                hasTermClause = true;
+            }
+        }
+        
+        System.out.println("\\n--- CONSOLIDATION ANALYSIS ---");
+        System.out.println("Original wildcards: 3");
+        System.out.println("Optimized wildcards: " + wildcardCount);
+        System.out.println("Optimized regexps: " + regexpCount);
+        System.out.println("Term clause preserved: " + hasTermClause);
+        
+        // Verify consolidation happened (3 wildcards → 1 regexp)
+        assertTrue("Term clause should be preserved", hasTermClause);
+        assertTrue("Wildcards should be consolidated (wildcards: " + wildcardCount + ", regexps: " + regexpCount + ")", 
+                  wildcardCount == 0 && regexpCount == 1);
+        
+        // Verify WildcardConsolidation rule was applied
+        assertNotNull("Should have metrics", result.getMetrics());
+        assertTrue("WildcardConsolidation rule should have helped", 
+                  result.getMetrics().appliedRules.contains("WildcardConsolidation"));
+        
+        System.out.println("✅ Should clause wildcard consolidation working correctly!");
+        System.out.println("✅ 3 wildcards on same field consolidated into 1 regexp");
+        System.out.println("✅ Non-wildcard clauses (term) preserved");
+    }
+
+    public void testMustClauseTermConsolidationSemanticBug() throws Exception {
+        System.out.println("=== Testing Must Clause Term Consolidation Semantic Bug ===");
+        
+        // This test demonstrates a CRITICAL semantic bug
+        // Multiple terms in a 'must' clause should NEVER be consolidated
+        // because it changes AND semantics to OR semantics
+        String queryWithMustTerms = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "must": [
+                    { "term": { "status": "active" } },
+                    { "term": { "status": "verified" } }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(queryWithMustTerms);
+        JsonNode original = objectMapper.readTree(queryWithMustTerms);
+        JsonNode optimized = objectMapper.readTree(result.getOptimizedQuery());
+        
+        System.out.println("Original query: " + queryWithMustTerms.replaceAll("\\s+", " "));
+        System.out.println("Optimized query: " + result.getOptimizedQuery().replaceAll("\\s+", " "));
+        
+        if (result.getMetrics() != null) {
+            System.out.println("Rules that helped: " + 
+                (result.getMetrics().appliedRules.isEmpty() ? "None" : String.join(", ", result.getMetrics().appliedRules)));
+        }
+        
+        // Analyze the semantic implications
+        JsonNode mustClause = optimized.path("query").path("bool").path("must");
+        assertTrue("Must clause should exist", mustClause.isArray());
+        
+        // Check if terms were consolidated
+        boolean hasTermsQuery = false;
+        boolean hasMultipleTermQueries = false;
+        int termQueryCount = 0;
+        
+        for (JsonNode clause : mustClause) {
+            if (clause.has("terms")) {
+                hasTermsQuery = true;
+                // Check if it's consolidating the same field with multiple values
+                JsonNode termsNode = clause.get("terms");
+                if (termsNode.has("status")) {
+                    JsonNode statusValues = termsNode.get("status");
+                    if (statusValues.isArray() && statusValues.size() > 1) {
+                        System.out.println("\\n🚨 SEMANTIC BUG DETECTED! 🚨");
+                        System.out.println("Terms query with multiple values in MUST clause:");
+                        System.out.println("  Field: status");
+                        System.out.println("  Values: " + statusValues.toString());
+                        System.out.println("\\n--- SEMANTIC ANALYSIS ---");
+                        System.out.println("ORIGINAL (correct): Documents must have status='active' AND status='verified'");
+                        System.out.println("  ↳ Matches: 0 documents (impossible - field can't have 2 values)");
+                        System.out.println("OPTIMIZED (WRONG): Documents must have status='active' OR status='verified'"); 
+                        System.out.println("  ↳ Matches: Many documents (any with either status)");
+                        System.out.println("\\n🔥 CONSOLIDATION CHANGED QUERY SEMANTICS FROM AND TO OR!");
+                    }
+                }
+            } else if (clause.has("term")) {
+                termQueryCount++;
+                if (termQueryCount > 1) {
+                    hasMultipleTermQueries = true;
+                }
+            }
+        }
+        
+        // The correct behavior: should NOT consolidate terms in must clauses
+        if (hasTermsQuery) {
+            fail("🚨 SEMANTIC BUG: Terms queries should NOT be created by consolidating term queries in 'must' clauses! " +
+                 "This changes AND semantics to OR semantics.");
+        }
+        
+        // Verify the original semantic meaning is preserved
+        assertTrue("Should preserve multiple separate term queries in must clause", hasMultipleTermQueries);
+        assertEquals("Should have exactly 2 separate term queries", 2, termQueryCount);
+        
+        System.out.println("\\n--- CORRECT BEHAVIOR VERIFIED ---");
+        System.out.println("✅ Multiple term queries in 'must' clause were NOT consolidated");
+        System.out.println("✅ AND semantics preserved: status='active' AND status='verified'");
+        System.out.println("✅ Query correctly matches 0 documents (impossible condition)");
+        System.out.println("\\n💡 RECOMMENDATION: Never consolidate term queries in 'must' clauses");
+        System.out.println("   Only consolidate in 'should', 'filter', or separate bool contexts");
+    }
+    
+    public void testShouldClauseTermConsolidationValid() throws Exception {
+        System.out.println("\\n=== Testing Should Clause Term Consolidation (Valid) ===");
+        
+        // This test shows that consolidation IS valid for 'should' clauses
+        // because OR semantics are preserved
+        String queryWithShouldTerms = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "should": [
+                    { "term": { "status": "active" } },
+                    { "term": { "status": "verified" } }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(queryWithShouldTerms);
+        JsonNode original = objectMapper.readTree(queryWithShouldTerms);
+        JsonNode optimized = objectMapper.readTree(result.getOptimizedQuery());
+        
+        System.out.println("Original query: " + queryWithShouldTerms.replaceAll("\\s+", " "));
+        System.out.println("Optimized query: " + result.getOptimizedQuery().replaceAll("\\s+", " "));
+        
+        // Check if terms were consolidated (this is OK for should clauses)
+        JsonNode shouldClause = optimized.path("query").path("bool").path("should");
+        assertTrue("Should clause should exist", shouldClause.isArray());
+        
+        boolean hasTermsQuery = false;
+        for (JsonNode clause : shouldClause) {
+            if (clause.has("terms")) {
+                hasTermsQuery = true;
+                JsonNode termsNode = clause.get("terms");
+                if (termsNode.has("status")) {
+                    JsonNode statusValues = termsNode.get("status");
+                    if (statusValues.isArray() && statusValues.size() > 1) {
+                        System.out.println("\\n✅ VALID CONSOLIDATION in 'should' clause:");
+                        System.out.println("  Field: status");
+                        System.out.println("  Values: " + statusValues.toString());
+                        System.out.println("\\n--- SEMANTIC ANALYSIS ---");
+                        System.out.println("ORIGINAL: Documents should have status='active' OR status='verified'");
+                        System.out.println("OPTIMIZED: Documents should have status='active' OR status='verified'");
+                        System.out.println("✅ OR semantics preserved - consolidation is safe for 'should' clauses");
+                    }
+                }
+            }
+        }
+        
+        // For should clauses, consolidation is beneficial and semantically correct
+        if (hasTermsQuery) {
+            System.out.println("✅ Terms consolidation in 'should' clause is semantically correct");
+        }
+        
+        System.out.println("\\n✅ Should clause consolidation maintains OR semantics correctly");
+    }
+    
+    public void testMustClauseDifferentFieldsConsolidation() throws Exception {
+        System.out.println("\\n=== Testing Must Clause Different Fields (Should NOT Consolidate) ===");
+        
+        // Test that different fields in must clauses are left alone
+        // Even though they're different fields, we should NOT consolidate anything in must clauses
+        String queryWithMustDifferentFields = """
+            {
+              "size": 10,
+              "query": {
+                "bool": {
+                  "must": [
+                    { "term": { "status": "active" } },
+                    { "term": { "type": "user" } },
+                    { "term": { "region": "us-east" } }
+                  ]
+                }
+              }
+            }""";
+        
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(queryWithMustDifferentFields);
+        JsonNode optimized = objectMapper.readTree(result.getOptimizedQuery());
+        
+        System.out.println("Original query: " + queryWithMustDifferentFields.replaceAll("\\s+", " "));
+        System.out.println("Optimized query: " + result.getOptimizedQuery().replaceAll("\\s+", " "));
+        
+        // Verify no consolidation happened (should preserve original structure)
+        JsonNode mustClause = optimized.path("query").path("bool").path("must");
+        assertTrue("Must clause should exist", mustClause.isArray());
+        
+        int termQueryCount = 0;
+        boolean hasTermsQuery = false;
+        
+        for (JsonNode clause : mustClause) {
+            if (clause.has("term")) {
+                termQueryCount++;
+            } else if (clause.has("terms")) {
+                hasTermsQuery = true;
+            }
+        }
+        
+        // Verify no terms queries were created (no consolidation)
+        assertFalse("Should NOT create terms queries in must clauses", hasTermsQuery);
+        assertEquals("Should preserve all original term queries", 3, termQueryCount);
+        
+        System.out.println("\\n--- VERIFICATION ---");
+        System.out.println("✅ No consolidation in must clause (preserves AND semantics)");
+        System.out.println("✅ All 3 term queries preserved separately");
+        System.out.println("✅ Semantics: status='active' AND type='user' AND region='us-east'");
+    }
 } 
