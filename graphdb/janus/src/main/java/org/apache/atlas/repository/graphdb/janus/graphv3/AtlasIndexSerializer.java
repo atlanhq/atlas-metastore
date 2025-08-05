@@ -153,7 +153,7 @@ public class AtlasIndexSerializer extends IndexSerializer {
         Preconditions.checkArgument(containsIndex(indexName), "Unknown backing index: %s", indexName);
         final String fieldname = configuration.get(INDEX_NAME_MAPPING,indexName)?key.name():keyID2Name(key);
         return mixedIndexes.get(indexName).mapKey2Field(fieldname,
-            new StandardKeyInformation(key,parameters));
+                new StandardKeyInformation(key,parameters));
     }
 
     public static void clearStore(final MixedIndexType index, final BackendTransaction tx) throws BackendException {
@@ -269,6 +269,7 @@ public class AtlasIndexSerializer extends IndexSerializer {
                     if (FeatureFlagStore.isTagV2Enabled() && EXCLUDE_ES_SYNC_ATTRIBUTES.contains(field.getFieldKey().name())) {
                         continue;
                     }
+
                     if (field.getStatus() == SchemaStatus.DISABLED) continue;
                     final IndexUpdate update = getMixedIndexUpdate(vertex, p.propertyKey(), p.value(), (MixedIndexType) index, updateType);
                     final int ttl = getIndexTTL(vertex,p.propertyKey());
