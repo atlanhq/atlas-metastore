@@ -864,7 +864,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     AtlasEntityHeader end1Entity = getAtlasEntityHeader(entity.getEntityGuidEnd1(), entity.getEntityIdEnd1(), entity.getEntityTypeEnd1());
 
                     AtlasEntityHeader end2Entity = getAtlasEntityHeader(entity.getEntityGuidEnd2(), entity.getEntityIdEnd2(), entity.getEntityTypeEnd2());
-
+                    LOG.info("entity.getEntityGuidEnd1() " +entity.getEntityGuidEnd1()+ " , entity.getEntityGuidEnd2() "+entity.getEntityGuidEnd2()+ " ,RelationShip TypeName needed for " + action + " authorization");
                     AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.valueOf(action), entity.getRelationShipTypeName(), end1Entity, end2Entity));
                     response.add(new AtlasEvaluatePolicyResponse(action, entity.getRelationShipTypeName(), entity.getEntityTypeEnd1(), entity.getEntityGuidEnd1(), entity.getEntityIdEnd1(), entity.getEntityTypeEnd2(), entity.getEntityGuidEnd2(), entity.getEntityIdEnd2(), true, null));
                 } catch (AtlasBaseException e) {

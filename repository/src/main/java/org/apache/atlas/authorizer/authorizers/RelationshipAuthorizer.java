@@ -59,6 +59,7 @@ public class RelationshipAuthorizer {
         try {
             List<RangerPolicy> policies = policiesStore.getRelevantPolicies(null, null, "atlas_abac", Arrays.asList(action), policyType);
             if (!policies.isEmpty()) {
+                LOG.info("checkRelationshipAccessAllowedInMemory  : relationshipType " +relationshipType+ ", action: "+action+ " , policies "+policies);
                 AtlasVertex oneVertex = endOneEntity.getGuid() != null ? AtlasGraphUtilsV2.findByGuid(endOneEntity.getGuid()) : null;
                 AtlasVertex twoVertex = endTwoEntity.getGuid() != null ? AtlasGraphUtilsV2.findByGuid(endTwoEntity.getGuid()) : null;
 
@@ -81,7 +82,7 @@ public class RelationshipAuthorizer {
                     }
                 }
             }
-
+            LOG.info("checkRelationshipAccessAllowedInMemory1  : relationshipType " +relationshipType+ ", action: "+action+ " , policies "+policies);
             return result;
         } finally {
             RequestContext.get().endMetricRecord(recorder);
