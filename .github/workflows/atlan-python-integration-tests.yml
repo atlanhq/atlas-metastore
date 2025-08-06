@@ -177,7 +177,7 @@ jobs:
           else
             # Run specific integration test files only
             echo "Running specific integration test files..."
-            python -m pytest -v tests/integration/admin_test.py tests/integration/adls_asset_test.py --tb=short --maxfail=5
+            python -m pytest -v tests/integration/connection_test.py tests/integration/adls_asset_test.py --tb=short --maxfail=5
           fi
 
       # - name: Upload test results
