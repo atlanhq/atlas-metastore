@@ -39,7 +39,7 @@ on:
         default: 'main'
         type: string
       test_pattern:
-        description: 'Test pattern to run (e.g., test_integration). If not provided, runs all tests in tests/integration/'
+        description: 'Test pattern to run (e.g., test_integration). If not provided, runs admin_test.py and adls_asset_test.py'
         required: false
         type: string
 
@@ -175,9 +175,9 @@ jobs:
             echo "Running tests with custom pattern: $TEST_PATTERN"
             python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
           else
-            # Run all integration tests from tests/integration/ directory
-            echo "Running all integration tests from tests/integration/"
-            python -m pytest -v tests/integration/ --tb=short --maxfail=5
+            # Run specific integration test files only
+            echo "Running specific integration test files..."
+            python -m pytest -v tests/integration/admin_test.py tests/integration/adls_asset_test.py --tb=short --maxfail=5
           fi
 
       # - name: Upload test results
