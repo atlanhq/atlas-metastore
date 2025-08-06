@@ -33,6 +33,8 @@ on:
       - interceptapis
       - skiprelations
       - controls-fix
+      - sandeep-scan
+      
   workflow_dispatch: 
 
 jobs:
