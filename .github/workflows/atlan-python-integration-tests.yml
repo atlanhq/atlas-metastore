@@ -67,38 +67,35 @@ jobs:
           token: ${{ secrets.ORG_PAT_GITHUB }}
           path: atlan-python
 
-
-
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python-version }}
 
-
-
       - name: Cache Python packages
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/setup.py') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('atlan-python/**/requirements*.txt', 'atlan-python/**/pyproject.toml', 'atlan-python/**/setup.py') }}
           restore-keys: |
             ${{ runner.os }}-pip-${{ matrix.python-version }}-
             ${{ runner.os }}-pip-
 
-
-
       - name: Verify Atlan API connectivity
+        env:
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
         run: |
           echo "Verifying Atlan API connectivity..."
-          if [ -z "${{ secrets.ATLAN_BASE_URL }}" ] || [ -z "${{ secrets.ATLAN_API_KEY }}" ]; then
+          if [ -z "$ATLAN_BASE_URL" ] || [ -z "$ATLAN_API_KEY" ]; then
             echo "❌ ATLAN_BASE_URL or ATLAN_API_KEY secrets not configured"
             exit 1
           fi
           
           # Test API connectivity (adjust endpoint as needed for atlan-python)
-          curl -H "Authorization: Bearer ${{ secrets.ATLAN_API_KEY }}" \
+          curl -H "Authorization: Bearer $ATLAN_API_KEY" \
                -H "Content-Type: application/json" \
-               "${{ secrets.ATLAN_BASE_URL }}/api/meta" || exit 1
+               "$ATLAN_BASE_URL/api/meta" || exit 1
           echo "✅ Atlan API is accessible"
 
       - name: Install atlan-python dependencies
