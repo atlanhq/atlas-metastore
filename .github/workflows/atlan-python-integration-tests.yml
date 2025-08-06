@@ -46,7 +46,7 @@ on:
 
 env:
   ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
-  ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }} 
+  ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
 
 jobs:
   integration-tests:
