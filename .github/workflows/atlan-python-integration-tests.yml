@@ -151,7 +151,7 @@ jobs:
             echo "Adding missing client fixture..."
             echo "" >> "tests/integration/conftest.py"
             echo "import pytest" >> "tests/integration/conftest.py"
-            echo "from pyatlan import AtlanClient" >> "tests/integration/conftest.py"
+            echo "from pyatlan.client.atlan import AtlanClient" >> "tests/integration/conftest.py"
             echo "" >> "tests/integration/conftest.py"
             echo "@pytest.fixture(scope=\"module\")" >> "tests/integration/conftest.py"
             echo "def client() -> AtlanClient:" >> "tests/integration/conftest.py"
