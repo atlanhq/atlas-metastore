@@ -139,30 +139,21 @@ jobs:
           # Set test pattern from input or default
           TEST_PATTERN="${{ github.event.inputs.test_pattern || 'test_integration' }}"
           
-          # Find and run integration tests
-          if [ -d "tests" ]; then
-            cd tests
-            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
-          elif [ -d "test" ]; then
-            cd test
-            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
-          else
-            # Try to find test files in the repository
-            find . -name "*test*.py" -path "*/test*" | head -10
-            echo "Running tests with pattern: $TEST_PATTERN"
-            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
-          fi
+          # Find and run integration tests from root directory
+          # This avoids pytest_plugins issues with non-top-level conftest.py files
+          echo "Running tests with pattern: $TEST_PATTERN"
+          python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-python-${{ matrix.python-version }}
-          path: |
-            atlan-python/test-results/
-            atlan-python/tests/test-results/
-            atlan-python/coverage.xml
-            atlan-python/pytest.xml
+      # - name: Upload test results
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: test-results-python-${{ matrix.python-version }}
+      #     path: |
+      #       atlan-python/test-results/
+      #       atlan-python/tests/test-results/
+      #       atlan-python/coverage.xml
+      #       atlan-python/pytest.xml
 
 
 
