@@ -125,7 +125,36 @@ jobs:
           # Install common test packages
           pip install pytest pytest-cov pytest-xdist pytest-vcr requests
 
-
+      - name: Fix pytest_plugins configuration
+        working-directory: atlan-python
+        run: |
+          echo "Fixing pytest_plugins configuration..."
+          
+          # Check if there's a pytest_plugins definition in integration conftest.py
+          if [ -f "tests/integration/conftest.py" ] && grep -q "pytest_plugins" "tests/integration/conftest.py"; then
+            echo "Found pytest_plugins in tests/integration/conftest.py, moving to root conftest.py"
+            
+            # Extract pytest_plugins lines from integration conftest.py
+            grep "pytest_plugins" "tests/integration/conftest.py" > temp_plugins.txt
+            
+            # Remove pytest_plugins from integration conftest.py
+            sed -i '/pytest_plugins/d' "tests/integration/conftest.py"
+            
+            # Add to root conftest.py (create if doesn't exist)
+            if [ -f "conftest.py" ]; then
+              echo "" >> conftest.py
+              cat temp_plugins.txt >> conftest.py
+            else
+              cat temp_plugins.txt > conftest.py
+            fi
+            
+            # Clean up temp file
+            rm temp_plugins.txt
+            
+            echo "✅ Moved pytest_plugins to root conftest.py"
+          else
+            echo "No pytest_plugins found in integration conftest.py"
+          fi
 
       - name: Run Integration Tests
         working-directory: atlan-python
