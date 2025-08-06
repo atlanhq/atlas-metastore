@@ -28,10 +28,12 @@ on:
       - master
       - staging
       - tagscanary
-      - tagscanarymerge
+      - tagscanarymergeß
       - fixlabels
       - interceptapis
       - skiprelations
+      - controls-fix
+  workflow_dispatch: 
 
 jobs:
   build:
