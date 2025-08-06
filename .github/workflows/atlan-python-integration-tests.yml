@@ -145,6 +145,20 @@ jobs:
           else
             echo "No pytest_plugins issue found"
           fi
+          
+          # Add missing client fixture if it doesn't exist
+          if ! grep -q "def client" "tests/integration/conftest.py"; then
+            echo "Adding missing client fixture..."
+            echo "" >> "tests/integration/conftest.py"
+            echo "import pytest" >> "tests/integration/conftest.py"
+            echo "from pyatlan import AtlanClient" >> "tests/integration/conftest.py"
+            echo "" >> "tests/integration/conftest.py"
+            echo "@pytest.fixture(scope=\"module\")" >> "tests/integration/conftest.py"
+            echo "def client() -> AtlanClient:" >> "tests/integration/conftest.py"
+            echo "    \"\"\"Provide an AtlanClient instance for integration tests.\"\"\"" >> "tests/integration/conftest.py"
+            echo "    return AtlanClient()" >> "tests/integration/conftest.py"
+            echo "✅ Added client fixture to conftest.py"
+          fi
 
       - name: Run Integration Tests
         working-directory: atlan-python
