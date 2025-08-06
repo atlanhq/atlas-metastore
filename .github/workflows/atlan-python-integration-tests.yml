@@ -39,9 +39,8 @@ on:
         default: 'main'
         type: string
       test_pattern:
-        description: 'Test pattern to run (e.g., test_integration)'
+        description: 'Test pattern to run (e.g., test_integration). If not provided, runs all tests in tests/integration/'
         required: false
-        default: 'test_integration'
         type: string
 
 env:
@@ -149,13 +148,16 @@ jobs:
         run: |
           echo "Running integration tests..."
           
-          # Set test pattern from input or default
-          TEST_PATTERN="${{ github.event.inputs.test_pattern || 'test_integration' }}"
-          
-          # Find and run integration tests from root directory
-          # This avoids pytest_plugins issues with non-top-level conftest.py files
-          echo "Running tests with pattern: $TEST_PATTERN"
-          python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
+          # Check if custom test pattern is provided, otherwise run integration tests
+          if [ -n "${{ github.event.inputs.test_pattern }}" ]; then
+            TEST_PATTERN="${{ github.event.inputs.test_pattern }}"
+            echo "Running tests with custom pattern: $TEST_PATTERN"
+            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
+          else
+            # Run all integration tests from tests/integration/ directory
+            echo "Running all integration tests from tests/integration/"
+            python -m pytest -v tests/integration/ --tb=short --maxfail=5
+          fi
 
       # - name: Upload test results
       #   uses: actions/upload-artifact@v4
