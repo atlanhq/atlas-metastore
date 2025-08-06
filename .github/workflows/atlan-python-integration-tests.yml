@@ -123,7 +123,7 @@ jobs:
           fi
           
           # Install common test packages
-          pip install pytest pytest-cov pytest-xdist requests
+          pip install pytest pytest-cov pytest-xdist pytest-vcr requests
 
 
 
