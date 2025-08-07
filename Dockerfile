@@ -51,7 +51,12 @@ RUN groupadd -g 1001 atlas && useradd -u 1001 -g atlas --no-log-init --home /opt
 RUN chown -R atlas:atlas /opt/apache-atlas
 RUN chmod -R u+w /opt/apache-atlas/server/webapp/atlas
 
+RUN mkdir -p /opt/apache-atlas/logs/tmp \
+    && chown -R atlas:atlas /opt/apache-atlas/logs
+
 USER atlas
+
+ENV JAVA_OPTS="-Djetty.webapp.tmpdir=/opt/apache-atlas/logs/tmp"
 
 
 RUN mkdir /opt/apache-atlas/libext
