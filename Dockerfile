@@ -49,7 +49,7 @@ COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
 RUN groupadd -g 1001 atlas && useradd -u 1001 -g atlas --no-log-init --home /opt/apache-atlas atlas
 RUN chown -R atlas:atlas /opt/apache-atlas
-RUN chmod -R u+w /opt/apache-atlas/server/webapp/atlas
+#RUN chmod -R u+w /opt/apache-atlas/server/webapp/atlas
 
 RUN mkdir -p /opt/apache-atlas/logs/tmp \
     && chown -R atlas:atlas /opt/apache-atlas/logs
