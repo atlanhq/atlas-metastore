@@ -25,6 +25,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.ha.HAConfiguration;
 import org.apache.atlas.listener.ActiveStateChangeHandler;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.Service;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
@@ -56,6 +57,7 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
     private final ICuratorFactory curatorFactory;
     private final RedisService redisService;
     private Thread watcherThread = null;
+    private static final String TASK_PROPAGATION_ENABLED = "TASK_PROPAGATION_ENABLED";
 
     public enum DeleteType {
         SOFT,
@@ -264,7 +266,11 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         }
 
         if (watcherThread == null) {
-            watcherThread = this.taskExecutor.startWatcherThread();
+            if (FeatureFlagStore.evaluate(TASK_PROPAGATION_ENABLED, "true")) {
+                watcherThread = this.taskExecutor.startWatcherThread();
+            } else {
+                LOG.warn("TaskManagement: Task propagation is disabled. Not starting watcher thread.");
+            }
         }
 
         this.statistics.print();
