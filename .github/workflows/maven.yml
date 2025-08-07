@@ -32,6 +32,7 @@ on:
       - fixlabels
       - interceptapis
       - skiprelations
+      - opt-mem-tag-attachment-master
 
 jobs:
   build:
