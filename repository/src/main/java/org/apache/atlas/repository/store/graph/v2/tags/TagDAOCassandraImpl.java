@@ -166,7 +166,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
             // === Statements for 'propagated_tags_by_source' table (using HARD DELETES) ===
             findPropagationsBySourceStmt = prepare(String.format(
-                    "SELECT propagated_asset_id, asset_metadata FROM %s.%s WHERE source_id = ? AND tag_type_name = ?", KEYSPACE, PROPAGATED_TAGS_TABLE_NAME));
+                    "SELECT propagated_asset_id FROM %s.%s WHERE source_id = ? AND tag_type_name = ?", KEYSPACE, PROPAGATED_TAGS_TABLE_NAME));
 
             insertPropagationBySourceStmt = prepare(String.format(
                     "INSERT INTO %s.%s (source_id, tag_type_name, propagated_asset_id, asset_metadata, updated_at) VALUES (?, ?, ?, ?, ?)",
@@ -398,11 +398,6 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                 tag.setVertexId(row.getString("propagated_asset_id"));
                 tag.setSourceVertexId(sourceVertexId);
                 tag.setTagTypeName(tagTypeName);
-                try {
-                    tag.setAssetMetadata(objectMapper.readValue(row.getString("asset_metadata"), Map.class));
-                } catch (JsonProcessingException e) {
-                    LOG.error("Error parsing asset_metadata for propagated tag on sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName, e);
-                }
                 tags.add(tag);
                 count++;
             }
@@ -597,30 +592,55 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     @Override
     public List<Tag> getTagPropagationsForAttachment(String sourceVertexId, String tagTypeName) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getTagPropagationsForAttachment");
-        List<Tag> allTags = new ArrayList<>();
+        
         try {
-            PaginatedTagResult result;
+            // Stream processing approach - avoid loading all tags into memory at once
+            Set<String> vertexIds = new HashSet<>();
             String pagingState = null;
             String cacheKey = "full_fetch_" + sourceVertexId + "|" + tagTypeName;
             int pageCount = 0;
-            LOG.info("Starting full propagation fetch for sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName);
+            PaginatedTagResult result;
+            LOG.info("Starting optimized propagation fetch for sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName);
+            
             do {
                 pageCount++;
-                result = getPropagationsForAttachmentBatchWithPagination(sourceVertexId, tagTypeName, pagingState, 500, cacheKey);
-                int fetchedCount = result.getTags().size();
-                allTags.addAll(result.getTags());
+                result = getPropagationsForAttachmentBatchWithPagination(sourceVertexId, tagTypeName, pagingState, 1000, cacheKey);
+                
+                // Extract only vertex IDs - don't keep full Tag objects in memory
+                for (Tag tag : result.getTags()) {
+                    vertexIds.add(tag.getVertexId());
+                }
+                
                 pagingState = result.getPagingState();
-                LOG.info("sourceVertexId={}, tagTypeName={}: Page {}: Fetched {} propagations. Total fetched: {}. Has next page: {}",
-                        sourceVertexId, tagTypeName, pageCount, fetchedCount, allTags.size(), !result.isDone());
+                
+                // Reduced logging frequency - only log every 10 pages to reduce I/O overhead
+                if (pageCount % 10 == 0 || result.isDone()) {
+                    LOG.debug("sourceVertexId={}, tagTypeName={}: Processed {} pages, {} unique vertex IDs, hasMore={}",
+                            sourceVertexId, tagTypeName, pageCount, vertexIds.size(), !result.isDone());
+                }
+                
             } while (!result.isDone());
 
-            if (allTags.isEmpty()) {
+            // Convert the vertex IDs back to minimal Tag objects only at the end
+            List<Tag> resultTags = new ArrayList<>(vertexIds.size());
+            for (String vertexId : vertexIds) {
+                Tag tag = new Tag();
+                tag.setVertexId(vertexId);
+                tag.setSourceVertexId(sourceVertexId);
+                tag.setTagTypeName(tagTypeName);
+                tag.setPropagated(true);
+                // Don't set asset metadata to save memory - caller only needs vertex IDs
+                resultTags.add(tag);
+            }
+
+            if (resultTags.isEmpty()) {
                 LOG.warn("No propagations found for sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName);
             } else {
-                LOG.info("Finished full propagation fetch for sourceVertexId={}, tagTypeName={}. Total propagations loaded: {}",
-                        sourceVertexId, tagTypeName, allTags.size());
+                LOG.info("Completed optimized propagation fetch for sourceVertexId={}, tagTypeName={}. Total unique propagations: {}",
+                        sourceVertexId, tagTypeName, resultTags.size());
             }
-            return allTags;
+            
+            return resultTags;
         } catch (Exception e) {
             LOG.error("Error fetching all propagations for sourceVertexId={}, tagTypeName={}", sourceVertexId, tagTypeName, e);
             throw new AtlasBaseException("Error fetching all propagations", e);

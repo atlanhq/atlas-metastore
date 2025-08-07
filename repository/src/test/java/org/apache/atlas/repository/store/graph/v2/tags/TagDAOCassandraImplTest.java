@@ -264,8 +264,7 @@ public class TagDAOCassandraImplTest {
         assertNotNull(specificPropagation, "Propagation for asset 3001 should exist.");
         assertAll("Verify details of a specific propagated Tag object",
                 () -> assertEquals(sourceAssetId, specificPropagation.getSourceVertexId()),
-                () -> assertEquals(tagTypeName, specificPropagation.getTagTypeName()),
-                () -> assertEquals(assetMinAttrsMap.get("3001"), specificPropagation.getAssetMetadata())
+                () -> assertEquals(tagTypeName, specificPropagation.getTagTypeName())
         );
     }
 
