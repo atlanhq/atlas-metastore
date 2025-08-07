@@ -47,13 +47,10 @@ COPY atlas-hub/atlas_start.py.patch atlas-hub/atlas_config.py.patch /opt/apache-
 COPY atlas-hub/pre-conf/atlas-logback.xml /opt/apache-atlas/conf/
 COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
-# Create non-root user and group
 RUN groupadd -g 1001 atlas && useradd -u 1001 -g atlas --no-log-init --home /opt/apache-atlas atlas
-
-# Change ownership of relevant folders
 RUN chown -R atlas:atlas /opt/apache-atlas
+RUN chmod -R u+w /opt/apache-atlas/server/webapp/atlas
 
-# Switch to non-root user
 USER atlas
 
 
