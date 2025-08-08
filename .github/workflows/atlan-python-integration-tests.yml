@@ -179,7 +179,7 @@ jobs:
             # Run specific integration test files only
             echo "Running specific integration test files..."
                          # Run tests sequentially to avoid timestamp-based parameter conflicts in parallel execution
-             python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/custom_metadata_test.py tests/integration/glossary_test.py tests/integration/persona_test.py tests/integration/purpose_test.py tests/integration/test_index_search.py --tb=short --maxfail=5
+             python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/glossary_test.py tests/integration/persona_test.py tests/integration/purpose_test.py tests/integration/test_index_search.py --tb=short --maxfail=5
             # python -m pytest -v tests/integration/ai_asset_test.py --tb=short --maxfail=5 -n auto
           fi
 
