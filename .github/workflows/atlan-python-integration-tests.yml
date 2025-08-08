@@ -43,17 +43,6 @@ on:
         required: false
         type: string
 
-permissions:
-  id-token: write # Required if using OpenID Connect for authentication
-  contents: read # Required for actions/checkout to access repository contents
-  packages: read # Required if fetching from private npm packages
-  statuses: write # Required to update commit statuses (pass/fail)
-  checks: write # Required to update unit test results in GitHub Checks API
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
 env:
   ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
   ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
@@ -62,46 +51,33 @@ jobs:
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    
+
     strategy:
       matrix:
-        shardIndex: [1, 2, 3, 4]
-        shardTotal: [4]
+        python-version: ['3.8', '3.9', '3.10', '3.11']
       fail-fast: false
 
     steps:
-      - name: Checkout atlan-python repository (workflow_dispatch)
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+      - name: Checkout atlan-python repository
         uses: actions/checkout@v4
         with:
           repository: atlanhq/atlan-python
           ref: ${{ github.event.inputs.atlan_python_branch || 'main' }}
           token: ${{ secrets.ORG_PAT_GITHUB }}
           path: atlan-python
-          fetch-depth: 1
 
-      - name: Checkout atlan-python repository (pull_request)
-        if: ${{ github.event_name != 'workflow_dispatch' }}
-        uses: actions/checkout@v4
-        with:
-          repository: atlanhq/atlan-python
-          ref: 'main'
-          token: ${{ secrets.ORG_PAT_GITHUB }}
-          path: atlan-python
-          fetch-depth: 1
-
-      - name: Set up Python 3.11
+      - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache Python packages
         uses: actions/cache@v3
         with:
           path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-3.11-${{ hashFiles('atlan-python/**/requirements*.txt', 'atlan-python/**/pyproject.toml', 'atlan-python/**/setup.py') }}
+          key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('atlan-python/**/requirements*.txt', 'atlan-python/**/pyproject.toml', 'atlan-python/**/setup.py') }}
           restore-keys: |
-            ${{ runner.os }}-pip-3.11-
+            ${{ runner.os }}-pip-${{ matrix.python-version }}-
             ${{ runner.os }}-pip-
 
       - name: Verify Atlan API connectivity
@@ -193,15 +169,17 @@ jobs:
         run: |
           echo "Running integration tests..."
           
-          # Check if custom test pattern is provided, otherwise run integration tests with sharding
+          # Check if custom test pattern is provided, otherwise run integration tests
           if [ -n "${{ github.event.inputs.test_pattern }}" ]; then
             TEST_PATTERN="${{ github.event.inputs.test_pattern }}"
-            echo "Running tests with custom pattern: $TEST_PATTERN (shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }})"
-            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5 --dist loadfile -n auto
+            echo "Running tests with custom pattern: $TEST_PATTERN"
+            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
           else
-            # Run specific integration test files with sharding
-            echo "Running integration tests shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }}..."
-            python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/glossary_test.py tests/integration/persona_test.py --tb=short --maxfail=5 --dist loadfile -n auto
+            # Run specific integration test files only
+            echo "Running specific integration test files..."
+                         # Run tests sequentially to avoid timestamp-based parameter conflicts in parallel execution
+             python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/custom_metadata_test.py tests/integration/glossary_test.py tests/integration/persona_test.py tests/integration/purpose_test.py tests/integration/test_index_search.py --tb=short --maxfail=5
+            # python -m pytest -v tests/integration/ai_asset_test.py --tb=short --maxfail=5 -n auto
           fi
 
       # - name: Upload test results
@@ -217,34 +195,19 @@ jobs:
 
 
 
-  test:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: [integration-tests]
-    if: always()
-    steps:
-      - name: Check if integration tests failed
-        if: ${{ needs.integration-tests.result == 'failure' }}
-        run: |
-          echo "One or more integration test shards failed. Marking as failed."
-          exit 1
-      - name: All integration tests passed
-        if: ${{ needs.integration-tests.result == 'success' }}
-        run: echo "All integration tests passed."
-
   notify-results:
-    needs: [integration-tests, test]
+    needs: integration-tests
     runs-on: ubuntu-latest
     if: always()
     
     steps:
       - name: Notify on success
-        if: needs.test.result == 'success'
+        if: needs.integration-tests.result == 'success'
         run: |
           echo "✅ All integration tests passed successfully!"
 
       - name: Notify on failure
-        if: needs.test.result == 'failure'
+        if: needs.integration-tests.result == 'failure'
         run: |
           echo "❌ Integration tests failed. Check the logs for details."
           exit 1 
