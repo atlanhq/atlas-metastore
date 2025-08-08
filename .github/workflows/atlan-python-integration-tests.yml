@@ -39,9 +39,20 @@ on:
         default: 'main'
         type: string
       test_pattern:
-        description: 'Test pattern to run (e.g., test_integration). If not provided, runs specific integration test files distributed across 4 parallel shards'
+        description: 'Test pattern to run (e.g., test_integration). If not provided, runs admin_test.py and adls_asset_test.py'
         required: false
         type: string
+
+permissions:
+  id-token: write # Required if using OpenID Connect for authentication
+  contents: read # Required for actions/checkout to access repository contents
+  packages: read # Required if fetching from private npm packages
+  statuses: write # Required to update commit statuses (pass/fail)
+  checks: write # Required to update unit test results in GitHub Checks API
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
@@ -51,21 +62,33 @@ jobs:
   integration-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 60
-
-    # Enable matrix strategy for parallel test execution with sharding
+    
     strategy:
       matrix:
-        shard: [1, 2, 3, 4]
+        shardIndex: [1, 2, 3, 4]
+        shardTotal: [4]
       fail-fast: false
 
     steps:
-      - name: Checkout atlan-python repository
+      - name: Checkout atlan-python repository (workflow_dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: actions/checkout@v4
         with:
           repository: atlanhq/atlan-python
           ref: ${{ github.event.inputs.atlan_python_branch || 'main' }}
           token: ${{ secrets.ORG_PAT_GITHUB }}
           path: atlan-python
+          fetch-depth: 1
+
+      - name: Checkout atlan-python repository (pull_request)
+        if: ${{ github.event_name != 'workflow_dispatch' }}
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-python
+          ref: 'main'
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+          path: atlan-python
+          fetch-depth: 1
 
       - name: Set up Python 3.11
         uses: actions/setup-python@v4
@@ -123,7 +146,7 @@ jobs:
           fi
           
           # Install common test packages with specific versions
-          pip install pytest pytest-cov pytest-xdist pytest-vcr pytest-order pytest-shard requests "vcrpy>=6.0.0,<7.0.0"
+          pip install pytest pytest-cov pytest-xdist pytest-vcr pytest-order requests "vcrpy>=6.0.0,<7.0.0"
 
       - name: Fix pytest_plugins configuration
         working-directory: atlan-python
@@ -168,62 +191,60 @@ jobs:
           ATLAN_API_KEY: ${{ env.ATLAN_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/atlan-python
         run: |
-          echo "Running integration tests (shard ${{ matrix.shard }}/4)..."
+          echo "Running integration tests..."
           
-          # Check if custom test pattern is provided, otherwise run integration tests
+          # Check if custom test pattern is provided, otherwise run integration tests with sharding
           if [ -n "${{ github.event.inputs.test_pattern }}" ]; then
             TEST_PATTERN="${{ github.event.inputs.test_pattern }}"
-            echo "Running tests with custom pattern: $TEST_PATTERN (shard ${{ matrix.shard }}/4)"
-            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5 \
-              --dist=loadscope --tx=popen//python \
-              -n auto --shard-id=${{ matrix.shard }} --num-shards=4
+            echo "Running tests with custom pattern: $TEST_PATTERN (shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }})"
+            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5 --dist loadfile -n auto
           else
             # Run specific integration test files with sharding
-            echo "Running specific integration test files (shard ${{ matrix.shard }}/4)..."
-            # Run tests with sharding to distribute across parallel jobs
-            python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/glossary_test.py tests/integration/persona_test.py \
-              --tb=short --maxfail=5 --shard-id=${{ matrix.shard }} --num-shards=4
-            # python -m pytest -v tests/integration/ai_asset_test.py --tb=short --maxfail=5 --shard-id=${{ matrix.shard }} --num-shards=4
+            echo "Running integration tests shard ${{ matrix.shardIndex }}/${{ matrix.shardTotal }}..."
+            python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/glossary_test.py tests/integration/persona_test.py --tb=short --maxfail=5 --dist loadfile -n auto
           fi
 
-      - name: Upload test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-results-shard-${{ matrix.shard }}
-          path: |
-            atlan-python/test-results/
-            atlan-python/tests/test-results/
-            atlan-python/coverage.xml
-            atlan-python/pytest.xml
+      # - name: Upload test results
+      #   uses: actions/upload-artifact@v4
+      #   if: always()
+      #   with:
+      #     name: test-results-python-${{ matrix.python-version }}
+      #     path: |
+      #       atlan-python/test-results/
+      #       atlan-python/tests/test-results/
+      #       atlan-python/coverage.xml
+      #       atlan-python/pytest.xml
 
 
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: [integration-tests]
+    if: always()
+    steps:
+      - name: Check if integration tests failed
+        if: ${{ needs.integration-tests.result == 'failure' }}
+        run: |
+          echo "One or more integration test shards failed. Marking as failed."
+          exit 1
+      - name: All integration tests passed
+        if: ${{ needs.integration-tests.result == 'success' }}
+        run: echo "All integration tests passed."
 
   notify-results:
-    needs: integration-tests
+    needs: [integration-tests, test]
     runs-on: ubuntu-latest
     if: always()
     
     steps:
-      - name: Download all test results
-        uses: actions/download-artifact@v4
-        if: always()
-        with:
-          pattern: test-results-shard-*
-          path: all-test-results
-          merge-multiple: true
       - name: Notify on success
-        if: needs.integration-tests.result == 'success'
+        if: needs.test.result == 'success'
         run: |
-          echo "✅ All integration test shards passed successfully!"
+          echo "✅ All integration tests passed successfully!"
 
       - name: Notify on failure
-        if: needs.integration-tests.result == 'failure'
+        if: needs.test.result == 'failure'
         run: |
-          echo "❌ One or more integration test shards failed. Check the logs for details."
-          exit 1
-
-      - name: Notify on partial success
-        if: needs.integration-tests.result == 'success' && contains(needs.integration-tests.outputs.*, 'failure')
-        run: |
-          echo "⚠️ Some integration test shards failed but job completed. Check individual shard results." 
+          echo "❌ Integration tests failed. Check the logs for details."
+          exit 1 
