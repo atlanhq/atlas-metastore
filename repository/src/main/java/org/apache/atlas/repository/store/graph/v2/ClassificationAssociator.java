@@ -33,6 +33,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -62,23 +63,25 @@ public class ClassificationAssociator {
     private static final Logger LOG = LoggerFactory.getLogger(ClassificationAssociator.class);
 
     private static TransactionInterceptHelper transactionInterceptHelper;
+    private final EntityGraphRetriever entityGraphRetriever;
 
     @Inject
-    public ClassificationAssociator(TransactionInterceptHelper transactionInterceptHelper) {
+    public ClassificationAssociator(TransactionInterceptHelper transactionInterceptHelper, EntityGraphRetriever entityGraphRetriever) {
         ClassificationAssociator.transactionInterceptHelper = transactionInterceptHelper;
+        this.entityGraphRetriever = entityGraphRetriever;
     }
 
     public static class Retriever {
         private final EntityAuditRepository auditRepository;
         private final EntityGraphRetriever entityRetriever;
 
-        public Retriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityAuditRepository auditRepository) {
-            this.entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+        public Retriever(AtlasGraph graph, AtlasTypeRegistry typeRegistry, EntityAuditRepository auditRepository, EntityGraphRetriever entityRetriever) {
+            this.entityRetriever = entityRetriever;
             this.auditRepository = auditRepository;
         }
 
-        public Retriever(AtlasTypeRegistry typeRegistry, EntityAuditRepository auditRepository) {
-            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, auditRepository);
+        public Retriever(AtlasTypeRegistry typeRegistry, EntityAuditRepository auditRepository, EntityGraphRetriever entityRetriever) {
+            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, auditRepository, entityRetriever);
         }
 
         public AtlasEntityHeaders get(long fromTimestamp, long toTimestamp) throws AtlasBaseException {
@@ -140,20 +143,20 @@ public class ClassificationAssociator {
 
         public Updater(AtlasGraph graph, AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
                        EntityGraphMapper entityGraphMapper, IAtlasEntityChangeNotifier entityChangeNotifier,
-                       AtlasInstanceConverter instanceConverter) {
+                       AtlasInstanceConverter instanceConverter, EntityGraphRetriever entityRetriever) {
             this.graph = graph;
             this.typeRegistry = typeRegistry;
             this.entitiesStore = entitiesStore;
             this.entityGraphMapper = entityGraphMapper;
             this.entityChangeNotifier = entityChangeNotifier;
             this.instanceConverter = instanceConverter;
-            entityRetriever = new EntityGraphRetriever(graph, typeRegistry);
+            this.entityRetriever = entityRetriever;
         }
 
         public Updater(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore,
                        EntityGraphMapper entityGraphMapper, IAtlasEntityChangeNotifier entityChangeNotifier,
-                       AtlasInstanceConverter instanceConverter) {
-            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, entitiesStore, entityGraphMapper, entityChangeNotifier, instanceConverter);
+                       AtlasInstanceConverter instanceConverter, EntityGraphRetriever entityRetriever) {
+            this(AtlasGraphProvider.getGraphInstance(), typeRegistry, entitiesStore, entityGraphMapper, entityChangeNotifier, instanceConverter, entityRetriever);
         }
 
         public void setClassifications(Map<String, AtlasEntityHeader> map, boolean overrideClassifications) throws AtlasBaseException {
@@ -208,7 +211,7 @@ public class ClassificationAssociator {
 
                     for (Object obj: vertices) {
                         AtlasVertex vertex = (AtlasVertex) obj;
-                        AtlasEntity entity = instanceConverter.getAndCacheEntity(GraphHelper.getGuid(vertex), IGNORE_REL);
+                        AtlasEntity entity = entityGraphMapper.getMinimalAtlasEntityForNotification(vertex);
 
                         allVertices.add(vertex);
                         propagatedEntities.add(entity);
@@ -226,7 +229,7 @@ public class ClassificationAssociator {
 
                     for (Object obj: vertices) {
                         AtlasVertex vertex = (AtlasVertex) obj;
-                        AtlasEntity entity = instanceConverter.getAndCacheEntity(GraphHelper.getGuid(vertex), IGNORE_REL);
+                        AtlasEntity entity = entityGraphMapper.getMinimalAtlasEntityForNotification(vertex);
 
                         allVertices.add(vertex);
                         propagatedEntities.add(entity);
@@ -235,7 +238,10 @@ public class ClassificationAssociator {
                     entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(addedClassification), false);
                 }
             }
-            entityGraphMapper.updateClassificationText(null, allVertices);
+
+            if (!FeatureFlagStore.isTagV2Enabled()) {
+                entityGraphMapper.updateClassificationText(null, allVertices);
+            }
             transactionInterceptHelper.intercept();
 
             RequestContext.get().endMetricRecord(recorder);
