@@ -21,24 +21,23 @@ import java.util.stream.Collectors;
  * Reports only rules that actually help optimize (make changes).
  * 
  * Available optimization rules:
- * 0. No execution needed detection (from:0, size:0, no aggs)
- * 1. Structure simplification (flatten nested bools)
- * 2. Empty bool elimination
- * 3. Multiple terms consolidation (should/filter/must_not only, NOT must)
- * 4. Array deduplication
- * 5. Multi-match consolidation
- * 6. Regexp simplification
- * 7. Aggregation optimization
- * 8. QualifiedName hierarchy optimization (default/* patterns)
- * 9. Multiple terms consolidation (should/filter/must_not only, NOT must)
- * 10. Wildcard consolidation (2+ wildcards, with 1000-char regexp splitting)
- * 11. Filter structure optimization (scoring-safe)
- * 12. Bool flattening (must+must_not to filter+must_not)
- * 13. Nested bool elimination
- * 14. Duplicate removal and consolidation
- * 15. Context-aware filter optimization (safe must->filter in function_score)
- * 16. Function score optimization
- * 17. Duplicate filter removal
+ * 0. Structure simplification (flatten nested bools)
+ * 1. Empty bool elimination
+ * 2. Multiple terms consolidation (should/filter/must_not only, NOT must)
+ * 3. Array deduplication
+ * 4. Multi-match consolidation
+ * 5. Regexp simplification
+ * 6. Aggregation optimization
+ * 7. QualifiedName hierarchy optimization (default/* patterns)
+ * 8. Multiple terms consolidation (should/filter/must_not only, NOT must)
+ * 9. Wildcard consolidation (2+ wildcards, with 1000-char regexp splitting)
+ * 10. Filter structure optimization (scoring-safe)
+ * 11. Bool flattening (must+must_not to filter+must_not)
+ * 12. Nested bool elimination
+ * 13. Duplicate removal and consolidation
+ * 14. Context-aware filter optimization (safe must->filter in function_score)
+ * 15. Function score optimization
+ * 16. Duplicate filter removal
  * 
  * Performance Features:
  * - Only reports rules that made actual changes
@@ -57,7 +56,6 @@ public class ElasticsearchDslOptimizer {
     public ElasticsearchDslOptimizer() {
         this.objectMapper = new ObjectMapper();
         this.optimizationRules = Arrays.asList(
-                new NoExecutionNeededRule(), // FIRST - can completely skip execution
                 new StructureSimplificationRule(),
                 new EmptyBoolEliminationRule(),
                 new NestedBoolEliminationRule(), // Flatten structures first
@@ -364,18 +362,6 @@ public class ElasticsearchDslOptimizer {
             for (OptimizationRule rule : optimizationRules) {
                 JsonNode beforeRule = query.deepCopy();
                 query = rule.apply(query);
-                
-                // Check if NoExecutionNeededRule detected skip condition
-                if (rule instanceof NoExecutionNeededRule) {
-                    NoExecutionNeededRule skipRule = (NoExecutionNeededRule) rule;
-                    if (skipRule.shouldSkipExecution(originalQuery)) {
-                        shouldSkipExecution = true;
-                        skipReason = "Query has from:0, size:0, and no aggregations - execution unnecessary";
-                        log.warn("SKIP EXECUTION: {}", skipReason);
-                        metrics.recordRuleApplication(rule.getName()); // Record skip rule as applied
-                        break; // No need to apply further optimizations
-                    }
-                }
                 
                 // IMPROVED: Only record rules that actually made changes
                 if (!beforeRule.equals(query)) {
@@ -803,65 +789,6 @@ public class ElasticsearchDslOptimizer {
          
          return count;
      }
-
-    /**
-     * Rule 0: No Execution Needed Detection
-     * Detects queries that don't need Elasticsearch execution at all
-     * (from: 0, size: 0, no aggregations = pointless query)
-     */
-    private class NoExecutionNeededRule implements OptimizationRule {
-
-        @Override
-        public String getName() {
-            return "NoExecutionNeeded";
-        }
-
-        @Override
-        public JsonNode apply(JsonNode query) {
-            // This rule doesn't modify the query structure, but sets execution skip flag
-            if (shouldSkipExecution(query)) {
-                log.info("NoExecutionNeededRule: Query should be skipped - from:0, size:0, no aggregations");
-                // We'll set the flag in the main optimization method
-            }
-            return query; // Return unchanged - skip flag is handled in optimizeQuery
-        }
-        
-        public boolean shouldSkipExecution(JsonNode query) {
-            if (query == null || !query.isObject()) {
-                return false;
-            }
-            
-            ObjectNode queryObj = (ObjectNode) query;
-            
-            // Check for from: 0 (or missing, which defaults to 0)
-            boolean fromIsZero = true;
-            if (queryObj.has("from")) {
-                JsonNode fromNode = queryObj.get("from");
-                fromIsZero = fromNode.isNumber() && fromNode.asInt() == 0;
-            }
-            
-            // Check for size: 0
-            boolean sizeIsZero = false;
-            if (queryObj.has("size")) {
-                JsonNode sizeNode = queryObj.get("size");
-                sizeIsZero = sizeNode.isNumber() && sizeNode.asInt() == 0;
-            }
-            
-            // Check for no aggregations
-            boolean hasNoAggs = !queryObj.has("aggs") && !queryObj.has("aggregations");
-            
-            boolean shouldSkip = fromIsZero && sizeIsZero && hasNoAggs;
-            
-            if (shouldSkip) {
-                log.debug("NoExecutionNeededRule: Detected skip conditions - from:{}, size:{}, hasAggs:{}", 
-                         queryObj.has("from") ? queryObj.get("from").asInt() : 0,
-                         queryObj.has("size") ? queryObj.get("size").asInt() : "missing",
-                         !hasNoAggs);
-            }
-            
-            return shouldSkip;
-        }
-    }
 
     /**
      * Rule 1: Structure Simplification
