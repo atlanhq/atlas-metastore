@@ -111,7 +111,7 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
 
         String tenantId = getTenantId(entity);
 
-        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, getUUID()));
+        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, getUUID((AtlasEntity) entity)));
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
 
         //create ES alias

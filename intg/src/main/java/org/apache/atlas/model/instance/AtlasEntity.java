@@ -105,6 +105,7 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
     private String                           deleteHandler;
     private Map<String, Object>              addedRelationshipAttributes;
     private Map<String, Object>              removedRelationshipAttributes;
+    private String                          qualifiedNameUUID;
 
     @JsonIgnore
     private static AtomicLong s_nextId = new AtomicLong(System.nanoTime());
@@ -608,6 +609,14 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
         addToMapList(this.removedRelationshipAttributes, name, relationship);
     }
 
+    public String getQualifiedNameUUID() {
+        return qualifiedNameUUID;
+    }
+
+    public void setQualifiedNameUUID(String qualifiedNameUUID) {
+        this.qualifiedNameUUID = qualifiedNameUUID;
+    }
+
     private void addToMapList(Map<String, Object> map, String key, Object value) {
         List<Object> values = (List<Object>) map.getOrDefault(key, new ArrayList<>(1));
         values.add(value);
@@ -683,6 +692,7 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
         sb.append(", pendingTasks=[");
         dumpObjects(pendingTasks, sb);
         sb.append("]");
+        sb.append(", qualifiedNameUUID='").append(qualifiedNameUUID).append('\'');
         sb.append('}');
 
         return sb;
