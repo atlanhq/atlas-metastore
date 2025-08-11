@@ -76,16 +76,25 @@ jobs:
           pattern = os.environ.get('TEST_PATTERN', '').strip()
           if pattern:
               matrix = {"include": [{"name": "pattern", "pattern": pattern}]}
-          else:
-              files = sorted(glob.glob('tests/integration'))
-              if not files:
-                  files = [
-                      'tests/integration/admin_test.py',
-                      'tests/integration/connection_test.py',
-                      'tests/integration/glossary_test.py',
-                      'tests/integration/persona_test.py',
+                        else:
+                  patterns = [
+                      'tests/integration/*_test.py',
+                      'tests/integration/test_*.py',
+                      'tests/integration/**/*_test.py',
+                      'tests/integration/**/test_*.py',
                   ]
-              num_groups = min(5, max(1, len(files)))
+                  files_set = set()
+                  for p in patterns:
+                      files_set.update(glob.glob(p, recursive=True))
+                  files = sorted(files_set)
+                  if not files:
+                      files = [
+                          'tests/integration/admin_test.py',
+                          'tests/integration/connection_test.py',
+                          'tests/integration/glossary_test.py',
+                          'tests/integration/persona_test.py',
+                      ]
+                  num_groups = min(5, max(1, len(files)))
               groups = [[] for _ in range(num_groups)]
               for idx, f in enumerate(files):
                   groups[idx % num_groups].append(f)
