@@ -52,11 +52,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    # Single Python version for faster execution
-    # strategy:
-    #   matrix:
-    #     python-version: ['3.8', '3.9', '3.10', '3.11']
-    #   fail-fast: false
+    # Run different test files in parallel, each file executes sequentially
+    strategy:
+      matrix:
+        include:
+          - name: admin_test.py
+            path: tests/integration/admin_test.py
+          - name: connection_test.py
+            path: tests/integration/connection_test.py
+          - name: glossary_test.py
+            path: tests/integration/glossary_test.py
+          - name: persona_test.py
+            path: tests/integration/persona_test.py
+      fail-fast: false
 
     steps:
       - name: Checkout atlan-python repository
@@ -168,31 +176,34 @@ jobs:
           ATLAN_API_KEY: ${{ env.ATLAN_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/atlan-python
         run: |
-          echo "Running integration tests..."
+          echo "Running integration tests for ${{ matrix.path }}..."
           
-          # Check if custom test pattern is provided, otherwise run integration tests
+          # If a custom test pattern is provided, only one matrix job should run it to avoid duplicates
           if [ -n "${{ github.event.inputs.test_pattern }}" ]; then
             TEST_PATTERN="${{ github.event.inputs.test_pattern }}"
+            if [ "${{ matrix.name }}" != "admin_test.py" ]; then
+              echo "Custom pattern provided; skipping on ${{ matrix.name }} to avoid duplicate runs."
+              exit 0
+            fi
             echo "Running tests with custom pattern: $TEST_PATTERN"
             python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
           else
-            # Run specific integration test files only
-            echo "Running specific integration test files..."
-                         # Run tests sequentially to avoid timestamp-based parameter conflicts in parallel execution
-             python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/glossary_test.py tests/integration/persona_test.py --tb=short --maxfail=5
-            # python -m pytest -v tests/integration/ai_asset_test.py --tb=short --maxfail=5 -n auto
+            # Run a single integration test file per job (sequential within file)
+            echo "Running tests in file: ${{ matrix.path }} sequentially"
+            python -m pytest -v ${{ matrix.path }} --tb=short --maxfail=5
           fi
 
-      # - name: Upload test results
-      #   uses: actions/upload-artifact@v4
-      #   if: always()
-      #   with:
-      #     name: test-results-python-${{ matrix.python-version }}
-      #     path: |
-      #       atlan-python/test-results/
-      #       atlan-python/tests/test-results/
-      #       atlan-python/coverage.xml
-      #       atlan-python/pytest.xml
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.name }}
+          if-no-files-found: ignore
+          path: |
+            atlan-python/test-results/
+            atlan-python/tests/test-results/
+            atlan-python/coverage.xml
+            atlan-python/pytest.xml
 
 
 
