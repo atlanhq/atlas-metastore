@@ -941,12 +941,12 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
     private void commitStorageWithRetry(BackendTransaction mutator, long transactionId) throws BackendException {
         int maxRetries = 1;
         
-        for (int attempt = 0; attempt < maxRetries; attempt++) {
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
             try {
                 mutator.commitStorage();
                 return; // Success
             } catch (BackendException e) {
-                if (isPermanentLockingException(e) && attempt < maxRetries) {
+                if (isPermanentLockingException(e) && attempt <= maxRetries) {
                     log.warn("PermanentLockingException on attempt {} for transaction [{}], attempting Cassandra fix", 
                              attempt, transactionId);
                     
