@@ -994,7 +994,10 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
             return;
         }
 
-        GraphIndexConflictInfo conflictInfo = parseConflictInfo(lockingException.getMessage());
+        log.error("Handling graphindex message  conflict for transaction [{}]: ", lockingException.getMessage());
+        log.error("Handling graphindex cause  conflict for transaction [{}]: ", lockingException.getCause().getMessage());
+
+        GraphIndexConflictInfo conflictInfo = parseConflictInfo(lockingException.getCause().getMessage());
         if (conflictInfo == null) {
             log.warn("Could not parse conflict info from exception: {}", lockingException.getMessage());
             return;
