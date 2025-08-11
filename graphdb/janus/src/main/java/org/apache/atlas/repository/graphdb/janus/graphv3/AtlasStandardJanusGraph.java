@@ -111,6 +111,11 @@ import org.janusgraph.util.system.IOUtils;
 import org.janusgraph.util.system.TXUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import org.janusgraph.diskstorage.locking.PermanentLockingException;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -830,7 +835,8 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
                 }
 
                 try {
-                    mutator.commitStorage();
+                    commitStorageWithRetry(mutator, transactionId);
+
                 } catch (Throwable e) {
                     //[FAILURE] If primary storage persistence fails abort directly (only schema could have been persisted)
                     log.error("Could not commit transaction ["+transactionId+"] due to storage exception in commit",e);
@@ -900,6 +906,202 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
             }
             throw e;
         }
+    }
+
+    /**
+     * Data class to hold conflict information parsed from exception.
+     */
+    private static class GraphIndexConflictInfo {
+        private final String key;
+        private final String column;
+        private final String expected;
+        private final String actual;
+
+        public GraphIndexConflictInfo(String key, String column, String expected, String actual) {
+            this.key = key;
+            this.column = column;
+            this.expected = expected;
+            this.actual = actual;
+        }
+
+        public String getKey() { return key; }
+        public String getColumn() { return column; }
+        public String getExpectedValue() { return expected; }
+        
+        public boolean isExpectedEmpty() { return expected == null || expected.trim().isEmpty(); }
+        public boolean isActualEmpty() { return actual == null || actual.trim().isEmpty(); }
+        public boolean hasExpectedValue() { return !isExpectedEmpty(); }
+        public boolean hasActualValue() { return !isActualEmpty(); }
+    }
+
+    /**
+     * Commits storage with retry logic for PermanentLockingException.
+     * On conflict, manipulates Cassandra graphindex table to resolve the issue.
+     */
+    private void commitStorageWithRetry(BackendTransaction mutator, long transactionId) throws BackendException {
+        int maxRetries = 1;
+        
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                mutator.commitStorage();
+                return; // Success
+            } catch (Exception e) { // Catch all exceptions including JanusGraphException
+                if (isPermanentLockingException(e) && attempt < maxRetries) {
+                    log.warn("PermanentLockingException on attempt {} for transaction [{}], attempting Cassandra fix", 
+                             attempt, transactionId);
+                    
+                    try {
+                        handleGraphIndexConflict(e);
+                        Thread.sleep(100 ); // Simple 100ms wait
+                    } catch (Exception fixException) {
+                        log.error("Failed to fix graphindex conflict on attempt {} for transaction [{}]", 
+                                 attempt, transactionId, fixException);
+                    }
+                } else {
+                    // Re-throw the original exception type
+                    log.error("Failed to commit storage on attempt {} for transaction [{}]",
+                              attempt, transactionId);
+                   throw e;
+                }
+            }
+        }
+    }
+
+    /**
+     * Checks if exception chain contains PermanentLockingException.
+     */
+    private boolean isPermanentLockingException(Throwable exception) {
+        return findPermanentLockingException(exception) != null;
+    }
+
+    /**
+     * Finds PermanentLockingException in exception chain.
+     */
+    private PermanentLockingException findPermanentLockingException(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof PermanentLockingException) {
+                return (PermanentLockingException) current;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    /**
+     * Handles graphindex conflicts by manipulating Cassandra table.
+     */
+    private void handleGraphIndexConflict(Throwable exception) throws Exception {
+        PermanentLockingException lockingException = findPermanentLockingException(exception);
+        if (lockingException == null) {
+            return;
+        }
+
+        log.error("Handling graphindex message  conflict for transaction [{}]: ", lockingException.getMessage());
+
+        GraphIndexConflictInfo conflictInfo = parseConflictInfo(lockingException.getMessage());
+        if (conflictInfo == null) {
+            log.warn("Could not parse conflict info from exception: {}", lockingException.getMessage());
+            return;
+        }
+
+        String keyspace = ApplicationProperties.get().getString( "atlas.graph.storage.cql.keyspace", "atlas");
+        
+        if (conflictInfo.isExpectedEmpty() && conflictInfo.hasActualValue()) {
+            // Case 1: expected=[] and actual=not null -> DELETE
+            executeDeleteQuery(keyspace, conflictInfo.getKey(), conflictInfo.getColumn());
+            log.info("Deleted conflicting entry from graphindex: key={}, column1={}", 
+                    conflictInfo.getKey(), conflictInfo.getColumn());
+        } else if (conflictInfo.hasExpectedValue() && conflictInfo.isActualEmpty()) {
+            // Case 2: expected=not null and actual=[] -> INSERT
+            executeInsertQuery(keyspace, conflictInfo.getKey(), conflictInfo.getColumn(), conflictInfo.getExpectedValue());
+            log.info("Inserted missing entry to graphindex: key={}, column1={}, value={}", 
+                    conflictInfo.getKey(), conflictInfo.getColumn(), conflictInfo.getExpectedValue());
+        }
+    }
+
+    /**
+     * Executes DELETE query on graphindex table.
+     */
+    private void executeDeleteQuery(String keyspace, String key, String column) {
+        try {
+            String cql = String.format("DELETE FROM %s.graphindex WHERE key = ? AND column1 = ?", keyspace);
+            PreparedStatement stmt = cqlSession.prepare(cql);
+            cqlSession.execute(stmt.bind(hexStringToByteBuffer(key), hexStringToByteBuffer(column)));
+            log.debug("Successfully deleted from graphindex: key={}, column1={}", key, column);
+        } catch (Exception e) {
+            log.error("Failed to delete from graphindex: key={}, column1={}", key, column, e);
+            throw new RuntimeException("Cassandra delete operation failed", e);
+        }
+    }
+
+    /**
+     * Executes INSERT query on graphindex table.
+     */
+    private void executeInsertQuery(String keyspace, String key, String column, String value) {
+        try {
+            String cql = String.format("INSERT INTO %s.graphindex (key, column1, value) VALUES (?, ?, ?)", keyspace);
+            PreparedStatement stmt = cqlSession.prepare(cql);
+            cqlSession.execute(stmt.bind(
+                hexStringToByteBuffer(key), 
+                hexStringToByteBuffer(column), 
+                hexStringToByteBuffer(value)
+            ));
+            log.debug("Successfully inserted to graphindex: key={}, column1={}, value={}", key, column, value);
+        } catch (Exception e) {
+            log.error("Failed to insert to graphindex: key={}, column1={}, value={}", key, column, value, e);
+            throw new RuntimeException("Cassandra insert operation failed", e);
+        }
+    }
+
+    /**
+     * Parses conflict information from PermanentLockingException message.
+     */
+    private GraphIndexConflictInfo parseConflictInfo(String exceptionMessage) {
+        // Pattern to match: k=0x0x..., c=0x0x..., expected=[...] vs actual=[...]
+        Pattern pattern = Pattern.compile("k=(0x0x[^,]+),\\s*c=(0x0x[^\\]]+).*expected=\\[([^\\]]*)\\]\\s*vs\\s*actual=\\[([^\\]]*)\\]");
+        Matcher matcher = pattern.matcher(exceptionMessage);
+        
+        if (matcher.find()) {
+            String fullKey = matcher.group(1);
+            String fullColumn = matcher.group(2);
+            String expected = matcher.group(3);
+            String actual = matcher.group(4);
+            
+            // Remove first "0x0x" prefix
+            String key = fullKey.startsWith("0x0x") ? fullKey.substring(4) : fullKey;
+            String column = fullColumn.startsWith("0x0x") ? fullColumn.substring(4) : fullColumn;
+
+            log.info("Parsed conflict info: key={}, column={}, expected={}, actual={}",
+                     key, column, expected, actual);
+            return new GraphIndexConflictInfo(key, column, expected, actual);
+        }
+        
+        return null;
+    }
+
+    /**
+     * Converts hex string to ByteBuffer for Cassandra.
+     */
+    private java.nio.ByteBuffer hexStringToByteBuffer(String hexString) {
+        if (hexString.startsWith("0x")) {
+            hexString = hexString.substring(2);
+        }
+        byte[] bytes = hexStringToBytes(hexString);
+        return java.nio.ByteBuffer.wrap(bytes);
+    }
+
+    /**
+     * Converts hex string to byte array.
+     */
+    private byte[] hexStringToBytes(String hexString) {
+        int len = hexString.length();
+        byte[] data = new byte[len / 2];
+        for (int i = 0; i < len; i += 2) {
+            data[i / 2] = (byte) ((Character.digit(hexString.charAt(i), 16) << 4)
+                    + Character.digit(hexString.charAt(i + 1), 16));
+        }
+        return data;
     }
 
 
