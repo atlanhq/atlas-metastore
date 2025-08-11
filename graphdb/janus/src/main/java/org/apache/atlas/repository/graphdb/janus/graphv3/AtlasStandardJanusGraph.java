@@ -998,9 +998,8 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
         }
 
         log.error("Handling graphindex message  conflict for transaction [{}]: ", lockingException.getMessage());
-        log.error("Handling graphindex cause  conflict for transaction [{}]: ", lockingException.getCause().getMessage());
 
-        GraphIndexConflictInfo conflictInfo = parseConflictInfo(lockingException.getCause().getMessage());
+        GraphIndexConflictInfo conflictInfo = parseConflictInfo(lockingException.getMessage());
         if (conflictInfo == null) {
             log.warn("Could not parse conflict info from exception: {}", lockingException.getMessage());
             return;
@@ -1072,7 +1071,9 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
             // Remove first "0x0x" prefix
             String key = fullKey.startsWith("0x0x") ? fullKey.substring(4) : fullKey;
             String column = fullColumn.startsWith("0x0x") ? fullColumn.substring(4) : fullColumn;
-            
+
+            log.info("Parsed conflict info: key={}, column={}, expected={}, actual={}",
+                     key, column, expected, actual);
             return new GraphIndexConflictInfo(key, column, expected, actual);
         }
         
