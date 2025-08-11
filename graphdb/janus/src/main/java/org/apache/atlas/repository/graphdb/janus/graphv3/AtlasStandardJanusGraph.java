@@ -941,7 +941,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
     private void commitStorageWithRetry(BackendTransaction mutator, long transactionId) throws BackendException {
         int maxRetries = 1;
         
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        for (int attempt = 0; attempt < maxRetries; attempt++) {
             try {
                 mutator.commitStorage();
                 return; // Success
