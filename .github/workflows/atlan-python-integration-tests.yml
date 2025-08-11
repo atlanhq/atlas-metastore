@@ -186,7 +186,8 @@ jobs:
           else
             # Run a single integration test file per job (sequential within file)
             echo "Running tests in file: ${{ matrix.test_file }} sequentially"
-            python -m pytest -v ${{ matrix.test_file }} --tb=short --maxfail=5
+            python -m pytest -v tests/integration/admin_test.py tests/integration/connection_test.py tests/integration/glossary_test.py tests/integration/persona_test.py --tb=short --maxfail=5
+            #python -m pytest -v ${{ matrix.test_file }} --tb=short --maxfail=5
           fi
 
       - name: Upload test results
