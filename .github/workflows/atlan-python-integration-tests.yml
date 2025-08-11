@@ -77,7 +77,7 @@ jobs:
           if pattern:
               matrix = {"include": [{"name": "pattern", "pattern": pattern}]}
           else:
-              files = sorted(glob.glob('tests/integration/*_test.py'))
+              files = sorted(glob.glob('tests/integration'))
               if not files:
                   files = [
                       'tests/integration/admin_test.py',
