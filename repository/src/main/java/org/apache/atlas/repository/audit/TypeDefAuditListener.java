@@ -52,7 +52,7 @@ public class TypeDefAuditListener implements TypeDefChangeListener {
 
     @Override
     public void onChange(ChangedTypeDefs changedTypeDefs) throws AtlasBaseException {
-        createAuditEntry(changedTypeDefs);
+//        createAuditEntry(changedTypeDefs);
     }
 
     @Override
