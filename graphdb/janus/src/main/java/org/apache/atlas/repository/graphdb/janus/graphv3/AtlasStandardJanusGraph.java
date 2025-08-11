@@ -945,7 +945,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
             try {
                 mutator.commitStorage();
                 return; // Success
-            } catch (JanusGraphException e) {
+            } catch (BackendException e) {
                 if (isPermanentLockingException(e) && attempt < maxRetries) {
                     log.warn("PermanentLockingException on attempt {} for transaction [{}], attempting Cassandra fix", 
                              attempt, transactionId);
