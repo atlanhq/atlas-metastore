@@ -945,7 +945,7 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
             try {
                 mutator.commitStorage();
                 return; // Success
-            } catch (BackendException e) {
+            } catch (Exception e) { // Catch all exceptions including JanusGraphException
                 if (isPermanentLockingException(e) && attempt < maxRetries) {
                     log.warn("PermanentLockingException on attempt {} for transaction [{}], attempting Cassandra fix", 
                              attempt, transactionId);
@@ -958,7 +958,10 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {//extends Janus
                                  attempt, transactionId, fixException);
                     }
                 } else {
-                    throw e; // Re-throw if not PermanentLockingException or max retries reached
+                    // Re-throw the original exception type
+                    log.error("Failed to commit storage on attempt {} for transaction [{}]",
+                              attempt, transactionId);
+                   throw e;
                 }
             }
         }
