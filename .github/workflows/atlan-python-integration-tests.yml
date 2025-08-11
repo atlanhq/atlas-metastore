@@ -79,7 +79,17 @@ jobs:
           else:
               files = [
 
+                      'tests/integration/admin_test.py',
+                      'tests/integration/atlan_tag_test.py',
+                      'tests/integration/connection_test.py',
+                      'tests/integration/custom_metadata_test.py',
+                      'tests/integration/glossary_test.py',
+                      'tests/integration/insights_test.py',
+                      'tests/integration/persona_test.py',
+                      'tests/integration/purpose_test.py',
                       'tests/integration/test_asset_batch.py',
+                      'tests/integration/test_client.py',
+                      'tests/integration/test_index_search.py',
 
                   ]
               num_groups = min(5, max(1, len(files)))
