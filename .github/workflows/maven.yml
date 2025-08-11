@@ -27,11 +27,7 @@ on:
       - development
       - master
       - staging
-      - tagscanary
-      - tagscanarymerge
-      - fixlabels
-      - interceptapis
-      - skiprelations
+      - tagnullcheck
 
 jobs:
   build:
