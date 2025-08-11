@@ -48,15 +48,75 @@ env:
   ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
 
 jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout atlan-python repository
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-python
+          ref: ${{ github.event.inputs.atlan_python_branch || 'main' }}
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+          path: atlan-python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - id: build-matrix
+        name: Build dynamic matrix (max 5 parallel groups)
+        working-directory: atlan-python
+        env:
+          TEST_PATTERN: ${{ github.event.inputs.test_pattern }}
+        run: |
+          echo "Building matrix..."
+          python - <<'PY'
+          import glob, json, os
+          pattern = os.environ.get('TEST_PATTERN', '').strip()
+          if pattern:
+              matrix = {"include": [{"name": "pattern", "pattern": pattern}]}
+          else:
+              files = [
+                      'tests/integration/admin_test.py',
+                      'tests/integration/atlan_tag_test.py',
+                      'tests/integration/connection_test.py',
+                      'tests/integration/custom_metadata_test.py',
+                      'tests/integration/glossary_test.py',
+                      'tests/integration/insights_test.py',
+                      'tests/integration/persona_test.py',
+                      'tests/integration/purpose_test.py',
+                      'tests/integration/test_asset_batch.py',
+                      'tests/integration/test_client.py',
+                      'tests/integration/test_index_search.py',
+                  ]
+              num_groups = min(5, max(1, len(files)))
+              groups = [[] for _ in range(num_groups)]
+              for idx, f in enumerate(files):
+                  groups[idx % num_groups].append(f)
+              include = []
+              for i, grp in enumerate(groups, start=1):
+                  include.append({
+                      "name": f"group-{i}",
+                      "files": grp,
+                      "files_str": " ".join(grp)
+                  })
+              matrix = {"include": include}
+          out = json.dumps(matrix)
+          print(out)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              fh.write(f"matrix={out}\n")
+          PY
+
   integration-tests:
+    needs: prepare-matrix
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
-    # Single Python version for faster execution
-    # strategy:
-    #   matrix:
-    #     python-version: ['3.8', '3.9', '3.10', '3.11']
-    #   fail-fast: false
+    strategy:
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 5
 
     steps:
       - name: Checkout atlan-python repository
@@ -167,32 +227,37 @@ jobs:
           ATLAN_BASE_URL: ${{ env.ATLAN_BASE_URL }}
           ATLAN_API_KEY: ${{ env.ATLAN_API_KEY }}
           PYTHONPATH: ${{ github.workspace }}/atlan-python
+          PATTERN: ${{ matrix.pattern }}
+          FILES: ${{ matrix.files_str }}
         run: |
-          echo "Running integration tests..."
-          
-          # Check if custom test pattern is provided, otherwise run integration tests
-          if [ -n "${{ github.event.inputs.test_pattern }}" ]; then
-            TEST_PATTERN="${{ github.event.inputs.test_pattern }}"
-            echo "Running tests with custom pattern: $TEST_PATTERN"
-            python -m pytest -v -k "$TEST_PATTERN" --tb=short --maxfail=5
+          if [ -n "$PATTERN" ]; then
+            echo "Running integration tests with pattern: $PATTERN"
+            python -m pytest -v -k "$PATTERN" --tb=short --maxfail=5
           else
-            # Run specific integration test files only
-            echo "Running specific integration test files..."
-                         # Run tests sequentially to avoid timestamp-based parameter conflicts in parallel execution
-             python -m pytest -v tests/integration/admin_test.py tests/integration/atlan_tag_test.py tests/integration/connection_test.py tests/integration/custom_metadata_test.py tests/integration/glossary_test.py tests/integration/insights_test.py tests/integration/persona_test.py tests/integration/purpose_test.py tests/integration/test_asset_batch.py tests/integration/test_client.py tests/integration/test_index_search.py --tb=short --maxfail=5
-            # python -m pytest -v tests/integration/ai_asset_test.py --tb=short --maxfail=5 -n auto
+            echo "Running integration tests for group files sequentially: $FILES"
+            status=0
+            for f in $FILES; do
+              echo "Running: $f"
+              python -m pytest -v "$f" --tb=short --maxfail=5 || status=$?
+              if [ $status -ne 0 ]; then
+                echo "Test failure detected in $f"
+                break
+              fi
+            done
+            exit $status
           fi
 
-      # - name: Upload test results
-      #   uses: actions/upload-artifact@v4
-      #   if: always()
-      #   with:
-      #     name: test-results-python-${{ matrix.python-version }}
-      #     path: |
-      #       atlan-python/test-results/
-      #       atlan-python/tests/test-results/
-      #       atlan-python/coverage.xml
-      #       atlan-python/pytest.xml
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.name }}
+          if-no-files-found: ignore
+          path: |
+            atlan-python/test-results/
+            atlan-python/tests/test-results/
+            atlan-python/coverage.xml
+            atlan-python/pytest.xml
 
 
 
