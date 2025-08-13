@@ -187,54 +187,19 @@ jobs:
           # Install common test packages with specific versions
           pip install pytest pytest-cov pytest-xdist pytest-vcr pytest-order requests "vcrpy>=6.0.0,<7.0.0"
 
-      - name: Fix pytest_plugins configuration
-        working-directory: atlan-python
-        run: |
-          echo "Fixing pytest_plugins configuration..."
-          
-          # Handle pytest_plugins multi-line definition properly
-          if [ -f "tests/integration/conftest.py" ] && grep -q "pytest_plugins" "tests/integration/conftest.py"; then
-            echo "Found pytest_plugins in tests/integration/conftest.py, fixing it"
-            
-            # Use awk to comment out the entire pytest_plugins block
-            awk '
-            /^pytest_plugins/ { in_block=1; print "#" $0; next }
-            in_block && /^\s*"/ { print "#" $0; next }
-            in_block && /^\s*\]/ { print "#" $0; in_block=0; next }
-            { print }
-            ' "tests/integration/conftest.py" > temp_conftest.py && mv temp_conftest.py "tests/integration/conftest.py"
-            
-            echo "✅ Fixed pytest_plugins configuration while preserving fixtures"
-          else
-            echo "No pytest_plugins issue found"
-          fi
-          
-          # Add missing client fixture if it doesn't exist
-          if ! grep -q "def client" "tests/integration/conftest.py"; then
-            echo "Adding missing client fixture..."
-            echo "" >> "tests/integration/conftest.py"
-            echo "import pytest" >> "tests/integration/conftest.py"
-            echo "from pyatlan.client.atlan import AtlanClient" >> "tests/integration/conftest.py"
-            echo "" >> "tests/integration/conftest.py"
-            echo "@pytest.fixture(scope=\"module\")" >> "tests/integration/conftest.py"
-            echo "def client() -> AtlanClient:" >> "tests/integration/conftest.py"
-            echo "    \"\"\"Provide an AtlanClient instance for integration tests.\"\"\"" >> "tests/integration/conftest.py"
-            echo "    return AtlanClient()" >> "tests/integration/conftest.py"
-            echo "✅ Added client fixture to conftest.py"
-          fi
 
       - name: Run Integration Tests
         working-directory: atlan-python
         env:
           ATLAN_BASE_URL: ${{ env.ATLAN_BASE_URL }}
           ATLAN_API_KEY: ${{ env.ATLAN_API_KEY }}
-          PYTHONPATH: ${{ github.workspace }}/atlan-python
+          PYTHONPATH: ${{ github.workspace }}/atlan-python:${{ github.workspace }}/atlan-python/tests:${{ github.workspace }}/atlan-python/tests/integration
           PATTERN: ${{ matrix.pattern }}
           FILES: ${{ matrix.files_str }}
         run: |
           if [ -n "$PATTERN" ]; then
-            echo "Running integration tests with pattern: $PATTERN"
-            python -m pytest -v -k "$PATTERN" --tb=short --maxfail=5
+            echo "Running integration tests with pattern (scoped to tests/integration): $PATTERN"
+            python -m pytest -v tests/integration -k "$PATTERN" --tb=short --maxfail=5
           else
             echo "Running integration tests for group files sequentially: $FILES"
             status=0
