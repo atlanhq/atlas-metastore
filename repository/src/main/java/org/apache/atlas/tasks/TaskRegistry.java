@@ -671,8 +671,6 @@ public class TaskRegistry {
     private static Map<String, Object> mapOf(String key, Object value) {
         Map<String, Object> map = new HashMap<>();
         map.put(key, value);
-    }
 
         return map;
     }
-}
