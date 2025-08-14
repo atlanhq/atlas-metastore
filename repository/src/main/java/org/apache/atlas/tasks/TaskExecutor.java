@@ -184,7 +184,7 @@ public class TaskExecutor {
 
                 String version = FeatureFlagStore.isTagV2Enabled() ? "V2" : "V1";
                 String type = task.getType();
-                String tagType = String.valueOf(task.getParameters() != null ? task.getParameters().getOrDefault("classificationTypeName", "unknown") : "unknown");
+                String tagType = task.getTagTypeName();
 
                 TagPropMetrics.emitTimer("TAG_PROP_TASK_QUEUE_LATENCY", version, type, tagType, "IN_PROGRESS", queueLatencyMs);
             } catch (Exception ignore) {
