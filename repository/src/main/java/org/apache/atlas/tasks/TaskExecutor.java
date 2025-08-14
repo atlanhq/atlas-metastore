@@ -26,6 +26,10 @@ import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.utils.AtlasMetricType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.repository.metrics.TagPropMetrics;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -188,6 +192,21 @@ public class TaskExecutor {
             }
 
             AbstractTask runnableTask = factory.create(task);
+
+            // Emit queue latency at the exact transition to IN_PROGRESS
+            try {
+                long now = System.currentTimeMillis();
+                long created = task.getCreatedTime() != null ? task.getCreatedTime().getTime() : 0L;
+                long queueLatencyMs = created > 0 ? (now - created) : 0L;
+
+                String version = FeatureFlagStore.isTagV2Enabled() ? "V2" : "V1";
+                String type = task.getType();
+                String tagType = String.valueOf(task.getParameters() != null ? task.getParameters().getOrDefault("classificationTypeName", "unknown") : "unknown");
+
+                TagPropMetrics.emitTimer("TAG_PROP_TASK_QUEUE_LATENCY", version, type, tagType, "IN_PROGRESS", queueLatencyMs);
+            } catch (Exception ignore) {
+                // do not block task if metrics fail
+            }
 
             registry.inProgress(taskVertex, task);
 

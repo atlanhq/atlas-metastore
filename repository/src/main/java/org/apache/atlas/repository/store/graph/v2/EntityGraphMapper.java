@@ -79,8 +79,10 @@ import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.utils.AtlasMetricType;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.repository.metrics.TagPropMetrics;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -4210,6 +4212,11 @@ public class EntityGraphMapper {
 
     public List<String> processClassificationPropagationAddition(List<AtlasVertex> verticesToPropagate, AtlasVertex classificationVertex) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
+        final long metricStartMs = System.currentTimeMillis();
+        final String version = "V1";
+        final String type = "CLASSIFICATION_PROPAGATION_ADD";
+        final String tagType = getTypeName(classificationVertex);
+        String status = "COMPLETE";
         List<String> propagatedEntitiesGuids = new ArrayList<>();
         int impactedVerticesSize = verticesToPropagate.size();
         int offset = 0;
@@ -4243,9 +4250,14 @@ public class EntityGraphMapper {
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
             LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
+            status = "FAILED";
             throw exception;
         } finally {
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
+            long durationMs = System.currentTimeMillis() - metricStartMs;
+
+            TagPropMetrics.emitTimer("TAG_PROP_TASK_DURATION", version, type, tagType, status, durationMs);
+            TagPropMetrics.emitCounter("TAG_PROP_TASK_PROPAGATIONS", version, type, tagType, status, propagatedEntitiesGuids.size());
         }
 
         return propagatedEntitiesGuids;
@@ -4257,11 +4269,18 @@ public class EntityGraphMapper {
                                                            List<AtlasVertex> verticesToPropagate,
                                                            AtlasClassification classification) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
+        final long metricStartMs = System.currentTimeMillis();
+        final String version = "V2";
+        final String type = "CLASSIFICATION_PROPAGATION_ADD";
+        final String tagType = classification.getTypeName();
+        String status = "COMPLETE";
+
         int impactedVerticesSize = verticesToPropagate.size();
 
         int offset = 0;
         int toIndex;
         LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
+        long processedCount = 0L;
 
         try {
             do {
@@ -4279,15 +4298,21 @@ public class EntityGraphMapper {
                 }
                 entityChangeNotifier.onClassificationPropagationAddedToEntities(propagatedEntitiesChunked, Collections.singletonList(classification), true, RequestContext.get()); // Async call
                 offset += CHUNK_SIZE;
+                processedCount += deNormAttributesMap.keySet().size();
                 LOG.info("offset {}, impactedVerticesSize: {}", offset, impactedVerticesSize);
             } while (offset < impactedVerticesSize);
             LOG.info(String.format("Total number of vertices propagated: %d", impactedVerticesSize));
         } catch (Exception exception) {
             LOG.error("Error occurred while adding classification propagation for classification with source entity id {}",
                     entityVertexId, exception);
+            status = "FAILED";
             throw exception;
         } finally {
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
+            long durationMs = System.currentTimeMillis() - metricStartMs;
+
+            TagPropMetrics.emitTimer("TAG_PROP_TASK_DURATION", version, type, tagType, status, durationMs);
+            TagPropMetrics.emitCounter("TAG_PROP_TASK_PROPAGATIONS", version, type, tagType, status, processedCount);
         }
     }
 
