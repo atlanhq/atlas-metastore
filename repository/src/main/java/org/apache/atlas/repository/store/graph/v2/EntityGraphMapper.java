@@ -82,7 +82,7 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasMetricType;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.atlas.utils.AtlasPerfTracer;
-import org.apache.atlas.repository.metrics.TagPropMetrics;
+import org.apache.atlas.service.metrics.TagPropMetrics;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;

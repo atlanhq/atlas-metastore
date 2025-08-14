@@ -28,7 +28,7 @@ import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.utils.AtlasMetricType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
-import org.apache.atlas.repository.metrics.TagPropMetrics;
+import org.apache.atlas.service.metrics.TagPropMetrics;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
