@@ -674,3 +674,4 @@ public class TaskRegistry {
 
         return map;
     }
+}
