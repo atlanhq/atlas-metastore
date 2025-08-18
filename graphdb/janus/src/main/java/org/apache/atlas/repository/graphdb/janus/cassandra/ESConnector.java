@@ -66,7 +66,7 @@ public class ESConnector {
         } catch (AtlasException e) {
             throw new RuntimeException(e);
         }
-        return null;
+        return lowLevelClient;
     }
 
     private static Set<String> initializeDenormAttributes() {
