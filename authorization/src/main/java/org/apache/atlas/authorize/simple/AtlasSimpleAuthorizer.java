@@ -322,7 +322,7 @@ public final class AtlasSimpleAuthorizer implements AtlasAuthorizer {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> SimpleAtlasAuthorizer.scrubSearchResults({})", request);
         }
-
+        LOG.info("==> AtlasSimpleAuthorizer scrubSearchResults(" + request + ")");
         final AtlasSearchResult result = request.getSearchResult();
 
         if (CollectionUtils.isNotEmpty(result.getEntities())) {
@@ -499,13 +499,17 @@ public final class AtlasSimpleAuthorizer implements AtlasAuthorizer {
 
     private void checkAccessAndScrub(AtlasEntityHeader entity, AtlasSearchResultScrubRequest request) throws AtlasAuthorizationException {
         if (entity != null && request != null) {
+            LOG.info("==> AtlasSimpleAuthorizer entity ->>" + entity + "  request + -->"+request.getAction());
             final AtlasEntityAccessRequest entityAccessRequest = new AtlasEntityAccessRequest(request.getTypeRegistry(), AtlasPrivilege.ENTITY_UPDATE, entity, request.getUser(), request.getUserGroups());
 
             entityAccessRequest.setClientIPAddress(request.getClientIPAddress());
 
 
             if (!isAccessAllowed(entityAccessRequest, true).isAllowed()) {
+                LOG.info("==> AtlasSimpleAuthorizer isAccessAllowed ENTITY_UPDATE->>" + false);
                 scrubEntityHeader(entity, request.getTypeRegistry());
+            } else {
+                LOG.info("==> AtlasSimpleAuthorizer isAccessAllowed ENTITY_UPDATE->>" + true);
             }
         }
     }
