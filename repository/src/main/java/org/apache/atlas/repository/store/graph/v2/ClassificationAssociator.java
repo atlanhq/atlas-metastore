@@ -241,7 +241,6 @@ public class ClassificationAssociator {
                     }
                     //new method to populate all primitive fields in kafka
                     entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(addedClassification), false);
->>>>>>> master
                 }
             }
 
