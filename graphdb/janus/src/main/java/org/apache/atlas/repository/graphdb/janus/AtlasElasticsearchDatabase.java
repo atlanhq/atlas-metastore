@@ -375,7 +375,7 @@ public class AtlasElasticsearchDatabase {
         LOG.info("====================================================");
     }
 
-    private static List<HttpHost> getHttpHosts() throws AtlasException {
+    public static List<HttpHost> getHttpHosts() throws AtlasException {
         List<HttpHost> httpHosts = new ArrayList<>();
         Configuration configuration = ApplicationProperties.get();
         String indexConf = configuration.getString(INDEX_BACKEND_CONF);
