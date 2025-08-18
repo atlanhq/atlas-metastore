@@ -28,8 +28,9 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.discovery.*;
 import org.apache.atlas.model.discovery.AtlasSearchResult.AtlasQueryType;
-import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.model.instance.AtlasObjectId;
+import org.apache.atlas.model.glossary.relations.AtlasTermAssignmentHeader;
+import org.apache.atlas.model.instance.*;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.model.searchlog.SearchLogSearchParams;
 import org.apache.atlas.model.searchlog.SearchLogSearchResult;
 import org.apache.atlas.query.QueryParams;
@@ -50,7 +51,6 @@ import org.apache.atlas.repository.userprofile.UserProfileService;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.searchlog.ESSearchLogger;
 import org.apache.atlas.service.FeatureFlagStore;
-import org.apache.atlas.stats.StatsClient;
 import org.apache.atlas.type.*;
 import org.apache.atlas.util.AtlasGremlinQueryProvider;
 import org.apache.atlas.util.SearchTracker;
@@ -59,37 +59,24 @@ import org.apache.atlas.v1.model.instance.Id;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
-import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections4.IteratorUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
-import org.apache.tinkerpop.gremlin.structure.T;
-import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 
 import org.janusgraph.graphdb.relations.CacheEdge;
-import org.apache.commons.collections4.IteratorUtils;
-import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
-import javax.script.ScriptEngine;
-import javax.script.ScriptException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import static org.apache.atlas.AtlasErrorCode.*;
-import static org.apache.atlas.SortOrder.ASCENDING;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
-import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.typedef.AtlasBaseTypeDef.*;
-import java.util.*;
-import java.util.stream.Collectors;
 
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.getAllTagNames;
@@ -969,7 +956,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         }
 
         // Find relationship attribute type
-        Map<String, AtlasAttribute> relationshipAttributes = type.getRelationshipAttributes().get(attributeName);
+        Map<String, AtlasStructType.AtlasAttribute> relationshipAttributes = type.getRelationshipAttributes().get(attributeName);
         if (MapUtils.isEmpty(relationshipAttributes)) {
             return null;
         }
