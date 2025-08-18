@@ -90,17 +90,21 @@ public class TaskQueueWatcher implements Runnable {
         if (LOG.isDebugEnabled()) {
             LOG.debug("TaskQueueWatcher: running {}:{}", Thread.currentThread().getName(), Thread.currentThread().getId());
         }
+        LOG.info("TaskQueueWatcher: Time constants - pollInterval: {}, TASK_WAIT_TIME_MS: {}", pollInterval, AtlasConstants.TASK_WAIT_TIME_MS);
+
         while (shouldRun.get()) {
             RequestContext requestContext = RequestContext.get();
             requestContext.setMetricRegistry(this.metricRegistry);
             TasksFetcher fetcher = new TasksFetcher(registry);
+            boolean lockAcquired = false;
             try {
                 if (!redisService.acquireDistributedLock(ATLAS_TASK_LOCK)) {
+                    LOG.info("TaskQueueWatcher: Failed to acquire distributed lock, sleeping for TASK_WAIT_TIME_MS: {}", AtlasConstants.TASK_WAIT_TIME_MS);
                     Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
                     continue;
                 }
                 LOG.info("TaskQueueWatcher: Acquired distributed lock: {}", ATLAS_TASK_LOCK);
-
+                lockAcquired = true;
                 List<AtlasTask> tasks = fetcher.getTasks();
                 if (CollectionUtils.isNotEmpty(tasks)) {
                     final CountDownLatch latch = new CountDownLatch(tasks.size());
@@ -108,19 +112,30 @@ public class TaskQueueWatcher implements Runnable {
                     LOG.info("Submitted {} tasks to the queue", tasks.size());
                     waitForTasksToComplete(latch);
                 } else {
-                    redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                    LOG.info("TaskQueueWatcher: No tasks fetched during this cycle.");
                 }
-                Thread.sleep(pollInterval);
             } catch (InterruptedException interruptedException) {
                 LOG.error("TaskQueueWatcher: Interrupted: thread is terminated, new tasks will not be loaded into the queue until next restart");
                 break;
             } catch (Exception e) {
                 LOG.error("TaskQueueWatcher: Exception occurred " + e.getMessage(), e);
             } finally {
-                redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
                 fetcher.clearTasks();
+                if (lockAcquired) {
+                    redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                    LOG.info("TaskQueueWatcher: Released Task Lock in finally");
+                    lockAcquired = false;
+                }
+            }
+            try{
+                LOG.info("TaskQueueWatcher: Sleeping for pollInterval: {}", pollInterval);
+                Thread.sleep(pollInterval);}
+            catch (Exception e){
+                LOG.warn("TaskQueueWatcher: Sleep interrupted, exiting.");
+                break;
             }
         }
+
     }
 
     private void waitForTasksToComplete(final CountDownLatch latch) throws InterruptedException {

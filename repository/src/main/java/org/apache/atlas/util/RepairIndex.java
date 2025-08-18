@@ -88,6 +88,20 @@ public class RepairIndex {
 
         LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
         LOG.info(": Done!");
+        for (String entityGuid : entityGUIDs){
+            for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
+                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
+                try {
+                    indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
+                    break;
+                } catch (Exception e){
+                    LOG.info("Exception: " + e.getMessage());
+                    LOG.info("Pausing before retry..");
+                    Thread.sleep(2000 * attemptCount);
+                }
+            }
+        }
+        searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
     }
 
     private Set<String> getEntityAndReferenceGuids(String guid, Map<String, AtlasEntity> referredEntities) {

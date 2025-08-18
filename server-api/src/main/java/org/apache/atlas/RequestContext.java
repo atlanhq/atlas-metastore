@@ -27,6 +27,7 @@ import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
@@ -116,8 +117,6 @@ public class RequestContext {
     private boolean skipAuthorizationCheck = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
-    private boolean cacheEnabled;
-
     private boolean delayTagNotifications = false;
     private boolean skipHasLineageCalculation = false;
     private boolean isInvokedByIndexSearch = false;
@@ -128,6 +127,8 @@ public class RequestContext {
     // Track Cassandra operations for rollback
     private final Map<String, Stack<CassandraTagOperation>> cassandraTagOperations = new HashMap<>();
     private final List<ESDeferredOperation> esDeferredOperations = new ArrayList<>();
+    private static final String X_ATLAN_CLIENT_ORIGIN = "X-Atlan-Client-Origin";
+    private static final String CLIENT_ORIGIN_PRODUCT = "product_webapp";
 
     Map<String, Object> tagsDiff = new HashMap<>();
 
@@ -724,6 +725,12 @@ public class RequestContext {
         }
     }
 
+    public void setRequestContextHeaders(Map<String, String> requestContextHeaders) {
+        if (requestContextHeaders != null) {
+            this.requestContextHeaders.putAll(requestContextHeaders);
+        }
+    }
+
     public Map<String, String> getRequestContextHeaders() {
         return requestContextHeaders;
     }
@@ -814,14 +821,6 @@ public class RequestContext {
         return this.requestUri;
     }
 
-    public void setEnableCache(boolean cacheEnabled) {
-        this.cacheEnabled = cacheEnabled;
-    }
-
-    public boolean isCacheEnabled() {
-        return this.cacheEnabled;
-    }
-
     public boolean isIncludeClassificationNames() {
         return includeClassificationNames;
     }
@@ -867,6 +866,16 @@ public class RequestContext {
 
     public boolean isInvokedByIndexSearch() {
         return isInvokedByIndexSearch;
+    }
+
+    public boolean isInvokedByProduct() {
+        Map<String, String> requestContextHeaders = getRequestContextHeaders();
+        if (MapUtils.isEmpty(requestContextHeaders)) {
+            return false;
+        }
+
+        return CLIENT_ORIGIN_PRODUCT.equals(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN)) ||
+                CLIENT_ORIGIN_PRODUCT.equals(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN.toLowerCase()));
     }
 
     public void setIsInvokedByLineage(boolean isInvokedByLineage) {

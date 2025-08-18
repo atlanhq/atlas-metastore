@@ -45,6 +45,8 @@ public abstract class ClassificationTask extends AbstractTask {
     private static final Logger LOG = LoggerFactory.getLogger(ClassificationTask.class);
 
     public static final String PARAM_ENTITY_GUID              = "entityGuid";
+    public static final String PARAM_SOURCE_VERTEX_ID         = "sourceVertexId";
+    public static final String PARAM_TO_ENTITY_GUID           = "toEntityGuid";
     public static final String PARAM_DELETED_EDGE_IDS         = "deletedEdgeIds"; // TODO: Will be deprecated
     public static final String PARAM_DELETED_EDGE_ID          = "deletedEdgeId";
     public static final String PARAM_CLASSIFICATION_VERTEX_ID = "classificationVertexId";
@@ -64,14 +66,13 @@ public abstract class ClassificationTask extends AbstractTask {
     protected final EntityGraphMapper      entityGraphMapper;
     protected final DeleteHandlerDelegate  deleteDelegate;
     protected final AtlasRelationshipStore relationshipStore;
-    public static Boolean JANUS_OPTIMISATION_ENABLED;
+
     public ClassificationTask(AtlasTask task,
                               AtlasGraph graph,
                               EntityGraphMapper entityGraphMapper,
                               DeleteHandlerDelegate deleteDelegate,
                               AtlasRelationshipStore relationshipStore) {
         super(task);
-        this.JANUS_OPTIMISATION_ENABLED = StringUtils.isNotEmpty(FeatureFlagStore.getFlag("ENABLE_JANUS_OPTIMISATION"));
         this.graph             = graph;
         this.entityGraphMapper = entityGraphMapper;
         this.deleteDelegate    = deleteDelegate;
@@ -106,10 +107,8 @@ public abstract class ClassificationTask extends AbstractTask {
 
             setStatus(COMPLETE);
         } catch (AtlasBaseException e) {
-            LOG.error("Task: {}: Error performing task!", getTaskGuid(), e);
-
+            LOG.error("Task: {}: Error performing task! Task details: {}", getTaskGuid(), getTask(), e);
             setStatus(FAILED);
-
             throw e;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
@@ -134,21 +133,6 @@ public abstract class ClassificationTask extends AbstractTask {
             put(PARAM_ENTITY_GUID, entityGuid);
             put(PARAM_CLASSIFICATION_VERTEX_ID, classificationVertexId);
             put(PARAM_RELATIONSHIP_GUID, relationshipGuid);
-        }};
-    }
-
-    public static Map<String, Object> toParameters(String deletedEdgeId, String classificationVertexId) {
-        return new HashMap<String, Object>() {{
-            put(PARAM_DELETED_EDGE_ID, deletedEdgeId);
-            put(PARAM_CLASSIFICATION_VERTEX_ID, classificationVertexId);
-        }};
-    }
-
-    public static Map<String, Object> toParameters(String classificationVertexId, String referencedVertexId, boolean isTermEntityEdge) {
-        return new HashMap<String, Object>() {{
-            put(PARAM_CLASSIFICATION_VERTEX_ID, classificationVertexId);
-            put(PARAM_REFERENCED_VERTEX_ID, referencedVertexId);
-            put(PARAM_IS_TERM_ENTITY_EDGE, isTermEntityEdge);
         }};
     }
 

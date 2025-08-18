@@ -40,6 +40,7 @@ import org.apache.atlas.query.executors.DSLQueryExecutor;
 import org.apache.atlas.query.executors.ScriptEngineBasedExecutor;
 import org.apache.atlas.query.executors.TraversalBasedExecutor;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.VertexEdgePropertiesCache;
 import org.apache.atlas.repository.graph.GraphBackedSearchIndexer;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
@@ -52,6 +53,7 @@ import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.userprofile.UserProfileService;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.searchlog.ESSearchLogger;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.stats.StatsClient;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
@@ -62,6 +64,7 @@ import org.apache.atlas.util.SearchPredicateUtil;
 import org.apache.atlas.util.SearchTracker;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.v1.model.instance.Id;
+import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.collections.Predicate;
@@ -95,13 +98,17 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.getAllTagNames;
 import static org.apache.atlas.repository.graph.GraphHelper.parseLabelsString;
 import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.DISPLAY_NAME;
+import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.BASIC_SEARCH_STATE_FILTER;
 import static org.apache.atlas.util.AtlasGremlinQueryProvider.AtlasGremlinQuery.TO_RANGE_LIST;
 
 @Component
 public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(EntityDiscoveryService.class);
+    private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("discovery.EntityDiscoveryService");
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
+    public static final String USE_BULK_FETCH_INDEXSEARCH = "discovery_use_bulk_fetch_indexsearch";
+    public static final String USE_DSL_OPTIMISATION = "discovery_use_dsl_optimisation";
 
     private final AtlasGraph                      graph;
     private final AtlasGremlinQueryProvider       gremlinQueryProvider;
@@ -119,6 +126,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final StatsClient                     statsClient;
     // Cache for type to edge names mapping to avoid repeated calls across methods
     private final Map<String, Map<String, Set<String>>> typeEdgeNamesCache;
+    private final ElasticsearchDslOptimizer dslOptimizer;
 
     private EntityGraphRetriever            entityRetriever;
 
@@ -149,16 +157,34 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
                 : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
         this.typeEdgeNamesCache = new HashMap<>();
+        this.statsClient              = statsClient;
+        this.dslOptimizer             = ElasticsearchDslOptimizer.getInstance();
     }
 
     @Override
     @GraphTransaction
     public AtlasSearchResult searchUsingDslQuery(String dslQuery, int limit, int offset) throws AtlasBaseException {
-        AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
+        AtlasPerfTracer perf = null;
+        try {
+            String clientOrigin = RequestContext.get().getClientOrigin();
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.searchUsingDslQuery(" + dslQuery + ")");
+            }
+            if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
+                    CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
+                ElasticsearchDslOptimizer.OptimizationResult result = dslOptimizer.optimizeQueryWithValidation(dslQuery);
+                dslQuery = result.getOptimizedQuery();
+            }
+            AtlasSearchResult ret = dslQueryExecutor.execute(dslQuery, limit, offset);
 
-        scrubSearchResults(ret);
+            scrubSearchResults(ret);
 
-        return ret;
+            return ret;
+        } finally {
+            if (perf != null) {
+                AtlasPerfTracer.log(perf);
+            }
+        }
     }
 
     @Override
@@ -998,10 +1024,16 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     @Override
     public AtlasSearchResult directIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+        return directIndexSearch(searchParams, false);
+    }
+
+    @Override
+    public AtlasSearchResult directIndexSearch(SearchParams searchParams, boolean useVertexEdgeBulkFetching) throws AtlasBaseException {
         IndexSearchParams params = (IndexSearchParams) searchParams;
         RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
         RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
         RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
+        String clientOrigin = RequestContext.get().getClientOrigin();
 
         RequestContext.get().setIncludeMeanings(!searchParams.isExcludeMeanings());
         RequestContext.get().setIncludeClassifications(!searchParams.isExcludeClassifications());
@@ -1017,6 +1049,66 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         if (CollectionUtils.isNotEmpty(searchParams.getAttributes())) {
             resultAttributes.addAll(searchParams.getAttributes());
         }
+        AtlasPerfTracer perf = null;
+        try {
+            if(LOG.isDebugEnabled()){
+                LOG.debug("Performing ES search for the params ({})", searchParams);
+            }
+
+            String indexName = getIndexName(params);
+
+            indexQuery = graph.elasticsearchQuery(indexName);
+
+            if (searchParams.getEnableFullRestriction()) {
+                addPreFiltersToSearchQuery(searchParams);
+            }
+
+            AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
+            if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
+                    CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
+                ElasticsearchDslOptimizer.OptimizationResult result = dslOptimizer.optimizeQueryWithValidation(searchParams.getQuery());
+                String dslOptimised = result.getOptimizedQuery();
+                searchParams.setQuery(dslOptimised);
+
+                // Log validation status for monitoring
+                if (!result.isValidationPassed()) {
+                    LOG.warn("DSL optimization validation failed: {} - falling back to original query",
+                             result.getValidationFailureReason());
+                }
+
+                if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.directIndexSearch(" + dslOptimised + ")");
+                }
+            }
+
+            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+            if (indexQueryResult == null) {
+                return null;
+            }
+            RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
+            prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
+
+            ret.setAggregations(indexQueryResult.getAggregationMap());
+            ret.setApproximateCount(indexQuery.vertexTotals());
+        } catch (Exception e) {
+            LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
+            throw e;
+        } finally {
+            if (perf != null) {
+                AtlasPerfTracer.log(perf);
+            }
+        }
+        return ret;
+    }
+
+    public List<AtlasVertex> directVerticesIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+        IndexSearchParams params = (IndexSearchParams) searchParams;
+        RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
+        RequestContext.get().setAllowDeletedRelationsIndexsearch(params.isAllowDeletedRelations());
+        RequestContext.get().setIncludeRelationshipAttributes(params.isIncludeRelationshipAttributes());
+
+        List<AtlasVertex> ret = new ArrayList<>();
+        AtlasIndexQuery indexQuery;
 
         try {
             if(LOG.isDebugEnabled()){
@@ -1108,29 +1200,51 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
     private void prepareSearchResultV1(AtlasSearchResult ret, DirectIndexQueryResult indexQueryResult, Set<String> resultAttributes, boolean fetchCollapsedResults) throws AtlasBaseException {
         SearchParams searchParams = ret.getSearchParameters();
+        AtlasPerfMetrics.MetricRecorder prepareSearchResultMetrics = RequestContext.get().startMetricRecord("prepareSearchResult");
         try {
             if(LOG.isDebugEnabled()){
                 LOG.debug("Preparing search results for ({})", ret.getSearchParameters());
             }
             Iterator<Result> iterator = indexQueryResult.getIterator();
+            List<Result> results = IteratorUtils.toList(iterator);
             boolean showSearchScore = searchParams.getShowSearchScore();
             if (iterator == null) {
                 return;
             }
+            Set<String> vertexIds = results.stream().map(result -> {
+                AtlasVertex vertex = result.getVertex();
+                if (vertex == null) {
+                    LOG.warn("vertex in null");
+                    return null;
+                }
+                return vertex.getId().toString();
+            }).filter(Objects::nonNull).collect(Collectors.toSet());
+            VertexEdgePropertiesCache vertexEdgePropertiesCache;
+            if (useVertexEdgeBulkFetching) {
+                vertexEdgePropertiesCache = entityRetriever.enrichVertexPropertiesByVertexIds(vertexIds, resultAttributes);
+            } else {
+                vertexEdgePropertiesCache = null;
+            }
 
-            while (iterator.hasNext()) {
-                Result result = iterator.next();
+            // If valueMap of certain vertex is empty or null then remove that from processing results
+
+
+            for(Result result : results) {
                 AtlasVertex vertex = result.getVertex();
 
                 if (vertex == null) {
                     LOG.warn("vertex in null");
                     continue;
                 }
+                vertexIds.add(vertex.getId().toString());
+                AtlasEntityHeader header;
 
-                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
-                if(RequestContext.get().includeClassifications()){
-                    header.setClassifications(entityRetriever.handleGetAllClassifications(vertex));
+                if(useVertexEdgeBulkFetching) {
+                  header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes, vertexEdgePropertiesCache);
+                } else {
+                    header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
                 }
+
                 if (showSearchScore) {
                     ret.addEntityScore(header.getGuid(), result.getScore());
                 }
@@ -1175,7 +1289,9 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 ret.addEntity(header);
             }
         } catch (Exception e) {
-            throw e;
+                throw e;
+        } finally {
+            RequestContext.get().endMetricRecord(prepareSearchResultMetrics);
         }
 
         if (!searchParams.getEnableFullRestriction()) {

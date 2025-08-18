@@ -34,6 +34,7 @@ import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.*;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.pc.EntityConsumerBuilder;
 import org.apache.atlas.repository.store.graph.v2.bulkimport.pc.EntityCreationManager;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.slf4j.Logger;
@@ -131,7 +132,7 @@ public class MigrationImport extends ImportStrategy {
 
         AtlasRelationshipStore relationshipStore = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier, null);
         EntityGraphMapper entityGraphMapper = new EntityGraphMapper(deleteDelegate, restoreHandlerV1, typeRegistry,
-                graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null, null, null, tagAttributeMapper);
+                graph, relationshipStore, entityChangeNotifier, getInstanceConverter(graph), fullTextMapperV2, null, null, null, tagAttributeMapper);
         AtlasRelationshipStoreV2 atlasRelationshipStoreV2 = new AtlasRelationshipStoreV2(graph, typeRegistry, deleteDelegate, entityChangeNotifier, null);
 
         return new AtlasEntityStoreV2(graph, deleteDelegate, restoreHandlerV1, typeRegistry, entityChangeNotifier, entityGraphMapper, null, atlasRelationshipStoreV2, null, null, null, null);

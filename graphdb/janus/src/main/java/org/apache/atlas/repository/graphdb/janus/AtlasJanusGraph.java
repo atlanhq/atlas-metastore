@@ -637,6 +637,20 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
 
+    public Set<AtlasVertex> getVertices(String... vertexIds) {
+        Set<AtlasVertex> result = new HashSet<>();
+        Iterator<Vertex> it     = getGraph().vertices(vertexIds);
+        while( it.hasNext()) {
+            Vertex vertex = it.next();
+            if (vertex == null) {
+                LOG.warn("Vertex with id {} not found", vertexIds);
+            } else {
+                result.add(GraphDbObjectFactory.createVertex(this, vertex));
+            }
+        }
+        return result;
+    }
+
     @Override
     public Iterable<AtlasVertex<AtlasJanusVertex, AtlasJanusEdge>> getVertices(String key, Object value) {
         AtlasGraphQuery<AtlasJanusVertex, AtlasJanusEdge> query = query();
@@ -906,14 +920,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         }
 
         return null;
-    }
-
-    public void setEnableCache(boolean enableCache) {
-        this.janusGraph.setEnableCache(enableCache);
-    }
-
-    public Boolean isCacheEnabled() {
-        return this.janusGraph.isCacheEnabled();
     }
 
     private long getVertexIdDivisor() {
