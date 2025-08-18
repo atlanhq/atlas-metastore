@@ -60,6 +60,9 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         SimpleModule module = new SimpleModule("NumbersAsStringModule");
         module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
         objectMapper.registerModule(module);
+
+        // Initialize required Cassandra resources (tables) on startup
+        createResources();
     }
 
     @Override
@@ -142,6 +145,34 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         queryBuilder.append(" ALLOW FILTERING");
 
         return session.prepare(queryBuilder.toString());
+    }
+
+    /**
+     * Initialize Cassandra resources required by this repository.
+     * Creates the vertex table if it does not already exist using configured keyspace and table name.
+     */
+    private void createResources() {
+        String cql = "CREATE TABLE IF NOT EXISTS %s.%s (\n" +
+                "    id text,\n" +
+                "    bucket int,\n" +
+                "    json_data text,\n" +
+                "    updated_at timestamp,\n" +
+                "    PRIMARY KEY ((bucket), id)\n" +
+                ") WITH compaction = {" +
+                "'class': 'SizeTieredCompactionStrategy', " +
+                "'min_threshold': 4, " +
+                "'max_threshold': 32" +
+                "};";
+
+        try {
+            String formatted = String.format(cql, keyspace, tableName);
+            session.execute(formatted);
+            if (LOG.isInfoEnabled()) {
+                LOG.info("Ensured Cassandra table exists: {}.{}", keyspace, tableName);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to create or verify Cassandra table {}.{}: {}", keyspace, tableName, e.getMessage(), e);
+        }
     }
 
     private int calculateBucket(String vertexId) {
