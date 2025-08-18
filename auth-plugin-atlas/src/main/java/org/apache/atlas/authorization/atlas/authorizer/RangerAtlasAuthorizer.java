@@ -542,7 +542,7 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> scrubSearchResults(" + request + ")");
         }
-        LOG.info("==> RangerAtlasAuthorizer scrubSearchResults(" + request + ")");
+
         RangerPerfTracer perf = null;
 
         try {
@@ -854,8 +854,6 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
     private void checkAccessAndScrub(AtlasEntityHeader entity, AtlasSearchResultScrubRequest request, boolean isScrubAuditEnabled) throws AtlasAuthorizationException {
         if (entity != null && request != null) {
-            LOG.info("==> RangerAtlasAuthorizer -->");
-            LOG.info("scrubbing entity : "+entity.getGuid() + "   request:--->" +request.getAction());
             final AtlasEntityAccessRequest entityAccessRequest = new AtlasEntityAccessRequest(request.getTypeRegistry(), AtlasPrivilege.ENTITY_UPDATE, entity, request.getUser(), request.getUserGroups());
 
             entityAccessRequest.setClientIPAddress(request.getClientIPAddress());
@@ -863,7 +861,6 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             entityAccessRequest.setRemoteIPAddress(request.getRemoteIPAddress());
 
             boolean isEntityAccessAllowed  = AtlasAuthorizationUtils.isAccessAllowed(entityAccessRequest, isScrubAuditEnabled);
-            LOG.info("scrubbing entity : "+entity + "   isEntityAccessAllowed:--->" +isEntityAccessAllowed);
             if (!isEntityAccessAllowed) {
                 scrubEntityHeader(entity, request.getTypeRegistry());
             }
