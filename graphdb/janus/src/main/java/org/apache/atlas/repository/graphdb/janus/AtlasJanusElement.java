@@ -19,17 +19,14 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
-import com.datastax.oss.driver.shaded.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.atlas.AtlasErrorCode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
-import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;

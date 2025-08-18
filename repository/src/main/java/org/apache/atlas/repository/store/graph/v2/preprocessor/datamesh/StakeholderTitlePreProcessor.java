@@ -71,7 +71,7 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
             } else {
                 LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in StakeholderTitlePreProcessor.");
             }
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }

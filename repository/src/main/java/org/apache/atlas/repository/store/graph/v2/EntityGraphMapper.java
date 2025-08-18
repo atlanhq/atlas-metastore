@@ -6828,7 +6828,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(property, value);
 
         RequestContext requestContext = RequestContext.get();
-        requestContext.cacheDifferentialEntity(diffEntity);
+        requestContext.cacheDifferentialEntity(diffEntity, ev);
     }
 
 }

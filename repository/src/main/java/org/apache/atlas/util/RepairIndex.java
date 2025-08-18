@@ -19,7 +19,6 @@
 package org.apache.atlas.util;
 
 
-import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graph.IFullTextMapper;
@@ -29,11 +28,8 @@ import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
-import org.apache.atlas.repository.util.AtlasEntityUtils;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.utils.AtlasEntityUtil;
-import org.janusgraph.core.JanusGraph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -88,20 +84,6 @@ public class RepairIndex {
 
         LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
         LOG.info(": Done!");
-        for (String entityGuid : entityGUIDs){
-            for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
-                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
-                try {
-                    indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
-                    break;
-                } catch (Exception e){
-                    LOG.info("Exception: " + e.getMessage());
-                    LOG.info("Pausing before retry..");
-                    Thread.sleep(2000 * attemptCount);
-                }
-            }
-        }
-        searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
     }
 
     private Set<String> getEntityAndReferenceGuids(String guid, Map<String, AtlasEntity> referredEntities) {
@@ -124,7 +106,7 @@ public class RepairIndex {
         Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) graph).getESPropertiesForUpdateFromVertices(vertices, this.typeRegistry);
         for (AtlasVertex vertex : vertices) {
             String vertexId = vertex.getIdForDisplay();
-            List<AtlasClassification> tags = tagDAO.getTagsForVertex(vertexId);
+            List<AtlasClassification> tags = tagDAO.getAllClassificationsForVertex(vertexId);
             if (!tags.isEmpty()) {
                 toReIndex.get(vertexId).putAll(TagDeNormAttributesUtil.getAllTagAttributes(getGuid(vertex), tags, typeRegistry, fullTextMapperV2));
             }

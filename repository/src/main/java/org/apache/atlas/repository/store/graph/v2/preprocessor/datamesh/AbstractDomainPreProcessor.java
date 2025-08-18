@@ -91,7 +91,7 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
         this.preProcessor = new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever);
 
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, entityRetriever);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize EntityDiscoveryService in AbstractDomainPreProcessor", e);
         }

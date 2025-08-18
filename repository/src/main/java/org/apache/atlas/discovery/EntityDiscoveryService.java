@@ -123,7 +123,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private final SuggestionsProvider             suggestionsProvider;
     private final DSLQueryExecutor                dslQueryExecutor;
     private final DynamicVertexService            dynamicVertexService;
-    private final StatsClient                     statsClient;
     // Cache for type to edge names mapping to avoid repeated calls across methods
     private final Map<String, Map<String, Set<String>>> typeEdgeNamesCache;
     private final ElasticsearchDslOptimizer dslOptimizer;
@@ -137,7 +136,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                            SearchTracker searchTracker,
                            UserProfileService userProfileService,
                            DynamicVertexService dynamicVertexService,
-                           StatsClient statsClient,
                           EntityGraphRetriever entityRetriever) throws AtlasException {
         this.graph                    = graph;
         this.indexer                  = indexer;
@@ -151,13 +149,11 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         this.indexSearchPrefix        = AtlasGraphUtilsV2.getIndexSearchPrefix();
         this.userProfileService       = userProfileService;
         this.suggestionsProvider      = new SuggestionsProviderImpl(graph, typeRegistry);
-        this.statsClient = statsClient;
         this.dynamicVertexService = dynamicVertexService;
         this.dslQueryExecutor = AtlasConfiguration.DSL_EXECUTOR_TRAVERSAL.getBoolean()
                 ? new TraversalBasedExecutor(typeRegistry, graph, entityRetriever)
                 : new ScriptEngineBasedExecutor(typeRegistry, graph, entityRetriever);
         this.typeEdgeNamesCache = new HashMap<>();
-        this.statsClient              = statsClient;
         this.dslOptimizer             = ElasticsearchDslOptimizer.getInstance();
     }
 
@@ -449,8 +445,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
         SearchContext searchContext = new SearchContext(createSearchParameters(quickSearchParameters),
                                                         typeRegistry,
                                                         graph,
-                                                        indexer.getVertexIndexKeys(),
-                                                        statsClient);
+                                                        indexer.getVertexIndexKeys());
 
         if(LOG.isDebugEnabled()) {
             LOG.debug("Generating the search results for the query {} .", searchContext.getSearchParameters().getQuery());
@@ -481,7 +476,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     @Override
     @GraphTransaction
     public AtlasSearchResult searchWithParameters(SearchParameters searchParameters) throws AtlasBaseException {
-        return searchWithSearchContext(new SearchContext(searchParameters, typeRegistry, graph, indexer.getVertexIndexKeys(), statsClient));
+        return searchWithSearchContext(new SearchContext(searchParameters, typeRegistry, graph, indexer.getVertexIndexKeys()));
     }
 
     private AtlasSearchResult searchWithSearchContext(SearchContext searchContext) throws AtlasBaseException {
@@ -1086,7 +1081,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return null;
             }
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
-            prepareSearchResult(ret, indexQueryResult, resultAttributes, true, useVertexEdgeBulkFetching);
+            prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
 
             ret.setAggregations(indexQueryResult.getAggregationMap());
             ret.setApproximateCount(indexQuery.vertexTotals());
@@ -1124,15 +1119,18 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
 
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
-            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(ret.getSearchParameters());
+            DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
             if (indexQueryResult == null) {
                 return null;
             }
             RequestContext.get().endMetricRecord(elasticSearchQueryMetric);
-            prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
-            ret.setAggregations(indexQueryResult.getAggregationMap());
-            ret.setApproximateCount(indexQuery.vertexTotals());
 
+            Iterator<Result> iterator = indexQueryResult.getIterator();
+            while (iterator.hasNext()) {
+                Result result = iterator.next();
+                AtlasVertex vertex = result.getVertex();
+                ret.add(vertex);
+            }
         } catch (Exception e) {
             LOG.error("Error while performing direct search for the params ({}), {}", searchParams, e.getMessage());
             throw e;
@@ -1220,11 +1218,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 return vertex.getId().toString();
             }).filter(Objects::nonNull).collect(Collectors.toSet());
             VertexEdgePropertiesCache vertexEdgePropertiesCache;
-            if (useVertexEdgeBulkFetching) {
-                vertexEdgePropertiesCache = entityRetriever.enrichVertexPropertiesByVertexIds(vertexIds, resultAttributes);
-            } else {
-                vertexEdgePropertiesCache = null;
-            }
+            vertexEdgePropertiesCache = null;
 
             // If valueMap of certain vertex is empty or null then remove that from processing results
 
@@ -1239,11 +1233,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 vertexIds.add(vertex.getId().toString());
                 AtlasEntityHeader header;
 
-                if(useVertexEdgeBulkFetching) {
-                  header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes, vertexEdgePropertiesCache);
-                } else {
-                    header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
-                }
+                header = entityRetriever.toAtlasEntityHeader(vertex, resultAttributes);
 
                 if (showSearchScore) {
                     ret.addEntityScore(header.getGuid(), result.getScore());

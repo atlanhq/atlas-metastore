@@ -112,10 +112,10 @@ public class FeatureFlagStore {
         }
     }
 
-    public static void setFlag(String key, String value) {
+    public static String setFlag(String key, String value) {
         if (redisService == null || StringUtils.isEmpty(key) || StringUtils.isEmpty(value))
-            return;
-        redisService.putValue(addFeatureFlagNamespace(key), value);
+            return key;
+        return redisService.putValue(addFeatureFlagNamespace(key), value);
     }
 
     public static void deleteFlag(String key) {

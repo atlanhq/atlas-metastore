@@ -2117,7 +2117,7 @@ public class EntityGraphRetriever {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Performing getAllClassifications");
             }
-            return tagDAO.getTagsForVertex(idForDisplay);
+            return tagDAO.getAllClassificationsForVertex(idForDisplay);
         } catch (Exception e) {
             LOG.error("Error while getting all classifications", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
@@ -2547,7 +2547,7 @@ public class EntityGraphRetriever {
                 for (Map.Entry<String, Object> entry : currentMap.entrySet()) {
                     String mapKey    = entry.getKey();
                     Object keyValue  = entry.getValue();
-                    Object mapValue  = mapVertexToCollectionEntry(entityVertex, mapValueType, keyValue, attribute.getRelationshipEdgeLabel(),
+                    Object mapValue  = mapVertexToCollectionEntry(entityVertex, mapType.getTypeForAttribute(), keyValue, attribute.getRelationshipEdgeLabel(),
                                                                   entityExtInfo, isOwnedAttribute, attribute.getRelationshipEdgeDirection(), isMinExtInfo, includeReferences, null);
                     if (mapValue != null) {
                         ret.put(mapKey, mapValue);
@@ -2604,8 +2604,7 @@ public class EntityGraphRetriever {
         return arrValues;
     }
 
-    private Object mapVertexToCollectionEntry(AtlasType atlasType,
-                                              AtlasVertex entityVertex, AtlasType arrayElement, Object value,
+    private Object mapVertexToCollectionEntry(AtlasVertex entityVertex, AtlasType arrayElement, Object value,
                                               String edgeLabel, AtlasEntityExtInfo entityExtInfo, boolean isOwnedAttribute,
                                               AtlasRelationshipEdgeDirection edgeDirection, final boolean isMinExtInfo, boolean includeReferences, VertexEdgePropertiesCache vertexEdgePropertiesCache) throws AtlasBaseException {
         Object ret = null;
@@ -2630,7 +2629,7 @@ public class EntityGraphRetriever {
 
             case STRUCT:
                 if (RequestContext.get().isIdOnlyGraphEnabled()) {
-                    ret = value instanceof String ? mapStringToStruct(atlasType, (String) value) : value;
+                    ret = value instanceof String ? mapStringToStruct(arrayElement, (String) value) : value;
                 } else {
                     ret = mapVertexToStruct(entityVertex, edgeLabel, (AtlasEdge) value, entityExtInfo, isMinExtInfo);
                 }

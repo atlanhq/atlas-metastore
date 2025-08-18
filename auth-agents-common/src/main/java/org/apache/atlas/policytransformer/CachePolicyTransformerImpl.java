@@ -147,7 +147,7 @@ public class CachePolicyTransformerImpl {
         this.purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
 
         try {
-            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
+            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, entityRetriever);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize discoveryService in CachePolicyTransformerImpl", e);
             throw new AtlasBaseException(e.getCause());

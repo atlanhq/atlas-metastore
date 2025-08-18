@@ -61,7 +61,7 @@ public class GlossaryPreProcessor implements PreProcessor {
             } else {
                 LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in GlossaryPreProcessor.");
             }
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, entityRetriever);
         } catch (Exception e) {
             e.printStackTrace();
         }

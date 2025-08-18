@@ -183,7 +183,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.taskNotificationSender = taskNotificationSender;
         this.dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, entityRetriever);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize EntityDiscoveryService in AtlasEntityStoreV2 constructor", e);
         }
