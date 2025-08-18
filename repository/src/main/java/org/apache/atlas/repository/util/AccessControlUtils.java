@@ -152,7 +152,8 @@ public final class AccessControlUtils {
     public static final String POLICY_FILTER_CRITERIA_ENDS_WITH = "ENDS_WITH";
     
     public static final Set<String> POLICY_FILTER_CRITERIA_VALID_OPS = Set.of(POLICY_FILTER_CRITERIA_EQUALS,
-            POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_IN, POLICY_FILTER_CRITERIA_NOT_IN);
+            POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_IN, POLICY_FILTER_CRITERIA_NOT_IN,
+            POLICY_FILTER_CRITERIA_STARTS_WITH, POLICY_FILTER_CRITERIA_ENDS_WITH);
     public static final Set<String> POLICY_FILTER_CRITERIA_NEGATIVE_OPS = Set.of(POLICY_FILTER_CRITERIA_NOT_EQUALS,
             POLICY_FILTER_CRITERIA_NOT_IN);
 
@@ -423,6 +424,9 @@ public final class AccessControlUtils {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(vertexIndexName);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
+        if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
+            return false;
+        }
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();
 
         while (iterator.hasNext()) {
@@ -462,6 +466,9 @@ public final class AccessControlUtils {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(VERTEX_INDEX_NAME);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
+        if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
+            return false;
+        }
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();
 
         while (iterator.hasNext()) {
