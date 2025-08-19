@@ -474,6 +474,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         try {
             AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
             return getEligibleProperties(properties, type).stream()
+                    .filter(k -> properties.get(k) != null)
                     .collect(Collectors.toMap(
                             k -> k,
                             v -> properties.get(v)
