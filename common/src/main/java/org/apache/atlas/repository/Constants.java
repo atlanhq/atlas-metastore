@@ -280,14 +280,15 @@ public final class Constants {
     /**
      * elasticsearch index prefix.
      */
-    public static String INDEX_PREFIX;
+    public static final String INDEX_PREFIX = "janusgraph_";
+    public static final String INDEX_PREFIX_IDONLY;
 
     static {
         try {
             String configuredIndexName = ApplicationProperties.get()
                     .getString("atlas.graph.index.search.index-name");
 
-            INDEX_PREFIX = StringUtils.isNotBlank(configuredIndexName)
+            INDEX_PREFIX_IDONLY = StringUtils.isNotBlank(configuredIndexName)
                     ? configuredIndexName + "_"
                     : "janusgraph_";
 
