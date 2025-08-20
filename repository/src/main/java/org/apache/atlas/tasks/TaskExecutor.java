@@ -22,9 +22,11 @@ import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.service.metrics.ClassificationTaskMetrics;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -51,13 +53,14 @@ public class TaskExecutor {
     private final boolean isActiveActiveHAEnabled;
     private final String zkRoot;
     private final MetricsRegistry metricRegistry;
+    private final ClassificationTaskMetrics classificationTaskMetrics;
 
     private TaskQueueWatcher watcher;
     private Thread watcherThread;
     private RedisService redisService;
 
     public TaskExecutor(TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                        ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry) {
+                        ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry, ClassificationTaskMetrics classificationTaskMetrics) {
         this.taskExecutorService = Executors.newSingleThreadExecutor(new ThreadFactoryBuilder()
                                                                     .setDaemon(true)
                                                                     .setNameFormat(TASK_NAME_FORMAT + Thread.currentThread().getName())
@@ -71,11 +74,12 @@ public class TaskExecutor {
         this.isActiveActiveHAEnabled = isActiveActiveHAEnabled;
         this.zkRoot = zkRoot;
         this.metricRegistry = metricsRegistry;
+        this.classificationTaskMetrics = classificationTaskMetrics;
     }
 
     public Thread startWatcherThread() {
 
-        watcher = new TaskQueueWatcher(taskExecutorService, registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot, isActiveActiveHAEnabled, metricRegistry);
+        watcher = new TaskQueueWatcher(taskExecutorService, registry, taskTypeFactoryMap, statistics, curatorFactory, redisService, zkRoot, isActiveActiveHAEnabled, metricRegistry, classificationTaskMetrics);
         watcherThread = new Thread(watcher);
         watcherThread.start();
         return watcherThread;
@@ -94,23 +98,27 @@ public class TaskExecutor {
         private final TaskRegistry              registry;
         private final TaskManagement.Statistics statistics;
         private final AtlasTask                 task;
+        private final ClassificationTaskMetrics classificationTaskMetrics;
         private CountDownLatch  latch;
 
         AtlasPerfTracer perf = null;
 
         public TaskConsumer(AtlasTask task, TaskRegistry registry, Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                            CountDownLatch latch) {
+                            CountDownLatch latch, ClassificationTaskMetrics classificationTaskMetrics) {
             this.task               = task;
             this.registry           = registry;
             this.taskTypeFactoryMap = taskTypeFactoryMap;
             this.statistics         = statistics;
             this.latch = latch;
+            this.classificationTaskMetrics = classificationTaskMetrics;
         }
 
         @Override
         public void run() {
             AtlasVertex taskVertex = null;
             int         attemptCount;
+            AtlasPerfMetrics.MetricRecorder taskMetricRecorder = null;
+            long taskStartTime = System.currentTimeMillis();
 
             try {
                 RequestContext.get().setTraceId("task-"+task.getGuid());
@@ -118,6 +126,14 @@ public class TaskExecutor {
                     TASK_LOG.info("Task not scheduled as it was not found");
                     return;
                 }
+
+                // Start task-level metrics recording
+                taskMetricRecorder = RequestContext.get().startMetricRecord("atlas.task." + task.getType().toLowerCase());
+                RequestContext.get().addMetricToContext("atlas.task.started", 1);
+                RequestContext.get().addMetricToContext("atlas.task.type." + task.getType().toLowerCase(), 1);
+                
+                // Record classification-specific metrics
+                recordClassificationTaskStarted(task.getType(), task.getTagTypeName());
 
                 TASK_LOG.info("Task guid = "+task.getGuid());
                 taskVertex = registry.getVertex(task.getGuid());
@@ -130,7 +146,7 @@ public class TaskExecutor {
                 }
 
                 if (perfEnabled) {
-                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, String.format("atlas.task:%s", task.getGuid(), task.getType()));
+                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, String.format("atlas.task:%s:%s", task.getType(), task.getGuid()));
                 }
 
                 statistics.increment(1);
@@ -160,6 +176,12 @@ public class TaskExecutor {
             } catch (Exception exception) {
                 if (task != null) {
                     registry.updateStatus(taskVertex, task);
+                    RequestContext.get().addMetricToContext("atlas.task.failed", 1);
+                    RequestContext.get().addMetricToContext("atlas.task.type." + task.getType().toLowerCase() + ".failed", 1);
+                    
+                    // Record classification-specific failure metrics
+                    long taskDuration = System.currentTimeMillis() - taskStartTime;
+                    recordClassificationTaskFailed(task.getType(), task.getTagTypeName(), taskDuration, exception.getClass().getSimpleName());
 
                     TASK_LOG.error("Error executing task. Please perform the operation again!", task, exception);
                 } else {
@@ -168,12 +190,28 @@ public class TaskExecutor {
 
                 statistics.error();
             } finally {
+                // Record task completion metrics
                 if (task != null) {
+                    long taskDuration = System.currentTimeMillis() - taskStartTime;
+                    RequestContext.get().addMetricToContext("atlas.task.duration", taskDuration);
+                    RequestContext.get().addMetricToContext("atlas.task.type." + task.getType().toLowerCase() + ".duration", taskDuration);
+                    
+                    if (task.getStatus() == AtlasTask.Status.COMPLETE) {
+                        RequestContext.get().addMetricToContext("atlas.task.completed", 1);
+                        RequestContext.get().addMetricToContext("atlas.task.type." + task.getType().toLowerCase() + ".completed", 1);
+                        
+                        // Record classification-specific completion metrics
+                        recordClassificationTaskCompleted(task.getType(), task.getTagTypeName(), taskDuration);
+                    }
+                    
                     this.registry.commit();
-
                     TASK_LOG.log(task);
                 }
 
+                if (taskMetricRecorder != null) {
+                    RequestContext.get().endMetricRecord(taskMetricRecorder);
+                }
+                
                 latch.countDown();
                 RequestContext.get().clearCache();
                 AtlasPerfTracer.log(perf);
@@ -196,6 +234,65 @@ public class TaskExecutor {
             registry.complete(taskVertex, task);
 
             statistics.successPrint();
+        }
+        
+        /**
+         * Record classification task started metrics
+         */
+        private void recordClassificationTaskStarted(String taskType, String tagType) {
+            if (isClassificationTask(taskType) && classificationTaskMetrics != null) {
+                String metricTaskType = mapToMetricTaskType(taskType);
+                classificationTaskMetrics.recordTaskStarted(metricTaskType, tagType);
+            }
+        }
+        
+        /**
+         * Record classification task completed metrics
+         */
+        private void recordClassificationTaskCompleted(String taskType, String tagType, long durationMs) {
+            if (isClassificationTask(taskType) && classificationTaskMetrics != null) {
+                String metricTaskType = mapToMetricTaskType(taskType);
+                classificationTaskMetrics.recordTaskCompleted(metricTaskType, tagType, durationMs);
+            }
+        }
+        
+        /**
+         * Record classification task failed metrics
+         */
+        private void recordClassificationTaskFailed(String taskType, String tagType, long durationMs, String errorType) {
+            if (isClassificationTask(taskType) && classificationTaskMetrics != null) {
+                String metricTaskType = mapToMetricTaskType(taskType);
+                classificationTaskMetrics.recordTaskFailed(metricTaskType, tagType, durationMs, errorType);
+            }
+        }
+        
+        /**
+         * Check if task is a classification task
+         */
+        private boolean isClassificationTask(String taskType) {
+            return taskType != null && (
+                taskType.equals("CLASSIFICATION_PROPAGATION_ADD") ||
+                taskType.equals("CLASSIFICATION_PROPAGATION_DELETE") ||
+                taskType.equals("CLASSIFICATION_REFRESH_PROPAGATION")
+            );
+        }
+        
+        /**
+         * Map Atlas task type to metrics task type
+         */
+        private String mapToMetricTaskType(String taskType) {
+            if (taskType == null) return "unknown";
+            
+            switch (taskType) {
+                case "CLASSIFICATION_PROPAGATION_ADD":
+                    return ClassificationTaskMetrics.PROPAGATION_ADD;
+                case "CLASSIFICATION_PROPAGATION_DELETE":
+                    return ClassificationTaskMetrics.PROPAGATION_DELETE;
+                case "CLASSIFICATION_REFRESH_PROPAGATION":
+                    return ClassificationTaskMetrics.PROPAGATION_REFRESH;
+                default:
+                    return "unknown";
+            }
         }
     }
 

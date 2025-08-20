@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.service.metrics.ClassificationTaskMetrics;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.commons.collections.CollectionUtils;
@@ -44,6 +45,7 @@ public class TaskQueueWatcher implements Runnable {
     private final String zkRoot;
     private final boolean isActiveActiveHAEnabled;
     private final MetricsRegistry metricRegistry;
+    private final ClassificationTaskMetrics classificationTaskMetrics;
 
     private TaskRegistry registry;
     private final ExecutorService executorService;
@@ -60,7 +62,7 @@ public class TaskQueueWatcher implements Runnable {
 
     public TaskQueueWatcher(ExecutorService executorService, TaskRegistry registry,
                             Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
-                            ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry) {
+                            ICuratorFactory curatorFactory, RedisService redisService, final String zkRoot, boolean isActiveActiveHAEnabled, MetricsRegistry metricsRegistry, ClassificationTaskMetrics classificationTaskMetrics) {
 
         this.registry = registry;
         this.executorService = executorService;
@@ -71,6 +73,7 @@ public class TaskQueueWatcher implements Runnable {
         this.zkRoot = zkRoot;
         this.isActiveActiveHAEnabled = isActiveActiveHAEnabled;
         this.metricRegistry = metricsRegistry;
+        this.classificationTaskMetrics = classificationTaskMetrics;
     }
 
     public void shutdown() {
@@ -154,7 +157,7 @@ public class TaskQueueWatcher implements Runnable {
                     TASK_LOG.log(task);
                 }
 
-                this.executorService.submit(new TaskExecutor.TaskConsumer(task, this.registry, this.taskTypeFactoryMap, this.statistics, latch));
+                this.executorService.submit(new TaskExecutor.TaskConsumer(task, this.registry, this.taskTypeFactoryMap, this.statistics, latch, this.classificationTaskMetrics));
             }
 
             LOG.info("TasksFetcher: Submitted {} tasks to the queue", tasks.size());
