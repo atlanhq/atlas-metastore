@@ -40,6 +40,8 @@ import org.janusgraph.core.JanusGraphElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.atlas.repository.Constants.*;
+
 /**
  * Janus implementation of AtlasElement.
  *
@@ -61,11 +63,12 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         excludeProperties.add("replicatedTo");
         excludeProperties.add("replicatedFrom");
 
-        VERTEX_CORE_PROPERTIES.add("__guid");
-        VERTEX_CORE_PROPERTIES.add("__state");
-        VERTEX_CORE_PROPERTIES.add("__typeName");
-        VERTEX_CORE_PROPERTIES.add("qualifiedName");
-        VERTEX_CORE_PROPERTIES.add("__u_qualifiedName");
+        VERTEX_CORE_PROPERTIES.add(GUID_PROPERTY_KEY);
+        VERTEX_CORE_PROPERTIES.add(STATE_PROPERTY_KEY);
+        VERTEX_CORE_PROPERTIES.add(ENTITY_TYPE_PROPERTY_KEY);
+        VERTEX_CORE_PROPERTIES.add(QUALIFIED_NAME);
+        VERTEX_CORE_PROPERTIES.add(UNIQUE_QUALIFIED_NAME);
+        VERTEX_CORE_PROPERTIES.add(SUPER_TYPES_PROPERTY_KEY);
     }
 
     public AtlasJanusElement(AtlasJanusGraph graph, T element) {
