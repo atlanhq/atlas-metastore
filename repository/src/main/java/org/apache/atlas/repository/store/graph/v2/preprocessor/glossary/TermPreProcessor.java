@@ -105,7 +105,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
             isValidLexoRank(lexicographicalSortOrder, glossaryQName, parentQname, this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(entity));
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
                 "create entity: type=", entity.getTypeName());
 
@@ -234,8 +234,8 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
         return updatedQualifiedName;
     }
 
-    private String createQualifiedName() {
-        return getUUID() + "@" + anchor.getAttribute(QUALIFIED_NAME);
+    private String createQualifiedName(AtlasEntity entity) {
+        return getUUID(entity) + "@" + anchor.getAttribute(QUALIFIED_NAME);
     }
 
     private void setAnchor(AtlasEntity entity, EntityMutationContext context) throws AtlasBaseException {
