@@ -29,6 +29,7 @@ on:
       - lineageondemand
       - idonlymaster
       - idonlycanary
+      - idonlymerge
 
 jobs:
   build:

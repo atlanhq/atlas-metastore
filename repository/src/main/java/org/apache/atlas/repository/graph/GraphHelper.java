@@ -143,7 +143,8 @@ public final class GraphHelper {
 
         String fromGuid = getGuid(fromVertex);
         if (fromGuid != null && fromGuid.equals(getGuid(toVertex))) {
-            LOG.error("Attempting to create a relationship between same vertex with guid {}", fromGuid);
+            LOG.error("Attempting to create a relationship between same vertex with guid {}. FromVertexId: {}, toVertexId: {}", fromGuid,
+                    fromVertex.getIdForDisplay(), toVertex.getIdForDisplay());
             throw new AtlasBaseException(RELATIONSHIP_CREATE_INVALID_PARAMS, fromGuid);
         }
 
