@@ -175,6 +175,8 @@ public final class GraphHelper {
         }
 
         String fromGuid = getGuid(fromVertex);
+
+        LOG.info("Adding edge toGuid {} ->  from guid {}",(getGuid(toVertex)) , fromGuid);
         if (fromGuid != null && fromGuid.equals(getGuid(toVertex))) {
             LOG.error("Attempting to create a relationship between same vertex with guid {}", fromGuid);
             throw new AtlasBaseException(RELATIONSHIP_CREATE_INVALID_PARAMS, fromGuid);

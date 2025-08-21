@@ -1716,7 +1716,6 @@ public class EntityGraphMapper {
             String edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty());
 
             try {
-                LOG.info("Creating edge:  from vertex: {} to vertex: {} with label: {}", ctx.getReferringVertex().getIdForDisplay(), entityVertex.getIdForDisplay(), edgeLabel);
                 ret = graphHelper.getOrCreateEdge(ctx.getReferringVertex(), entityVertex, edgeLabel);
             } catch (RepositoryException e) {
                 throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
