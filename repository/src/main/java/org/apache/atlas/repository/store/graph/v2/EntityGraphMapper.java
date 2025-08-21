@@ -1716,6 +1716,7 @@ public class EntityGraphMapper {
             String edgeLabel = AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty());
 
             try {
+                LOG.info("Creating edge:  from vertex: {} to vertex: {} with label: {}", ctx.getReferringVertex().getIdForDisplay(), entityVertex.getIdForDisplay(), edgeLabel);
                 ret = graphHelper.getOrCreateEdge(ctx.getReferringVertex(), entityVertex, edgeLabel);
             } catch (RepositoryException e) {
                 throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
@@ -1769,6 +1770,7 @@ public class EntityGraphMapper {
                 AtlasAttribute  attribute     = ctx.getAttribute();
                 String          attributeName = attribute.getName();
 
+                LOG.info("Looking for relationship attribute: {} on entity type: {}", attributeName, entityType.getTypeName());
                 // use relationship to create/update edges
                 if (entityType.hasRelationshipAttribute(attributeName)) {
                     Map<String, Object> relationshipAttributes = getRelationshipAttributes(ctx.getValue());
