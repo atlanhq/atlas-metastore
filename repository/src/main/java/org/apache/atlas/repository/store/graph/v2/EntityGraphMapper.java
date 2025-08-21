@@ -1296,7 +1296,7 @@ public class EntityGraphMapper {
                         currentEdge = graphHelper.getEdgeForLabel(ctx.getReferringVertex(), edgeLabel, edgeDirection);
                     }
                     LOG.info("Get relationship edge label for attribute: {}, edgeLabel: {}, edgeDirection: {} " +
-                            "referringVertex :{}  currentEdge: {}", ctx.getAttribute().getName(), edgeLabel, edgeDirection,  ctx.getReferringVertex(), currentEdge.getId());
+                            "referringVertex :{}  currentEdge: {}", ctx.getAttribute().getName(), edgeLabel, edgeDirection,  ctx.getReferringVertex().getIdForDisplay(), currentEdge.getId());
 
                     AtlasEdge newEdge = null;
 
@@ -1774,6 +1774,11 @@ public class EntityGraphMapper {
                 String          attributeName = attribute.getName();
 
                 LOG.info("Looking for relationship attribute: {} on entity type: {} with relation :{}", attributeName, entityType.getTypeName(), entityType.hasRelationshipAttribute(attributeName));
+
+                entityType.getRelationshipAttributes()
+                        .entrySet()
+                        .stream().
+                        forEach(e-> LOG.info("Relationship attribute: {} ", e.getKey()));
 
                 // use relationship to create/update edges
                 if (entityType.hasRelationshipAttribute(attributeName)) {
