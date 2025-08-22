@@ -765,6 +765,8 @@ public class EntityGraphMapper {
             LOG.debug("==> setBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
 
+        validateProductStatus(entityVertex);
+
         validateBusinessAttributes(entityVertex, entityType, businessAttributes, true);
 
         Map<String, Map<String, AtlasBusinessAttribute>> entityTypeBusinessAttributes = entityType.getBusinessAttributes();
@@ -931,6 +933,8 @@ public class EntityGraphMapper {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> removeBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
+
+        validateProductStatus(entityVertex);
 
         AtlasEntityHeader               entityHeader   = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
         AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder requestBuilder = new AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder(typeRegistry, AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, entityHeader);
