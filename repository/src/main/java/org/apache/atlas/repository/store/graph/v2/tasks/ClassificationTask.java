@@ -103,6 +103,13 @@ public abstract class ClassificationTask extends AbstractTask {
             int assetsAffected = context.getAssetsAffected();
             MDC.put("assets_affected", String.valueOf(assetsAffected));
             MDC.put("status", "success");
+            MDC.put("startTime", String.valueOf(getTaskDef().getStartTime()));
+            MDC.put("endTime", String.valueOf(getTaskDef().getEndTime()));
+            
+            // Calculate duration in milliseconds
+            long duration = getTaskDef().getEndTime().getTime() - getTaskDef().getStartTime().getTime();
+            MDC.put("duration_ms", String.valueOf(duration));
+            
             LOG.info("Classification task completed successfully. Assets affected: {}", assetsAffected);
 
             return AtlasTask.Status.COMPLETE;
@@ -110,6 +117,13 @@ public abstract class ClassificationTask extends AbstractTask {
             MDC.put("assets_affected", "0");
             MDC.put("status", "failed");
             MDC.put("error", e.getMessage());
+            
+            // Even for failures, record the duration
+            if (getTaskDef().getStartTime() != null && getTaskDef().getEndTime() != null) {
+                long duration = getTaskDef().getEndTime().getTime() - getTaskDef().getStartTime().getTime();
+                MDC.put("duration_ms", String.valueOf(duration));
+            }
+            
             LOG.error("Classification task failed", e);
             setStatus(AtlasTask.Status.FAILED);
             throw e;
@@ -118,6 +132,13 @@ public abstract class ClassificationTask extends AbstractTask {
             MDC.put("assets_affected", "0");
             MDC.put("status", "failed");
             MDC.put("error", t.getMessage());
+            
+            // Record duration even for unexpected errors
+            if (getTaskDef().getStartTime() != null && getTaskDef().getEndTime() != null) {
+                long duration = getTaskDef().getEndTime().getTime() - getTaskDef().getStartTime().getTime();
+                MDC.put("duration_ms", String.valueOf(duration));
+            }
+            
             LOG.error("Unexpected error in classification task", t);
             setStatus(AtlasTask.Status.FAILED);
             throw new AtlasBaseException(t);
