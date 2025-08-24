@@ -91,55 +91,41 @@ public abstract class ClassificationTask extends AbstractTask {
             MDC.put("tag_version", org.apache.atlas.service.FeatureFlagStore.isTagV2Enabled() ? "v2" : "v1");
             MDC.put("thread_name", threadName);
             MDC.put("thread_id", String.valueOf(Thread.currentThread().getId()));
+            MDC.put("status", "in_progress");
+            MDC.put("assets_affected", "0");
 
             LOG.info("Starting classification task execution");
             
-            // Update status without committing
-            super.setStatus(IN_PROGRESS);
+            setStatus(AtlasTask.Status.IN_PROGRESS);
             run(params, context);
-
-            // Update final status and clean up
-            try {
-                if (CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE.equals(getTaskType())) {
-                    entityGraphMapper.removePendingTaskFromEdge((String) params.get(PARAM_RELATIONSHIP_EDGE_ID), getTaskGuid());
-                } else {
-                    entityGraphMapper.removePendingTaskFromEntity((String) params.get(PARAM_ENTITY_GUID), getTaskGuid());
-                }
-            } catch (EntityNotFoundException | AtlasBaseException e) {
-                LOG.warn("Error updating associated element for: {}", getTaskGuid(), e);
-            }
-
-            super.setStatus(COMPLETE);
+            setStatus(AtlasTask.Status.COMPLETE);
             
             int assetsAffected = context.getAssetsAffected();
             MDC.put("assets_affected", String.valueOf(assetsAffected));
             MDC.put("status", "success");
             LOG.info("Classification task completed successfully. Assets affected: {}", assetsAffected);
 
-            return COMPLETE;
+            return AtlasTask.Status.COMPLETE;
         } catch (AtlasBaseException e) {
             MDC.put("assets_affected", "0");
             MDC.put("status", "failed");
             MDC.put("error", e.getMessage());
             LOG.error("Classification task failed", e);
-            super.setStatus(FAILED);
+            setStatus(AtlasTask.Status.FAILED);
             throw e;
         } catch (Throwable t) {
+            // Catch any unexpected errors to ensure MDC cleanup
             MDC.put("assets_affected", "0");
             MDC.put("status", "failed");
             MDC.put("error", t.getMessage());
             LOG.error("Unexpected error in classification task", t);
-            super.setStatus(FAILED);
+            setStatus(AtlasTask.Status.FAILED);
             throw new AtlasBaseException(t);
         } finally {
             try {
                 graph.commit();
-                LOG.info("Successfully committed changes for task: {}", getTaskGuid());
-            } catch (Exception e) {
-                LOG.error("Error committing changes for task: {}", getTaskGuid(), e);
-                throw new AtlasBaseException("Failed to commit changes", e);
             } finally {
-                MDC.clear();
+                MDC.clear(); // Ensure MDC is always cleared even if commit fails
             }
         }
     }
@@ -175,10 +161,20 @@ public abstract class ClassificationTask extends AbstractTask {
         }};
     }
 
-    @Override
     protected void setStatus(AtlasTask.Status status) {
         super.setStatus(status);
-        LOG.info("ClassificationTask status is set {} for task: {}", status, getTaskGuid());
+        LOG.info(String.format("ClassificationTask status is set %s for the task: %s ", status, super.getTaskGuid()));
+
+        try {
+            if (CLASSIFICATION_PROPAGATION_RELATIONSHIP_UPDATE.equals(getTaskType())) {
+                entityGraphMapper.removePendingTaskFromEdge((String) getTaskDef().getParameters().get(PARAM_RELATIONSHIP_EDGE_ID), getTaskGuid());
+            } else {
+                entityGraphMapper.removePendingTaskFromEntity((String) getTaskDef().getParameters().get(PARAM_ENTITY_GUID), getTaskGuid());
+            }
+        } catch (EntityNotFoundException | AtlasBaseException e) {
+            LOG.warn("Error updating associated element for: {}", getTaskGuid(), e);
+        }
+        graph.commit();
     }
 
     protected abstract void run(Map<String, Object> parameters, TaskContext context) throws AtlasBaseException;
