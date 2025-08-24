@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.instance.AtlasRelationship;
@@ -26,14 +25,11 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.tasks.AbstractTask;
 import org.apache.atlas.type.AtlasType;
-import org.apache.atlas.utils.AtlasPerfMetrics;
-import org.apache.commons.collections4.MapUtils;
-import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -81,45 +77,60 @@ public abstract class ClassificationTask extends AbstractTask {
 
     @Override
     public AtlasTask.Status perform() throws AtlasBaseException {
+        String threadName = Thread.currentThread().getName();
         Map<String, Object> params = getTaskDef().getParameters();
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord(getTaskGuid());
+        TaskContext context = new TaskContext();
 
-        if (MapUtils.isEmpty(params)) {
-            LOG.warn("Task: {}: Unable to process task: Parameters is not readable!", getTaskGuid());
-
-            return FAILED;
-        }
-
-        String userName = getTaskDef().getCreatedBy();
-
-        if (StringUtils.isEmpty(userName)) {
-            LOG.warn("Task: {}: Unable to process task as user name is empty!", getTaskGuid());
-
-            return FAILED;
-        }
-
-        RequestContext.get().setUser(userName, null);
-
+        MDC.clear(); // Clear any lingering MDC context
         try {
-            setStatus(IN_PROGRESS);
+            // Basic task context
+            MDC.put("task_id", getTaskGuid());
+            MDC.put("task_type", getTaskType());
+            MDC.put("tag_name", getTaskDef().getTagTypeName());
+            MDC.put("entity_guid", getTaskDef().getEntityGuid());
+            MDC.put("tag_version", org.apache.atlas.service.FeatureFlagStore.isTagV2Enabled() ? "v2" : "v1");
+            
+            // Thread context for parallel execution tracking
+            MDC.put("thread_name", threadName);
+            MDC.put("thread_id", String.valueOf(Thread.currentThread().getId()));
 
-            run(params);
+            LOG.info("Starting classification task execution");
+            
+            setStatus(AtlasTask.Status.IN_PROGRESS);
+            run(params, context);
+            setStatus(AtlasTask.Status.COMPLETE);
 
-            setStatus(COMPLETE);
+            MDC.put("assets_affected", String.valueOf(context.getAssetsAffected()));
+            MDC.put("status", "success");
+            LOG.info("Classification task completed successfully");
+
+            return AtlasTask.Status.COMPLETE;
         } catch (AtlasBaseException e) {
-            LOG.error("Task: {}: Error performing task! Task details: {}", getTaskGuid(), getTask(), e);
-            setStatus(FAILED);
+            MDC.put("assets_affected", "0");
+            MDC.put("status", "failed");
+            MDC.put("error", e.getMessage());
+            LOG.error("Classification task failed", e);
+            setStatus(AtlasTask.Status.FAILED);
             throw e;
+        } catch (Throwable t) {
+            // Catch any unexpected errors to ensure MDC cleanup
+            MDC.put("assets_affected", "0");
+            MDC.put("status", "failed");
+            MDC.put("error", t.getMessage());
+            LOG.error("Unexpected error in classification task", t);
+            setStatus(AtlasTask.Status.FAILED);
+            throw new AtlasBaseException(t);
         } finally {
-            RequestContext.get().endMetricRecord(metricRecorder);
-            graph.commit();
+            try {
+                graph.commit();
+            } finally {
+                MDC.clear(); // Ensure MDC is always cleared even if commit fails
+            }
         }
-
-        return getStatus();
     }
 
     public static Map<String, Object> toParameters(String entityGuid, String classificationVertexId, String relationshipGuid, Boolean restrictPropagationThroughLineage,Boolean restrictPropagationThroughHierarchy) {
-        return new HashMap<String, Object>() {{
+        return new HashMap<>() {{
             put(PARAM_ENTITY_GUID, entityGuid);
             put(PARAM_CLASSIFICATION_VERTEX_ID, classificationVertexId);
             put(PARAM_RELATIONSHIP_GUID, relationshipGuid);
@@ -129,7 +140,7 @@ public abstract class ClassificationTask extends AbstractTask {
     }
 
     public static Map<String, Object> toParameters(String entityGuid, String classificationVertexId, String relationshipGuid) {
-        return new HashMap<String, Object>() {{
+        return new HashMap<>() {{
             put(PARAM_ENTITY_GUID, entityGuid);
             put(PARAM_CLASSIFICATION_VERTEX_ID, classificationVertexId);
             put(PARAM_RELATIONSHIP_GUID, relationshipGuid);
@@ -137,14 +148,14 @@ public abstract class ClassificationTask extends AbstractTask {
     }
 
     public static Map<String, Object> toParameters(String relationshipEdgeId, AtlasRelationship relationship) {
-        return new HashMap<String, Object>() {{
+        return new HashMap<>() {{
             put(PARAM_RELATIONSHIP_EDGE_ID, relationshipEdgeId);
             put(PARAM_RELATIONSHIP_OBJECT, AtlasType.toJson(relationship));
         }};
     }
 
     public static Map<String, Object> toParameters(String classificationId) {
-        return new HashMap<String, Object>() {{
+        return new HashMap<>() {{
             put(PARAM_CLASSIFICATION_VERTEX_ID, classificationId);
         }};
     }
@@ -165,5 +176,17 @@ public abstract class ClassificationTask extends AbstractTask {
         graph.commit();
     }
 
-    protected abstract void run(Map<String, Object> parameters) throws AtlasBaseException;
+    protected abstract void run(Map<String, Object> parameters, TaskContext context) throws AtlasBaseException;
+
+    public static class TaskContext {
+        private int assetsAffected = 0;
+
+        public void incrementAssetsAffected(int count) {
+            this.assetsAffected += count;
+        }
+
+        public int getAssetsAffected() {
+            return assetsAffected;
+        }
+    }
 }
