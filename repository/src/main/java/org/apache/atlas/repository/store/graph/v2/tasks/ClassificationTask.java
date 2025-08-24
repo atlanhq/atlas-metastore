@@ -81,9 +81,8 @@ public abstract class ClassificationTask extends AbstractTask {
         Map<String, Object> params = getTaskDef().getParameters();
         TaskContext context = new TaskContext();
 
-        MDC.clear(); // Clear any lingering MDC context
         try {
-            // Basic task context
+            // Set up MDC context first
             MDC.put("task_id", getTaskGuid());
             MDC.put("task_type", getTaskType());
             MDC.put("tag_name", getTaskDef().getTagTypeName());
@@ -94,11 +93,11 @@ public abstract class ClassificationTask extends AbstractTask {
             MDC.put("status", "in_progress");
             MDC.put("assets_affected", "0");
 
+            // Now log with MDC context
             LOG.info("Starting classification task execution");
             
-            setStatus(AtlasTask.Status.IN_PROGRESS);
             run(params, context);
-            setStatus(AtlasTask.Status.COMPLETE);
+            setStatus(AtlasTask.Status.COMPLETE);  // This will commit the graph
             
             int assetsAffected = context.getAssetsAffected();
             MDC.put("assets_affected", String.valueOf(assetsAffected));
@@ -110,7 +109,7 @@ public abstract class ClassificationTask extends AbstractTask {
             MDC.put("status", "failed");
             MDC.put("error", e.getMessage());
             LOG.error("Classification task failed", e);
-            setStatus(AtlasTask.Status.FAILED);
+            setStatus(AtlasTask.Status.FAILED);  // This will commit the graph
             throw e;
         } catch (Throwable t) {
             // Catch any unexpected errors to ensure MDC cleanup
@@ -118,25 +117,23 @@ public abstract class ClassificationTask extends AbstractTask {
             MDC.put("status", "failed");
             MDC.put("error", t.getMessage());
             LOG.error("Unexpected error in classification task", t);
-            setStatus(AtlasTask.Status.FAILED);
+            setStatus(AtlasTask.Status.FAILED);  // This will commit the graph
             throw new AtlasBaseException(t);
         } finally {
-            try {
-                graph.commit();
-                
-                // Log final state after task.end() has been called by AbstractTask
-                MDC.put("startTime", String.valueOf(getTaskDef().getStartTime()));
-                MDC.put("endTime", String.valueOf(getTaskDef().getEndTime()));
-                if (getTaskDef().getStartTime() != null && getTaskDef().getEndTime() != null) {
-                    long duration = getTaskDef().getEndTime().getTime() - getTaskDef().getStartTime().getTime();
-                    MDC.put("duration_ms", String.valueOf(duration));
-                }
-                LOG.info("Classification task completed. Assets affected: {}, Duration: {} ms", 
-                    MDC.get("assets_affected"), 
-                    MDC.get("duration_ms"));
-            } finally {
-                MDC.clear(); // Ensure MDC is always cleared even if commit fails
+            // Log final state after task.end() has been called by AbstractTask
+            MDC.put("startTime", String.valueOf(getTaskDef().getStartTime()));
+            MDC.put("endTime", String.valueOf(getTaskDef().getEndTime()));
+            if (getTaskDef().getStartTime() != null && getTaskDef().getEndTime() != null) {
+                long duration = getTaskDef().getEndTime().getTime() - getTaskDef().getStartTime().getTime();
+                MDC.put("duration_ms", String.valueOf(duration));
             }
+            
+            // Log with all MDC values before clearing
+            LOG.info("Classification task completed. Assets affected: {}, Duration: {} ms", 
+                MDC.get("assets_affected"), 
+                MDC.get("duration_ms"));
+
+            MDC.clear();  // Clear MDC at the end
         }
     }
 
