@@ -120,6 +120,8 @@ public abstract class ClassificationTask extends AbstractTask {
             setStatus(AtlasTask.Status.FAILED);  // This will commit the graph
             throw new AtlasBaseException(t);
         } finally {
+            // failsafe invocation to make sure endTime is set
+            getTask().end();
             // Log final state after task.end() has been called by AbstractTask
             MDC.put("startTime", String.valueOf(getTaskDef().getStartTime()));
             MDC.put("endTime", String.valueOf(getTaskDef().getEndTime()));
