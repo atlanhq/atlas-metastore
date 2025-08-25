@@ -6443,6 +6443,7 @@ public class EntityGraphMapper {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("classificationRefreshPropagationV2_new");
         try {
             final int BATCH_SIZE = 10000;
+            int assetsAffected = 0;
             LOG.info("classificationRefreshPropagationV2_new: Starting scalable refresh for tag '{}' from source entity {}", classificationTypeName, sourceEntityGuid);
 
             // === Phase 1: Initialization & Calculation ===
@@ -6451,7 +6452,7 @@ public class EntityGraphMapper {
                 String warningMessage = String.format("classificationRefreshPropagationV2_new(sourceEntityGuid=%s): entity vertex not found, skipping task execution", sourceEntityGuid);
                 LOG.warn(warningMessage);
                 RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                return 0;
+                return assetsAffected;
             }
 
             String entityVertexId = entityVertex.getIdForDisplay();
@@ -6464,7 +6465,7 @@ public class EntityGraphMapper {
                         String warningMessage = String.format("classificationRefreshPropagationV2_new(parentEntityGuid=%s): parent entity vertex not found", parentEntityGuid);
                         LOG.warn(warningMessage);
                         RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                        return 0;
+                        return assetsAffected;
                     }
                     entityVertexId = entityVertex.getIdForDisplay();
                     sourceTag = tagDAO.findDirectTagByVertexIdAndTagTypeName(entityVertexId, classificationTypeName, true);
@@ -6477,7 +6478,7 @@ public class EntityGraphMapper {
 
             if (!sourceTag.isPropagate()) {
                 LOG.warn("classificationRefreshPropagationV2_new: Refresh task invalid as propagation is disabled for tag '{}' on entity {}. Aborting.", classificationTypeName, sourceEntityGuid);
-                return 0;
+                return assetsAffected;
             }
 
             Set<String> expectedPropagatedVertexIds = calculateExpectedPropagations(entityVertex, sourceTag);
@@ -6508,6 +6509,7 @@ public class EntityGraphMapper {
                 }
 
                 if (tagsToDelete.size() >= BATCH_SIZE) {
+                    assetsAffected += tagsToDelete.size();
                     processDeletions_new(tagsToDelete, sourceTag);
                     tagsToDelete.clear();
                 }
@@ -6520,6 +6522,7 @@ public class EntityGraphMapper {
             }
 
             if (!tagsToDelete.isEmpty()) {
+                assetsAffected += tagsToDelete.size();
                 processDeletions_new(tagsToDelete, sourceTag);
             }
 
@@ -6527,6 +6530,7 @@ public class EntityGraphMapper {
             if (!expectedPropagatedVertexIds.isEmpty()) {
                 LOG.info("classificationRefreshPropagationV2_new: Found {} assets that need the tag '{}' to be newly propagated.", expectedPropagatedVertexIds.size(), classificationTypeName);
                 List<String> vertexIdsToAdd = new ArrayList<>(expectedPropagatedVertexIds);
+                assetsAffected += expectedPropagatedVertexIds.size();
                 for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE) {
                     int end = Math.min(i + BATCH_SIZE, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
@@ -6542,7 +6546,7 @@ public class EntityGraphMapper {
                 }
             }
             LOG.info("classificationRefreshPropagationV2_new: Successfully completed scalable refresh for tag '{}' from source entity {}", classificationTypeName, sourceEntityGuid);
-            return expectedPropagatedVertexIds.size() + tagsToDelete.size();
+            return assetsAffected;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
