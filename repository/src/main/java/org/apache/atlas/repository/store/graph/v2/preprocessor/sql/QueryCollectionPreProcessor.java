@@ -124,7 +124,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateCollection");
 
         try {
-            entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+            entity.setAttribute(QUALIFIED_NAME, createQualifiedName((AtlasEntity) entity));
 
             AtlasEntity collection = (AtlasEntity) entity;
 
@@ -197,8 +197,8 @@ public class QueryCollectionPreProcessor implements PreProcessor {
         }
     }
 
-    private static String createQualifiedName() {
-        return String.format(qualifiedNameFormat, AtlasAuthorizationUtils.getCurrentUserName(), getUUID());
+    private static String createQualifiedName(AtlasEntity entity) {
+        return String.format(qualifiedNameFormat, AtlasAuthorizationUtils.getCurrentUserName(), getUUID(entity));
     }
 
     private RoleRepresentation createCollectionAdminRole(AtlasEntity collection) throws AtlasBaseException {

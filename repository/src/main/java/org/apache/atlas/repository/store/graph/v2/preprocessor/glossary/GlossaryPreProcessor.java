@@ -106,7 +106,7 @@ public class GlossaryPreProcessor implements PreProcessor {
             isValidLexoRank(lexicographicalSortOrder, "", "", this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName((AtlasEntity) entity));
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -134,8 +134,8 @@ public class GlossaryPreProcessor implements PreProcessor {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    public static String createQualifiedName() {
-        return getUUID();
+    public static String createQualifiedName(AtlasEntity entity) {
+        return getUUID(entity);
     }
 
     private boolean glossaryExists(String glossaryName) {
