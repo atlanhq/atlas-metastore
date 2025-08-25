@@ -94,7 +94,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
             } else {
                 LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in StakeholderPreProcessor.");
             }
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService , entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }
@@ -170,7 +170,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         entity.setAttribute(ATTR_STAKEHOLDER_TITLE_GUID, stakeholderTitleGuid);
 
         String stakeholderQualifiedName = format("default/%s/%s",
-                getUUID(),
+                getUUID(entity),
                 domainQualifiedName);
 
         entity.setAttribute(QUALIFIED_NAME, stakeholderQualifiedName);

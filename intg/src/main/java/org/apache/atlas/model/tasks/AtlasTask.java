@@ -38,14 +38,23 @@ public class AtlasTask {
     @JsonIgnore
     public static final int MAX_ATTEMPT_COUNT = 3;
 
-    public String getClassificationTypeName() {
-        return classificationTypeName;
+    public String getTagTypeName() {
+        return tagTypeName;
     }
 
-    public void setClassificationTypeName(String classificationTypeName) {
-        this.classificationTypeName = classificationTypeName;
+    public void setTagTypeName(String tagTypeName) {
+        this.tagTypeName = tagTypeName;
     }
 
+    public void setParentEntityGuid(String parentEntityGuid) {
+        this.parentEntityGuid = parentEntityGuid;
+    }
+
+    public String getParentEntityGuid() {
+        return parentEntityGuid;
+    }
+
+    private String parentEntityGuid;
     public enum Status {
         PENDING,
         IN_PROGRESS,
@@ -91,16 +100,17 @@ public class AtlasTask {
     private Map<String, Object> parameters;
     private int                 attemptCount;
     private String              errorMessage;
+    private String              warningMessage;
     private Status              status;
     private String              classificationId;
     private String              entityGuid;
-    private String              classificationTypeName;
+    private String tagTypeName;
 
     public AtlasTask() {
     }
 
     public AtlasTask(String type, String createdBy, Map<String, Object> parameters,
-                     String classificationId, String classificationTypeName,
+                     String classificationId, String tagTypeName,
                      String entityGuid) {
         this.guid               = UUID.randomUUID().toString();
         this.type               = type;
@@ -112,7 +122,7 @@ public class AtlasTask {
         this.attemptCount       = 0;
         this.classificationId   = classificationId;
         this.entityGuid         = entityGuid;
-        this.classificationTypeName = classificationTypeName;
+        this.tagTypeName = tagTypeName;
     }
 
     public String getGuid() {
@@ -201,6 +211,14 @@ public class AtlasTask {
         this.errorMessage = errorMessage;
     }
 
+    public String getWarningMessage() {
+        return warningMessage;
+    }
+
+    public void setWarningMessage(String warningMessage) {
+        this.warningMessage = warningMessage;
+    }
+
     public Date getStartTime() {
         return startTime;
     }
@@ -271,7 +289,11 @@ public class AtlasTask {
                 ", parameters=" + parameters +
                 ", attemptCount=" + attemptCount +
                 ", errorMessage='" + errorMessage + '\'' +
+                ", warningMessage='" + warningMessage + '\'' +
                 ", status=" + status +
+                ", classificationId='" + classificationId + '\'' +
+                ", entityGuid='" + entityGuid + '\'' +
+                ", tagTypeName='" + tagTypeName + '\'' +
                 '}';
     }
 }

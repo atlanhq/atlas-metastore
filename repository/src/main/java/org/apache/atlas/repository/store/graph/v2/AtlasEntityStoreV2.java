@@ -84,6 +84,7 @@ import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.util.FileUtils;
+import org.apache.atlas.util.NanoIdUtils;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
@@ -182,7 +183,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.taskNotificationSender = taskNotificationSender;
         this.dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, entityRetriever);
         } catch (AtlasException e) {
             LOG.error("Failed to initialize EntityDiscoveryService in AtlasEntityStoreV2 constructor", e);
         }
@@ -1088,26 +1089,52 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     @Override
     @GraphTransaction
-    public void repairClassificationMappings(final String guid) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> repairClassificationMappings({})", guid);
+    public void repairClassificationMappings(List<String> guids) throws AtlasBaseException {
+        for (String guid : guids) {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("==> repairClassificationMappings({})", guid);
+            }
+
+            if (StringUtils.isEmpty(guid)) {
+                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+            }
+
+            AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+
+            if (entityVertex == null) {
+                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+            }
+
+            entityGraphMapper.repairClassificationMappings(entityVertex);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("<== repairClassificationMappings({})", guid);
+            }
+        }
+    }
+
+    public Map<String, String> repairClassificationMappingsV2(List<String> guids) throws AtlasBaseException {
+        Map<String, String> errorMap = new HashMap<>(0);
+
+        List<AtlasVertex> verticesToRepair = new ArrayList<>(guids.size());
+        for (String guid : guids) {
+            if (StringUtils.isEmpty(guid)) {
+                errorMap.put(NanoIdUtils.randomNanoId(), AtlasErrorCode.INSTANCE_GUID_NOT_FOUND.getFormattedErrorMessage(guid));
+                continue;
+            }
+
+            AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+            if (entityVertex == null) {
+                errorMap.put(guid, AtlasErrorCode.INSTANCE_GUID_NOT_FOUND.getFormattedErrorMessage(guid));
+                continue;
+            }
+
+            verticesToRepair.add(entityVertex);
         }
 
-        if (StringUtils.isEmpty(guid)) {
-            throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
-        }
+        errorMap.putAll(entityGraphMapper.repairClassificationMappingsV2(verticesToRepair));
 
-        AtlasVertex entityVertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
-
-        if (entityVertex == null) {
-            throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
-        }
-
-        entityGraphMapper.repairClassificationMappings(entityVertex);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("<== repairClassificationMappings({})", guid);
-        }
+        return errorMap;
     }
 
     @Override
@@ -1867,7 +1894,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapper entityGraphMapper, boolean isPartialUpdate) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
-        this.graph.setEnableCache(RequestContext.get().isCacheEnabled());
         EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapper);
         EntityGraphDiscoveryContext discoveryContext = graphDiscoverer.discoverEntities();
         EntityMutationContext       context          = new EntityMutationContext(discoveryContext);
@@ -1925,7 +1951,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         graphDiscoverer.validateAndNormalize(entity);
 
                         //Create vertices which do not exist in the repository
-                        if (RequestContext.get().isImportInProgress() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
+                        if (RequestContext.get().isAllowCustomGuid() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
                             vertex = entityGraphMapper.createVertexWithGuid(entity, entity.getGuid());
                         } else {
                             vertex = entityGraphMapper.createVertex(entity);
@@ -3259,5 +3285,38 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             RequestContext.get().endMetricRecord(metric);
         }
     }
+    @Override
+    @GraphTransaction
+    public void attributeUpdate(List<AttributeUpdateRequest.AssetAttributeInfo> data) throws AtlasBaseException {
+        if (CollectionUtils.isEmpty(data)) {
+            LOG.warn("No data provided for attribute update.");
+            return;
+        }
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("attributeUpdate.GraphTransaction");
+        try {
+            List<AtlasVertex> vertices = data.stream()
+                    .map(ad -> {
+                        AtlasVertex av = this.entityGraphMapper.attributeUpdate(ad);
+                        if (av == null) {
+                            LOG.warn("No vertex found for asset: {}", ad.getAssetId());
+                        }
+                        return av;
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+
+            if (vertices.isEmpty()) {
+                LOG.warn("No vertices updated during attribute update.");
+                return;
+            }
+            handleEntityMutation(vertices);
+        } catch (Exception e) {
+            LOG.error("Error during attribute update", e);
+            throw e;
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+        }
+    }
+
 
 }

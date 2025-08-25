@@ -24,11 +24,12 @@ on:
     branches:
       - alpha
       - beta
-      - development
+      - rollbackmain
       - master
       - lineageondemand
       - idonlymaster
-      - staging
+      - idonlycanary
+      - idonlymerge
 
 jobs:
   build:

@@ -379,11 +379,13 @@ public final class Constants {
     public static final String TASK_ATTEMPT_COUNT     = encodePropertyKey(TASK_PREFIX + "attemptCount");
     public static final String TASK_PARAMETERS        = encodePropertyKey(TASK_PREFIX + "parameters");
     public static final String TASK_ERROR_MESSAGE     = encodePropertyKey(TASK_PREFIX + "errorMessage");
+    public static final String TASK_WARNING_MESSAGE     = encodePropertyKey(TASK_PREFIX + "warning");
     public static final String TASK_START_TIME        = encodePropertyKey(TASK_PREFIX + "startTime");
     public static final String TASK_END_TIME          = encodePropertyKey(TASK_PREFIX + "endTime");
     public static final String TASK_TIME_TAKEN_IN_SECONDS   = encodePropertyKey(TASK_PREFIX + "timeTakenInSeconds");
     public static final String TASK_CLASSIFICATION_ID       = encodePropertyKey(TASK_PREFIX + "classificationId");
     public static final String TASK_ENTITY_GUID             = encodePropertyKey(TASK_PREFIX + "entityGuid");
+    public static final String TASK_PARENT_ENTITY_GUID             = encodePropertyKey(TASK_PREFIX + "parentEntityGuid");
     public static final String TASK_CLASSIFICATION_TYPENAME = encodePropertyKey(TASK_PREFIX + "classificationTypeName");
     public static final String ACTIVE_STATE_VALUE           = "ACTIVE";
     public static final String TASK_HEADER_ATLAN_AGENT      = "x-atlan-agent";
@@ -462,6 +464,12 @@ public final class Constants {
 
     public static final String CATALOG_PROCESS_INPUT_RELATIONSHIP_LABEL = "__Process.inputs";
     public static final String CATALOG_PROCESS_OUTPUT_RELATIONSHIP_LABEL = "__Process.outputs";
+    public static final String CATALOG_AIRFLOW_INPUT_RELATIONSHIP_LABEL = "__AirflowTask.inputs";
+    public static final String CATALOG_AIRFLOW_OUTPUT_RELATIONSHIP_LABEL = "__AirflowTask.outputs";
+    public static final String CATALOG_CONNECTION_PROCESS_INPUT_RELATIONSHIP_LABEL = "__ConnectionProcess.inputs";
+    public static final String CATALOG_CONNECTION_PROCESS_OUTPUT_RELATIONSHIP_LABEL = "__ConnectionProcess.outputs";
+    public static final String CATALOG_SPARK_JOB_INPUT_RELATIONSHIP_LABEL = "__SparkJob.inputs";
+    public static final String CATALOG_SPARK_JOB_OUTPUT_RELATIONSHIP_LABEL = "__SparkJob.outputs";
     public static final String CLASSIFICATION_PROPAGATION_MODE_DEFAULT  ="DEFAULT";
     public static final String CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE  ="RESTRICT_LINEAGE";
 
@@ -471,7 +479,13 @@ public final class Constants {
     public static final HashMap<String, ArrayList<String>> CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP = new HashMap<String, ArrayList<String>>(){{
         put(CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE, new ArrayList<>(
                 Arrays.asList(CATALOG_PROCESS_INPUT_RELATIONSHIP_LABEL,
-                CATALOG_PROCESS_OUTPUT_RELATIONSHIP_LABEL
+                        CATALOG_PROCESS_OUTPUT_RELATIONSHIP_LABEL,
+                CATALOG_AIRFLOW_INPUT_RELATIONSHIP_LABEL,
+                CATALOG_AIRFLOW_OUTPUT_RELATIONSHIP_LABEL,
+                CATALOG_CONNECTION_PROCESS_INPUT_RELATIONSHIP_LABEL,
+                CATALOG_CONNECTION_PROCESS_OUTPUT_RELATIONSHIP_LABEL,
+                CATALOG_SPARK_JOB_INPUT_RELATIONSHIP_LABEL,
+                CATALOG_SPARK_JOB_OUTPUT_RELATIONSHIP_LABEL
         )));
         put(CLASSIFICATION_PROPAGATION_MODE_DEFAULT, null);
         put(CLASSIFICATION_PROPAGATION_MODE_RESTRICT_HIERARCHY, new ArrayList<>(

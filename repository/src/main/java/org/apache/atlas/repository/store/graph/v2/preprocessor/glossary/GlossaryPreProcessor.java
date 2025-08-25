@@ -61,7 +61,7 @@ public class GlossaryPreProcessor implements PreProcessor {
             } else {
                 LOG.warn("Graph instance is not AtlasJanusGraph. DynamicVertexService will be null for EntityDiscoveryService in GlossaryPreProcessor.");
             }
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, entityRetriever);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -106,7 +106,7 @@ public class GlossaryPreProcessor implements PreProcessor {
             isValidLexoRank(lexicographicalSortOrder, "", "", this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName((AtlasEntity) entity));
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -134,8 +134,8 @@ public class GlossaryPreProcessor implements PreProcessor {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    public static String createQualifiedName() {
-        return getUUID();
+    public static String createQualifiedName(AtlasEntity entity) {
+        return getUUID(entity);
     }
 
     private boolean glossaryExists(String glossaryName) {

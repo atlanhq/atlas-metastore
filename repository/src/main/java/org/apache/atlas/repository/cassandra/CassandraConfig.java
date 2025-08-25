@@ -5,6 +5,8 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
@@ -16,7 +18,6 @@ import java.time.Duration;
 
 @Configuration
 public class CassandraConfig {
-
 
     @Bean(destroyMethod = "close")
     public CqlSession cqlSession() throws AtlasException {
@@ -48,6 +49,11 @@ public class CassandraConfig {
                 .withLocalDatacenter(datacenter)
                 .withKeyspace(keyspace)
                 .build();
+    }
+
+    @Bean
+    public TagDAO tagDAO() {
+        return TagDAOCassandraImpl.getInstance();
     }
 
 }

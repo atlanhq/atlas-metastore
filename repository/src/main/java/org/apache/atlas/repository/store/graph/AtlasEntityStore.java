@@ -268,7 +268,12 @@ public interface AtlasEntityStore {
     /*
      * Repair classification mappings
      */
-    public void repairClassificationMappings(final String guid) throws AtlasBaseException;
+    public void repairClassificationMappings(List<String> guids) throws AtlasBaseException;
+
+    /*
+     * Repair classification mappings for V2
+     */
+    public Map<String, String> repairClassificationMappingsV2(List<String> guids) throws AtlasBaseException;
 
     /*
      * Return list of deleted entity guids
@@ -383,4 +388,7 @@ public interface AtlasEntityStore {
     List<AtlasEvaluatePolicyResponse> evaluatePolicies(List<AtlasEvaluatePolicyRequest> entities) throws AtlasBaseException;
 
     void unlinkBusinessPolicyV2(Set<String> assetGuids, Set<String> unlinkGuids) throws AtlasBaseException;
+
+
+    void attributeUpdate(List<AttributeUpdateRequest.AssetAttributeInfo> data) throws AtlasBaseException;
 }

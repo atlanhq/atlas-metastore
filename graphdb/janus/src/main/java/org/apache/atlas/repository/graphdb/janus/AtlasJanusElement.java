@@ -19,17 +19,14 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
-import com.datastax.oss.driver.shaded.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.atlas.AtlasErrorCode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
-import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -42,6 +39,8 @@ import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.atlas.repository.Constants.*;
 
 /**
  * Janus implementation of AtlasElement.
@@ -64,11 +63,12 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         excludeProperties.add("replicatedTo");
         excludeProperties.add("replicatedFrom");
 
-        VERTEX_CORE_PROPERTIES.add("__guid");
-        VERTEX_CORE_PROPERTIES.add("__state");
-        VERTEX_CORE_PROPERTIES.add("__typeName");
-        VERTEX_CORE_PROPERTIES.add("qualifiedName");
-        VERTEX_CORE_PROPERTIES.add("__u_qualifiedName");
+        VERTEX_CORE_PROPERTIES.add(GUID_PROPERTY_KEY);
+        VERTEX_CORE_PROPERTIES.add(STATE_PROPERTY_KEY);
+        VERTEX_CORE_PROPERTIES.add(ENTITY_TYPE_PROPERTY_KEY);
+        VERTEX_CORE_PROPERTIES.add(QUALIFIED_NAME);
+        VERTEX_CORE_PROPERTIES.add(UNIQUE_QUALIFIED_NAME);
+        VERTEX_CORE_PROPERTIES.add(SUPER_TYPES_PROPERTY_KEY);
     }
 
     public AtlasJanusElement(AtlasJanusGraph graph, T element) {

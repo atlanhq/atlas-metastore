@@ -33,6 +33,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -210,7 +211,9 @@ public class ClassificationAssociator {
 
                     for (Object obj: vertices) {
                         AtlasVertex vertex = (AtlasVertex) obj;
-                        AtlasEntity entity = entityGraphMapper.getMinimalAtlasEntityForNotification(vertex);
+
+                        AtlasEntity entity;
+                        entity = instanceConverter.getAndCacheEntity(GraphHelper.getGuid(vertex), IGNORE_REL);
 
                         allVertices.add(vertex);
                         propagatedEntities.add(entity);
@@ -225,20 +228,25 @@ public class ClassificationAssociator {
                 for (AtlasClassification addedClassification: added.keySet()) {
                     Collection<Object> vertices =  added.get(addedClassification);
                     List<AtlasEntity> propagatedEntities = new ArrayList<>();
-
+                    Set<AtlasVertex> propagatedVertices = new HashSet<>();
                     for (Object obj: vertices) {
                         AtlasVertex vertex = (AtlasVertex) obj;
-                        AtlasEntity entity = entityGraphMapper.getMinimalAtlasEntityForNotification(vertex);
+
+                        AtlasEntity entity;
+                        entity = instanceConverter.getAndCacheEntity(GraphHelper.getGuid(vertex), IGNORE_REL);
 
                         allVertices.add(vertex);
+                        propagatedVertices.add(vertex);
                         propagatedEntities.add(entity);
                     }
-
+                    //new method to populate all primitive fields in kafka
                     entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(addedClassification), false);
                 }
             }
 
-            //entityGraphMapper.updateClassificationText(null, allVertices);
+            if (!FeatureFlagStore.isTagV2Enabled()) {
+                entityGraphMapper.updateClassificationText(null, allVertices);
+            }
             transactionInterceptHelper.intercept();
 
             RequestContext.get().endMetricRecord(recorder);
