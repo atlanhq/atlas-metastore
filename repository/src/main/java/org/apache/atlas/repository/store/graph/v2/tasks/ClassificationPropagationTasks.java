@@ -50,6 +50,7 @@ public class ClassificationPropagationTasks {
 
             if (org.apache.atlas.service.FeatureFlagStore.isTagV2Enabled()) {
                 LOG.info("Using v2 tag flow (Cassandra) for Add propagation task");
+                entityGraphMapper.propagateClassificationV2_Optimised(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
                 List<String> impactedVertices = entityGraphMapper.propagateClassificationV2(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
                 context.incrementAssetsAffected(impactedVertices.size());
             } else {
@@ -145,7 +146,6 @@ public class ClassificationPropagationTasks {
             AtlasRelationship relationship = AtlasType.fromJson((String) parameters.get(PARAM_RELATIONSHIP_OBJECT), AtlasRelationship.class);
 
             entityGraphMapper.updateTagPropagations(relationshipEdgeId, relationship);
-            // Note: updateTagPropagations doesn't return a count since it's just updating edges
         }
     }
 
