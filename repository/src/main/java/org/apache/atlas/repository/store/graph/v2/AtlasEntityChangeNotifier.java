@@ -78,6 +78,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     private final AtlasTypeRegistry           atlasTypeRegistry;
     private final boolean                     isV2EntityNotificationEnabled;
     private static final List<String> ALLOWED_RELATIONSHIP_TYPES = Arrays.asList(AtlasConfiguration.SUPPORTED_RELATIONSHIP_EVENTS.getStringArray());
+    private static final boolean replayMode = AtlasConfiguration.ATLAS_ROLLBACK_REPLAY_MODE_ENABLED.getBoolean();
     public static final String ENTITY_TYPE_AUDIT_ENTRY = "__AtlasAuditEntry";
 
     @Inject
@@ -87,7 +88,9 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                                      FullTextMapperV2 fullTextMapperV2,
                                      AtlasTypeRegistry atlasTypeRegistry) {
         this.entityChangeListeners         = entityChangeListeners;
-        this.entityChangeListenersV2       = entityChangeListenersV2;
+        this.entityChangeListenersV2 = replayMode
+                ? Collections.emptySet()
+                : entityChangeListenersV2;
         this.instanceConverter             = instanceConverter;
         this.fullTextMapperV2              = fullTextMapperV2;
         this.atlasTypeRegistry             = atlasTypeRegistry;

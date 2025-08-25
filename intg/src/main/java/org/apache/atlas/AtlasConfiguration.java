@@ -171,6 +171,7 @@ public enum AtlasConfiguration {
     ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
     ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "janusgraph_target"),
     ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets"),
+    ATLAS_ROLLBACK_REPLAY_MODE_ENABLED("atlas.rollback.replay.mode.enabled", false),
 
 
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100);

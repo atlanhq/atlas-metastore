@@ -281,21 +281,6 @@ public final class Constants {
      * elasticsearch index prefix.
      */
     public static final String INDEX_PREFIX = "janusgraph_";
-    public static final String INDEX_PREFIX_IDONLY;
-
-    static {
-        try {
-            String configuredIndexName = ApplicationProperties.get()
-                    .getString("atlas.graph.index.search.index-name");
-
-            INDEX_PREFIX_IDONLY = StringUtils.isNotBlank(configuredIndexName)
-                    ? configuredIndexName + "_"
-                    : "janusgraph_";
-
-        } catch (AtlasException e) {
-            throw new RuntimeException("Failed to initialize index prefix", e);
-        }
-    }
 
     public static final String VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
     public static final String EDGE_INDEX_NAME = INDEX_PREFIX + EDGE_INDEX;

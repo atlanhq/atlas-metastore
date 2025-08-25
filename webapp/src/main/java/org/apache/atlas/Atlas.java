@@ -63,7 +63,6 @@ import java.util.List;
 
 import static org.apache.atlas.repository.Constants.INDEX_PREFIX;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
-import static org.apache.atlas.repository.Constants.INDEX_PREFIX_IDONLY;
 
 /**
  * Driver for running Metadata as a standalone server with embedded jetty server.
@@ -343,9 +342,8 @@ public final class Atlas {
         }
         if (!exists) {
             String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
-            String idOnlyVertexIndex = INDEX_PREFIX_IDONLY + VERTEX_INDEX;
             PutIndexTemplateRequest request = new PutIndexTemplateRequest("atlan-template");
-            request.patterns(Arrays.asList(vertexIndex, idOnlyVertexIndex));
+            request.patterns(Arrays.asList(vertexIndex));
             String atlasHomeDir  = System.getProperty("atlas.home");
             String elasticsearchSettingsFilePath = (org.apache.commons.lang3.StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "elasticsearch" + File.separator + "es-settings.json";
             File elasticsearchSettingsFile  = new File(elasticsearchSettingsFilePath);
