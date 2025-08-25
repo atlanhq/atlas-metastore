@@ -28,7 +28,6 @@ import org.apache.atlas.type.AtlasType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.List;
 import java.util.Map;
 
 public class ClassificationPropagationTasks {
@@ -51,14 +50,14 @@ public class ClassificationPropagationTasks {
             if (org.apache.atlas.service.FeatureFlagStore.isTagV2Enabled()) {
                 LOG.info("Using v2 tag flow (Cassandra) for Add propagation task");
                 entityGraphMapper.propagateClassificationV2_Optimised(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
-                List<String> impactedVertices = entityGraphMapper.propagateClassificationV2(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
-                context.incrementAssetsAffected(impactedVertices.size());
+                int assetsAffected = entityGraphMapper.propagateClassificationV2_Optimised(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
+                context.incrementAssetsAffected(assetsAffected);
             } else {
                 LOG.info("Using v1 tag flow (JanusGraph) for Add propagation task");
                 String classificationVertexId = (String) parameters.get(PARAM_CLASSIFICATION_VERTEX_ID);
                 String relationshipGuid = (String) parameters.get(PARAM_RELATIONSHIP_GUID);
-                List<String> impactedVertices = entityGraphMapper.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage, previousRestrictPropagationThroughHierarchy);
-                context.incrementAssetsAffected(impactedVertices.size());
+                int assetsAffected = entityGraphMapper.propagateClassification(entityGuid, classificationVertexId, relationshipGuid, previousRestrictPropagationThroughLineage, previousRestrictPropagationThroughHierarchy);
+                context.incrementAssetsAffected(assetsAffected);
             }
         }
     }

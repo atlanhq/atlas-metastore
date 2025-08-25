@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.EntityNotFoundException;
 import org.apache.atlas.model.instance.AtlasRelationship;
@@ -27,6 +28,8 @@ import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
 import org.apache.atlas.tasks.AbstractTask;
 import org.apache.atlas.type.AtlasType;
+import org.apache.commons.collections4.MapUtils;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -80,6 +83,23 @@ public abstract class ClassificationTask extends AbstractTask {
         String threadName = Thread.currentThread().getName();
         Map<String, Object> params = getTaskDef().getParameters();
         TaskContext context = new TaskContext();
+
+        if (MapUtils.isEmpty(params)) {
+            LOG.warn("Task: {}: Unable to process task: Parameters is not readable!", getTaskGuid());
+
+            return FAILED;
+        }
+
+        String userName = getTaskDef().getCreatedBy();
+
+        if (StringUtils.isEmpty(userName)) {
+            LOG.warn("Task: {}: Unable to process task as user name is empty!", getTaskGuid());
+
+            return FAILED;
+        }
+
+        RequestContext.get().setUser(userName, null);
+
 
         try {
             // Set up MDC context first
