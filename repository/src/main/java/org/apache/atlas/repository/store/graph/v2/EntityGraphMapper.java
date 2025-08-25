@@ -96,6 +96,9 @@ import org.springframework.stereotype.Component;
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.model.TypeCategory.*;
+import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
+import static org.apache.atlas.model.TypeCategory.ARRAY;
+import static org.apache.atlas.model.TypeCategory.CLASSIFICATION;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.instance.AtlasObjectId.KEY_TYPENAME;
@@ -130,8 +133,7 @@ import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociato
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_NOOP;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_UPDATE;
-import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.INPUT_PORT_GUIDS_ATTR;
-import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.OUTPUT_PORT_GUIDS_ATTR;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_ENTITY_GUID;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_SOURCE_VERTEX_ID;
@@ -764,6 +766,8 @@ public class EntityGraphMapper {
             LOG.debug("==> setBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
 
+        validateProductStatus(entityVertex);
+
         validateBusinessAttributes(entityVertex, entityType, businessAttributes, true);
 
         Map<String, Map<String, AtlasBusinessAttribute>> entityTypeBusinessAttributes = entityType.getBusinessAttributes();
@@ -843,6 +847,8 @@ public class EntityGraphMapper {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> addOrUpdateBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
+
+        validateProductStatus(entityVertex);
 
         validateBusinessAttributes(entityVertex, entityType, businessAttributes, true);
 
@@ -929,6 +935,8 @@ public class EntityGraphMapper {
             LOG.debug("==> removeBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
 
+        validateProductStatus(entityVertex);
+
         AtlasEntityHeader               entityHeader   = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
         AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder requestBuilder = new AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder(typeRegistry, AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, entityHeader);
 
@@ -971,6 +979,18 @@ public class EntityGraphMapper {
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== removeBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
+        }
+    }
+
+    public static void validateProductStatus(AtlasVertex assetVertex) throws AtlasBaseException {
+        if (assetVertex != null) {
+            if (DATA_PRODUCT_ENTITY_TYPE.equals(assetVertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class))) {
+                String entityState = assetVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+
+                if ((AtlasEntity.Status.DELETED.name().equals(entityState))) {
+                    throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot update DataProduct that is Archived!");
+                }
+            }
         }
     }
 
