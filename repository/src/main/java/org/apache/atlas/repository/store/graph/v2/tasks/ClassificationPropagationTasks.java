@@ -49,7 +49,6 @@ public class ClassificationPropagationTasks {
 
             if (org.apache.atlas.service.FeatureFlagStore.isTagV2Enabled()) {
                 LOG.info("Using v2 tag flow (Cassandra) for Add propagation task");
-                entityGraphMapper.propagateClassificationV2_Optimised(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
                 int assetsAffected = entityGraphMapper.propagateClassificationV2_Optimised(parameters, entityGuid, tagTypeName, parentEntityGuid, toEntityGuid);
                 context.incrementAssetsAffected(assetsAffected);
             } else {
