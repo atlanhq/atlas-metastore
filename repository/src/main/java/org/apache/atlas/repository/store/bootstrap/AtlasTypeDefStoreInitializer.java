@@ -50,6 +50,7 @@ import org.apache.atlas.repository.patches.AddMandatoryAttributesPatch;
 import org.apache.atlas.repository.patches.SuperTypesUpdatePatch;
 import org.apache.atlas.repository.patches.AtlasPatchManager;
 import org.apache.atlas.repository.patches.AtlasPatchRegistry;
+import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
@@ -101,15 +102,17 @@ public class AtlasTypeDefStoreInitializer implements ActiveStateChangeHandler {
     private final Configuration     conf;
     private final AtlasGraph        graph;
     private final AtlasPatchManager patchManager;
+    private final RedisService redisService;
 
     @Inject
     public AtlasTypeDefStoreInitializer(AtlasTypeDefStore typeDefStore, AtlasTypeRegistry typeRegistry,
-                                        AtlasGraph graph, Configuration conf, AtlasPatchManager patchManager) throws AtlasBaseException {
+                                        AtlasGraph graph, Configuration conf, AtlasPatchManager patchManager, RedisService redisService) throws AtlasBaseException {
         this.typeDefStore  = typeDefStore;
         this.typeRegistry  = typeRegistry;
         this.conf          = conf;
         this.graph         = graph;
         this.patchManager  = patchManager;
+        this.redisService = redisService;
     }
 
     @PostConstruct

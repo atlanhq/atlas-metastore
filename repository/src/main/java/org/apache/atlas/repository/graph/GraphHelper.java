@@ -964,22 +964,22 @@ public final class GraphHelper {
         return traitName;
     }
 
-    public static List<String> handleGetTraitNames(AtlasVertex entityVertex) {
+    public static List<String> handleGetTraitNames(AtlasVertex entityVertex) throws AtlasBaseException {
         return handleGetTraitNames(entityVertex, false);
     }
 
-    public static List<String> getPropagatedTraitNames(AtlasVertex entityVertex) {
+    public static List<String> getPropagatedTraitNames(AtlasVertex entityVertex) throws AtlasBaseException {
         return handleGetTraitNames(entityVertex, true);
     }
 
     public static List<String> getAllTagNames(List<AtlasClassification> tags) {
         return tags.stream().map(AtlasStruct::getTypeName).collect(Collectors.toList());
     }
-    public static List<String> getAllTraitNames(AtlasVertex entityVertex) {
+    public static List<String> getAllTraitNames(AtlasVertex entityVertex) throws AtlasBaseException {
         return handleGetTraitNames(entityVertex, null);
     }
 
-    public static List<String> handleGetTraitNames(AtlasVertex entityVertex, Boolean propagated) {
+    public static List<String> handleGetTraitNames(AtlasVertex entityVertex, Boolean propagated) throws AtlasBaseException {
         if (FeatureFlagStore.isTagV2Enabled()) {
             return getTraitNamesV2(entityVertex, propagated);
         } else {

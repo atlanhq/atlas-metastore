@@ -1167,7 +1167,7 @@ public abstract class DeleteHandlerV1 {
         entityVertex.setProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, getDelimitedPropagatedClassificationNames(entityVertex, classificationName));
     }
 
-    public void removeFromPropagatedClassificationNames(AtlasVertex entityVertex, String classificationName) {
+    public void removeFromPropagatedClassificationNames(AtlasVertex entityVertex, String classificationName) throws AtlasBaseException {
         if (entityVertex != null && StringUtils.isNotEmpty(classificationName)) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Removing from property: {} value: {} in vertex: {}", PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, classificationName, string(entityVertex));

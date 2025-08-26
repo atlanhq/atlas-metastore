@@ -158,7 +158,7 @@ public abstract class SearchProcessor {
         return SearchContext.MarkerUtil.getNextEncMarker(context.getSearchParameters(), nextOffset);
     }
 
-    public abstract List<AtlasVertex> execute();
+    public abstract List<AtlasVertex> execute() throws AtlasBaseException;
     public abstract long getResultCount();
 
     protected boolean isEntityRootType() {

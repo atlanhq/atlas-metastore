@@ -19,6 +19,7 @@ package org.apache.atlas.discovery;
 
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.SearchParameters;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.GraphHelper;
@@ -100,7 +101,7 @@ public class FreeTextSearchProcessor extends SearchProcessor {
     }
 
     @Override
-    public List<AtlasVertex> execute() {
+    public List<AtlasVertex> execute() throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> FreeTextSearchProcessor.execute({})", context);
         }

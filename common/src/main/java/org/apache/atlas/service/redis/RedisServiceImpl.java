@@ -3,6 +3,7 @@ package org.apache.atlas.service.redis;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.redisson.Redisson;
+import org.redisson.client.RedisConnectionException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -32,7 +33,7 @@ public class RedisServiceImpl extends AbstractRedisService{
 
                 LOG.info("Connected to Redis (attempt {}). Sentinel redis client created successfully.", attempt);
                 return;
-            } catch (Exception e) {
+            } catch (RedisConnectionException e) {
                 LOG.warn("Redis connection failed (attempt {}). Retrying in {} ms…",
                         attempt, backoffMs, e);
                 try {
