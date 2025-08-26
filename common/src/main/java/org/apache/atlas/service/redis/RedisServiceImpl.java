@@ -17,9 +17,36 @@ public class RedisServiceImpl extends AbstractRedisService{
 
     @PostConstruct
     public void init() throws AtlasException {
-        redisClient = Redisson.create(getProdConfig());
-        redisCacheClient = Redisson.create(getCacheImplConfig());
-        LOG.debug("Sentinel redis client created successfully.");
+        long backoffMs = 2_000;         // initial backoff
+        long maxBackoffMs = 30_000;     // cap the backoff
+        int attempt = 0;
+
+        while (!Thread.currentThread().isInterrupted()) {
+            attempt++;
+            try {
+                redisClient = Redisson.create(getProdConfig());
+                redisCacheClient = Redisson.create(getCacheImplConfig());
+
+                redisClient.getKeys().count();
+                redisCacheClient.getKeys().count();
+
+                LOG.info("Connected to Redis (attempt {}). Sentinel redis client created successfully.", attempt);
+                return;
+            } catch (Exception e) {
+                LOG.warn("Redis connection failed (attempt {}). Retrying in {} ms…",
+                        attempt, backoffMs, e);
+                try {
+                    Thread.sleep(backoffMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new AtlasException("Startup interrupted while waiting for Redis", ie);
+                }
+                backoffMs = Math.min(backoffMs * 2, maxBackoffMs);
+            }
+        }
+
+        // If we were interrupted, fail the startup cleanly
+        throw new AtlasException("Startup interrupted while waiting for Redis");
     }
 
     @Override

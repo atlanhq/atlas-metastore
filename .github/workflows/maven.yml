@@ -27,11 +27,7 @@ on:
       - development
       - master
       - staging
-      - tagscanary
-      - tagscanarymerge
-      - fixlabels
-      - interceptapis
-      - mlh-965
+      - redis-reliability
 
 jobs:
   build:
