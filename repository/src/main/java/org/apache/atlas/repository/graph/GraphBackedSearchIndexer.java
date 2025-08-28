@@ -763,8 +763,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             case ATLAS_TYPE_INT:
                 return Integer.class;
             case ATLAS_TYPE_LONG:
-            case ATLAS_TYPE_DATE:
                 return Long.class;
+            case ATLAS_TYPE_DATE:
+                return Date.class;
             case ATLAS_TYPE_FLOAT:
                 return Float.class;
             case ATLAS_TYPE_DOUBLE:

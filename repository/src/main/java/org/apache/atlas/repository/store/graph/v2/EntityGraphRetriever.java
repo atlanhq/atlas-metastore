@@ -2609,6 +2609,10 @@ public class EntityGraphRetriever {
         return ret;
     }
 
+    private static Long getDateAsLong(Date date) {
+        return date != null ? date.toInstant().toEpochMilli() : null;
+    }
+
     public static Object mapVertexToPrimitive(AtlasElement entityVertex, final String vertexPropertyName, AtlasAttributeDef attrDef) {
         Object ret = null;
 
@@ -2648,7 +2652,7 @@ public class EntityGraphRetriever {
                 ret = AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, BigDecimal.class);
                 break;
             case ATLAS_TYPE_DATE:
-                ret = new Date(AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Long.class));
+                ret = getDateAsLong(AtlasGraphUtilsV2.getEncodedProperty(entityVertex, vertexPropertyName, Date.class));
                 break;
             default:
                 break;
@@ -2696,8 +2700,7 @@ public class EntityGraphRetriever {
                 ret = vertexEdgePropertiesCache.getPropertyValue(elementId, encodePropertyKey(vertexPropertyName), BigDecimal.class);
                 break;
             case ATLAS_TYPE_DATE:
-                Long dateValue = vertexEdgePropertiesCache.getPropertyValue(elementId, encodePropertyKey(vertexPropertyName), Long.class);
-                ret = new Date(dateValue != null ? dateValue : 0L);
+                ret = getDateAsLong(vertexEdgePropertiesCache.getPropertyValue(elementId, encodePropertyKey(vertexPropertyName), Date.class));
                 break;
             default:
                 break;
