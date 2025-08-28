@@ -133,6 +133,7 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
 
 @Component
 public class EntityGraphRetriever {
@@ -1245,7 +1246,14 @@ public class EntityGraphRetriever {
 
             GraphTraversal<Edge, Map<String, Object>> edgeTraversal =
                     ((AtlasJanusGraph) graph).V(vertexIds)
-                            .bothE()
+                            .bothE();
+
+            // Filter by edge labels if provided
+            if (!CollectionUtils.isEmpty(edgeLabels)) {
+                edgeTraversal = edgeTraversal.hasLabel(P.within(edgeLabels));
+            }
+
+            edgeTraversal = edgeTraversal
                             .has(STATE_PROPERTY_KEY, ACTIVE.name())
                             .has(RELATIONSHIP_GUID_PROPERTY_KEY)
                             .project( "id", "valueMap","label", "inVertexId", "outVertexId")
