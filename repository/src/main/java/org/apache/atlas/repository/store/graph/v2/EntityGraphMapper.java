@@ -5273,10 +5273,10 @@ public class EntityGraphMapper {
 
                 if (entity != null) {
                     vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
-                    totalUpdated++;
+                    entityBatch.add(entity);
                 }
-                entityBatch.add(entity);
             }
+            totalUpdated += entityBatch.size();
             transactionInterceptHelper.intercept();
             entityChangeNotifier.onClassificationUpdatedToEntities(entityBatch, classification); // Async call - fire and forget
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
@@ -5469,7 +5469,7 @@ public class EntityGraphMapper {
         if (CollectionUtils.isEmpty(verticesToAddClassification)) {
             LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", sourceEntityId, classificationId);
             // return only
-            return verticesIdsToRemove.size();
+            return verticesToRemove.size();
         }
         processClassificationPropagationAddition(verticesToAddClassification, currentClassificationVertex);
 
@@ -6622,6 +6622,8 @@ public class EntityGraphMapper {
                             .map(id -> graph.getVertex(id))
                             .filter(Objects::nonNull)
                             .collect(Collectors.toList());
+
+                    assetsAffected += verticesToPropagate.size();
 
                     if (!verticesToPropagate.isEmpty()) {
                         processClassificationPropagationAdditionV2(parameters, entityVertexId, verticesToPropagate, sourceTag);

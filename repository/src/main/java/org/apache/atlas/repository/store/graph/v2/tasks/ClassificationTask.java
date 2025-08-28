@@ -115,10 +115,10 @@ public abstract class ClassificationTask extends AbstractTask {
 
             // Now log with MDC context
             LOG.info("Starting classification task execution");
-            
+            setStatus(IN_PROGRESS);
             run(params, context);
             setStatus(AtlasTask.Status.COMPLETE);  // This will commit the graph
-            
+
             int assetsAffected = context.getAssetsAffected();
             MDC.put("assets_affected", String.valueOf(assetsAffected));
             MDC.put("status", "success");
@@ -149,10 +149,10 @@ public abstract class ClassificationTask extends AbstractTask {
                 long duration = getTaskDef().getEndTime().getTime() - getTaskDef().getStartTime().getTime();
                 MDC.put("duration_ms", String.valueOf(duration));
             }
-            
+
             // Log with all MDC values before clearing
-            LOG.info("Classification task completed. Assets affected: {}, Duration: {} ms", 
-                MDC.get("assets_affected"), 
+            LOG.info("Classification task completed. Assets affected: {}, Duration: {} ms",
+                MDC.get("assets_affected"),
                 MDC.get("duration_ms"));
 
             MDC.clear();  // Clear MDC at the end
