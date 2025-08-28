@@ -58,6 +58,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
+import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
+
 /**
  * REST interface for CRUD operations on type definitions
  */
@@ -446,7 +449,7 @@ public class TypesREST {
     @POST
     @Path("/typedefs")
     @Timed
-    public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, 
+    public AtlasTypesDef createAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef,
                                            @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
                                            @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid,
                                            @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
@@ -527,7 +530,8 @@ public class TypesREST {
             }
             
             AtlasTypesDef atlasTypesDef = typeDefStore.createTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId());
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.createAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -574,7 +578,7 @@ public class TypesREST {
     @Path("/typedefs")
     @Experimental
     @Timed
-    public AtlasTypesDef updateAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
+    public AtlasTypesDef updateAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
                                              @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
                                              @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
@@ -678,9 +682,10 @@ public class TypesREST {
             }
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
             AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId());
+            refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Done");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
@@ -709,7 +714,7 @@ public class TypesREST {
     @Path("/typedefs")
     @Experimental
     @Timed
-    public void deleteAtlasTypeDefs(final AtlasTypesDef typesDef) throws AtlasBaseException {
+    public void deleteAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         Lock lock = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
@@ -721,7 +726,8 @@ public class TypesREST {
             }
             lock = attemptAcquiringLockV2();
             typeDefStore.deleteTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId());
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -802,8 +808,8 @@ public class TypesREST {
         return ret;
     }
 
-    private void refreshAllHostCache(String traceId){
-        if (AtlasConfiguration.ENABLE_ASYNC_TYPE_UPDATE.getBoolean()){
+    private void refreshAllHostCache(String traceId, String clientOrigin){
+        if (CLIENT_ORIGIN_PRODUCT.equals(clientOrigin) && AtlasConfiguration.ENABLE_ASYNC_TYPE_UPDATE.getBoolean()){
             cacheRefreshExecutor.submit(() -> {
                 RequestContext.get().setTraceId(traceId);
                 try {
