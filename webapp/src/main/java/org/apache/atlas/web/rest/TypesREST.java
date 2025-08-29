@@ -548,63 +548,6 @@ public class TypesREST {
         }
     }
 
-    private void validateBuiltInTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
-        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs())
-                if (typeDefStore.hasBuiltInTypeName(typeDef))
-                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs())
-                if (typeDefStore.hasBuiltInTypeName(typeDef))
-                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs())
-                if (typeDefStore.hasBuiltInTypeName(typeDef))
-                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
-        }
-    }
-
-    private void validateTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
-        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs()) {
-                typeDefStore.getByName(typeDef.getName());
-            }
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs()) {
-                typeDefStore.getByName(typeDef.getName());
-            }
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs()) {
-                typeDefStore.getByName(typeDef.getName());
-            }
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getClassificationDefs()) {
-                typeDefStore.getByName(typeDef.getName());
-            }
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getBusinessMetadataDefs()) {
-                typeDefStore.getByName(typeDef.getName());
-            }
-        }
-    }
-
-    private void validateTypes(AtlasTypesDef typesDef) throws AtlasBaseException {
-        try {
-            validateTypeNames(typesDef);
-        } catch (AtlasBaseException e) {
-            if(AtlasErrorCode.TYPE_NAME_NOT_FOUND.equals(e.getAtlasErrorCode())) {
-                typeDefStore.init();
-                validateTypeNames(typesDef);
-            }
-        }
-    }
-
     /**
      * Bulk update API for all types, changes detected in the type definitions would be persisted
      * @param typesDef A composite object that captures all type definition changes
@@ -817,6 +760,63 @@ public class TypesREST {
                 redisService.releaseDistributedLockV2(lock, typeDefLock);
             }
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    private void validateBuiltInTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs())
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
+                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs())
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
+                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs())
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
+                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
+        }
+    }
+
+    private void validateTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getClassificationDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getBusinessMetadataDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+    }
+
+    private void validateTypes(AtlasTypesDef typesDef) throws AtlasBaseException {
+        try {
+            validateTypeNames(typesDef);
+        } catch (AtlasBaseException e) {
+            if(AtlasErrorCode.TYPE_NAME_NOT_FOUND.equals(e.getAtlasErrorCode())) {
+                typeDefStore.init();
+                validateTypeNames(typesDef);
+            }
         }
     }
 
