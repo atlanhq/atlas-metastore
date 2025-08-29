@@ -138,7 +138,7 @@ public class IndexRepairService {
 
         if (vertices.hasNext()) {
             AtlasVertex vertex = vertices.next();
-            if (CollectionUtils.isEmpty(vertex.getPropertyKeys()) && StringUtils.isEmpty(vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class)) && StringUtils.isEmpty(vertex.getProperty(Constants.QUALIFIED_NAME, String.class))) {
+            if (StringUtils.isEmpty(vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class)) && StringUtils.isEmpty(vertex.getProperty(Constants.QUALIFIED_NAME, String.class))) {
                 return vertex.getId() instanceof Long ? Optional.of((Long) vertex.getId()) : Optional.empty();
             }
         }
