@@ -455,7 +455,7 @@ public class TypesREST {
                                            @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
         Lock lock = null;
         AtlasPerfTracer perf = null;
-        validateTypeCreateOrUpdate(typesDef);
+        validateTypeBeforeAction(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
@@ -548,8 +548,17 @@ public class TypesREST {
         }
     }
 
-    private void validateTypeCreateOrUpdate(AtlasTypesDef typesDef) throws AtlasBaseException {
+    private void validateTypeBeforeAction(AtlasTypesDef typesDef) throws AtlasBaseException {
+        try {
+            validateBuiltInTypeNames(typesDef);
+        } catch (AtlasBaseException e) {
+            // If validation fails, try refreshing cache once and revalidate
+            typeDefStore.init();
+            validateBuiltInTypeNames(typesDef);
+        }
+    }
 
+    private void validateBuiltInTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
             for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs())
                 if (typeDefStore.hasBuiltInTypeName(typeDef))
@@ -582,7 +591,7 @@ public class TypesREST {
                                              @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
                                              @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
-        validateTypeCreateOrUpdate(typesDef);
+        validateTypeBeforeAction(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         Lock lock = null;
         try {
@@ -718,6 +727,7 @@ public class TypesREST {
         AtlasPerfTracer perf = null;
         Lock lock = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
+        validateTypeBeforeAction(typesDef);
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
