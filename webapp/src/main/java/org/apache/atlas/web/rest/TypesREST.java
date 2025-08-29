@@ -565,7 +565,7 @@ public class TypesREST {
                                              @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         validateBuiltInTypeNames(typesDef);
-        validateTypes(typesDef);
+        validateTypeNameExists(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         Lock lock = null;
         try {
@@ -702,7 +702,7 @@ public class TypesREST {
         Lock lock = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         validateBuiltInTypeNames(typesDef);
-        validateTypes(typesDef);
+        validateTypeNameExists(typesDef);
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
@@ -809,7 +809,7 @@ public class TypesREST {
         }
     }
 
-    private void validateTypes(AtlasTypesDef typesDef) throws AtlasBaseException {
+    private void validateTypeNameExists(AtlasTypesDef typesDef) throws AtlasBaseException {
         try {
             validateTypeNames(typesDef);
         } catch (AtlasBaseException e) {
