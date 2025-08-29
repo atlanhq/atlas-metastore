@@ -77,7 +77,6 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryCollecti
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryFolderPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
-import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -153,7 +152,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final ESAliasStore esAliasStore;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
-    private final AtlasTypeDefStore typeDefStore;
 
     private static final Boolean isConnectionLineageEnabled = ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE.getBoolean();
 
@@ -165,8 +163,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
                               AtlasRelationshipStore atlasRelationshipStore, FeatureFlagStore featureFlagStore,
                               IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier, AtlasDistributedTaskNotificationSender taskNotificationSender,
-                              EntityGraphRetriever entityRetriever,
-                              AtlasTypeDefStore typeDefStore) {
+                              EntityGraphRetriever entityRetriever) {
 
         this.graph                = graph;
         this.deleteDelegate       = deleteDelegate;
@@ -183,7 +180,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
-        this.typeDefStore = typeDefStore;
         try {
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
         } catch (AtlasException e) {
@@ -1799,26 +1795,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     }
 
-    private AtlasEntityType validateEntityType(String typeName, String elementValue) throws AtlasBaseException {
-        try {
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
-            
-            if (entityType == null) {
-                // If type not found, try refreshing cache once and retry
-                typeDefStore.init();
-                entityType = typeRegistry.getEntityTypeByName(typeName);
-                
-                if (entityType == null) {
-                    throw new AtlasBaseException(elementValue, AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), typeName);
-                }
-            }
-            
-            return entityType;
-        } catch (AtlasBaseException e) {
-            throw e;
-        }
-    }
-
     private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapper entityGraphMapper, boolean isPartialUpdate) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
         EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapper);
@@ -1832,7 +1808,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             AtlasEntity entity = entityStream.getByGuid(guid);
 
             if (entity != null) { // entity would be null if guid is not in the stream but referenced by an entity in the stream
-                AtlasEntityType entityType = validateEntityType(entity.getTypeName(), element.getValue());
+                AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+
+                if (entityType == null) {
+                    throw new AtlasBaseException(element.getValue(), AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), entity.getTypeName());
+                }
 
                 compactAttributes(entity, entityType);
                 flushAutoUpdateAttributes(entity, entityType);
