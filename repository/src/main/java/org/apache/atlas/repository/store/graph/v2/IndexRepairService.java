@@ -47,7 +47,6 @@ public class IndexRepairService {
 
         if (vertices.hasNext()) {
             AtlasVertex vertex = vertices.next();
-
             // Check if vertex is corrupted
             if (CollectionUtils.isEmpty(vertex.getPropertyKeys())){
                 return vertex.getId() instanceof Long ? Optional.of((Long) vertex.getId()) : Optional.empty();
