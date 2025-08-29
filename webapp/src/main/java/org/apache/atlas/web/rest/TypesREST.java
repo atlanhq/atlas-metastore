@@ -551,7 +551,7 @@ public class TypesREST {
     private void validateBuiltInTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
             for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs())
-            if (typeDefStore.hasBuiltInTypeName(typeDef))
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
                     throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
         }
         if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
