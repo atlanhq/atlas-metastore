@@ -106,6 +106,8 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
     private Map<String, Object>              addedRelationshipAttributes;
     private Map<String, Object>              removedRelationshipAttributes;
 
+    private Map<String, Map<String, Object>> preprocessorAttributes;
+
     @JsonIgnore
     private static AtomicLong s_nextId = new AtomicLong(System.nanoTime());
 
@@ -724,6 +726,15 @@ public class AtlasEntity extends AtlasStruct implements Serializable {
     @Override
     public String toString() {
         return toString(new StringBuilder()).toString();
+    }
+
+    @JsonIgnore
+    public Map<String, Map<String, Object>> getPreprocessorAttributes() {
+        return preprocessorAttributes;
+    }
+
+    public void setPreprocessorAttributes(Map<String, Map<String, Object>> preprocessorAttributes) {
+        this.preprocessorAttributes = preprocessorAttributes;
     }
 
     /**

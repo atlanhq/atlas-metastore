@@ -56,10 +56,7 @@ import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEntityDiffResult;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.ConnectionPreProcessor;
-import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.*;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PersonaPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.PurposePreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.accesscontrol.StakeholderPreProcessor;
@@ -1737,6 +1734,16 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             ret.setGuidAssignments(context.getGuidAssignments());
 
+            for (AtlasEntity entity : context.getCreatedEntities()) {
+                // Add preprocessor attributes to response
+                entity.setPreprocessorAttributes(context.getAllPreProcessorAttributes());
+            }
+
+            for (AtlasEntity entity : context.getUpdatedEntities()) {
+                // Add preprocessor attributes to response
+                entity.setPreprocessorAttributes(context.getAllPreProcessorAttributes());
+            }
+
             for (AtlasEntity entity: context.getCreatedEntities()) {
                 RequestContext.get().cacheDifferentialEntity(entity);
             }
@@ -2066,76 +2073,76 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         switch (typeName) {
             case ATLAS_GLOSSARY_ENTITY_TYPE:
-                preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph));
+                preProcessors.add(new PreProcessorWrapper(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph)));
                 break;
 
             case ATLAS_GLOSSARY_TERM_ENTITY_TYPE:
-                preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement));
+                preProcessors.add(new PreProcessorWrapper(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement)));
                 break;
 
             case ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE:
-                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper));
+                preProcessors.add(new PreProcessorWrapper(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper)));
                 break;
 
             case DATA_DOMAIN_ENTITY_TYPE:
-                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph));
+                preProcessors.add(new PreProcessorWrapper(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph)));
                 break;
 
             case DATA_PRODUCT_ENTITY_TYPE:
-                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this));
+                preProcessors.add(new PreProcessorWrapper(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this)));
                 break;
 
             case QUERY_ENTITY_TYPE:
-                preProcessors.add(new QueryPreProcessor(typeRegistry, entityRetriever));
+                preProcessors.add(new PreProcessorWrapper(new QueryPreProcessor(typeRegistry, entityRetriever)));
                 break;
 
             case QUERY_FOLDER_ENTITY_TYPE:
-                preProcessors.add(new QueryFolderPreProcessor(typeRegistry, entityRetriever));
+                preProcessors.add(new PreProcessorWrapper(new QueryFolderPreProcessor(typeRegistry, entityRetriever)));
                 break;
 
             case QUERY_COLLECTION_ENTITY_TYPE:
-                preProcessors.add(new QueryCollectionPreProcessor(typeRegistry, discovery, entityRetriever, featureFlagStore, this));
+                preProcessors.add(new PreProcessorWrapper(new QueryCollectionPreProcessor(typeRegistry, discovery, entityRetriever, featureFlagStore, this)));
                 break;
 
             case PERSONA_ENTITY_TYPE:
-                preProcessors.add(new PersonaPreProcessor(graph, typeRegistry, entityRetriever, this));
+                preProcessors.add(new PreProcessorWrapper(new PersonaPreProcessor(graph, typeRegistry, entityRetriever, this)));
                 break;
 
             case PURPOSE_ENTITY_TYPE:
-                preProcessors.add(new PurposePreProcessor(graph, typeRegistry, entityRetriever, this));
+                preProcessors.add(new PreProcessorWrapper(new PurposePreProcessor(graph, typeRegistry, entityRetriever, this)));
                 break;
 
             case POLICY_ENTITY_TYPE:
-                preProcessors.add(new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever));
+                preProcessors.add(new PreProcessorWrapper(new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever)));
                 break;
 
             case STAKEHOLDER_ENTITY_TYPE:
-                preProcessors.add(new StakeholderPreProcessor(graph, typeRegistry, entityRetriever, this));
+                preProcessors.add(new PreProcessorWrapper(new StakeholderPreProcessor(graph, typeRegistry, entityRetriever, this)));
                 break;
 
             case CONNECTION_ENTITY_TYPE:
-                preProcessors.add(new ConnectionPreProcessor(graph, discovery, entityRetriever, featureFlagStore, deleteDelegate, this));
+                preProcessors.add(new PreProcessorWrapper(new ConnectionPreProcessor(graph, discovery, entityRetriever, featureFlagStore, deleteDelegate, this)));
                 break;
 
             case LINK_ENTITY_TYPE:
-                preProcessors.add(new LinkPreProcessor(typeRegistry, entityRetriever));
+                preProcessors.add(new PreProcessorWrapper(new LinkPreProcessor(typeRegistry, entityRetriever)));
                 break;
 
             case README_ENTITY_TYPE:
-                preProcessors.add(new ReadmePreProcessor(typeRegistry, entityRetriever));
+                preProcessors.add(new PreProcessorWrapper(new ReadmePreProcessor(typeRegistry, entityRetriever)));
                 break;
 
             case CONTRACT_ENTITY_TYPE:
-                preProcessors.add(new ContractPreProcessor(graph, typeRegistry, entityRetriever, storeDifferentialAudits, discovery));
+                preProcessors.add(new PreProcessorWrapper(new ContractPreProcessor(graph, typeRegistry, entityRetriever, storeDifferentialAudits, discovery)));
                 break;
 
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
-                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
+                preProcessors.add(new PreProcessorWrapper(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever)));
                 break;
         }
 
         //  The default global pre-processor for all AssetTypes
-        preProcessors.add(new AssetPreProcessor(typeRegistry, entityRetriever, graph));
+        preProcessors.add(new PreProcessorWrapper(new AssetPreProcessor(typeRegistry, entityRetriever, graph)));
 
         return preProcessors;
     }

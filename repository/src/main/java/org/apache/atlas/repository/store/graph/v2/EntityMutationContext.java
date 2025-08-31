@@ -23,10 +23,14 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.commons.lang.StringUtils;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class EntityMutationContext {
+    private static final Logger LOG = LoggerFactory.getLogger(EntityMutationContext.class);
     private final EntityGraphDiscoveryContext context;
     private final List<AtlasEntity> entitiesCreated = new ArrayList<>();
     private final List<AtlasEntity> entitiesUpdated = new ArrayList<>();
@@ -39,6 +43,30 @@ public class EntityMutationContext {
     private List<AtlasVertex> entitiesToRestore = null;
 
     private Set<String> removedLineageRelations = new HashSet<>();
+
+    private final Map<String, PreProcessorAttributeTracker> entityPreProcessorAttributes = new ConcurrentHashMap<>();
+
+    public PreProcessorAttributeTracker getPreProcessorTracker(String guid) {
+        if (guid == null) {
+            LOG.warn("Attempt to get preprocessor tracker for null guid");
+            return null;
+        }
+        return entityPreProcessorAttributes.computeIfAbsent(guid, k -> new PreProcessorAttributeTracker());
+    }
+
+    public Map<String, Map<String, Object>> getAllPreProcessorAttributes() {
+        Map<String, Map<String, Object>> result = new HashMap<>();
+        
+        for (Map.Entry<String, PreProcessorAttributeTracker> entry : entityPreProcessorAttributes.entrySet()) {
+            result.put(entry.getKey(), entry.getValue().getTrackedAttributes());
+        }
+        
+        return Collections.unmodifiableMap(result);
+    }
+
+    public void clearPreProcessorAttributes() {
+        entityPreProcessorAttributes.clear();
+    }
 
     public EntityMutationContext(final EntityGraphDiscoveryContext context) {
         this.context = context;

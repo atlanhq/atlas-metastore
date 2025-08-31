@@ -287,6 +287,19 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
         setAttribute(ret, OWNER, entity.getAttribute(OWNER));
         setAttribute(ret, CREATE_TIME, entity.getAttribute(CREATE_TIME));
 
+        Map<String, Map<String, Object>> preprocessorAttributes = entity.getPreprocessorAttributes();
+        if (MapUtils.isNotEmpty(preprocessorAttributes)) {
+            for (Map<String, Object> attrMap : preprocessorAttributes.values()) {
+                if (MapUtils.isNotEmpty(attrMap)) {
+                    for (Map.Entry<String, Object> entry : attrMap.entrySet()) {
+                        if (entity.getAttribute(entry.getKey()) == null) { // do not override existing attributes
+                            setAttribute(ret, entry.getKey(), entry.getValue());
+                        }
+                    }
+                }
+            }
+        }
+
         if (displayText != null) {
             ret.setDisplayText(displayText.toString());
         }
