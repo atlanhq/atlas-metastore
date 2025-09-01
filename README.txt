@@ -59,7 +59,7 @@ Build Process
    $ mvn clean install
    $ mvn clean package -Pdist
 
-3. After above build commands successfully complete, you should see the following files
+3. After above build commands successfully complete, you should see the following files.
    distro/target/apache-atlas-<version>-bin.tar.gz
    distro/target/apache-atlas-<version>-hbase-hook.tar.gz
    distro/target/apache-atlas-<version>-hive-hook.tar.gz
