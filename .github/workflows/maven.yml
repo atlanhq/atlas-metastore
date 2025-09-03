@@ -26,6 +26,7 @@ on:
       - master
       - staging
       - mlh-987-tag-metrics
+      - stagtemp
 
 
 jobs:
