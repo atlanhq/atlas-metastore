@@ -55,26 +55,7 @@ public class FeatureFlagStore {
             return;
         }
 
-        int retries = 5;
-        while (retries > 0) {
-            try {
-                String value = redisService.getValue(addFeatureFlagNamespace(FF_ENABLE_JANUS_OPTIMISATION_KEY));
-                cachedTagV2Enabled = StringUtils.isNotEmpty(value);
-                LOG.info("Loaded feature flag '{}'. Value: {}", FF_ENABLE_JANUS_OPTIMISATION_KEY, cachedTagV2Enabled);
-                return;
-            } catch (Exception e) {
-                retries--;
-                LOG.error("Error loading feature flag cache for '{}'. Retries left: {}.", FF_ENABLE_JANUS_OPTIMISATION_KEY, retries, e);
-                if (retries == 0) {
-                    throw new RuntimeException("Failed to load feature flag for " + FF_ENABLE_JANUS_OPTIMISATION_KEY + " after multiple retries.", e);
-                }
-                try {
-                    Thread.sleep(3000);
-                } catch (InterruptedException interruptedException) {
-                    Thread.currentThread().interrupt();
-                }
-            }
-        }
+        cachedTagV2Enabled = true;
     }
 
     public static boolean evaluate(String key, String expectedValue) {
