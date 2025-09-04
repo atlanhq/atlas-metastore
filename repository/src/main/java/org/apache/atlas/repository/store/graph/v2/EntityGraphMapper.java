@@ -6597,10 +6597,10 @@ public class EntityGraphMapper {
             }
 
             if (!tagsToDelete.isEmpty()) {
-                AtlasPerfMetrics.MetricRecorder classificationRefreshPropagationDeleteBatchesV2 = RequestContext.get().startMetricRecord("classificationRefreshPropagationDeleteBatchesV2");
+                AtlasPerfMetrics.MetricRecorder classificationRefreshPropagationDeleteRemBatchV2 = RequestContext.get().startMetricRecord("classificationRefreshPropagationDeleteRemBatchV2");
                 assetsAffected += tagsToDelete.size();
                 processDeletions_new(tagsToDelete, sourceTag);
-                RequestContext.get().endMetricRecord(classificationRefreshPropagationDeleteBatchesV2);
+                RequestContext.get().endMetricRecord(classificationRefreshPropagationDeleteRemBatchV2);
             }
 
             // === Phase 3: Process Net-New Additions ===
