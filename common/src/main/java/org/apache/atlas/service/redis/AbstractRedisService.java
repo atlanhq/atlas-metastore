@@ -186,9 +186,9 @@ public abstract class AbstractRedisService implements RedisService {
             return (String) redisCacheClient.getBucket(convertToNamespace(key)).get();
         } catch (Exception e) {
             MetricUtils.recordRedisConnectionFailure();
-            getLogger().warn("Redis getValue operation failed for key: {}", key, e);
+            getLogger().error("Redis getValue operation failed for key: {}", key, e);
+            throw e;
         }
-        return null;
     }
 
     @Override
@@ -213,8 +213,8 @@ public abstract class AbstractRedisService implements RedisService {
         } catch (Exception e) {
             MetricUtils.recordRedisConnectionFailure();
             getLogger().warn("Redis putValue with TTL operation failed for key: {}", key, e);
+            throw e;
         }
-        return null;
     }
 
     @Override
@@ -225,6 +225,7 @@ public abstract class AbstractRedisService implements RedisService {
         } catch (Exception e) {
             MetricUtils.recordRedisConnectionFailure();
             getLogger().warn("Redis removeValue operation failed for key: {}", key, e);
+            throw e;
         }
     }
 

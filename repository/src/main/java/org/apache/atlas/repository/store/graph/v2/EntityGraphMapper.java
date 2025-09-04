@@ -609,16 +609,16 @@ public class EntityGraphMapper {
     private void setSystemAttributesToEntity(AtlasVertex entityVertex, AtlasEntity createdEntity) {
 
         createdEntity.setCreatedBy(GraphHelper.getCreatedByAsString(entityVertex));
-        createdEntity.setUpdatedBy(GraphHelper.getModifiedByAsString(entityVertex));
+        createdEntity.setUpdatedBy(RequestContext.get().getUser());
         createdEntity.setCreateTime(new Date(GraphHelper.getCreatedTime(entityVertex)));
-        createdEntity.setUpdateTime(new Date(GraphHelper.getModifiedTime(entityVertex)));
+        createdEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
 
 
         if (DIFFERENTIAL_AUDITS) {
             AtlasEntity diffEntity = RequestContext.get().getDifferentialEntity(createdEntity.getGuid());
             if (diffEntity != null) {
-                diffEntity.setUpdateTime(createdEntity.getUpdateTime());
-                diffEntity.setUpdatedBy(createdEntity.getUpdatedBy());
+                diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
+                diffEntity.setUpdatedBy(RequestContext.get().getUser());
             }
         }
     }
@@ -3901,7 +3901,7 @@ public class EntityGraphMapper {
 
     public void addClassificationsV2(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(classifications)) {
-            MetricRecorder metric = RequestContext.get().startMetricRecord("addClassifications");
+            MetricRecorder metric = RequestContext.get().startMetricRecord("addClassificationsV2");
 
             final AtlasVertex                              entityVertex          = context.getVertex(guid);
             final AtlasEntityType                          entityType            = context.getType(guid);

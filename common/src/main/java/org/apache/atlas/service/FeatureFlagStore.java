@@ -97,7 +97,7 @@ public class FeatureFlagStore {
             String namespacedKey = addFeatureFlagNamespace(flagKey);
             String value = loadFlagFromRedisWithRetry(namespacedKey, flagKey);
             
-            if (value != null && !value.isEmpty()) {
+            if (!StringUtils.isEmpty(value)) {
                 cacheStore.putInFallbackCache(namespacedKey, value);
                 LOG.info("Preloaded flag '{}' with Redis value: {}", flagKey, value);
             } else {
@@ -121,10 +121,13 @@ public class FeatureFlagStore {
                     throw new RuntimeException("Failed to load flag " + flagKey + " after " + attempt + " attempts", e);
                 }
                 
-                LOG.warn("Redis operation failed for flag '{}' (attempt {}/{}), retrying...", flagKey, attempt, config.getRedisRetryAttempts(), e);
+                // Calculate exponential backoff delay
+                long backoffDelay = calculateBackoffDelay(attempt);
+                LOG.warn("Redis operation failed for flag '{}' (attempt {}/{}), retrying in {}ms...", 
+                        flagKey, attempt, config.getRedisRetryAttempts(), backoffDelay, e);
                 
                 try {
-                    Thread.sleep(config.getRedisRetryDelayMs());
+                    Thread.sleep(backoffDelay);
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Interrupted while retrying flag " + flagKey, ie);
@@ -134,10 +137,18 @@ public class FeatureFlagStore {
         
         return null; // This line should never be reached
     }
+    
+    private long calculateBackoffDelay(int attempt) {
+        double exponentialFactor = Math.pow(config.getRedisRetryBackoffMultiplier(), attempt - 1);
+        long backoffDelay = Math.round(config.getRedisRetryDelayMs() * exponentialFactor);
+        
+        // Cap the maximum delay to prevent extremely long waits (e.g., 30 seconds max)
+        long maxDelayMs = 30000L;
+        return Math.min(backoffDelay, maxDelayMs);
+    }
 
     public static boolean isTagV2Enabled() {
-        return evaluate(FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey(), "true") || 
-               StringUtils.isNotEmpty(getFlag(FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey()));
+        return !evaluate(FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey(), "false"); // Default value is false, if the flag is present or has any other value it's treated as enabled
     }
 
     public static boolean evaluate(String key, String expectedValue) {
@@ -145,18 +156,28 @@ public class FeatureFlagStore {
     }
 
     public static String getFlag(String key){
-        if (!isValidFlag(key)) {
-            LOG.warn("Invalid feature flag requested: '{}'. Only predefined flags are allowed", key);
-            return null;
+        try {
+            if (!isValidFlag(key)) {
+                LOG.warn("Invalid feature flag requested: '{}'. Only predefined flags are allowed", key);
+                return null;
+            }
+
+            FeatureFlagStore instance = getInstance();
+            if (instance == null) {
+                LOG.warn("FeatureFlagStore not initialized, cannot get flag: {}", key);
+                return getDefaultValue(key);
+            }
+
+            return instance.getFlagInternal(key);
+        } catch (Exception e) {
+            LOG.error("Error getting feature flag '{}'", key, e);
+            return getDefaultValue(key); // Always return something
         }
-        
-        FeatureFlagStore instance = getInstance();
-        if (instance == null) {
-            LOG.warn("FeatureFlagStore not initialized, cannot get flag: {}", key);
-            return null;
-        }
-        
-        return instance.getFlagInternal(key);
+    }
+
+    private static String getDefaultValue(String key) {
+        FeatureFlag flag = FeatureFlag.fromKey(key);
+        return flag != null ? String.valueOf(flag.getDefaultValue()) : "false";
     }
 
     private static boolean isValidFlag(String key) {
@@ -164,7 +185,7 @@ public class FeatureFlagStore {
     }
 
 
-    private String getFlagInternal(String key) {
+    String getFlagInternal(String key) {
         if (!initialized) {
             LOG.warn("FeatureFlagStore not fully initialized yet, attempting to get flag: {}", key);
             throw new IllegalStateException("FeatureFlagStore not initialized");
@@ -204,11 +225,11 @@ public class FeatureFlagStore {
     private String fetchFromRedisAndCache(String namespacedKey, String key) {
         try {
             String value = redisService.getValue(namespacedKey);
-            updateBothCaches(namespacedKey, value != null ? value : "");
+            if (value != null)
+                updateBothCaches(namespacedKey, value);
             return value;
-            
         } catch (Exception e) {
-            LOG.debug("Failed to fetch flag '{}' from Redis", key, e);
+            LOG.error("Failed to fetch flag '{}' from Redis", key, e);
             return null;
         }
     }
@@ -232,7 +253,7 @@ public class FeatureFlagStore {
         instance.setFlagInternal(key, value);
     }
 
-    private synchronized void setFlagInternal(String key, String value) {
+    synchronized void setFlagInternal(String key, String value) {
         if (StringUtils.isEmpty(key) || StringUtils.isEmpty(value)) {
             return;
         }
@@ -263,7 +284,7 @@ public class FeatureFlagStore {
         instance.deleteFlagInternal(key);
     }
 
-    private synchronized void deleteFlagInternal(String key) {
+    synchronized void deleteFlagInternal(String key) {
         if (StringUtils.isEmpty(key)) {
             return;
         }
