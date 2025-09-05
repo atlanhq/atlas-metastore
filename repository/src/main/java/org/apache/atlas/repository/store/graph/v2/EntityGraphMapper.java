@@ -4299,6 +4299,7 @@ public class EntityGraphMapper {
 
         try {
             do {
+                AtlasPerfMetrics.MetricRecorder processClassificationPropagationAdditionBatchProcess = RequestContext.get().startMetricRecord("processClassificationPropagationAdditionBatchProcessV1");
                 toIndex = offset + CHUNK_SIZE > impactedVerticesSize ? impactedVerticesSize : offset + CHUNK_SIZE;
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
 
@@ -4323,6 +4324,7 @@ public class EntityGraphMapper {
                 //Convert entitiesPropagatedTo to Set
                 Set<AtlasVertex> entitiesPropagatedToSet = new HashSet<>(entitiesPropagatedTo);
                 entityChangeNotifier.onClassificationsAddedToEntitiesV2(entitiesPropagatedToSet, Collections.singletonList(classification), false, RequestContext.get());
+                RequestContext.get().endMetricRecord(processClassificationPropagationAdditionBatchProcess);
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
             LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
@@ -4348,6 +4350,7 @@ public class EntityGraphMapper {
 
         try {
             do {
+                AtlasPerfMetrics.MetricRecorder processClassificationPropagationAdditionBatchProcessV2 = RequestContext.get().startMetricRecord("processClassificationPropagationAdditionBatchProcessV2");
                 toIndex = Math.min(offset + CHUNK_SIZE, impactedVerticesSize);
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 Set<AtlasVertex> chunkedVerticesToPropagateSet = new HashSet<>(chunkedVerticesToPropagate);
@@ -4363,6 +4366,7 @@ public class EntityGraphMapper {
                 entityChangeNotifier.onClassificationPropagationAddedToEntitiesV2(chunkedVerticesToPropagateSet, Collections.singletonList(classification), true, RequestContext.get()); // Async call
                 offset += CHUNK_SIZE;
                 LOG.info("offset {}, impactedVerticesSize: {}", offset, impactedVerticesSize);
+                RequestContext.get().endMetricRecord(processClassificationPropagationAdditionBatchProcessV2);
             } while (offset < impactedVerticesSize);
             LOG.info(String.format("Total number of vertices propagated: %d", impactedVerticesSize));
             return impactedVerticesSize;
@@ -5253,6 +5257,7 @@ public class EntityGraphMapper {
         int batchSize = 100;
         int totalUpdated = 0;
         for (int i = 0; i < impactedVertices.size(); i += batchSize) {
+            AtlasPerfMetrics.MetricRecorder updateClassificationTextPropagationBatchProcessV1 = RequestContext.get().startMetricRecord("updateClassificationTextPropagationBatchProcessV1");
             int end = Math.min(i + batchSize, impactedVertices.size());
             List<AtlasVertex> batch = impactedVertices.subList(i, end);
             List<AtlasEntity> entityBatch = new ArrayList<>();
@@ -5269,6 +5274,7 @@ public class EntityGraphMapper {
             transactionInterceptHelper.intercept();
             entityChangeNotifier.onClassificationUpdatedToEntities(entityBatch, classification); // Async call - fire and forget
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
+            RequestContext.get().endMetricRecord(updateClassificationTextPropagationBatchProcessV1);
         }
         return totalUpdated;
     }
@@ -5350,6 +5356,7 @@ public class EntityGraphMapper {
             }
 
             while (!batchToDelete.isEmpty()) {
+                MetricRecorder deleteClassificationPropagationBatchV2 = RequestContext.get().startMetricRecord("deleteClassificationPropagationBatchV2");
                 // collect the vertex IDs in this batch
                 List<String> vertexIds = batchToDelete.stream()
                         .map(Tag::getVertexId)
@@ -5382,6 +5389,7 @@ public class EntityGraphMapper {
                 String pagingState = pageToDelete.getPagingState();
                 pageToDelete = tagDAO.getPropagationsForAttachmentBatch(vertexIdForPropagations, tagTypeName, pagingState);
                 batchToDelete = pageToDelete.getTags();
+                RequestContext.get().endMetricRecord(deleteClassificationPropagationBatchV2);
             }
 
             LOG.info("Updated classification text for {} propagations, taskId: {}",
@@ -5420,10 +5428,6 @@ public class EntityGraphMapper {
 
         Boolean restrictPropagationThroughLineage = AtlasGraphUtilsV2.getProperty(currentClassificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE, Boolean.class);
         Boolean restrictPropagationThroughHierarchy = AtlasGraphUtilsV2.getProperty(currentClassificationVertex, CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY, Boolean.class);
-        // TODO : Why is refresh propagation being triggered for a child asset with the tag-vertex of the parent asset. The line :
-        //  List<String> verticesIdsToRemove = (List<String>)CollectionUtils.subtract(propagatedVerticesIds, impactedVertices);
-        //  Will Remove (whole-graph - sub-graph)
-        // The above is resolved, but keeping the TODO until full release of the code incase the source-task-creation logic is under scrutiny
         propagationMode = entityRetriever.determinePropagationMode(restrictPropagationThroughLineage,restrictPropagationThroughHierarchy);
         Boolean toExclude = propagationMode == CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE ? true:false;
 
@@ -5477,6 +5481,7 @@ public class EntityGraphMapper {
 
         try {
             do {
+                AtlasPerfMetrics.MetricRecorder processPropagatedClassificationDeletionFromVerticesBatchesV1 = RequestContext.get().startMetricRecord("processPropagatedClassificationDeletionFromVerticesBatchesV1");
                 toIndex = ((offset + CHUNK_SIZE > propagatedVerticesSize) ? propagatedVerticesSize : (offset + CHUNK_SIZE));
                 List<AtlasVertex> verticesChunkToRemoveTag = VerticesToRemoveTag.subList(offset, toIndex);
 
@@ -5492,6 +5497,7 @@ public class EntityGraphMapper {
 
                 transactionInterceptHelper.intercept();
                 entityChangeNotifier.onClassificationsDeletedFromEntities(updatedEntities, Collections.singletonList(classification));
+                RequestContext.get().endMetricRecord(processPropagatedClassificationDeletionFromVerticesBatchesV1);
             } while (offset < propagatedVerticesSize);
         } catch (AtlasBaseException exception) {
             LOG.error("Error while removing classification from vertices with classification vertex id {}", classificationVertex.getIdForDisplay());
@@ -5508,6 +5514,7 @@ public class EntityGraphMapper {
         int offset = 0;
 
         do {
+            AtlasPerfMetrics.MetricRecorder processClassificationEdgeDeletionBatches = RequestContext.get().startMetricRecord("processClassificationEdgeDeletionBatches");
             toIndex = ((offset + CHUNK_SIZE > propagatedEdgesSize) ? propagatedEdgesSize : (offset + CHUNK_SIZE));
 
             List<AtlasVertex> entityVertices = deleteDelegate.getHandler().removeTagPropagation(classification, propagatedEdges.subList(offset, toIndex));
@@ -5526,6 +5533,7 @@ public class EntityGraphMapper {
             offset += CHUNK_SIZE;
             transactionInterceptHelper.intercept();
             entityChangeNotifier.onClassificationDeletedFromEntitiesV2(propagatedAtlasVertices, classification);
+            RequestContext.get().endMetricRecord(processClassificationEdgeDeletionBatches);
         } while (offset < propagatedEdgesSize);
 
         return deletedPropagationsGuid;
@@ -6399,7 +6407,7 @@ public class EntityGraphMapper {
             List<Tag> batchToUpdate = paginatedResult.getTags();
 
             while (!batchToUpdate.isEmpty()) {
-
+                AtlasPerfMetrics.MetricRecorder updateClassificationTextPropagationBatchProcessV2 = RequestContext.get().startMetricRecord("updateClassificationTextPropagationBatchProcessV2");
                 // collect the vertex IDs in this batch
                 List<String> vertexIds = batchToUpdate.stream()
                         .map(Tag::getVertexId)
@@ -6437,6 +6445,7 @@ public class EntityGraphMapper {
                 String pagingState = paginatedResult.getPagingState();
                 paginatedResult = tagDAO.getPropagationsForAttachmentBatch(sourceEntityVertex.getIdForDisplay(), tagTypeName, pagingState);
                 batchToUpdate = paginatedResult.getTags();
+                RequestContext.get().endMetricRecord(updateClassificationTextPropagationBatchProcessV2);
             }
 
             LOG.info("Updated classification text for {} propagations, taskId: {}", totalUpdated, RequestContext.get().getCurrentTask().getGuid());
@@ -6558,6 +6567,7 @@ public class EntityGraphMapper {
             int totalCountOfPropagatedTags = 0;
 
             while (hasMorePages) {
+                AtlasPerfMetrics.MetricRecorder classificationRefreshPropagationDeleteBatchesV2 = RequestContext.get().startMetricRecord("classificationRefreshPropagationDeleteBatchesV2");
                 pageCount++;
                 PaginatedTagResult result = tagDAO.getPropagationsForAttachmentBatchWithPagination(entityVertexId, classificationTypeName, pagingState, BATCH_SIZE);
                 List<Tag> currentPageTags = result.getTags();
@@ -6584,11 +6594,14 @@ public class EntityGraphMapper {
 
                 LOG.info("sourceVertexId={}, tagTypeName={}: Page {}: Fetched {} propagations. Total fetched: {}. Has next page: {}",
                         entityVertexId, classificationTypeName, pageCount, fetchedCount, totalCountOfPropagatedTags, hasMorePages);
+                RequestContext.get().endMetricRecord(classificationRefreshPropagationDeleteBatchesV2);
             }
 
             if (!tagsToDelete.isEmpty()) {
+                AtlasPerfMetrics.MetricRecorder classificationRefreshPropagationDeleteRemBatchV2 = RequestContext.get().startMetricRecord("classificationRefreshPropagationDeleteRemBatchV2");
                 assetsAffected += tagsToDelete.size();
                 processDeletions_new(tagsToDelete, sourceTag);
+                RequestContext.get().endMetricRecord(classificationRefreshPropagationDeleteRemBatchV2);
             }
 
             // === Phase 3: Process Net-New Additions ===
@@ -6596,6 +6609,7 @@ public class EntityGraphMapper {
                 LOG.info("classificationRefreshPropagationV2_new: Found {} assets that need the tag '{}' to be newly propagated.", expectedPropagatedVertexIds.size(), classificationTypeName);
                 List<String> vertexIdsToAdd = new ArrayList<>(expectedPropagatedVertexIds);
                 for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE) {
+                    AtlasPerfMetrics.MetricRecorder classificationRefreshPropagationAddBatchesV2 = RequestContext.get().startMetricRecord("classificationRefreshPropagationAddBatchesV2");
                     int end = Math.min(i + BATCH_SIZE, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
@@ -6609,6 +6623,7 @@ public class EntityGraphMapper {
                     if (!verticesToPropagate.isEmpty()) {
                         processClassificationPropagationAdditionV2(parameters, entityVertexId, verticesToPropagate, sourceTag);
                     }
+                    RequestContext.get().endMetricRecord(classificationRefreshPropagationAddBatchesV2);
                 }
             }
             LOG.info("classificationRefreshPropagationV2_new: Successfully completed scalable refresh for tag '{}' from source entity {}", classificationTypeName, sourceEntityGuid);
