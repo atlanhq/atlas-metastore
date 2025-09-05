@@ -30,6 +30,7 @@ on:
       - tagscanary
       - tagscanarymerge
       - interceptapis
+      - mlh-1115-master
       - mlh-1115-stage
 
 jobs:
