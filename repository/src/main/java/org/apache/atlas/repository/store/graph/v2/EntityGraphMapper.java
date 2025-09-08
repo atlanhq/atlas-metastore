@@ -87,7 +87,6 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.janusgraph.util.encoding.LongEncoding;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -4056,7 +4055,6 @@ public class EntityGraphMapper {
         }
     }
 
-    @NotNull
     private List<AtlasClassification> mapClassificationsV2(List<AtlasClassification> classifications) throws AtlasBaseException {
         List<AtlasClassification> mappedClassifications = new ArrayList<>(classifications.size());
         for (AtlasClassification c : classifications) {
