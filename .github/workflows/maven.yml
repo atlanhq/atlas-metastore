@@ -32,6 +32,7 @@ on:
       - fixlabels
       - interceptapis
       - mlh-965
+      - docker-push-with-retry
 
 jobs:
   build:
@@ -111,18 +112,24 @@ jobs:
 
       - name: Build and push
         id: docker_build
-        uses: docker/build-push-action@v3
+        uses: nick-invision/retry@v2
         with:
-          platforms: linux/amd64,linux/arm64
-          context: .
-          file: ./Dockerfile
-          no-cache: true
-          sbom: true
-          provenance: true
-          push: true
-          tags: |
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+          timeout_minutes: 15
+          max_attempts: 3
+          retry_wait_seconds: 30
+          command: |
+            echo "Building and pushing docker image"
+            exit 1
+            docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --file ./Dockerfile \
+              --no-cache \
+              --sbom=true \
+              --provenance=true \
+              --push \
+              --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest \
+              --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
+              .
 
       - name: Check Image Manifest
         run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
