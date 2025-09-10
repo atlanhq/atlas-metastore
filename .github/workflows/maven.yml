@@ -112,39 +112,34 @@ jobs:
       - name: Build and push with retry
         id: docker_build
         run: |
-          # Build the image first
-          echo "Building Docker image..."
-          docker buildx build \
-            --platform linux/amd64,linux/arm64 \
-            --file ./Dockerfile \
-            --no-cache \
-            --sbom=true \
-            --provenance=true \
-            --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest \
-            --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
-            --load \
-            .
-          
-          # Push with retry logic
-          echo "Pushing Docker image with retry mechanism..."
+          # Build and push with retry logic
+          echo "Building and pushing Docker image with retry mechanism..."
           retry_count=0
           max_retries=3
           retry_delay=5
           
           while [ $retry_count -lt $max_retries ]; do
-            echo "Push attempt $((retry_count + 1)) of $max_retries"
+            echo "Build and push attempt $((retry_count + 1)) of $max_retries"
             
-            if docker push ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest && \
-               docker push ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}; then
-              echo "Push successful!"
+            if docker buildx build \
+              --platform linux/amd64,linux/arm64 \
+              --file ./Dockerfile \
+              --no-cache \
+              --sbom=true \
+              --provenance=true \
+              --push \
+              --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest \
+              --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
+              .; then
+              echo "Build and push successful!"
               break
             else
               retry_count=$((retry_count + 1))
               if [ $retry_count -lt $max_retries ]; then
-                echo "Push failed. Retrying in $retry_delay seconds..."
+                echo "Build and push failed. Retrying in $retry_delay seconds..."
                 sleep $retry_delay
               else
-                echo "Push failed after $max_retries attempts. Exiting."
+                echo "Build and push failed after $max_retries attempts. Exiting."
                 exit 1
               fi
             fi
