@@ -22,16 +22,10 @@ name: Java CI with Maven
 on:
   push:
     branches:
-      - alpha
       - beta
-      - development
       - master
       - staging
-      - tagscanary
-      - tagscanarymerge
-      - fixlabels
-      - interceptapis
-      - mlh-1115-master
+      - mlh-987-tag-metrics
 
 jobs:
   build:

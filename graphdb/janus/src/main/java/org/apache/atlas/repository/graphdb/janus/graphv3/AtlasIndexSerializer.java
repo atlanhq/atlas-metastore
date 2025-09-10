@@ -17,6 +17,7 @@ package org.apache.atlas.repository.graphdb.janus.graphv3;
 import com.google.common.base.Function;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.janusgraph.core.JanusGraphElement;
@@ -123,13 +124,20 @@ public class AtlasIndexSerializer extends IndexSerializer {
     private final boolean hashKeys;
     private final HashingUtil.HashLength hashLength = HashingUtil.HashLength.SHORT;
 
+    private Set<String> EXCLUDE_ES_SYNC_ATTRIBUTES = new HashSet<>(5);
+
     public AtlasIndexSerializer(Configuration config, Serializer serializer, Map<String, ? extends IndexInformation> indexes, final boolean hashKeys) {
         super(config, serializer, indexes, hashKeys);
         this.serializer = serializer;
         this.configuration = config;
         this.mixedIndexes = indexes;
         this.hashKeys=hashKeys;
-        if (hashKeys) log.info("Hashing index keys");
+
+        EXCLUDE_ES_SYNC_ATTRIBUTES.add("__classificationNames");
+        EXCLUDE_ES_SYNC_ATTRIBUTES.add("__classificationsText");
+        EXCLUDE_ES_SYNC_ATTRIBUTES.add("__traitNames");
+        EXCLUDE_ES_SYNC_ATTRIBUTES.add("__propagatedTraitNames");
+        EXCLUDE_ES_SYNC_ATTRIBUTES.add("propagatedClassificationNames");
     }
 
     /* ################################################
@@ -257,6 +265,11 @@ public class AtlasIndexSerializer extends IndexSerializer {
                     if (field == null) {
                         throw new SchemaViolationException(p.propertyKey() + " is not available in mixed index " + index);
                     }
+
+                    if (FeatureFlagStore.isTagV2Enabled() && EXCLUDE_ES_SYNC_ATTRIBUTES.contains(field.getFieldKey().name())) {
+                        continue;
+                    }
+
                     if (field.getStatus() == SchemaStatus.DISABLED) continue;
                     final IndexUpdate update = getMixedIndexUpdate(vertex, p.propertyKey(), p.value(), (MixedIndexType) index, updateType);
                     final int ttl = getIndexTTL(vertex,p.propertyKey());
@@ -294,6 +307,8 @@ public class AtlasIndexSerializer extends IndexSerializer {
                 (index.getElement().isRelation() && elementId instanceof RelationIdentifier),"Invalid element id [%s] provided for index: %s",elementId,index);
         getDocuments(documentsPerStore,index).put(element2String(elementId),new ArrayList<>());
     }
+
+
 
     public Set<IndexUpdate<StaticBuffer,Entry>> reindexElement(JanusGraphElement element, CompositeIndexType index) {
         final Set<IndexUpdate<StaticBuffer,Entry>> indexEntries = new HashSet<>();

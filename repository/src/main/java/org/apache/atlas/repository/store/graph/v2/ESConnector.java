@@ -1,4 +1,5 @@
 package org.apache.atlas.repository.store.graph.v2;
+
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;

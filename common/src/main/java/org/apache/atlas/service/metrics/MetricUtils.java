@@ -28,6 +28,7 @@ public class MetricUtils {
     private static final String METHOD = "method";
     private static final String SERVICE = "service";
     private static final String INTEGRATION = "integration";
+    private static final String ORIGIN = "origin";
     private static final String ATLAS_METASTORE = "atlas-metastore";
     private static final String REGEX_URI_PLACEHOLDER = "\\[\\^/\\]\\+";
     private static final String HTTP_SERVER_REQUESTS = "http.server.requests";

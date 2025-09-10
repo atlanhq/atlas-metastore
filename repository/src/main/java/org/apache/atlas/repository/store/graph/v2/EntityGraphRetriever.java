@@ -133,6 +133,7 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
 
 @Component
 public class EntityGraphRetriever {
@@ -1245,12 +1246,10 @@ public class EntityGraphRetriever {
             GraphTraversal<Edge, Map<String, Object>> edgeTraversal =
                     ((AtlasJanusGraph) graph).V(vertexIds)
                             .bothE();
-            
             // Filter by edge labels if provided
             if (!CollectionUtils.isEmpty(edgeLabels)) {
                 edgeTraversal = edgeTraversal.hasLabel(P.within(edgeLabels));
             }
-            
             edgeTraversal = edgeTraversal
                             .has(STATE_PROPERTY_KEY, ACTIVE.name())
                             .has(RELATIONSHIP_GUID_PROPERTY_KEY)
@@ -1699,6 +1698,7 @@ public class EntityGraphRetriever {
             RequestContext context = RequestContext.get();
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
+
             if(includeClassifications || includeClassificationNames){
                 List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
 
@@ -1707,6 +1707,7 @@ public class EntityGraphRetriever {
                 }
                 ret.setClassificationNames(getAllTagNames(tags));
             }
+
             ret.setLabels(getLabels(entityVertex));
 
             ret.setCreatedBy(vertexEdgePropertiesCache.getPropertyValue(vertexId, CREATED_BY_KEY, String.class));

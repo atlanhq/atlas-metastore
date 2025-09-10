@@ -104,6 +104,11 @@ public class RequestContext {
 
     private boolean     includeClassificationNames = false;
     private boolean     skipProcessEdgeRestoration = false;
+
+
+
+    private String     lineageInputLabel = "";
+    private String     lineageOutputLabel = "";
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
     private String traceId;
@@ -111,6 +116,8 @@ public class RequestContext {
     private boolean     allowDuplicateDisplayName;
     private MetricsRegistry metricsRegistry;
     private boolean skipAuthorizationCheck = false;
+    private boolean allowCustomGuid = false;
+    private boolean allowCustomQualifiedName = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
     private boolean delayTagNotifications = false;
@@ -251,6 +258,21 @@ public class RequestContext {
         return removedElementsMap;
     }
 
+    public String getLineageInputLabel() {
+        return lineageInputLabel;
+    }
+
+    public void setLineageInputLabel(String lineageInputLabel) {
+        this.lineageInputLabel = lineageInputLabel;
+    }
+
+    public String getLineageOutputLabel() {
+        return lineageOutputLabel;
+    }
+
+    public void setLineageOutputLabel(String lineageOutputLabel) {
+        this.lineageOutputLabel = lineageOutputLabel;
+    }
     public Map<String, List<Object>> getNewElementsCreatedMap() {
         return newElementsCreatedMap;
     }
@@ -382,6 +404,22 @@ public class RequestContext {
     }
     public boolean getAllowDuplicateDisplayName(){
         return allowDuplicateDisplayName;
+    }
+
+    public boolean isAllowCustomGuid() {
+        return allowCustomGuid;
+    }
+
+    public void setAllowCustomGuid(boolean allowCustomGuid) {
+        this.allowCustomGuid = allowCustomGuid;
+    }
+
+    public boolean isAllowCustomQualifiedName() {
+        return allowCustomQualifiedName;
+    }
+
+    public void setAllowCustomQualifiedName(boolean allowCustomQualifiedName) {
+        this.allowCustomQualifiedName = allowCustomQualifiedName;
     }
 
     public String getCurrentTypePatchAction() {
