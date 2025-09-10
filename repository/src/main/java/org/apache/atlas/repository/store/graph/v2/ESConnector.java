@@ -124,7 +124,7 @@ public class ESConnector implements Closeable {
 
             Request request = new Request("POST", "/_bulk");
             request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
-
+            LOG.info("Bulk request body: {}", bulkRequestBody.toString());
             int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
             long retryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
             long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
@@ -133,7 +133,7 @@ public class ESConnector implements Closeable {
                 try {
                     Response response = lowLevelClient.performRequest(request); // Capture the response
                     int statusCode = response.getStatusLine().getStatusCode();
-
+                    LOG.info("ES bulk update response status: {}", statusCode);
                     if (statusCode >= 200 && statusCode < 300) {
                         // Check response body for partial failures if necessary
                         return; // Success

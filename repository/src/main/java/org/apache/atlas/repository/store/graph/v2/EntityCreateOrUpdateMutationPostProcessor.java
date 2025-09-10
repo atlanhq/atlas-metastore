@@ -50,7 +50,7 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
                 ESDeferredOperation.OperationType opType = entry.getKey();
                 List<ESDeferredOperation> ops = entry.getValue();
 
-                boolean upsert = (opType == ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS);
+                boolean upsert = (ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS.equals(opType));
 
                 int batchSize = AtlasConfiguration.ES_BULK_BATCH_SIZE.getInt();
                 for (int i = 0; i < ops.size(); i += batchSize) {
