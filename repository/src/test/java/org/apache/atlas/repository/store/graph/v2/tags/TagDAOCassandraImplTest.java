@@ -470,7 +470,20 @@ public class TagDAOCassandraImplTest {
         );
     }
 
+    @Test
+    void testBucketCalculation() {
+        assertEquals(63, TagDAOCassandraImpl.calculateBucket("aaaaaaa"));
+        assertEquals(62, TagDAOCassandraImpl.calculateBucket("aaaaaab"));
+        assertEquals(61, TagDAOCassandraImpl.calculateBucket("aaaaaac"));
+        assertEquals(60, TagDAOCassandraImpl.calculateBucket("aaaaaad"));
 
+        assertEquals(31, TagDAOCassandraImpl.calculateBucket("abaaaab"));
+
+        assertEquals(32, TagDAOCassandraImpl.calculateBucket("11228037216"));
+        assertEquals(56, TagDAOCassandraImpl.calculateBucket("4272455864"));
+        assertEquals(16, TagDAOCassandraImpl.calculateBucket("3637313744"));
+        assertEquals(32, TagDAOCassandraImpl.calculateBucket("2076545120"));
+    }
 
     // =================== Helper Methods ===================
 
