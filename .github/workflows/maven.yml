@@ -109,20 +109,46 @@ jobs:
           username: $GITHUB_ACTOR
           password: ${{ secrets.ORG_PAT_GITHUB }}
 
-      - name: Build and push
+      - name: Build and push with retry
         id: docker_build
-        uses: docker/build-push-action@v3
-        with:
-          platforms: linux/amd64,linux/arm64
-          context: .
-          file: ./Dockerfile
-          no-cache: true
-          sbom: true
-          provenance: true
-          push: true
-          tags: |
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+        run: |
+          # Build the image first
+          echo "Building Docker image..."
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --file ./Dockerfile \
+            --no-cache \
+            --sbom=true \
+            --provenance=true \
+            --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest \
+            --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
+            --load \
+            .
+          
+          # Push with retry logic
+          echo "Pushing Docker image with retry mechanism..."
+          retry_count=0
+          max_retries=3
+          retry_delay=5
+          
+          while [ $retry_count -lt $max_retries ]; do
+            echo "Push attempt $((retry_count + 1)) of $max_retries"
+            
+            if docker push ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest && \
+               docker push ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}; then
+              echo "Push successful!"
+              break
+            else
+              retry_count=$((retry_count + 1))
+              if [ $retry_count -lt $max_retries ]; then
+                echo "Push failed. Retrying in $retry_delay seconds..."
+                sleep $retry_delay
+              else
+                echo "Push failed after $max_retries attempts. Exiting."
+                exit 1
+              fi
+            fi
+          done
 
       - name: Check Image Manifest
         run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
