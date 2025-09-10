@@ -765,8 +765,14 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     }
 
     public static int calculateBucket(String vertexId) {
-        int numBuckets = 2 << BUCKET_POWER; // 2 * 2^5 = 64
-        return (int) (Long.parseLong(vertexId) % numBuckets);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
+
+        try {
+            int numBuckets = 2 << 5; // 2^5=32
+            return Math.abs(vertexId.hashCode() % numBuckets);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     public static AtlasClassification convertToAtlasClassification(String tagMetaJson) throws AtlasBaseException {

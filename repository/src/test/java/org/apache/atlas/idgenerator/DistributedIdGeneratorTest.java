@@ -1,18 +1,16 @@
 package org.apache.atlas.idgenerator;
 
 import com.datastax.oss.driver.api.core.CqlSession;
-import com.datastax.oss.driver.api.core.CqlSessionBuilder;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.Row;
+import idgenerator.DistributedIdGenerator;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.junit.After;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.springframework.context.annotation.DependsOn;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;

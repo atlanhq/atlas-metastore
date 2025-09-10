@@ -257,7 +257,7 @@ class CassandraVertexDataRepository implements VertexDataRepository {
 
         try {
             int numBuckets = 2 << 5; // 2^5=32
-            return (int) (Long.parseLong(vertexId) % numBuckets);
+            return Math.abs(vertexId.hashCode() % numBuckets);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }

@@ -31,6 +31,8 @@ import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDataba
 public class ESConnector {
     private static final Logger LOG      = LoggerFactory.getLogger(ESConnector.class);
 
+    public static final String JG_ES_DOC_ID_PREFIX = "S"; // S fot string type custom vertex ID
+
     private static RestClient lowLevelClient;
 
     private static Set<String> DENORM_ATTRS;
@@ -96,8 +98,7 @@ public class ESConnector {
                 for (String assetVertexId : entitiesMapForUpdate.keySet()) {
                     Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
 
-                    long vertexId = Long.valueOf(assetVertexId);
-                    String docId = LongEncoding.encode(vertexId);
+                    String docId =  JG_ES_DOC_ID_PREFIX + assetVertexId;
                     bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
 
                     bulkRequestBody.append("{");
@@ -166,8 +167,7 @@ public class ESConnector {
 //                toUpdate.put("__modificationTimestamp", System.currentTimeMillis());
 
 
-                long vertexId = Long.parseLong(assetVertexId);
-                String docId = LongEncoding.encode(vertexId);
+                String docId =  JG_ES_DOC_ID_PREFIX + assetVertexId;
                 bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"").append(docId).append("\" }}\n");
 
                 bulkRequestBody.append("{");

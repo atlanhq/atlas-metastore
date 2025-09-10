@@ -92,7 +92,7 @@ public interface AtlasIndexQuery<V, E> {
          */
         AtlasVertex<V, E> getVertex();
 
-        Long getVertexId();
+        String getVertexId();
 
         /**
          * Gets the score for this result.

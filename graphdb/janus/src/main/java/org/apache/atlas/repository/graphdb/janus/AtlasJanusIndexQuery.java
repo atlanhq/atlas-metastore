@@ -35,6 +35,7 @@ import org.janusgraph.core.JanusGraphVertex;
 /**
  * Janus implementation of AtlasIndexQuery.
  */
+@Deprecated
 public class AtlasJanusIndexQuery implements AtlasIndexQuery<AtlasJanusVertex, AtlasJanusEdge> {
     private AtlasJanusGraph      graph;
     private JanusGraphIndexQuery query;
@@ -135,8 +136,8 @@ public class AtlasJanusIndexQuery implements AtlasIndexQuery<AtlasJanusVertex, A
         }
 
         @Override
-        public Long getVertexId() {
-            return 0L;
+        public String getVertexId() {
+            return null;
         }
 
         @Override

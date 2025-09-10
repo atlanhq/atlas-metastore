@@ -1,15 +1,16 @@
-package org.apache.atlas.idgenerator;
+package idgenerator;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.CqlSessionBuilder;
 import com.datastax.oss.driver.api.core.ConsistencyLevel;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.*;
-import com.google.common.annotations.VisibleForTesting;
-import org.apache.atlas.exception.AtlasBaseException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,7 +33,7 @@ public class DistributedIdGenerator implements AutoCloseable {
     private static final String TABLE = "server_ids";
     private static final String SERVER_PREFIX_TABLE = "server_prefix";
     private static final int ID_LENGTH = 7;
-    private static final long BATCH_SIZE = 5;
+    private static final long BATCH_SIZE = 5_000;
 
     // Server range management
     private static final Lock RANGE_LOCK = new ReentrantLock();
@@ -80,6 +81,23 @@ public class DistributedIdGenerator implements AutoCloseable {
     public DistributedIdGenerator(String contactPoints, int port, String serverName) {
         this(contactPoints, port, serverName, null, null);
     }
+
+    public DistributedIdGenerator(String contactPoints, int port, String serverName, String username, String password) {
+        this.serverName = serverName;
+        this.currentId = new AtomicReference<>(); // initialize
+
+        // Initialize Cassandra session with retry logic
+        this.session = createSessionWithRetry(contactPoints, port, username, password);
+
+        // Initialize with retry logic
+        initializeWithRetry();
+
+        // Initialize the current ID and range
+        String initialId = initializeId();
+
+        logger.info("Initialized ID generator for server '{}' with starting ID: {}", serverName, initialId);
+    }
+
 
     /**
      * Convert a base-62 string to a decimal number
@@ -142,23 +160,60 @@ public class DistributedIdGenerator implements AutoCloseable {
         long dec2 = base62ToDecimal(base62Increment);
         return decimalToBase62(dec1 + dec2, base62Id1.length());
     }
-    
-    public DistributedIdGenerator(String contactPoints, int port, String serverName, String username, String password) {
-        this.serverName = serverName;
-        this.currentId = new AtomicReference<>(); // initialize
-        
-        // Initialize Cassandra session with retry logic
-        this.session = createSessionWithRetry(contactPoints, port, username, password);
-        
-        // Initialize with retry logic
-        initializeWithRetry();
-        
-        // Initialize the current ID and range
-        String initialId = initializeId();
 
-        logger.info("Initialized ID generator for server '{}' with starting ID: {}", serverName, initialId);
+    /**
+     * Generate the next ID in the sequence.
+     * @return The next unique ID
+     */
+    public String getCurrentId() {
+        return currentId.get();
     }
-    
+
+    public String getCurrentRangePrefix() {
+        return currentRangePrefix;
+    }
+
+    public synchronized String nextId() {
+        String current = currentId.get();
+
+        if (this.counter.get() == 0) {
+            counter.incrementAndGet();
+            return current;
+        }
+
+        String nextId = incrementId(current);
+
+        // Check if we've exhausted the current range (second character changed)
+        if (nextId == null || nextId.charAt(1) != currentRangePrefix.charAt(0)) {
+            // Release the current range
+            //releaseCurrentRange();
+
+            // Allocate a new range
+            nextId = allocateNewPrefix();
+            logger.info("Advanced to new range with second character '{}' for server '{}' (ID: {})",
+                    currentRangePrefix, serverName, nextId);
+        }
+
+        return nextId;
+    }
+
+    /**
+     * Close the ID generator and release resources.
+     * Implements AutoCloseable to allow use in try-with-resources.
+     */
+    @Override
+    public void close() {
+        if (session != null) {
+            try {
+                session.close();
+            } catch (Exception e) {
+                logger.error("Error closing Cassandra session: {}", e.getMessage(), e);
+            }
+        }
+
+        logger.info("Closed ID generator for server: {}", serverName);
+    }
+
     private CqlSession createSessionWithRetry(String contactPoints, int port, String username, String password) {
         int attempts = 0;
         long retryDelayMs = 2000; // Start with 2 seconds
@@ -172,7 +227,16 @@ public class DistributedIdGenerator implements AutoCloseable {
                 // Create session builder with common configuration
                 CqlSessionBuilder sessionBuilder = CqlSession.builder()
                     .addContactPoint(new InetSocketAddress(contactPoints, port))
-                    .withLocalDatacenter("datacenter1");
+                    .withLocalDatacenter("datacenter1")
+                    .withConfigLoader(
+                            DriverConfigLoader.programmaticBuilder()
+                                    .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(10))
+                                    .withDuration(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, Duration.ofSeconds(15))
+                                    .withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(15))
+                                    .withDuration(DefaultDriverOption.CONTROL_CONNECTION_AGREEMENT_TIMEOUT, Duration.ofSeconds(20))
+                                    .withDuration(DefaultDriverOption.REQUEST_TRACE_INTERVAL, Duration.ofMillis(500))
+                                    .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
+                                    .build());
                 
                 // Add authentication if credentials are provided
                 if (username != null && !username.isEmpty() && password != null) {
@@ -183,55 +247,7 @@ public class DistributedIdGenerator implements AutoCloseable {
                 }
                 
                 // Configure the session with additional settings
-                return sessionBuilder
-                    /*.withConfigLoader(DriverConfigLoader.programmaticBuilder()
-                                // Basic configuration
-                                .withString(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, "20 seconds")
-                                .withString(DefaultDriverOption.REQUEST_TIMEOUT, "30 seconds")
-                                .withString(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, "30 seconds")
-                                .withString(DefaultDriverOption.CONTROL_CONNECTION_TIMEOUT, "30 seconds")
-                                .withString(DefaultDriverOption.REQUEST_CONSISTENCY, "ONE")
-                                .withString(DefaultDriverOption.REQUEST_SERIAL_CONSISTENCY, "SERIAL")
-                                .withString(DefaultDriverOption.REQUEST_DEFAULT_IDEMPOTENCE, "true")
-                                
-                                // Reconnection policy
-                                .withString(DefaultDriverOption.RECONNECTION_POLICY_CLASS, 
-                                        "com.datastax.oss.driver.internal.core.connection.ExponentialReconnectionPolicy")
-                                .withString(DefaultDriverOption.RECONNECTION_BASE_DELAY, "1 second")
-                                .withString(DefaultDriverOption.RECONNECTION_MAX_DELAY, "10 seconds")
-                                
-                                // Connection pooling
-                                .withString(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, "2")
-                                .withString(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, "1")
-                                .withString(DefaultDriverOption.CONNECTION_MAX_REQUESTS, "1024")
-                                .withString(DefaultDriverOption.HEARTBEAT_INTERVAL, "30 seconds")
-                                .withString(DefaultDriverOption.HEARTBEAT_TIMEOUT, "10 seconds")
-                                
-                                // Retry policy - using the request level retry policy
-                                .withString(DefaultDriverOption.RETRY_POLICY_CLASS, 
-                                        "com.datastax.oss.driver.internal.core.retry.DefaultRetryPolicy")
-                                .withString(DefaultDriverOption.REQUEST_TIMEOUT, "30 seconds")
-                                
-                                // Protocol version
-                                .withString(DefaultDriverOption.PROTOCOL_VERSION, "V4")
-                                
-                                // Socket options
-                                .withString(DefaultDriverOption.SOCKET_TCP_NODELAY, "true")
-                                .withString(DefaultDriverOption.CONNECTION_CONNECT_TIMEOUT, "30 seconds")
-                                .withString(DefaultDriverOption.REQUEST_TIMEOUT, "30 seconds")
-                                
-                                // Load balancing
-                                .withString(DefaultDriverOption.LOAD_BALANCING_POLICY_CLASS, 
-                                        "com.datastax.oss.driver.internal.core.loadbalancing.DcInferringLoadBalancingPolicy")
-                                
-                                // Reconnection policy
-                                .withString(DefaultDriverOption.RECONNECTION_POLICY_CLASS, 
-                                        "com.datastax.oss.driver.internal.core.connection.ExponentialReconnectionPolicy")
-                                .withString(DefaultDriverOption.RECONNECTION_BASE_DELAY, "1 second")
-                                .withString(DefaultDriverOption.RECONNECTION_MAX_DELAY, "10 seconds")
-                                
-                                .build())*/
-                        .build();
+                return sessionBuilder.build();
                         
             } catch (Exception e) {
                 attempts++;
@@ -471,59 +487,6 @@ public class DistributedIdGenerator implements AutoCloseable {
     }
     
     /**
-     * Generate the next ID in the sequence.
-     * @return The next unique ID
-     */
-    public String getCurrentId() {
-        return currentId.get();
-    }
-
-    public String getCurrentRangePrefix() {
-        return currentRangePrefix;
-    }
-
-    public synchronized String nextId() {
-        String current = currentId.get();
-
-        if (this.counter.get() == 0) {
-            counter.incrementAndGet();
-            return current;
-        }
-
-        String nextId = incrementId(current);
-        
-        // Check if we've exhausted the current range (second character changed)
-        if (nextId == null || nextId.charAt(1) != currentRangePrefix.charAt(0)) {
-            // Release the current range
-            //releaseCurrentRange();
-            
-            // Allocate a new range
-            nextId = allocateNewPrefix();
-            logger.info("Advanced to new range with second character '{}' for server '{}' (ID: {})", 
-                    currentRangePrefix, serverName, nextId);
-        }
-        
-        return nextId;
-    }
-    
-    private void releaseCurrentRange() {
-        if (currentRangePrefix != null) {
-            try {
-                session.execute(
-                    String.format("DELETE FROM %s.%s WHERE range_prefix = ?", 
-                            KEYSPACE, SERVER_PREFIX_TABLE),
-                    currentRangePrefix
-                );
-                ALLOCATED_PREFIXES.remove(currentRangePrefix);
-                logger.debug("Released range '{}' by server '{}'", currentRangePrefix, serverName);
-            } catch (Exception e) {
-                logger.error("Failed to release range '{}': {}", currentRangePrefix, e.getMessage(), e);
-            }
-            currentRangePrefix = null;
-        }
-    }
-    
-    /**
      * Persist the current ID to the database.
      */
     public synchronized void persistCurrentId() {
@@ -539,105 +502,7 @@ public class DistributedIdGenerator implements AutoCloseable {
             throw new RuntimeException("Failed to persist ID", e);
         }
     }
-    
-    /**
-     * Increment the given ID string to the next value in the sequence.
-     * @return The next ID, or null if we've reached the end of the current range
-     */
-    /*private String incrementId(String id) {
-        if (id == null || id.length() != ID_LENGTH) {
-            throw new IllegalArgumentException("ID must be exactly " + ID_LENGTH + " characters long");
-        }
-        
-        char[] chars = id.toCharArray();
-        
-        // Start from the rightmost character
-        for (int i = chars.length - 1; i >= 0; i--) {
-            // Skip the first character (it's always 'a' for now)
-            if (i == 0) {
-                continue;
-            }
-            
-            // For the second character, we only allow it to be the current range prefix
-            if (i == 1) {
-                // If this is the second character and it's not our range prefix, we've exhausted the range
-                if (chars[i] != currentRangePrefix.charAt(0)) {
-                    return null;
-                }
-                continue;
-            }
-            
-            char c = chars[i];
-            int index = getCharIndex(c);
-            
-            if (index < CHARS.length - 1) {
-                // Can increment this character
-                chars[i] = CHARS[index + 1];
-                // Reset all characters to the right to 'a'
-                for (int j = i + 1; j < chars.length; j++) {
-                    chars[j] = 'a';
-                }
-                return new String(chars);
-            } else if (i > 1) {  // Only reset if not the second character
-                // Carry over to the next character to the left
-                chars[i] = 'a';
-            }
-        }
-        
-        // If we get here, we've exhausted all IDs in this range
-        return null;
-    }*/
 
-    /**
-     * Increment an ID by a specific number of positions using
-     * string operations. This is used for increasing count by BATCH_SIZE
-     * when pod restarts
-     * @param id : original string vertex id
-     * @param incrementBy : decimal value of increment( typically batch_size)
-     * @return : new string id
-     */
-    private String IncrementIdBy2(String id, long incrementBy) {
-        if (id == null || id.length() != ID_LENGTH) {
-            throw new IllegalArgumentException("ID must be exactly " + ID_LENGTH + " characters long");
-        }
-
-        char[] chars = id.toCharArray();
-        long remaining = incrementBy;
-
-        // Process from right to left, skipping the first character (fixed as 'a')
-        for (int i = chars.length - 1; i >= 1 && remaining > 0; i--) {
-            int currentValue = getCharIndex(chars[i]);
-            int maxValue = CHARS.length - 1;
-
-            // Calculate how much we can add to this position
-            int add = (int) Math.min(remaining, maxValue - currentValue);
-
-            // Update the character and remaining increment
-            chars[i] = CHARS[currentValue + add];
-            remaining -= add;
-
-            // If we've used up all the increment, we're done
-            if (remaining == 0) {
-                break;
-            }
-
-            // If we reach here, we need to carry over to the next position
-            if (i > 1) { // Not the second character (range prefix)
-                chars[i] = 'a'; // Reset current position to 'a'
-                remaining--; // The carry adds 1 to the next position
-            } else {
-                // If we're at the second character and still have remaining, we've exhausted the range
-                return null;
-            }
-        }
-
-        // If we still have remaining after processing all positions, we've exhausted the range
-        if (remaining > 0) {
-            return null;
-        }
-
-        return new String(chars);
-    }
 
     /**
      * More efficient Increment an ID by a specified number of positions using base-62 arithmetic
@@ -689,7 +554,6 @@ public class DistributedIdGenerator implements AutoCloseable {
         }
     }
 
-
     /**
      * Get the index of a character in our character set.
      */
@@ -703,30 +567,5 @@ public class DistributedIdGenerator implements AutoCloseable {
         }
         throw new IllegalArgumentException("Invalid character in ID: " + c);
     }
-    
-    /**
-     * Close the ID generator and release resources.
-     * Implements AutoCloseable to allow use in try-with-resources.
-     */
-    @Override
-    public void close() {
-        try {
-            // Persist the current ID before shutting down
-            //persistCurrentId();
-            
-            // In a real system, you might want to keep the range reserved
-            // and implement a heartbeat mechanism to detect dead servers
-            // releaseCurrentRange();
-            
-            logger.info("Closing ID generator for server: {}", serverName);
-        } finally {
-            if (session != null) {
-                try {
-                    session.close();
-                } catch (Exception e) {
-                    logger.error("Error closing Cassandra session: {}", e.getMessage(), e);
-                }
-            }
-        }
-    }
+
 }
