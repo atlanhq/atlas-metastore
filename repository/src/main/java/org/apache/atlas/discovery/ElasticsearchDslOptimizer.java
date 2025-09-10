@@ -544,7 +544,7 @@ public class ElasticsearchDslOptimizer {
                 MDC.put("validation.failure_reason", "validation_check_failed");
                 MDC.put("fallback.used", "true");
 
-                log.error("Query optimization failed validation - using original query as fallback");
+                log.warn("Query optimization failed validation - using original query as fallback");
 
                 return fallbackResult;
             }
@@ -1576,7 +1576,15 @@ public class ElasticsearchDslOptimizer {
                         }
                     }
 
-                    String pattern = wildcardNode.get(field).asText();
+                    JsonNode fieldValue = wildcardNode.get(field);
+                    
+                    // Skip optimization if case_insensitive flag is present
+                    if (fieldValue.isObject() && (fieldValue.has("case_insensitive") || fieldValue.has("flags"))) {
+                        // Return empty list to skip consolidation
+                        return false;
+                    }
+                    
+                    String pattern = fieldValue.isObject() ? fieldValue.get("value").asText() : fieldValue.asText();
                     patterns.add(pattern);
                 }
 

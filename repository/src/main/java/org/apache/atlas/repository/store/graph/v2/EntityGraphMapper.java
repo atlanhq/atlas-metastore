@@ -86,7 +86,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -609,16 +608,16 @@ public class EntityGraphMapper {
     private void setSystemAttributesToEntity(AtlasVertex entityVertex, AtlasEntity createdEntity) {
 
         createdEntity.setCreatedBy(GraphHelper.getCreatedByAsString(entityVertex));
-        createdEntity.setUpdatedBy(GraphHelper.getModifiedByAsString(entityVertex));
+        createdEntity.setUpdatedBy(RequestContext.get().getUser());
         createdEntity.setCreateTime(new Date(GraphHelper.getCreatedTime(entityVertex)));
-        createdEntity.setUpdateTime(new Date(GraphHelper.getModifiedTime(entityVertex)));
+        createdEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
 
 
         if (DIFFERENTIAL_AUDITS) {
             AtlasEntity diffEntity = RequestContext.get().getDifferentialEntity(createdEntity.getGuid());
             if (diffEntity != null) {
-                diffEntity.setUpdateTime(createdEntity.getUpdateTime());
-                diffEntity.setUpdatedBy(createdEntity.getUpdatedBy());
+                diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
+                diffEntity.setUpdatedBy(RequestContext.get().getUser());
             }
         }
     }
@@ -2301,14 +2300,14 @@ public class EntityGraphMapper {
 
             Object deleteEntry =  getEdgeUsingRelationship(arrCtx, context, false);
 
-            // throw error if relation does not exist but requested to remove
+            // avoid throwing error if relation does not exist but requested to remove
             if (deleteEntry == null) {
-                AtlasVertex attributeVertex = context.getDiscoveryContext().getResolvedEntityVertex(getGuid(arrCtx.getValue()));
-                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_DOES_NOT_EXIST, attribute.getRelationshipName(),
-                        AtlasGraphUtilsV2.getIdFromVertex(attributeVertex), AtlasGraphUtilsV2.getIdFromVertex(ctx.getReferringVertex()));
+                LOG.warn("Relation does not exist for attribute {} for entity {}", attribute.getName(),
+                        ctx.getReferringVertex());
+            } else {
+                entityRelationsDeleted.add(deleteEntry);
             }
 
-            entityRelationsDeleted.add(deleteEntry);
         }
 
         removedElements = removeArrayEntries(attribute, (List)entityRelationsDeleted, ctx);
@@ -2485,7 +2484,7 @@ public class EntityGraphMapper {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    private void addOrRemoveDaapInternalAttr(AtlasVertex toVertex, String internalAttr, List<Object> createdElements, List<AtlasEdge> deletedElements, List<Object> currentElements) {
+    private void addOrRemoveDaapInternalAttr(AtlasVertex toVertex, String internalAttr, List<Object> createdElements, List<AtlasEdge> deletedElements, List<Object> currentElements) throws AtlasBaseException {
         List<String> addedGuids = new ArrayList<>();
         List<String> removedGuids = new ArrayList<>();
         if (CollectionUtils.isNotEmpty(createdElements)) {
@@ -2500,6 +2499,17 @@ public class EntityGraphMapper {
 
         // Add more info to outputPort update event.
         if (internalAttr.equals(OUTPUT_PORT_GUIDS_ATTR)) {
+            List<String> conflictingGuids = fetchConflictingGuids(toVertex, addedGuids);
+
+            // When adding assets as outputPort, remove them from inputPorts if they already exist there.
+            if (CollectionUtils.isNotEmpty(conflictingGuids)) {
+                try {
+                    removeInputPortReferences(toVertex, conflictingGuids);
+                } catch (AtlasBaseException e) {
+                    throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, "Failed to remove input port edges for conflicting GUIDs: " + conflictingGuids, String.valueOf(e));
+                }
+            }
+
             if (CollectionUtils.isNotEmpty(currentElements)) {
                 List<String> currentElementGuids = currentElements.stream()
                         .filter(x -> ((AtlasEdge) x).getProperty(STATE_PROPERTY_KEY, String.class).equals("ACTIVE"))
@@ -2517,6 +2527,59 @@ public class EntityGraphMapper {
                 // make change to not add following attributes to diff entity if they are empty
                 diffEntity.setAddedRelationshipAttribute(OUTPUT_PORTS, addedGuids);
                 diffEntity.setRemovedRelationshipAttribute(OUTPUT_PORTS, removedGuids);
+            }
+        } else if (internalAttr.equals(INPUT_PORT_GUIDS_ATTR)) {
+            //  When adding assets as inputPort, fail if they already exist as outputPorts.
+            validateInputPortUpdate(toVertex, addedGuids);
+        }
+    }
+
+    private List<String> fetchConflictingGuids(AtlasVertex toVertex, List<String> addedGuids) {
+        List<String> conflictingGuids = new ArrayList<>();
+        if (CollectionUtils.isNotEmpty(addedGuids)) {
+            List<String> existingInputPortGuids = toVertex.getMultiValuedProperty(INPUT_PORT_GUIDS_ATTR, String.class);
+            if (CollectionUtils.isNotEmpty(existingInputPortGuids)) {
+                conflictingGuids = addedGuids.stream()
+                        .filter(existingInputPortGuids::contains)
+                        .collect(Collectors.toList());
+            }
+        }
+        return conflictingGuids;
+    }
+
+    private void removeInputPortReferences(AtlasVertex toVertex, List<String> conflictingGuids) throws AtlasBaseException {
+        for (String assetGuid: conflictingGuids) {
+            AtlasVertex assetVertex = AtlasGraphUtilsV2.findByGuid(this.graph, assetGuid);
+            if (assetVertex == null) {
+                LOG.warn("Asset vertex not found for GUID: {}, skipping edge removal", assetGuid);
+                continue;
+            }
+
+            Iterator<AtlasEdge> outEdges = assetVertex.getEdges(AtlasEdgeDirection.OUT, INPUT_PORT_PRODUCT_EDGE_LABEL).iterator();
+            while(outEdges.hasNext()) {
+                AtlasEdge edge = outEdges.next();
+                if (edge.getInVertex().equals(toVertex)) {
+                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, TypeCategory.ENTITY, true,
+                            true, AtlasRelationshipEdgeDirection.OUT, assetVertex);
+                }
+            }
+        }
+
+        conflictingGuids.forEach(guid ->
+                AtlasGraphUtilsV2.removeItemFromListPropertyValue(toVertex, INPUT_PORT_GUIDS_ATTR, guid));
+    }
+
+    private void validateInputPortUpdate(AtlasVertex toVertex, List<String> addedGuids) throws AtlasBaseException {
+        if (CollectionUtils.isNotEmpty(addedGuids)) {
+            List<String> existingOutputPortGuids = toVertex.getMultiValuedProperty(OUTPUT_PORT_GUIDS_ATTR, String.class);
+            if (CollectionUtils.isNotEmpty(existingOutputPortGuids)) {
+                List<String> conflictingGuids = addedGuids.stream()
+                        .filter(existingOutputPortGuids::contains)
+                        .collect(Collectors.toList());
+
+                if (CollectionUtils.isNotEmpty(conflictingGuids)) {
+                    throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Cannot add input ports that already exist as output ports: " + conflictingGuids);
+                }
             }
         }
     }
@@ -3415,7 +3478,7 @@ public class EntityGraphMapper {
                     List<AtlasEdge> additionalElements = new ArrayList<>();
 
                     for (AtlasEdge edge : tobeDeletedEntries) {
-                        if (getStatus(edge) == DELETED ) {
+                        if (edge == null || getStatus(edge) == DELETED) {
                             continue;
                         }
 
@@ -3514,7 +3577,7 @@ public class EntityGraphMapper {
     }
 
 
-    public void cleanUpClassificationPropagation(String classificationName, int batchLimit) {
+    public int cleanUpClassificationPropagation(String classificationName, int batchLimit) {
         int CLEANUP_MAX = batchLimit <= 0 ? CLEANUP_BATCH_SIZE : batchLimit * CLEANUP_BATCH_SIZE;
         int cleanedUpCount = 0;
         long classificationEdgeCount = 0;
@@ -3525,7 +3588,7 @@ public class EntityGraphMapper {
 
         while (tagVertices != null && tagVertices.hasNext()) {
             if (cleanedUpCount >= CLEANUP_MAX){
-                return;
+                return cleanedUpCount;
             }
 
             while (tagVertices.hasNext() && currentAssetVerticesBatch.size() < CLEANUP_BATCH_SIZE) {
@@ -3608,6 +3671,7 @@ public class EntityGraphMapper {
         }
 
         LOG.info("Completed cleaning up classification {}", classificationName);
+        return cleanedUpCount;
     }
 
     public AtlasEntity repairClassificationMappings(AtlasVertex entityVertex) throws AtlasBaseException {
@@ -3818,7 +3882,7 @@ public class EntityGraphMapper {
                 } else {
                     List<AtlasEntity> propagatedEntities = updateClassificationText(classification, vertices);
 
-                    entityChangeNotifier.onClassificationsAddedToEntitiesV2(vertices, Collections.singletonList(classification), false, RequestContext.get());
+                    entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntities, Collections.singletonList(classification), false);
                 }
             }
 
@@ -3836,7 +3900,7 @@ public class EntityGraphMapper {
 
     public void addClassificationsV2(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(classifications)) {
-            MetricRecorder metric = RequestContext.get().startMetricRecord("addClassifications");
+            MetricRecorder metric = RequestContext.get().startMetricRecord("addClassificationsV2");
 
             final AtlasVertex                              entityVertex          = context.getVertex(guid);
             final AtlasEntityType                          entityType            = context.getType(guid);
@@ -3986,7 +4050,6 @@ public class EntityGraphMapper {
         }
     }
 
-    @NotNull
     private List<AtlasClassification> mapClassificationsV2(List<AtlasClassification> classifications) throws AtlasBaseException {
         List<AtlasClassification> mappedClassifications = new ArrayList<>(classifications.size());
         for (AtlasClassification c : classifications) {
@@ -3998,7 +4061,7 @@ public class EntityGraphMapper {
         return classifications;
     }
 
-    public List<String> propagateClassification(String entityGuid, String classificationVertexId, String relationshipGuid, Boolean previousRestrictPropagationThroughLineage,Boolean previousRestrictPropagationThroughHierarchy) throws AtlasBaseException {
+    public int propagateClassification(String entityGuid, String classificationVertexId, String relationshipGuid, Boolean previousRestrictPropagationThroughLineage,Boolean previousRestrictPropagationThroughHierarchy) throws AtlasBaseException {
         try {
 
             if (StringUtils.isEmpty(entityGuid) || StringUtils.isEmpty(classificationVertexId)) {
@@ -4046,14 +4109,13 @@ public class EntityGraphMapper {
 
             if (CollectionUtils.isEmpty(impactedVertices)) {
                 LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", entityGuid, classificationVertexId);
-
-                return null;
+                return 0;
             }
 
-            return processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            List<String> propagatedAssets = processClassificationPropagationAddition(impactedVertices, classificationVertex);
+            return propagatedAssets.size();
         } catch (Exception e) {
             LOG.error("propagateClassification(entityGuid={}, classificationVertexId={}): error while propagating classification", entityGuid, classificationVertexId, e);
-
             throw new AtlasBaseException(e);
         }
     }
@@ -4063,7 +4125,7 @@ public class EntityGraphMapper {
      * Performs a scalable, "add-only" propagation of classifications using a "read-free"
      * approach. This is the new, optimized implementation.
      */
-    public void propagateClassificationV2_Optimised(Map<String, Object> parameters,
+    public int propagateClassificationV2_Optimised(Map<String, Object> parameters,
                                                     String entityGuid,
                                                     String tagTypeName, String parentEntityGuid, String toVertexGuid) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("propagateClassificationV2_new");
@@ -4081,8 +4143,7 @@ public class EntityGraphMapper {
                 if (entityVertex == null) {
                     String warningMessage = String.format("propagateClassificationV2_Optimised(entityGuid=%s, tagTypeName=%s): entity vertex not found, skipping task execution", entityGuid, tagTypeName);
                     LOG.warn(warningMessage);
-                    RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                    return;
+                    return 0;
                 }
 
                 AtlasClassification tag = tagDAO.findDirectTagByVertexIdAndTagTypeName(entityVertex.getIdForDisplay(), tagTypeName, false);
@@ -4093,16 +4154,14 @@ public class EntityGraphMapper {
                         if (parentEntityVertex == null) {
                             String warningMessage = String.format("propagateClassificationV2_Optimised(parentEntityGuid=%s, tagTypeName=%s): parentEntityVertex vertex not found, skipping task execution", parentEntityGuid, tagTypeName);
                             LOG.warn(warningMessage);
-                            RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                            return;
+                            return 0;
                         }
                         tag = tagDAO.findDirectTagByVertexIdAndTagTypeName(parentEntityVertex.getIdForDisplay(), tagTypeName, false);
                     }
                     if (tag == null) {
                         String warningMessage = String.format("propagateClassificationV2_Optimised(entityGuid=%s,parentEntityGuid=%s, tagTypeName=%s): tag not found, skipping task execution", entityGuid, parentEntityGuid, tagTypeName);
                         LOG.warn(warningMessage);
-                        RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                        return;
+                        return 0;
                     }
                 }
 
@@ -4121,12 +4180,13 @@ public class EntityGraphMapper {
 
                 if (CollectionUtils.isEmpty(impactedVerticeIds)) {
                     LOG.info("propagateClassificationV2_Optimised: No entities found to propagate the classification to.");
-                    return;
+                    return 0;
                 }
 
                 // 2. Process additions in batches.
                 LOG.info("propagateClassificationV2_Optimised: Found {} total vertices for propagation. Processing in batches.", impactedVerticeIds.size());
                 List<String> vertexIdsToAdd = new ArrayList<>(impactedVerticeIds);
+                int assetsAffected = 0;
                 for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE_FOR_ADD_PROPAGATION) {
                     int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
@@ -4137,26 +4197,27 @@ public class EntityGraphMapper {
                             .collect(Collectors.toList());
 
                     if (!impactedVertices.isEmpty()) {
+                        assetsAffected += impactedVertices.size();
                         LOG.info("propagateClassificationV2_Optimised: Processing batch of {} assets for tag addition.", impactedVertices.size());
                         processClassificationPropagationAdditionV2(parameters, entityVertex.getIdForDisplay(), impactedVertices, tag);
                     }
                 }
+                return assetsAffected;
             } else {
                 // "Add on Relationship Change" Flow, this logic processes all tags on the `fromVertex`.
+                int assetsAffected = 0;
                 AtlasVertex fromVertex = entityRetriever.getEntityVertex(entityGuid);
                 if (fromVertex == null) {
                     String warningMessage = String.format("propagateClassificationV2_Optimised(fromVertexId=%s, tagTypeName=%s): fromVertex not found, skipping task execution", entityGuid, tagTypeName);
                     LOG.warn(warningMessage);
-                    RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                    return;
+                    return assetsAffected;
                 }
 
                 AtlasVertex toVertex = entityRetriever.getEntityVertex(toVertexGuid);
                 if (toVertex == null) {
                     String warningMessage = String.format("propagateClassificationV2_Optimised(toVertexId=%s, tagTypeName=%s): toVertex not found, skipping task execution", toVertexGuid, tagTypeName);
                     LOG.warn(warningMessage);
-                    RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                    return;
+                    return assetsAffected;
                 }
 
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(fromVertex.getIdForDisplay());
@@ -4170,8 +4231,7 @@ public class EntityGraphMapper {
                         if (sourceVertex == null) {
                             String warningMessage = String.format("propagateClassificationV2_Optimised(sourceVertex=%s, tagTypeName=%s): sourceVertex not found, skipping task execution", sourceEntityGuid, tagTypeName);
                             LOG.warn(warningMessage);
-                            RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                            return;
+                            continue;
                         }
 
                         String propagationMode = entityRetriever.determinePropagationMode(tag.getRestrictPropagationThroughLineage(), tag.getRestrictPropagationThroughHierarchy());
@@ -4198,6 +4258,7 @@ public class EntityGraphMapper {
                         // 2. Process additions in batches.
                         LOG.info("propagateClassificationV2_Optimised: Found {} total vertices for propagation based on toVertex: {}. Processing in batches.", impactedVertexIds.size(), toVertexGuid);
                         List<String> vertexIdsToAdd = new ArrayList<>(impactedVertexIds);
+
                         for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE_FOR_ADD_PROPAGATION) {
                             int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                             List<String> batchIds = vertexIdsToAdd.subList(i, end);
@@ -4208,12 +4269,14 @@ public class EntityGraphMapper {
                                     .collect(Collectors.toList());
 
                             if (!impactedVertices.isEmpty()) {
+                                assetsAffected += impactedVertices.size();
                                 LOG.info("propagateClassificationV2_Optimised: Processing batch of {} assets for tag addition based on toVertex: {}, sourceVertex: {}, tag_type_name: {}", impactedVertices.size(), toVertexGuid, sourceVertex.getIdForDisplay(), atlasClassification.getTypeName());
                                 processClassificationPropagationAdditionV2(parameters, sourceVertex.getIdForDisplay(), impactedVertices, atlasClassification);
                             }
                         }
                     }
                 }
+                return assetsAffected;
             }
         } catch (Exception e) {
             LOG.error("propagateClassificationV2_Optimised(entityGuid={}, classificationTypeName={}): error while propagating classification", entityGuid, tagTypeName, e);
@@ -4246,7 +4309,7 @@ public class EntityGraphMapper {
                 List<AtlasVertex>   entitiesPropagatedTo = deleteDelegate.getHandler().addTagPropagation(classificationVertex, chunkedVerticesToPropagate);
 
                 if (CollectionUtils.isEmpty(entitiesPropagatedTo)) {
-                    return null;
+                    return Collections.emptyList();
                 }
 
                 List<AtlasEntity>   propagatedEntitiesChunked       = updateClassificationText(classification, entitiesPropagatedTo);
@@ -4255,9 +4318,7 @@ public class EntityGraphMapper {
                 propagatedEntitiesGuids.addAll(chunkedPropagatedEntitiesGuids);
                 offset += CHUNK_SIZE;
                 transactionInterceptHelper.intercept();
-                //Convert entitiesPropagatedTo to Set
-                Set<AtlasVertex> entitiesPropagatedToSet = new HashSet<>(entitiesPropagatedTo);
-                entityChangeNotifier.onClassificationsAddedToEntitiesV2(entitiesPropagatedToSet, Collections.singletonList(classification), false, RequestContext.get());
+                entityChangeNotifier.onClassificationsAddedToEntities(propagatedEntitiesChunked, Collections.singletonList(classification), false);
             } while (offset < impactedVerticesSize);
         } catch (AtlasBaseException exception) {
             LOG.error("Error occurred while adding classification propagation for classification with propagation id {}", classificationVertex.getIdForDisplay());
@@ -4270,7 +4331,7 @@ public class EntityGraphMapper {
 
     }
 
-    public void processClassificationPropagationAdditionV2(Map<String, Object> parameters,
+    public int processClassificationPropagationAdditionV2(Map<String, Object> parameters,
                                                            String entityVertexId,
                                                            List<AtlasVertex> verticesToPropagate,
                                                            AtlasClassification classification) throws AtlasBaseException{
@@ -4300,6 +4361,7 @@ public class EntityGraphMapper {
                 LOG.info("offset {}, impactedVerticesSize: {}", offset, impactedVerticesSize);
             } while (offset < impactedVerticesSize);
             LOG.info(String.format("Total number of vertices propagated: %d", impactedVerticesSize));
+            return impactedVerticesSize;
         } catch (Exception exception) {
             LOG.error("Error occurred while adding classification propagation for classification with source entity id {}",
                     entityVertexId, exception);
@@ -5174,10 +5236,10 @@ public class EntityGraphMapper {
         }
     }
 
-    public void updateClassificationTextPropagation(String classificationVertexId) throws AtlasBaseException {
+    public int updateClassificationTextPropagation(String classificationVertexId) throws AtlasBaseException {
         if (StringUtils.isEmpty(classificationVertexId)) {
             LOG.warn("updateClassificationTextPropagation(classificationVertexId={}): classification vertex id is empty", classificationVertexId);
-            return;
+            return 0;
         }
         AtlasVertex classificationVertex = graph.getVertex(classificationVertexId);
         AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
@@ -5185,6 +5247,7 @@ public class EntityGraphMapper {
         List<AtlasVertex> impactedVertices = graphHelper.getAllPropagatedEntityVertices(classificationVertex);
         LOG.info("impactedVertices : {}", impactedVertices.size());
         int batchSize = 100;
+        int totalUpdated = 0;
         for (int i = 0; i < impactedVertices.size(); i += batchSize) {
             int end = Math.min(i + batchSize, impactedVertices.size());
             List<AtlasVertex> batch = impactedVertices.subList(i, end);
@@ -5195,28 +5258,28 @@ public class EntityGraphMapper {
 
                 if (entity != null) {
                     vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
+                    entityBatch.add(entity);
                 }
-                entityBatch.add(entity);
             }
+            totalUpdated += entityBatch.size();
             transactionInterceptHelper.intercept();
             entityChangeNotifier.onClassificationUpdatedToEntities(entityBatch, classification); // Async call - fire and forget
             LOG.info("Updated classificationText from {} for {}", i, batchSize);
         }
+        return totalUpdated;
     }
 
     public List<String> deleteClassificationPropagation(String entityGuid, String classificationVertexId) throws AtlasBaseException {
         try {
             if (StringUtils.isEmpty(classificationVertexId)) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification vertex id is empty", classificationVertexId);
-
-                return null;
+                return Collections.emptyList();
             }
 
             AtlasVertex classificationVertex = graph.getVertex(classificationVertexId);
             if (classificationVertex == null) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification vertex not found", classificationVertexId);
-
-                return null;
+                return Collections.emptyList();
             }
 
             AtlasClassification classification = entityRetriever.toAtlasClassification(classificationVertex);
@@ -5224,8 +5287,7 @@ public class EntityGraphMapper {
             List<AtlasEdge> propagatedEdges = getPropagatedEdges(classificationVertex);
             if (propagatedEdges.isEmpty()) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification edges empty", classificationVertexId);
-
-                return null;
+                return Collections.emptyList();
             }
 
             int propagatedEdgesSize = propagatedEdges.size();
@@ -5246,17 +5308,17 @@ public class EntityGraphMapper {
     }
 
 
-    public void deleteClassificationPropagationV2(String sourceEntityGuid, String sourceVertexId, String parentEntityGuid, String tagTypeName) throws AtlasBaseException {
+    public int deleteClassificationPropagationV2(String sourceEntityGuid, String sourceVertexId, String parentEntityGuid, String tagTypeName) throws AtlasBaseException {
         MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("deleteClassificationPropagationNew");
         try {
             if (StringUtils.isEmpty(tagTypeName)) {
                 LOG.warn("deleteClassificationPropagation(classificationVertexId={}): classification type name is empty", tagTypeName);
-                return;
+                return 0;
             }
 
             String vertexIdForPropagations = sourceVertexId;
 
-            if(StringUtils.isNotEmpty(parentEntityGuid)) {
+            if (StringUtils.isNotEmpty(parentEntityGuid)) {
                 AtlasVertex parentVertex = graphHelper.getVertexForGUID(parentEntityGuid);
                 if (parentVertex != null) {
                     // If a parent is involved and still exists, use its ID.
@@ -5320,6 +5382,7 @@ public class EntityGraphMapper {
 
             LOG.info("Updated classification text for {} propagations, taskId: {}",
                     totalDeleted, RequestContext.get().getCurrentTask().getGuid());
+            return totalDeleted;
         } catch (Exception e) {
             LOG.error("Error while updating classification text for tag type {}: {}", tagTypeName, e.getMessage());
             throw new AtlasBaseException(e);
@@ -5336,13 +5399,13 @@ public class EntityGraphMapper {
         return batchToDelete.size();
     }
 
-    public void classificationRefreshPropagation(String classificationId) throws AtlasBaseException {
+    public int classificationRefreshPropagation(String classificationId) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder classificationRefreshPropagationMetricRecorder = RequestContext.get().startMetricRecord("classificationRefreshPropagation");
 
         AtlasVertex currentClassificationVertex             = graph.getVertex(classificationId);
         if (currentClassificationVertex == null) {
             LOG.warn("Classification vertex with ID {} is deleted", classificationId);
-            return;
+            return 0;
         }
 
         String              sourceEntityId                  = getClassificationEntityGuid(currentClassificationVertex);
@@ -5387,14 +5450,16 @@ public class EntityGraphMapper {
         //Add classification to the reachable vertices
         if (CollectionUtils.isEmpty(verticesToAddClassification)) {
             LOG.debug("propagateClassification(entityGuid={}, classificationVertexId={}): found no entities to propagate the classification", sourceEntityId, classificationId);
-            return;
+            // return only
+            return verticesToRemove.size();
         }
         processClassificationPropagationAddition(verticesToAddClassification, currentClassificationVertex);
 
         LOG.info("Completed refreshing propagation for classification with vertex id {} with classification name {} and source entity {}",classificationId,
-                classification.getTypeName(), classification.getEntityGuid());
+            classification.getTypeName(), classification.getEntityGuid());
 
         RequestContext.get().endMetricRecord(classificationRefreshPropagationMetricRecorder);
+        return verticesToAddClassification.size() + verticesToRemove.size();
     }
 
     private void processPropagatedClassificationDeletionFromVertices(List<AtlasVertex> VerticesToRemoveTag, AtlasVertex classificationVertex, AtlasClassification classification) throws AtlasBaseException {
@@ -6301,20 +6366,19 @@ public class EntityGraphMapper {
         return minEntity;
     }
 
-    public void updateClassificationTextPropagationV2(String sourceEntityGuid, String tagTypeName) throws AtlasBaseException {
+    public int updateClassificationTextPropagationV2(String sourceEntityGuid, String tagTypeName) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextPropagationNew");
         try {
             if (StringUtils.isEmpty(tagTypeName)) {
                 LOG.warn("updateClassificationTextPropagation(classificationVertexId={}): classification type name is empty", tagTypeName);
-                return;
+                return 0;
             }
 
             AtlasVertex sourceEntityVertex = graphHelper.getVertexForGUID(sourceEntityGuid);
             if (sourceEntityVertex == null) {
                 String warningMessage = String.format("updateClassificationTextPropagationV2(entityGuid=%s, tagTypeName=%s): entity vertex not found, skipping task execution", sourceEntityGuid, tagTypeName);
                 LOG.warn(warningMessage);
-                RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                return;
+                return 0;
             }
 
             int totalUpdated = 0;
@@ -6325,8 +6389,7 @@ public class EntityGraphMapper {
             if (originalClassification == null) {
                 String warningMessage = String.format("updateClassificationTextPropagationV2(entityGuid=%s, tagTypeName=%s): classification not found, skipping task execution", sourceEntityGuid, tagTypeName);
                 LOG.warn(warningMessage);
-                RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                return;
+                return 0;
             }
 
             List<Tag> batchToUpdate = paginatedResult.getTags();
@@ -6373,6 +6436,7 @@ public class EntityGraphMapper {
             }
 
             LOG.info("Updated classification text for {} propagations, taskId: {}", totalUpdated, RequestContext.get().getCurrentTask().getGuid());
+            return totalUpdated;
         } catch (Exception e) {
             LOG.error("Error while updating classification text for tag type {}: {}", tagTypeName, e.getMessage());
             throw new AtlasBaseException(e);
@@ -6438,10 +6502,11 @@ public class EntityGraphMapper {
      * @param classificationTypeName The type name of the classification to refresh.
      * @throws AtlasBaseException if a critical error occurs.
      */
-    public void classificationRefreshPropagationV2_new(Map<String, Object> parameters, String parentEntityGuid, String sourceEntityGuid, String classificationTypeName) throws AtlasBaseException {
+    public int classificationRefreshPropagationV2_new(Map<String, Object> parameters, String parentEntityGuid, String sourceEntityGuid, String classificationTypeName) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("classificationRefreshPropagationV2_new");
         try {
             final int BATCH_SIZE = 10000;
+            int assetsAffected = 0;
             LOG.info("classificationRefreshPropagationV2_new: Starting scalable refresh for tag '{}' from source entity {}", classificationTypeName, sourceEntityGuid);
 
             // === Phase 1: Initialization & Calculation ===
@@ -6449,8 +6514,7 @@ public class EntityGraphMapper {
             if (entityVertex == null) {
                 String warningMessage = String.format("classificationRefreshPropagationV2_new(sourceEntityGuid=%s): entity vertex not found, skipping task execution", sourceEntityGuid);
                 LOG.warn(warningMessage);
-                RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                return;
+                return assetsAffected;
             }
 
             String entityVertexId = entityVertex.getIdForDisplay();
@@ -6462,8 +6526,7 @@ public class EntityGraphMapper {
                     if (entityVertex == null) {
                         String warningMessage = String.format("classificationRefreshPropagationV2_new(parentEntityGuid=%s): parent entity vertex not found", parentEntityGuid);
                         LOG.warn(warningMessage);
-                        RequestContext.get().getCurrentTask().setWarningMessage(warningMessage);
-                        return;
+                        return assetsAffected;
                     }
                     entityVertexId = entityVertex.getIdForDisplay();
                     sourceTag = tagDAO.findDirectTagByVertexIdAndTagTypeName(entityVertexId, classificationTypeName, true);
@@ -6476,7 +6539,7 @@ public class EntityGraphMapper {
 
             if (!sourceTag.isPropagate()) {
                 LOG.warn("classificationRefreshPropagationV2_new: Refresh task invalid as propagation is disabled for tag '{}' on entity {}. Aborting.", classificationTypeName, sourceEntityGuid);
-                return;
+                return assetsAffected;
             }
 
             Set<String> expectedPropagatedVertexIds = calculateExpectedPropagations(entityVertex, sourceTag);
@@ -6507,6 +6570,7 @@ public class EntityGraphMapper {
                 }
 
                 if (tagsToDelete.size() >= BATCH_SIZE) {
+                    assetsAffected += tagsToDelete.size();
                     processDeletions_new(tagsToDelete, sourceTag);
                     tagsToDelete.clear();
                 }
@@ -6519,6 +6583,7 @@ public class EntityGraphMapper {
             }
 
             if (!tagsToDelete.isEmpty()) {
+                assetsAffected += tagsToDelete.size();
                 processDeletions_new(tagsToDelete, sourceTag);
             }
 
@@ -6535,12 +6600,15 @@ public class EntityGraphMapper {
                             .filter(Objects::nonNull)
                             .collect(Collectors.toList());
 
+                    assetsAffected += verticesToPropagate.size();
+
                     if (!verticesToPropagate.isEmpty()) {
                         processClassificationPropagationAdditionV2(parameters, entityVertexId, verticesToPropagate, sourceTag);
                     }
                 }
             }
             LOG.info("classificationRefreshPropagationV2_new: Successfully completed scalable refresh for tag '{}' from source entity {}", classificationTypeName, sourceEntityGuid);
+            return assetsAffected;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
