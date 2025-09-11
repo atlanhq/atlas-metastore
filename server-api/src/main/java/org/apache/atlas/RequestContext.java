@@ -492,6 +492,7 @@ public class RequestContext {
     }
 
     public boolean isIdOnlyGraphEnabled() {
+        //TODO: extract flag from Redis
 //        if (isIdOnlyGraphEnabled == null || !isIdOnlyGraphEnabled) {
 //            // flag is not set yet
 //            // set it for the current request

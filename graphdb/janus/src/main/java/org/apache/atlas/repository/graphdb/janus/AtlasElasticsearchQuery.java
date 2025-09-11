@@ -648,6 +648,7 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
         return vertexTotals;
     }
 
+    @Deprecated
     public final class ResultImpl implements AtlasIndexQuery.Result<AtlasJanusVertex, AtlasJanusEdge> {
         private SearchHit hit;
 
@@ -657,13 +658,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(hit.getId());
-            return graph.getVertex(String.valueOf(vertexId));
+            String vertexId = getVertexId();
+            return graph.getVertex(vertexId);
         }
 
         @Override
-        public Long getVertexId() {
-            return LongEncoding.decode(hit.getId());
+        public String getVertexId() {
+            String docId = String.valueOf(hit.getId());
+            return docId.substring(1);
         }
 
         @Override
@@ -706,13 +708,15 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
-            return graph.getVertex(String.valueOf(vertexId));
+            String vertexId = getVertexId();
+            return graph.getVertex(vertexId);
         }
 
         @Override
-        public Long getVertexId() {
-            return  LongEncoding.decode(String.valueOf(hit.get("_id")));
+        public String getVertexId() {
+            // Discard prefix "S" from doc id
+            String docId = String.valueOf(hit.get("_id"));
+            return docId.substring(1);
         }
 
         @Override

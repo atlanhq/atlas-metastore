@@ -24,6 +24,7 @@ import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Maps;
+import idgenerator.DistributedIdGenerator;
 import org.apache.atlas.*;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
@@ -54,6 +55,7 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
@@ -75,6 +77,7 @@ import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.common.Strings;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.core.JanusGraph;
@@ -150,6 +153,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     // Sonyflake-based distributed ID generator
     private static final IdGenerator SONYFLAKE_ID_GENERATOR;
+    private static final DistributedIdGenerator CUSTOM_ID_GENERATOR;
     static {
         IdGeneratorProperties props = new IdGeneratorProperties();
         // Set machineId based on hostname hash (or customize as needed)
@@ -162,6 +166,24 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             props.setMachineId((long) (Math.random() * 65536));
         }
         SONYFLAKE_ID_GENERATOR = new IdGenerator(props);
+
+        try {
+            String hostName = ApplicationProperties.get().getString("atlas.graph.storage.hostname", "localhost");
+            int port = ApplicationProperties.get().getInt("atlas.graph.storage.port", 9042);
+            String podName = System.getenv("K8S_POD_NAME");
+
+            if (StringUtils.isEmpty(podName)) {
+                podName = "local-atlas-0";
+                //String message = "Pod name not found in env for DistributedIdGenerator for custom vertex ID generation";
+                //LOG.error(message);
+                //throw new RuntimeException(message);
+            }
+
+            CUSTOM_ID_GENERATOR = new DistributedIdGenerator(hostName, port, podName);
+        } catch (AtlasException e) {
+            LOG.error("Failed to initialize DistributedIdGenerator for custom vertex ID generation");
+            throw new RuntimeException(e);
+        }
     }
 
     public DynamicVertexService getDynamicVertexRetrievalService() {
@@ -328,11 +350,21 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
-        long divisor = getVertexIdDivisor();
-        long id = SONYFLAKE_ID_GENERATOR.nextId();
-        id = id - (id % divisor); // Ensure id is divisible by the correct divisor
+        String id = generateCustomId();
         Vertex result = getGraph().addVertex(T.id, id);
         return GraphDbObjectFactory.createVertex(this, result);
+    }
+
+    private String generateCustomId() {
+        return CUSTOM_ID_GENERATOR.nextId();
+    }
+
+    private long generateSnowflakeId() {
+        long id = SONYFLAKE_ID_GENERATOR.nextId();
+        long divisor = getVertexIdDivisor();
+        id = id - (id % divisor); // Ensure id is divisible by the correct divisor
+
+        return id;
     }
 
     @Override

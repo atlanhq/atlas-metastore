@@ -49,6 +49,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
 
     private static String DROP_VERTEX = "DELETE from %s.%s where bucket = %s AND id = '%s'";
 
+    private static final int NUM_BUCKETS = 2 << 5; // 64 buckets
+
     /**
      * Creates a new enhanced Cassandra repository.
      *
@@ -256,8 +258,10 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
 
         try {
-            int numBuckets = 2 << 5; // 2^5=32
-            return (int) (Long.parseLong(vertexId) % numBuckets);
+            // Backward compatibility for Tags V2
+            return (int) (Long.parseLong(vertexId) % NUM_BUCKETS);
+        } catch (NumberFormatException nfe) {
+            return Math.abs(vertexId.hashCode() % NUM_BUCKETS);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }

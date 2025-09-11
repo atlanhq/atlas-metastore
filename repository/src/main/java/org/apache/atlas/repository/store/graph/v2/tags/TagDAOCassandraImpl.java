@@ -64,6 +64,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     public static final String DATACENTER = "datacenter1";
 
     private static final TagDAOCassandraImpl INSTANCE;
+    private static final int NUM_BUCKETS = 2 << 5; // 64 buckets
 
     /**
      * Static initializer block to create the singleton instance.
@@ -765,8 +766,16 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     }
 
     public static int calculateBucket(String vertexId) {
-        int numBuckets = 2 << BUCKET_POWER; // 2 * 2^5 = 64
-        return (int) (Long.parseLong(vertexId) % numBuckets);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
+
+        try {
+            // Backward compatibility for Tags V2
+            return (int) (Long.parseLong(vertexId) % NUM_BUCKETS);
+        } catch (NumberFormatException nfe) {
+            return Math.abs(vertexId.hashCode() % NUM_BUCKETS);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     public static AtlasClassification convertToAtlasClassification(String tagMetaJson) throws AtlasBaseException {
