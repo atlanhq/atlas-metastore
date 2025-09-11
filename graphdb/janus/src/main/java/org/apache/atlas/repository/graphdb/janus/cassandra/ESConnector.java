@@ -10,7 +10,9 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
 import org.janusgraph.util.encoding.LongEncoding;
@@ -164,8 +166,6 @@ public class ESConnector {
                 Map<String, Object> toUpdate = new HashMap<>();
 
                 DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
-//                toUpdate.put("__modificationTimestamp", System.currentTimeMillis());
-
 
                 String docId =  JG_ES_DOC_ID_PREFIX + assetVertexId;
                 bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"").append(docId).append("\" }}\n");
@@ -184,12 +184,44 @@ public class ESConnector {
             Request request = new Request("POST", "/_bulk");
             request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
 
-            try {
-                lowLevelClient.performRequest(request);
-            } catch (IOException e) {
-                LOG.error("Failed to update ES doc for denorm attributes");
-                throw new RuntimeException(e);
+            int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
+            long retryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+            long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+
+            for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
+                try {
+                    Response response = lowLevelClient.performRequest(request); // Capture the response
+                    int statusCode = response.getStatusLine().getStatusCode();
+
+                    if (statusCode >= 200 && statusCode < 300) {
+                        // Check response body for partial failures if necessary
+                        return; // Success
+                    }
+
+                    // Add logic to retry on 5xx or throw on 4xx
+                    if (statusCode >= 500) {
+                        LOG.warn("Failed to update ES doc due to server error ({}). Retrying...", statusCode);
+                    } else {
+                        // Not a retryable error
+                        String responseBody = EntityUtils.toString(response.getEntity());
+                        throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
+                    }
+                } catch (IOException e) {
+                    LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
+                }
+
+                if (retryCount < maxRetries - 1) {
+                    try {
+                        long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount);
+                        Thread.sleep(exponentialBackoffDelay);
+                    } catch (InterruptedException interruptedException) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
+                    }
+                }
             }
+            // If the loop completes, all retries have failed. Throw an exception.
+            throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries + " retries");
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }

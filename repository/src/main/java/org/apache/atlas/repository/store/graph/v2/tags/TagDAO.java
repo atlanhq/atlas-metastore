@@ -12,8 +12,6 @@ public interface TagDAO {
 
     List<AtlasClassification> getAllDirectClassificationsForVertex(String vertexId) throws AtlasBaseException;
 
-    List<Tag> getAllDirectTagsForVertex(String vertexId) throws AtlasBaseException;
-
     List<AtlasClassification> getAllClassificationsForVertex(String vertexId) throws AtlasBaseException;
     List<Tag> getAllTagsByVertexId(String vertexId) throws AtlasBaseException;
 
@@ -21,7 +19,6 @@ public interface TagDAO {
 
     Tag findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(String vertexId, String tagTypeName, boolean includeDeleted) throws AtlasBaseException;
     PaginatedTagResult getPropagationsForAttachmentBatch(String sourceVertexId, String tagTypeName, String storedPagingState) throws AtlasBaseException;
-    List<Tag> getTagPropagationsForAttachment(String sourceVertexId, String tagTypeName) throws AtlasBaseException;
 
     List<AtlasClassification> findByVertexIdAndPropagated(String vertexId) throws AtlasBaseException;
 

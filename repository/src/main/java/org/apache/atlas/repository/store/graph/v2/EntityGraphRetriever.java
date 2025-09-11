@@ -78,13 +78,13 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.collections4.ListUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.apache.tinkerpop.gremlin.structure.*;
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.graphdb.relations.CacheVertexProperty;
 import org.javatuples.Pair;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -946,18 +946,22 @@ public class EntityGraphRetriever {
     }
 
     public void traverseImpactedVerticesByLevelV2(final AtlasVertex entityVertexStart, final String relationshipGuidToExclude,
-                                                 final String classificationId, final Set<String> result, List<String> edgeLabelsToCheck,Boolean toExclude, Set<String> verticesWithClassification) {
+                                                 final String classificationId, final Set<String> result, List<String> edgeLabelsToCheck,Boolean toExclude, Set<String> verticesWithClassification, Set<String> verticesToExcludeFromTraversal) {
         AtlasPerfMetrics.MetricRecorder metricRecorder                          = RequestContext.get().startMetricRecord("traverseImpactedVerticesByLevel");
         Set<String>                 visitedVerticesIds                          = new HashSet<>();
         Set<String>                 verticesAtCurrentLevel                      = new HashSet<>();
         Set<String>                 traversedVerticesIds                        = new HashSet<>();
-        Set<String>                 verticesToPropagateTo               = new HashSet<>();
+        Set<String>                 verticesToPropagateTo                       = new HashSet<>();
         RequestContext              requestContext                              = RequestContext.get();
         boolean                     storeVerticesWithoutClassification          = verticesWithClassification == null ? false : true;
 
         //Add Source vertex to level 1
         if (entityVertexStart != null) {
             verticesAtCurrentLevel.add(entityVertexStart.getIdForDisplay());
+        }
+
+        if (CollectionUtils.isNotEmpty(verticesToExcludeFromTraversal)) {
+            visitedVerticesIds.addAll(verticesToExcludeFromTraversal);
         }
 
         /*
@@ -1119,7 +1123,6 @@ public class EntityGraphRetriever {
         return ret;
     }
 
-    @NotNull
     private static Map<String, List<?>> getStringArrayListMap(Map<Object, Object> properties) {
         Map<String, List<?>> vertexProperties = new HashMap<>();
         for (Map.Entry<Object, Object> entry : properties.entrySet()) {
@@ -1242,7 +1245,14 @@ public class EntityGraphRetriever {
 
             GraphTraversal<Edge, Map<String, Object>> edgeTraversal =
                     ((AtlasJanusGraph) graph).V(vertexIds)
-                            .bothE()
+                            .bothE();
+            
+            // Filter by edge labels if provided
+            if (!CollectionUtils.isEmpty(edgeLabels)) {
+                edgeTraversal = edgeTraversal.hasLabel(P.within(edgeLabels));
+            }
+            
+            edgeTraversal = edgeTraversal
                             .has(STATE_PROPERTY_KEY, ACTIVE.name())
                             .has(RELATIONSHIP_GUID_PROPERTY_KEY)
                             .project( "id", "valueMap","label", "inVertexId", "outVertexId")
@@ -1253,6 +1263,54 @@ public class EntityGraphRetriever {
                             .by(__.outV().id()); // Returns the outVertexId
 
             return edgeTraversal.toList();
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    public List<Map<String, Object>> getConnectedRelationEdgesVertexBatching(
+            Set<String> vertexIds, Set<String> edgeLabels, int relationAttrsSize) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getConnectedRelationEdgesVertexBatching");
+        try {
+            if (CollectionUtils.isEmpty(vertexIds)) {
+                return Collections.emptyList();
+            }
+
+            List<Map<String, Object>> allResults = new ArrayList<>();
+            List<String> vertexIdList = new ArrayList<>(vertexIds);
+            int vertexBatchSize = AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_BATCH_SIZE.getInt(); // Process 100 vertices at a time
+
+            for (int i = 0; i < vertexIdList.size(); i += vertexBatchSize) {
+                int end = Math.min(i + vertexBatchSize, vertexIdList.size());
+                List<String> vertexBatch = vertexIdList.subList(i, end);
+
+                GraphTraversal<Edge, Map<String, Object>> edgeTraversal =
+                        ((AtlasJanusGraph) graph).V(vertexBatch)
+                                .bothE();
+
+                if (!CollectionUtils.isEmpty(edgeLabels)) {
+                    edgeTraversal = edgeTraversal.hasLabel(P.within(edgeLabels));
+                }
+
+                List<Map<String, Object>> batchResults = edgeTraversal
+                        .has(STATE_PROPERTY_KEY, ACTIVE.name())
+                        .has(RELATIONSHIP_GUID_PROPERTY_KEY)
+                        .dedup()
+                        .project("id", "valueMap", "label", "inVertexId", "outVertexId")
+                        .by(__.id())
+                        .by(__.valueMap(true))
+                        .by(__.label())
+                        .by(__.inV().id())
+                        .by(__.outV().id())
+                        .toList();
+
+                allResults.addAll(batchResults);
+
+                LOG.debug("Processed vertex batch {}-{} of {}, found {} edges",
+                        i, end, vertexIdList.size(), batchResults.size());
+            }
+
+            return allResults;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
@@ -1293,7 +1351,13 @@ public class EntityGraphRetriever {
 
            Set<String> vertexIdsToProcess = new HashSet<>();
            if (!CollectionUtils.isEmpty(edgeLabelsToProcess)) {
-               List<Map<String, Object>> relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelsToProcess, relationAttrsSize);
+               List<Map<String, Object>> relationEdges;
+               if (AtlasConfiguration.ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE.getBoolean()) {
+                   relationEdges = getConnectedRelationEdgesVertexBatching(vertexIds, edgeLabelsToProcess, relationAttrsSize);
+               } else {
+                   relationEdges = getConnectedRelationEdges(vertexIds, edgeLabelsToProcess, relationAttrsSize);
+               }
+
 
                for(String vertexId : vertexIds) {
                    for (Map<String, Object> relationEdge : relationEdges) {
@@ -2166,9 +2230,9 @@ public class EntityGraphRetriever {
                         atlasClassification.setEntityGuid(classificationProperty.get(CLASSIFICATION_ENTITY_GUID) != null ? (String) classificationProperty.get(CLASSIFICATION_ENTITY_GUID) : "");
                         atlasClassification.setEntityStatus(classificationProperty.get(CLASSIFICATION_ENTITY_STATUS) != null ? AtlasEntity.Status.valueOf((String) classificationProperty.get(CLASSIFICATION_ENTITY_STATUS)) : null);
                         atlasClassification.setPropagate(classificationProperty.get(CLASSIFICATION_VERTEX_PROPAGATE_KEY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_PROPAGATE_KEY) : null);
-                        atlasClassification.setRemovePropagationsOnEntityDelete(classificationProperty.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY) : null);
-                        atlasClassification.setRestrictPropagationThroughLineage(classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE) : null);
-                        atlasClassification.setRestrictPropagationThroughHierarchy(classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) : null);
+                        atlasClassification.setRemovePropagationsOnEntityDelete(classificationProperty.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_REMOVE_PROPAGATIONS_KEY) : true);
+                        atlasClassification.setRestrictPropagationThroughLineage(classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_LINEAGE) : false);
+                        atlasClassification.setRestrictPropagationThroughHierarchy(classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) != null ? (Boolean) classificationProperty.get(CLASSIFICATION_VERTEX_RESTRICT_PROPAGATE_THROUGH_HIERARCHY) : false);
                         ret.add(atlasClassification);
                     }
                 });

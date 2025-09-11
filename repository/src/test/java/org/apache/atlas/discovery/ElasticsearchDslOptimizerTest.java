@@ -4414,4 +4414,142 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         
         System.out.println("\\n🚀 UI Contains optimization ready for production!");
     }
+
+    public void testWildcardCaseInsensitiveNotConsolidated() throws Exception {
+        String input = "{\n" +
+                "    \"query\": {\n" +
+                "        \"bool\": {\n" +
+                "            \"should\": [\n" +
+                "                {\n" +
+                "                    \"wildcard\": {\n" +
+                "                        \"name.keyword\": {\n" +
+                "                            \"value\": \"*cust*\",\n" +
+                "                            \"case_insensitive\": true\n" +
+                "                        }\n" +
+                "                    }\n" +
+                "                },\n" +
+                "                {\n" +
+                "                    \"wildcard\": {\n" +
+                "                        \"displayName.keyword\": {\n" +
+                "                            \"value\": \"*cust*\",\n" +
+                "                            \"case_insensitive\": true\n" +
+                "                        }\n" +
+                "                    }\n" +
+                "                }\n" +
+                "            ]\n" +
+                "        }\n" +
+                "    }\n" +
+                "}";
+
+        JsonNode query = objectMapper.readTree(input);
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(input);
+        JsonNode optimized = objectMapper.readTree(result.getOptimizedQuery());
+
+        // Verify that wildcards were not consolidated
+        JsonNode shouldClause = optimized.path("query").path("bool").path("should");
+        assertTrue("Should clause should exist", shouldClause.isArray());
+        assertEquals("Should have same number of wildcards", 2, shouldClause.size());
+
+        // Verify both wildcards are preserved with case_insensitive flag
+        for (JsonNode clause : shouldClause) {
+            assertTrue("Should be wildcard query", clause.has("wildcard"));
+            JsonNode wildcardNode = clause.get("wildcard");
+            JsonNode fieldValue = wildcardNode.fields().next().getValue();
+            assertTrue("Should have case_insensitive flag", fieldValue.has("case_insensitive"));
+            assertTrue("Case insensitive should be true", fieldValue.get("case_insensitive").asBoolean());
+            assertEquals("Pattern should be preserved", "*cust*", fieldValue.get("value").asText());
+        }
+
+        // Verify no regexp queries were created
+        int regexpCount = 0;
+        for (JsonNode clause : shouldClause) {
+            if (clause.has("regexp")) {
+                regexpCount++;
+            }
+        }
+        assertEquals("Should not have any regexp queries", 0, regexpCount);
+    }
+
+    public void testWildcardWithSpecialCharacters() throws Exception {
+        String query = "{\n" +
+                "    \"bool\": {\n" +
+                "        \"must\": [\n" +
+                "            {\n" +
+                "                \"bool\": {\n" +
+                "                    \"must_not\": [\n" +
+                "                        {\n" +
+                "                            \"wildcard\": {\n" +
+                "                                \"description.keyword\": \"?*\"\n" +
+                "                            }\n" +
+                "                        }\n" +
+                "                    ]\n" +
+                "                }\n" +
+                "            },\n" +
+                "            {\n" +
+                "                \"bool\": {\n" +
+                "                    \"must_not\": [\n" +
+                "                        {\n" +
+                "                            \"wildcard\": {\n" +
+                "                                \"userDescription.keyword\": \"?*\"\n" +
+                "                            }\n" +
+                "                        }\n" +
+                "                    ]\n" +
+                "                }\n" +
+                "            }\n" +
+                "        ]\n" +
+                "    }\n" +
+                "}";
+
+        // Parse and optimize the query
+        JsonNode originalQuery = parseJson(query);
+        ElasticsearchDslOptimizer.OptimizationResult result = optimizer.optimizeQuery(query);
+        JsonNode optimizedQuery = parseJson(result.getOptimizedQuery());
+
+        // Verify that wildcards with special characters are not consolidated
+        int originalWildcardCount = countWildcardsInQuery(originalQuery);
+        int optimizedWildcardCount = countWildcardsInQuery(optimizedQuery);
+        assertEquals("Wildcards with special characters should not be consolidated", 
+                    originalWildcardCount, optimizedWildcardCount);
+
+
+        // Verify that the must_not context is preserved
+        JsonNode originalMust = originalQuery.get("bool").get("must");
+        JsonNode optimizedMust = optimizedQuery.get("bool").get("must");
+        assertEquals("Must array size should be preserved", 
+                    originalMust.size(), optimizedMust.size());
+
+        // Verify that wildcard patterns are unchanged
+        Set<String> originalPatterns = extractWildcardPatterns(originalQuery);
+        Set<String> optimizedPatterns = extractWildcardPatterns(optimizedQuery);
+        assertEquals("Wildcard patterns should remain unchanged", 
+                    originalPatterns, optimizedPatterns);
+    }
+
+    private Set<String> extractWildcardPatterns(JsonNode query) {
+        Set<String> patterns = new HashSet<>();
+        extractWildcardPatternsRecursive(query, patterns);
+        return patterns;
+    }
+
+    private void extractWildcardPatternsRecursive(JsonNode node, Set<String> patterns) {
+        if (node.isObject()) {
+            if (node.has("wildcard")) {
+                JsonNode wildcardNode = node.get("wildcard");
+                Iterator<String> fields = wildcardNode.fieldNames();
+                while (fields.hasNext()) {
+                    String field = fields.next();
+                    patterns.add(wildcardNode.get(field).asText());
+                }
+            }
+            // Recursively check all fields
+            Iterator<String> fields = node.fieldNames();
+            while (fields.hasNext()) {
+                extractWildcardPatternsRecursive(node.get(fields.next()), patterns);
+            }
+        } else if (node.isArray()) {
+            for (JsonNode item : node) {
+                extractWildcardPatternsRecursive(item, patterns);
+            }
+        }
+    }
 } 

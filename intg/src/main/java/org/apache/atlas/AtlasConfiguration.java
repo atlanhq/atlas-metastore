@@ -94,6 +94,7 @@ public enum AtlasConfiguration {
     SESSION_TIMEOUT_SECS("atlas.session.timeout.secs", -1),
     UPDATE_COMPOSITE_INDEX_STATUS("atlas.update.composite.index.status", true),
     TASKS_GRAPH_COMMIT_CHUNK_SIZE("atlas.tasks.graph.commit.chunk.size", 100),
+    TAG_CASSANDRA_BATCHING_CHUNK_SIZE("atlas.tags.cassandra.batch.size", 200),
     MAX_NUMBER_OF_RETRIES("atlas.tasks.graph.retry.count", 3),
     GRAPH_TRAVERSAL_PARALLELISM("atlas.graph.traverse.bucket.size",10),
     LINEAGE_ON_DEMAND_ENABLED("atlas.lineage.on.demand.enabled", true),
@@ -135,9 +136,15 @@ public enum AtlasConfiguration {
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_LINEAGE("atlas.indexsearch.enable.janus.optimization.for.lineage", false),
     ATLAS_LINEAGE_ENABLE_CONNECTION_LINEAGE("atlas.lineage.enable.connection.lineage", false),
     ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_EXTENDED("atlas.indexsearch.enable.janus.optimization.extended", false),
+    ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_ENABLE("atlas.indexsearch.edge.bulk.fetch.enable", true),
+    ATLAS_INDEXSEARCH_EDGE_BULK_FETCH_BATCH_SIZE ("atlas.indexsearch.edge.bulk.fetch.batch.size", 10),
     ATLAS_MAINTENANCE_MODE("atlas.maintenance.mode", false),
     DELTA_BASED_REFRESH_ENABLED("atlas.authorizer.enable.delta_based_refresh", false),
     ATLAS_UD_RELATIONSHIPS_MAX_COUNT("atlas.ud.relationship.max.count", 100),
+
+    // Slow query logging threshold for search endpoints (ms)
+    SEARCH_SLOW_QUERY_THRESHOLD_MS("atlas.search.slow.query.threshold.ms", 1000),
+
 
     /***
      * OTEL Configuration
@@ -164,6 +171,8 @@ public enum AtlasConfiguration {
     // ES and Cassandra batch operation configurations
     ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
     CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
+    ES_MAX_RETRIES("atlas.es.max.retries", 5),
+    ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
 
     /**
      * Cassabdra Configuration
