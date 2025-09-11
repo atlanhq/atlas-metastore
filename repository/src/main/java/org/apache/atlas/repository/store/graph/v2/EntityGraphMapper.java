@@ -754,7 +754,6 @@ public class EntityGraphMapper {
             addOrUpdateBusinessAttributes(entityVertex, entityType, businessAttrbutes);
         }
     }
-
     /*
      * reset/overwrite business attributes of the entity with given values
      */
@@ -1549,7 +1548,6 @@ public class EntityGraphMapper {
 
         AtlasGraphUtilsV2.setEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, parentRelationshipGuid);
     }
-
     // legacy method to create edges for inverse reference
     private AtlasEdge createInverseReference(AtlasAttribute inverseAttribute, AtlasStructType inverseAttributeType,
                                              AtlasVertex inverseVertex, AtlasVertex vertex) throws AtlasBaseException {
@@ -2339,7 +2337,6 @@ public class EntityGraphMapper {
 
         return entityRelationsDeleted;
     }
-
     private void addEdgesToContext(String guid, List<Object> newElementsCreated, List<AtlasEdge> removedElements) {
 
         if (newElementsCreated.size() > 0) {
@@ -3137,7 +3134,6 @@ public class EntityGraphMapper {
 
         return null;
     }
-
     private void setAssignedGuid(Object val, EntityMutationContext context) {
         if (val != null) {
             Map<String, String> guidAssignements = context.getGuidAssignments();
@@ -3897,7 +3893,6 @@ public class EntityGraphMapper {
             addClassificationsV1(context, guid, classifications);
         }
     }
-
     public void addClassificationsV2(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("addClassificationsV2");
@@ -5391,7 +5386,6 @@ public class EntityGraphMapper {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
-
     public int deletePropagations(List<Tag> batchToDelete) throws AtlasBaseException {
         if(batchToDelete.isEmpty())
             return 0;
@@ -5858,6 +5852,7 @@ public class EntityGraphMapper {
                     String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
                     vertex.setProperty(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
                     propagatedEntities.add(entity);
+                    LOG.debug("DEBUG_TAG_KEY - V1 Flow - Classification Text for entity {}: {}", entity.getGuid(), classificationTextForEntity);
                 }
             }
         }
@@ -5920,6 +5915,7 @@ public class EntityGraphMapper {
 
                 deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
                 propagatedEntities.add(entity);
+                LOG.debug("DEBUG_TAG_KEY - V2 Flow - De-normalized attributes for vertex {}: {}", vertex.getIdForDisplay(), deNormAttributes);
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
@@ -5950,6 +5946,7 @@ public class EntityGraphMapper {
                 }
 
                 deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
+                LOG.debug("DEBUG_TAG_KEY - V2 Flow - De-normalized attributes for vertex {}: {}", tagAttachment.getVertexId(), deNormAttributes);
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
@@ -6181,7 +6178,6 @@ public class EntityGraphMapper {
         Set<String> nonCompliantPolicies = getMultiValuedSetProperty(vertex, NON_COMPLIANT_ASSET_POLICY_GUIDS);
         return compliantPolicies.contains(policyId) || nonCompliantPolicies.contains(policyId);
     }
-
     private AtlasVertex updateVertexPolicy(AtlasVertex vertex, String policyId) {
         Set<String> compliantPolicies = getMultiValuedSetProperty(vertex, ASSET_POLICY_GUIDS);
         Set<String> nonCompliantPolicies = getMultiValuedSetProperty(vertex, NON_COMPLIANT_ASSET_POLICY_GUIDS);

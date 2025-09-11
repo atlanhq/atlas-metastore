@@ -231,6 +231,7 @@ public class FullTextMapperV2 implements IFullTextMapper {
                 }
             }
 
+            LOG.debug("DEBUG_TAG_KEY - Processing attribute: {} with value: {}", attribKey, attrValue);
 
             sb.append(attribKey).append(FULL_TEXT_DELIMITER);
 

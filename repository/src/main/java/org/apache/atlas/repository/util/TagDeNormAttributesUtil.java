@@ -209,6 +209,7 @@ public class TagDeNormAttributesUtil {
             fullTextMapperV2.mapAttributes(classificationType, currentTag.getAttributes(), null, sb, null, new HashSet<>(), true);
         }
 
+        LOG.debug("DEBUG_TAG_KEY - Constructed classification text key: {}", sb.toString());
         return sb.toString();
     }
 }
