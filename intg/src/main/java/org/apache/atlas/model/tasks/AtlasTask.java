@@ -100,11 +100,11 @@ public class AtlasTask {
     private Map<String, Object> parameters;
     private int                 attemptCount;
     private String              errorMessage;
-    private String              warningMessage;
     private Status              status;
     private String              classificationId;
     private String              entityGuid;
-    private String tagTypeName;
+    private String              tagTypeName;
+    private Map<String, Object> headers;
 
     public AtlasTask() {
     }
@@ -122,7 +122,7 @@ public class AtlasTask {
         this.attemptCount       = 0;
         this.classificationId   = classificationId;
         this.entityGuid         = entityGuid;
-        this.tagTypeName = tagTypeName;
+        this.tagTypeName        = tagTypeName;
     }
 
     public String getGuid() {
@@ -163,6 +163,14 @@ public class AtlasTask {
 
     public void setParameters(Map<String, Object> val) {
         this.parameters = val;
+    }
+
+    public Map<String, Object> getHeaders() {
+        return headers;
+    }
+
+    public void setHeaders(Map<String, Object> headers) {
+        this.headers = headers;
     }
 
     public void setType(String val) {
@@ -209,14 +217,6 @@ public class AtlasTask {
 
     public void setErrorMessage(String errorMessage) {
         this.errorMessage = errorMessage;
-    }
-
-    public String getWarningMessage() {
-        return warningMessage;
-    }
-
-    public void setWarningMessage(String warningMessage) {
-        this.warningMessage = warningMessage;
     }
 
     public Date getStartTime() {
@@ -289,7 +289,6 @@ public class AtlasTask {
                 ", parameters=" + parameters +
                 ", attemptCount=" + attemptCount +
                 ", errorMessage='" + errorMessage + '\'' +
-                ", warningMessage='" + warningMessage + '\'' +
                 ", status=" + status +
                 ", classificationId='" + classificationId + '\'' +
                 ", entityGuid='" + entityGuid + '\'' +
