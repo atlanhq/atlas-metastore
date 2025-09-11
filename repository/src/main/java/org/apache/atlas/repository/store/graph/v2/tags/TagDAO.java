@@ -10,20 +10,19 @@ import java.util.Set;
 
 public interface TagDAO {
 
-    List<AtlasClassification> getAllDirectTagsForVertex(String vertexId) throws AtlasBaseException;
-    List<AtlasClassification> getTagsForVertex(String vertexId) throws AtlasBaseException;
-    Tag getTagFromPK(String vertexId, String sourceId, String tagTypeName) throws AtlasBaseException;
+    List<AtlasClassification> getAllDirectClassificationsForVertex(String vertexId) throws AtlasBaseException;
+
+    List<AtlasClassification> getAllClassificationsForVertex(String vertexId) throws AtlasBaseException;
     List<Tag> getAllTagsByVertexId(String vertexId) throws AtlasBaseException;
 
     AtlasClassification findDirectDeletedTagByVertexIdAndTagTypeName(String vertexId, String tagTypeName) throws AtlasBaseException;
 
-    Tag findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(String vertexId, String tagTypeName) throws AtlasBaseException;
-    PaginatedTagResult getPropagationsForAttachmentBatch(String sourceVertexId, String tagTypeName) throws AtlasBaseException;
-    List<Tag> getTagPropagationsForAttachment(String sourceVertexId, String tagTypeName) throws AtlasBaseException;
+    Tag findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(String vertexId, String tagTypeName, boolean includeDeleted) throws AtlasBaseException;
+    PaginatedTagResult getPropagationsForAttachmentBatch(String sourceVertexId, String tagTypeName, String storedPagingState) throws AtlasBaseException;
 
     List<AtlasClassification> findByVertexIdAndPropagated(String vertexId) throws AtlasBaseException;
 
-    AtlasClassification findDirectTagByVertexIdAndTagTypeName(String assetVertexId, String tagTypeName) throws AtlasBaseException;
+    AtlasClassification findDirectTagByVertexIdAndTagTypeName(String assetVertexId, String tagTypeName, boolean includeDeleted) throws AtlasBaseException;
 
     void putPropagatedTags(String sourceAssetId,
                            String tagTypeName,
@@ -51,6 +50,6 @@ public interface TagDAO {
      * @throws AtlasBaseException If an error occurs during retrieval
      */
     PaginatedTagResult getPropagationsForAttachmentBatchWithPagination(String sourceVertexId, String tagTypeName,
-                                                                       String pagingStateStr, int pageSize, String cacheKey) throws AtlasBaseException;
+                                                                       String pagingStateStr, int pageSize) throws AtlasBaseException;
 }
 

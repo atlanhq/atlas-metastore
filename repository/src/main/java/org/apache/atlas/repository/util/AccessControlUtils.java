@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.util;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -30,6 +31,7 @@ import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.util.NanoIdUtils;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -80,6 +82,7 @@ public final class AccessControlUtils {
     public static final String ATTR_POLICY_RESOURCES_CATEGORY  = "policyResourceCategory";
     public static final String ATTR_POLICY_SERVICE_NAME  = "policyServiceName";
     public static final String ATTR_POLICY_PRIORITY  = "policyPriority";
+    public static final String ATTR_QUALIFIED_NAME  = "qualifiedName";
 
     public static final String REL_ATTR_ACCESS_CONTROL = "accessControl";
     public static final String REL_ATTR_POLICIES       = "policies";
@@ -141,12 +144,24 @@ public final class AccessControlUtils {
     public static final String POLICY_FILTER_CRITERIA_CRITERION = "criterion";
     public static final String POLICY_FILTER_CRITERIA_CONDITION = "condition";
     public static final String POLICY_FILTER_CRITERIA_OPERATAOR = "operator";
+    public static final String POLICY_FILTER_CRITERIA_AND = "AND";
+    public static final String POLICY_FILTER_CRITERIA_OR = "OR";
     public static final String POLICY_FILTER_CRITERIA_EQUALS = "EQUALS";
     public static final String POLICY_FILTER_CRITERIA_NOT_EQUALS = "NOT_EQUALS";
     public static final String POLICY_FILTER_CRITERIA_IN = "IN";
     public static final String POLICY_FILTER_CRITERIA_NOT_IN = "NOT_IN";
-    public static final Set<String> POLICY_FILTER_CRITERIA_VAID_OPS = Set.of(POLICY_FILTER_CRITERIA_EQUALS,
-            POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_IN, POLICY_FILTER_CRITERIA_NOT_IN);
+    public static final String POLICY_FILTER_CRITERIA_STARTS_WITH = "STARTS_WITH";
+    public static final String POLICY_FILTER_CRITERIA_ENDS_WITH = "ENDS_WITH";
+
+    public static final String ATTR_TAG = "__traitNames";
+    public static final String ATTR_PROPAGATED_TAG = "__propagatedTraitNames";
+    public static final List<String> ATTR_TAGS = List.of(ATTR_TAG, ATTR_PROPAGATED_TAG);
+    
+    public static final Set<String> POLICY_FILTER_CRITERIA_VALID_OPS = Set.of(POLICY_FILTER_CRITERIA_EQUALS,
+            POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_IN, POLICY_FILTER_CRITERIA_NOT_IN,
+            POLICY_FILTER_CRITERIA_STARTS_WITH, POLICY_FILTER_CRITERIA_ENDS_WITH);
+    public static final Set<String> POLICY_FILTER_CRITERIA_NEGATIVE_OPS = Set.of(POLICY_FILTER_CRITERIA_NOT_EQUALS,
+            POLICY_FILTER_CRITERIA_NOT_IN);
 
 
     private AccessControlUtils() {}
@@ -381,7 +396,13 @@ public final class AccessControlUtils {
         }
     }
 
-    public static String getUUID(){
+    public static String getUUID(AtlasEntity entity){
+        // Check if custom qualified name is allowed and entity has qualifiedNameUUID
+        if (RequestContext.get().isAllowCustomQualifiedName() &&
+                entity != null &&
+                StringUtils.isNotEmpty(entity.getQualifiedNameUUID())) {
+            return entity.getQualifiedNameUUID();
+        }
         return NanoIdUtils.randomNanoId(22);
     }
 
@@ -415,6 +436,9 @@ public final class AccessControlUtils {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(vertexIndexName);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
+        if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
+            return false;
+        }
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();
 
         while (iterator.hasNext()) {
@@ -454,6 +478,9 @@ public final class AccessControlUtils {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(VERTEX_INDEX_NAME);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);
+        if (indexQueryResult == null || indexQueryResult.getIterator() == null) {
+            return false;
+        }
         Iterator<AtlasIndexQuery.Result> iterator = indexQueryResult.getIterator();
 
         while (iterator.hasNext()) {

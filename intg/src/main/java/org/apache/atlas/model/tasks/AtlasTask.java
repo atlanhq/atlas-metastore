@@ -38,14 +38,23 @@ public class AtlasTask {
     @JsonIgnore
     public static final int MAX_ATTEMPT_COUNT = 3;
 
-    public String getClassificationTypeName() {
-        return classificationTypeName;
+    public String getTagTypeName() {
+        return tagTypeName;
     }
 
-    public void setClassificationTypeName(String classificationTypeName) {
-        this.classificationTypeName = classificationTypeName;
+    public void setTagTypeName(String tagTypeName) {
+        this.tagTypeName = tagTypeName;
     }
 
+    public void setParentEntityGuid(String parentEntityGuid) {
+        this.parentEntityGuid = parentEntityGuid;
+    }
+
+    public String getParentEntityGuid() {
+        return parentEntityGuid;
+    }
+
+    private String parentEntityGuid;
     public enum Status {
         PENDING,
         IN_PROGRESS,
@@ -94,13 +103,14 @@ public class AtlasTask {
     private Status              status;
     private String              classificationId;
     private String              entityGuid;
-    private String              classificationTypeName;
+    private String              tagTypeName;
+    private Map<String, Object> headers;
 
     public AtlasTask() {
     }
 
     public AtlasTask(String type, String createdBy, Map<String, Object> parameters,
-                     String classificationId, String classificationTypeName,
+                     String classificationId, String tagTypeName,
                      String entityGuid) {
         this.guid               = UUID.randomUUID().toString();
         this.type               = type;
@@ -112,7 +122,7 @@ public class AtlasTask {
         this.attemptCount       = 0;
         this.classificationId   = classificationId;
         this.entityGuid         = entityGuid;
-        this.classificationTypeName = classificationTypeName;
+        this.tagTypeName        = tagTypeName;
     }
 
     public String getGuid() {
@@ -153,6 +163,14 @@ public class AtlasTask {
 
     public void setParameters(Map<String, Object> val) {
         this.parameters = val;
+    }
+
+    public Map<String, Object> getHeaders() {
+        return headers;
+    }
+
+    public void setHeaders(Map<String, Object> headers) {
+        this.headers = headers;
     }
 
     public void setType(String val) {
@@ -272,6 +290,9 @@ public class AtlasTask {
                 ", attemptCount=" + attemptCount +
                 ", errorMessage='" + errorMessage + '\'' +
                 ", status=" + status +
+                ", classificationId='" + classificationId + '\'' +
+                ", entityGuid='" + entityGuid + '\'' +
+                ", tagTypeName='" + tagTypeName + '\'' +
                 '}';
     }
 }

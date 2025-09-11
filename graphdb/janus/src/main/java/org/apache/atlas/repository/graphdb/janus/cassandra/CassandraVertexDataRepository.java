@@ -2,11 +2,14 @@ package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 import com.datastax.driver.core.exceptions.QueryValidationException;
 import com.datastax.oss.driver.api.core.ConsistencyLevel;
+import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import com.datastax.oss.driver.api.core.servererrors.InvalidQueryException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.inject.Inject;
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 
@@ -45,6 +49,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
 
     private static String DROP_VERTEX = "DELETE from %s.%s where bucket = %s AND id = '%s'";
 
+    private static final int NUM_BUCKETS = 2 << 5; // 64 buckets
+
     /**
      * Creates a new enhanced Cassandra repository.
      *
@@ -60,6 +66,9 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         SimpleModule module = new SimpleModule("NumbersAsStringModule");
         module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
         objectMapper.registerModule(module);
+
+        // Initialize required Cassandra resources (tables) on startup
+        createResources();
     }
 
     @Override
@@ -83,7 +92,18 @@ class CassandraVertexDataRepository implements VertexDataRepository {
             }
 
             batchQuery.append("APPLY BATCH;");
-            session.execute(batchQuery.toString());
+            try {
+                session.execute(batchQuery.toString());
+            } catch (InvalidQueryException iqe) {
+                if (isUnconfiguredTableError(iqe)) {
+                    LOG.warn("Vertex table not found on insert. Attempting to create resources and retry. Error={}", iqe.getMessage());
+                    // Best-effort ensure the table exists, then retry once
+                    createResources();
+                    session.execute(batchQuery.toString());
+                } else {
+                    throw iqe;
+                }
+            }
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -105,7 +125,17 @@ class CassandraVertexDataRepository implements VertexDataRepository {
                 batchQuery.append(insert).append(";");
             }
             batchQuery.append("APPLY BATCH;");
-            session.execute(batchQuery.toString());
+            try {
+                session.execute(batchQuery.toString());
+            } catch (InvalidQueryException iqe) {
+                if (isUnconfiguredTableError(iqe)) {
+                    LOG.warn("Vertex table not found on delete. Attempting to create resources and retry. Error={}", iqe.getMessage());
+                    createResources();
+                    session.execute(batchQuery.toString());
+                } else {
+                    throw iqe;
+                }
+            }
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -144,12 +174,94 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         return session.prepare(queryBuilder.toString());
     }
 
+    /**
+     * Initialize Cassandra resources required by this repository.
+     * Creates the vertex table if it does not already exist using configured keyspace and table name.
+     */
+    private void createResources() {
+        String cql = "CREATE TABLE IF NOT EXISTS %s.%s (\n" +
+                "    id text,\n" +
+                "    bucket int,\n" +
+                "    json_data text,\n" +
+                "    updated_at timestamp,\n" +
+                "    PRIMARY KEY ((bucket), id)\n" +
+                ") WITH compaction = {" +
+                "'class': 'SizeTieredCompactionStrategy', " +
+                "'min_threshold': 4, " +
+                "'max_threshold': 32" +
+                "};";
+
+        try {
+            String formatted = String.format(cql, keyspace, tableName);
+            SimpleStatement stmt = SimpleStatement.builder(formatted)
+                    .setConsistencyLevel(DefaultConsistencyLevel.ALL)
+                    .build();
+            executeSchemaChangeWithRetry(stmt, 5, Duration.ofMillis(100));
+            waitForTableAvailability(Duration.ofSeconds(5));
+            if (LOG.isInfoEnabled()) {
+                LOG.info("Ensured Cassandra table exists: {}.{}", keyspace, tableName);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to create or verify Cassandra table {}.{}: {}", keyspace, tableName, e.getMessage(), e);
+        }
+    }
+
+    private boolean isUnconfiguredTableError(Throwable t) {
+        String msg = t != null && t.getMessage() != null ? t.getMessage().toLowerCase(Locale.ROOT) : "";
+        return msg.contains("unconfigured table") || msg.contains("unknown table") || msg.contains("does not exist");
+    }
+
+    private void executeSchemaChangeWithRetry(SimpleStatement stmt, int maxRetries, Duration initialBackoff) {
+        int attempt = 0;
+        while (true) {
+            try {
+                session.execute(stmt);
+                return;
+            } catch (Exception e) {
+                attempt++;
+                if (attempt > maxRetries) {
+                    throw e;
+                }
+                long backoff = (long) (initialBackoff.toMillis() * Math.pow(2, attempt - 1));
+                LOG.warn("Schema change failed (attempt {}/{}). Retrying in {} ms. Error={}", attempt, maxRetries, backoff, e.getMessage());
+                try {
+                    Thread.sleep(backoff);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Interrupted during schema change retry backoff", ie);
+                }
+            }
+        }
+    }
+
+    private void waitForTableAvailability(Duration timeout) {
+        long deadline = System.currentTimeMillis() + timeout.toMillis();
+        while (System.currentTimeMillis() < deadline) {
+            try {
+                Optional<com.datastax.oss.driver.api.core.metadata.schema.KeyspaceMetadata> ks = session.getMetadata().getKeyspace(keyspace);
+                if (ks.isPresent() && ks.get().getTable(tableName).isPresent()) {
+                    return;
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return;
+            }
+        }
+        LOG.warn("Timed out waiting for table {}.{} to become available in metadata.", keyspace, tableName);
+    }
+
     private int calculateBucket(String vertexId) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
 
         try {
-            int numBuckets = 2 << 5; // 2^5=32
-            return (int) (Long.parseLong(vertexId) % numBuckets);
+            // Backward compatibility for Tags V2
+            return (int) (Long.parseLong(vertexId) % NUM_BUCKETS);
+        } catch (NumberFormatException nfe) {
+            return Math.abs(vertexId.hashCode() % NUM_BUCKETS);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }

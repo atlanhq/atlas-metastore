@@ -66,7 +66,7 @@ public class AtlasBusinessMetadataDef extends AtlasStructDef implements AtlasNam
     }
 
     public AtlasBusinessMetadataDef(String displayName, String description, String typeVersion, List<AtlasAttributeDef> attributeDefs, Map<String, String> options) {
-        this(generateRandomName(), displayName, description, typeVersion, attributeDefs, options);
+        this(null, displayName, description, typeVersion, attributeDefs, options);
     }
     public AtlasBusinessMetadataDef(String name, String displayName, String description, String typeVersion, List<AtlasAttributeDef> attributeDefs, Map<String, String> options) {
         super(TypeCategory.BUSINESS_METADATA, name, description, typeVersion, attributeDefs, options);
