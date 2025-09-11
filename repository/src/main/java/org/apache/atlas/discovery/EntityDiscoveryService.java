@@ -51,6 +51,7 @@ import org.apache.atlas.repository.userprofile.UserProfileService;
 import org.apache.atlas.repository.util.AccessControlUtils;
 import org.apache.atlas.searchlog.ESSearchLogger;
 import org.apache.atlas.service.FeatureFlagStore;
+import org.apache.atlas.stats.StatsClient;
 import org.apache.atlas.type.*;
 import org.apache.atlas.util.AtlasGremlinQueryProvider;
 import org.apache.atlas.util.SearchTracker;
@@ -82,6 +83,7 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.getAllTagNames;
 import static org.apache.atlas.repository.graph.GraphHelper.parseLabelsString;
 import static org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever.DISPLAY_NAME;
+import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PLAYBOOK;
 import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
 
 @Component
@@ -89,7 +91,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(EntityDiscoveryService.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("discovery.EntityDiscoveryService");
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
-    public static final String USE_DSL_OPTIMISATION = "discovery_use_dsl_optimisation";
 
     private final AtlasGraph                      graph;
     private final AtlasGremlinQueryProvider       gremlinQueryProvider;
@@ -337,20 +338,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
 
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
-            if (FeatureFlagStore.evaluate(USE_DSL_OPTIMISATION, "true") &&
-                    CLIENT_ORIGIN_PRODUCT.equals(clientOrigin)) {
-                ElasticsearchDslOptimizer.OptimizationResult result = dslOptimizer.optimizeQueryWithValidation(searchParams.getQuery());
-                String dslOptimised = result.getOptimizedQuery();
-                searchParams.setQuery(dslOptimised);
-
-                // Log validation status for monitoring
-                if (!result.isValidationPassed()) {
-                    LOG.warn("DSL optimization validation failed: {} - falling back to original query",
-                             result.getValidationFailureReason());
-                }
-
+            optimizeQueryIfApplicable(searchParams, clientOrigin);
+            if (CLIENT_ORIGIN_PRODUCT.equals(clientOrigin) || CLIENT_ORIGIN_PLAYBOOK.equals(clientOrigin)) {
                 if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.directIndexSearch(" + dslOptimised + ")");
+                    perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.directIndexSearch(" + searchParams.getQuery() + ")");
                 }
             }
 
@@ -372,6 +363,76 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             }
         }
         return ret;
+    }
+
+    @Override
+    public Map<String, Object> directEsIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+        IndexSearchParams params = (IndexSearchParams) searchParams;
+        String clientOrigin = RequestContext.get().getClientOrigin();
+
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Performing raw ES search for the params ({})", searchParams);
+            }
+
+            String indexName = getIndexName(params);
+            AtlasIndexQuery indexQuery = graph.elasticsearchQuery(indexName);
+
+            if (searchParams.getEnableFullRestriction()) {
+                addPreFiltersToSearchQuery(searchParams);
+            }
+
+            optimizeQueryIfApplicable(searchParams, clientOrigin);
+
+            return indexQuery.directEsIndexQuery(searchParams.getQuery());
+        } catch (Exception e) {
+            LOG.error("Error while performing raw index search for the params ({}), {}", searchParams, e.getMessage());
+            throw e;
+        }
+    }
+
+    @Override
+    public Long directCountIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+        IndexSearchParams params = (IndexSearchParams) searchParams;
+        String clientOrigin = RequestContext.get().getClientOrigin();
+
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Performing ES count for the params ({})", searchParams);
+            }
+
+            String indexName = getIndexName(params);
+            AtlasIndexQuery indexQuery = graph.elasticsearchQuery(indexName);
+
+            if (searchParams.getEnableFullRestriction()) {
+                addPreFiltersToSearchQuery(searchParams);
+            }
+
+            optimizeQueryIfApplicable(searchParams, clientOrigin);
+
+            return indexQuery.countIndexQuery(searchParams.getQuery());
+        } catch (Exception e) {
+            LOG.error("Error while performing count index search for the params ({}), {}", searchParams, e.getMessage());
+            throw e;
+        }
+    }
+
+    private void optimizeQueryIfApplicable(SearchParams searchParams, String clientOrigin) {
+        try {
+            if (CLIENT_ORIGIN_PRODUCT.equals(clientOrigin) || CLIENT_ORIGIN_PLAYBOOK.equals(clientOrigin)) {
+                ElasticsearchDslOptimizer.OptimizationResult result = dslOptimizer.optimizeQueryWithValidation(searchParams.getQuery());
+                String dslOptimised = result.getOptimizedQuery();
+                searchParams.setQuery(dslOptimised);
+
+                if (!result.isValidationPassed()) {
+                    LOG.warn("DSL optimization validation failed: {} - falling back to original query",
+                            result.getValidationFailureReason());
+                }
+            }
+        } catch (Exception ex) {
+            // Do not fail the request on optimization errors; log and proceed with original query
+            LOG.error("DSL optimization errored; proceeding with original query: {}", ex.getMessage());
+        }
     }
 
     public List<AtlasVertex> directVerticesIndexSearch(SearchParams searchParams) throws AtlasBaseException {

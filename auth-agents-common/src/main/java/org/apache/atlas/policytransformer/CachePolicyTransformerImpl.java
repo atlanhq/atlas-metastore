@@ -245,7 +245,7 @@ public class CachePolicyTransformerImpl {
             }
 
         } catch (Exception e) {
-            LOG.error("PolicyDelta: {}: ABAC_AUTH: ERROR in getPoliciesDelta {}: {}", serviceName, e.getMessage(), e);
+            LOG.error("PolicyDelta: {}: ABAC_AUTH: ERROR in getPoliciesDelta: {}", serviceName, e.getMessage(), e);
             return null;
         }
 
@@ -381,6 +381,10 @@ public class CachePolicyTransformerImpl {
 
         for (RangerPolicy policy : rangerPolicies) {
             Integer changeType = auditEventToDeltaChangeType.get(policyChanges.get(policy.getAtlasGuid()));
+            if (changeType == null) {
+                LOG.warn("PolicyDelta: {}: No change type found for policy guid={} audit_event={}", serviceName, policy.getAtlasGuid(), policyChanges.get(policy.getAtlasGuid()));
+                continue;
+            }
             RangerPolicyDelta delta = new RangerPolicyDelta(policy.getId(), changeType, policy.getVersion(), policy);
             policyDeltas.add(delta);
         }
@@ -388,7 +392,7 @@ public class CachePolicyTransformerImpl {
         // handle delete changes separately as they won't be present in atlas policies
         List<RangerPolicyDelta> deletedPolicyDeltas = new ArrayList<>();
         for (String policyGuid : policyGuids) {
-            int deltaChangeType = auditEventToDeltaChangeType.get(policyChanges.get(policyGuid));
+            Integer deltaChangeType = auditEventToDeltaChangeType.get(policyChanges.get(policyGuid));
             if (deltaChangeType == RangerPolicyDelta.CHANGE_TYPE_POLICY_DELETE) {
                 RangerPolicy deletedPolicy = new RangerPolicy();
                 deletedPolicy.setGuid(policyGuid);
