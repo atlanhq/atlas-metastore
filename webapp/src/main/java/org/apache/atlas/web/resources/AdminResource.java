@@ -291,7 +291,6 @@ public class AdminResource {
                 put(STATUS, serviceState.getState().toString());
             }};
 
-
         Response response = Response.ok(AtlasJson.toV1Json(responseData)).build();
 
         if (LOG.isDebugEnabled()) {
@@ -299,6 +298,49 @@ public class AdminResource {
         }
 
         return response;
+    }
+
+    @GET
+    @Path("ready")
+    @Produces(Servlets.JSON_MEDIA_TYPE)
+    @Timed
+    public Response getReadyStatus() {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> AdminResource.getReadyStatus()");
+        }
+
+        // Check if tasks are being processed
+        boolean isProcessingTasks = taskManagement.isProcessingTasks();
+        
+        // Check memory usage
+        Runtime runtime = Runtime.getRuntime();
+        long maxMemory = runtime.maxMemory();
+        long totalMemory = runtime.totalMemory();
+        long freeMemory = runtime.freeMemory();
+        long usedMemory = totalMemory - freeMemory;
+        double memoryUsage = (double) usedMemory / maxMemory;
+
+        Map<String, Object> responseData = new HashMap<String, Object>() {{
+            put("isProcessingTasks", isProcessingTasks);
+            put("memoryUsage", String.format("%.2f", memoryUsage * 100));
+            put("status", serviceState.getState().toString());
+        }};
+
+        Response.ResponseBuilder builder;
+        
+        // Return 503 if processing tasks or high memory
+        if (isProcessingTasks || memoryUsage > 0.75) {
+            builder = Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                            .entity(AtlasJson.toV1Json(responseData));
+        } else {
+            builder = Response.ok(AtlasJson.toV1Json(responseData));
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("<== AdminResource.getReadyStatus()");
+        }
+
+        return builder.build();
     }
 
     @GET
