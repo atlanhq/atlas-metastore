@@ -207,7 +207,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                     removeProperty(propertyName);
                 }
             } else {
-                if (RequestContext.get().isIdOnlyGraphEnabled() && isVertex() && !propertyName.equals("__type")) {
+                if (isDynamicVertex(propertyName)) {
                     AtlasJanusVertex vertex = (AtlasJanusVertex) this;
                     vertex.getDynamicVertex().setProperty(propertyName, value);
 
@@ -224,6 +224,13 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+
+    private boolean isDynamicVertex(String propertyName) {
+        return RequestContext.get().isIdOnlyGraphEnabled() &&
+                isVertex() &&
+                !propertyName.equals("__type") &&
+                !propertyName.startsWith("__patch");
     }
 
     protected boolean isVertex() {
