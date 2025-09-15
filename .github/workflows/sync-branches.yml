@@ -1,0 +1,34 @@
+name: Sync idonlycanary to idonlycanarybeta
+
+on:
+  push:
+    branches:
+      - idonlycanary
+
+jobs:
+  sync-branches:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+
+      - name: Set up Git user
+        run: |
+          git config user.name "GitHub Actions Bot"
+          git config user.email "actions@github.com"
+
+      - name: Merge idonlycanary into idonlycanarybeta
+        run: |
+          git fetch origin idonlycanarybeta # Ensure the local idonlycanarybeta is up-to-date
+          git checkout idonlycanarybeta
+          git pull origin idonlycanarybeta # Pull again to be absolutely sure
+          git merge origin/idonlycanary --no-ff -m "Auto-merge: Sync changes from idonlycanary"
+          # --no-ff creates a merge commit, making it clear in the history that a sync occurred.
+          # Remove --no-ff if you prefer a fast-forward merge when possible.
+
+      - name: Push changes to idonlycanarybeta
+        run: |
+          git push https://github.com/${GITHUB_REPOSITORY}.git idonlycanarybeta

@@ -19,7 +19,6 @@
 package org.apache.atlas.util;
 
 
-import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graph.IFullTextMapper;
@@ -29,11 +28,8 @@ import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
-import org.apache.atlas.repository.util.AtlasEntityUtils;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.utils.AtlasEntityUtil;
-import org.janusgraph.core.JanusGraph;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -110,7 +106,7 @@ public class RepairIndex {
         Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) graph).getESPropertiesForUpdateFromVertices(vertices, this.typeRegistry);
         for (AtlasVertex vertex : vertices) {
             String vertexId = vertex.getIdForDisplay();
-            List<AtlasClassification> tags = tagDAO.getTagsForVertex(vertexId);
+            List<AtlasClassification> tags = tagDAO.getAllClassificationsForVertex(vertexId);
             if (!tags.isEmpty()) {
                 toReIndex.get(vertexId).putAll(TagDeNormAttributesUtil.getAllTagAttributes(getGuid(vertex), tags, typeRegistry, fullTextMapperV2));
             }

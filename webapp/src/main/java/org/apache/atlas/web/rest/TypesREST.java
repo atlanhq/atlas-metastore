@@ -19,6 +19,7 @@ package org.apache.atlas.web.rest;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -57,6 +58,11 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.atlas.AtlasErrorCode.APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED;
+import static org.apache.atlas.AtlasErrorCode.ATTRIBUTE_DELETION_NOT_SUPPORTED;
+import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
+import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
+
 /**
  * REST interface for CRUD operations on type definitions
  */
@@ -68,20 +74,25 @@ import java.util.concurrent.TimeUnit;
 public class TypesREST {
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.TypesREST");
     private static final Logger LOG = LoggerFactory.getLogger(TypesREST.class);
-    private static final String ATLAS_TYPEDEF_LOCK = "atlas:type-def:lock";
-
+    // private static final String ATLAS_TYPEDEF_LOCK = "atlas:type-def:lock";
 
     private final AtlasTypeDefStore typeDefStore;
     private final RedisService redisService;
     private final TypeCacheRefresher typeCacheRefresher;
     private final ExecutorService cacheRefreshExecutor;
+    private String typeDefLock;
+
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 1000;
 
     @Inject
     public TypesREST(AtlasTypeDefStore typeDefStore, RedisService redisService, Configuration configuration, TypeCacheRefresher typeCacheRefresher) {
         this.typeDefStore = typeDefStore;
         this.redisService = redisService;
         this.typeCacheRefresher = typeCacheRefresher;
-        
+        this.typeDefLock = configuration.getString(ApplicationProperties.TYPEDEF_LOCK_NAME, "atlas:type-def:lock");
+        LOG.info("TypeDef lock name: {}", this.typeDefLock);
+
         this.cacheRefreshExecutor = Executors.newFixedThreadPool(AtlasConfiguration.MAX_THREADS_TYPE_UPDATE.getInt(), r -> {
             Thread t = new Thread(r);
             t.setName("Atlas-Cache-Refresh-" + t.getId());
@@ -393,7 +404,7 @@ public class TypesREST {
     private void attemptAcquiringLock() throws AtlasBaseException {
         final String traceId = RequestContext.get().getTraceId();
         try {
-            if (!redisService.acquireDistributedLock(ATLAS_TYPEDEF_LOCK)) {
+            if (!redisService.acquireDistributedLock(typeDefLock)) {
                 LOG.info("Lock is already acquired. Returning now :: traceId {}", traceId);
                 throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK);
             }
@@ -411,15 +422,15 @@ public class TypesREST {
         Lock lock = null;
         try {
 
-            lock = redisService.acquireDistributedLockV2(ATLAS_TYPEDEF_LOCK);
+            lock = redisService.acquireDistributedLockV2(typeDefLock);
             if (lock == null) {
-                LOG.info("Lock is already acquired. for key {} : Returning now :: traceId {}", ATLAS_TYPEDEF_LOCK, traceId);
+                LOG.info("Lock is already acquired. for key {} : Returning now :: traceId {}", typeDefLock, traceId);
                 throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK);
             }
-            LOG.info("Successfully acquired lock with key {} :: traceId {}", ATLAS_TYPEDEF_LOCK, traceId);
+            LOG.info("Successfully acquired lock with key {} :: traceId {}", typeDefLock, traceId);
             return lock;
         } catch (AtlasBaseException e) {
-            redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
+            redisService.releaseDistributedLockV2(lock, typeDefLock);
             throw e;
         } catch (Exception e) {
             LOG.error("Error while acquiring lock on type-defs :: traceId " + traceId + " ." + e.getMessage(), e);
@@ -443,10 +454,10 @@ public class TypesREST {
     @POST
     @Path("/typedefs")
     @Timed
-    public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
+    public AtlasTypesDef createAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
         Lock lock = null;
         AtlasPerfTracer perf = null;
-        validateTypeCreateOrUpdate(typesDef);
+        validateBuiltInTypeNames(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
@@ -458,8 +469,8 @@ public class TypesREST {
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
             typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
-            AtlasTypesDef atlasTypesDef = typeDefStore.createTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId());
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            AtlasTypesDef atlasTypesDef = createTypeDefsWithRetry(typesDef, clientOrigin);
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.createAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -470,30 +481,12 @@ public class TypesREST {
         }
         finally {
             if (lock != null) {
-                redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
             }
             AtlasPerfTracer.log(perf);
         }
     }
 
-    private void validateTypeCreateOrUpdate(AtlasTypesDef typesDef) throws AtlasBaseException {
-
-        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs())
-                if (typeDefStore.hasBuiltInTypeName(typeDef))
-                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs())
-                if (typeDefStore.hasBuiltInTypeName(typeDef))
-                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
-        }
-        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs())
-                if (typeDefStore.hasBuiltInTypeName(typeDef))
-                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
-        }
-    }
     /**
      * Bulk update API for all types, changes detected in the type definitions would be persisted
      * @param typesDef A composite object that captures all type definition changes
@@ -506,10 +499,11 @@ public class TypesREST {
     @Path("/typedefs")
     @Experimental
     @Timed
-    public AtlasTypesDef updateAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
+    public AtlasTypesDef updateAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
                                              @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
-        validateTypeCreateOrUpdate(typesDef);
+        validateBuiltInTypeNames(typesDef);
+        validateTypeNameExists(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         Lock lock = null;
         try {
@@ -542,8 +536,8 @@ public class TypesREST {
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
-            AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId());
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            AtlasTypesDef atlasTypesDef = updateTypeDefsWithRetry(typesDef, clientOrigin);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Done");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
@@ -554,7 +548,7 @@ public class TypesREST {
             throw new AtlasBaseException("Error while updating a type definition");
         } finally {
             if (lock != null) {
-                redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
             }
             RequestContext.clear();
             AtlasPerfTracer.log(perf);
@@ -572,10 +566,12 @@ public class TypesREST {
     @Path("/typedefs")
     @Experimental
     @Timed
-    public void deleteAtlasTypeDefs(final AtlasTypesDef typesDef) throws AtlasBaseException {
+    public void deleteAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         Lock lock = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
+        validateBuiltInTypeNames(typesDef);
+        validateTypeNameExists(typesDef);
         try {
             typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
@@ -583,8 +579,8 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
-            typeDefStore.deleteTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId());
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            deleteTypeDefsWithRetry(typesDef, clientOrigin);
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -593,7 +589,7 @@ public class TypesREST {
             throw new AtlasBaseException("Error while deleting a type definition");
         } finally {
             if (lock != null) {
-                redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
             }
             AtlasPerfTracer.log(perf);
         }
@@ -619,8 +615,7 @@ public class TypesREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeByName(" + typeName + ")");
             }
             lock = attemptAcquiringLockV2();
-            typeDefStore.deleteTypeByName(typeName);
-            typeCacheRefresher.refreshAllHostCache();
+            deleteTypeByNameWithRetry(typeName);
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeByName:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -629,9 +624,66 @@ public class TypesREST {
             throw new AtlasBaseException("Error while deleting a type definition");
         } finally {
             if (lock != null) {
-                redisService.releaseDistributedLockV2(lock, ATLAS_TYPEDEF_LOCK);
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
             }
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    private void validateBuiltInTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs())
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
+                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs())
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
+                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs())
+                if (typeDefStore.hasBuiltInTypeName(typeDef))
+                    throw new AtlasBaseException(AtlasErrorCode.FORBIDDEN_TYPENAME, typeDef.getName());
+        }
+    }
+
+    private void validateTypeNames(AtlasTypesDef typesDef) throws AtlasBaseException {
+        if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEnumDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getEntityDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getStructDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getClassificationDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+        if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
+            for (AtlasBaseTypeDef typeDef : typesDef.getBusinessMetadataDefs()) {
+                typeDefStore.getByName(typeDef.getName());
+            }
+        }
+    }
+
+    private void validateTypeNameExists(AtlasTypesDef typesDef) throws AtlasBaseException {
+        try {
+            validateTypeNames(typesDef);
+        } catch (AtlasBaseException e) {
+            if(AtlasErrorCode.TYPE_NAME_NOT_FOUND.equals(e.getAtlasErrorCode())) {
+                typeDefStore.initWithoutLock();
+                validateTypeNames(typesDef);
+            }
         }
     }
 
@@ -665,8 +717,8 @@ public class TypesREST {
         return ret;
     }
 
-    private void refreshAllHostCache(String traceId){
-        if (AtlasConfiguration.ENABLE_ASYNC_TYPE_UPDATE.getBoolean()){
+    private void refreshAllHostCache(String traceId, String clientOrigin){
+        if (CLIENT_ORIGIN_PRODUCT.equals(clientOrigin) && AtlasConfiguration.ENABLE_ASYNC_TYPE_UPDATE.getBoolean()){
             cacheRefreshExecutor.submit(() -> {
                 RequestContext.get().setTraceId(traceId);
                 try {
@@ -729,6 +781,181 @@ public class TypesREST {
             }
         }
 
-        this.redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
+        this.redisService.releaseDistributedLock(typeDefLock);
+    }
+
+    private AtlasTypesDef createTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Enable patching for cache conflicts (Atlas might confuse CREATE with UPDATE)
+                RequestContext.get().setInTypePatching(true);
+                
+                // Perform the creation
+                AtlasTypesDef result = typeDefStore.createTypesDef(typesDef);
+                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                LOG.info("Successfully created typedefs on attempt {}", attempt);
+                return result;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to create typedefs after {} attempts", MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Creation attempt {} failed with retryable error, retrying in {}ms",
+                            attempt, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Creation retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred during creation", e);
+                    throw e;
+                }
+            } finally {
+                // Reset type patching mode
+                RequestContext.get().setInTypePatching(false);
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private AtlasTypesDef updateTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+        boolean originalPatchingState = RequestContext.get().isInTypePatching();
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Enable patching for retries to handle cache sync conflicts
+                if (attempt > 1) {
+                    RequestContext.get().setInTypePatching(true);
+                }
+                
+                AtlasTypesDef result = typeDefStore.updateTypesDef(typesDef);
+                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                LOG.info("Successfully updated typedefs on attempt {}", attempt);
+                return result;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to update typedefs after {} attempts", MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Attempt {} failed with retryable error, retrying in {}ms",
+                            attempt, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred", e);
+                    throw e;
+                }
+            } finally {
+                // Always restore original patching state
+                RequestContext.get().setInTypePatching(originalPatchingState);
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private void deleteTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Perform the deletion
+                typeDefStore.deleteTypesDef(typesDef);
+                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                LOG.info("Successfully deleted typedefs on attempt {}", attempt);
+                return;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to delete typedefs after {} attempts", MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Deletion attempt {} failed with retryable error, retrying in {}ms",
+                            attempt, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Deletion retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred during deletion", e);
+                    throw e;
+                }
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private void deleteTypeByNameWithRetry(String typeName) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Perform the deletion
+                typeDefStore.deleteTypeByName(typeName);
+                refreshAllHostCache(RequestContext.get().getTraceId(), null);
+                LOG.info("Successfully deleted typedef '{}' on attempt {}", typeName, attempt);
+                return;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to delete typedef '{}' after {} attempts", typeName, MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Deletion attempt {} for '{}' failed with retryable error, retrying in {}ms",
+                            attempt, typeName, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Deletion retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred during deletion of '{}'", typeName, e);
+                    throw e;
+                }
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private boolean isRetryable(AtlasBaseException e) {
+        return APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode()) ||
+               ATTRIBUTE_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode());
     }
 }

@@ -110,6 +110,16 @@ public class PreProcessorUtils {
         return NanoIdUtils.randomNanoId();
     }
 
+    public static String getUUID(AtlasEntity entity){
+        // Check if custom qualified name is allowed and entity has qualifiedNameUUID
+        if (RequestContext.get().isAllowCustomQualifiedName() && 
+            entity != null && 
+            StringUtils.isNotEmpty(entity.getQualifiedNameUUID())) {
+            return entity.getQualifiedNameUUID();
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
     public static String getUserName(){
         return NanoIdUtils.randomNanoId();
     }
@@ -194,6 +204,42 @@ public class PreProcessorUtils {
 
             if (CollectionUtils.isNotEmpty(headers)) {
                 ret.addAll(headers);
+            } else {
+                hasMore = false;
+            }
+
+            from += size;
+
+        } while (hasMore);
+
+        return ret;
+    }
+
+    public static List<AtlasVertex> retrieveVerticesFromIndexSearchPaginated(Map<String, Object> dsl, Set<String> attributes, EntityDiscoveryService discovery) throws AtlasBaseException {
+        IndexSearchParams searchParams = new IndexSearchParams();
+        List<AtlasVertex> ret = new ArrayList<>();
+
+        if (CollectionUtils.isNotEmpty(attributes)) {
+            searchParams.setAttributes(attributes);
+        }
+
+        List<Map> sortList = new ArrayList<>(0);
+        sortList.add(mapOf("__timestamp", mapOf("order", "asc")));
+        sortList.add(mapOf("__guid", mapOf("order", "asc")));
+        dsl.put("sort", sortList);
+
+        int from = 0;
+        int size = 100;
+        boolean hasMore = true;
+        do {
+            dsl.put("from", from);
+            dsl.put("size", size);
+            searchParams.setDsl(dsl);
+
+            List<AtlasVertex> vertices = discovery.directVerticesIndexSearch(searchParams);
+
+            if (CollectionUtils.isNotEmpty(vertices)) {
+                ret.addAll(vertices);
             } else {
                 hasMore = false;
             }

@@ -1,13 +1,17 @@
 package org.apache.atlas.repository.store.graph.v2.tasks;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.tasks.AtlasTaskService;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,6 +52,37 @@ public class TaskUtil {
 
         return taskService.getTasksByCondition(from, size, mustConditions, shouldConditions, excludeConditions);
 
+    }
+
+    /**
+     *
+     * Finds a single page of pending tasks that match the specified criteria, starting from a given offset.
+     *
+     * @param from        The starting offset for pagination.
+     * @param size        The page size.
+     * @param entityGuid  The GUID of the entity.
+     * @param tagTypeName The type name of the classification/tag.
+     * @param types       A list of task types to search for.
+     * @return A list of tasks from the specified page of results.
+     * @throws AtlasBaseException
+     */
+    public List<AtlasTask> findAPageOfPendingTasks(int from, int size, String entityGuid, String tagTypeName, List<String> types) throws AtlasBaseException {
+        List<Map<String,Object>> mustConditions = new ArrayList<>();
+
+        if (StringUtils.isNotEmpty(entityGuid))
+            mustConditions.add(getMap("term", getMap(TASK_ENTITY_GUID, entityGuid)));
+
+        if (StringUtils.isNotEmpty(tagTypeName))
+            mustConditions.add(getMap("term", getMap(TASK_CLASSIFICATION_TYPENAME, tagTypeName)));
+
+        if (CollectionUtils.isNotEmpty(types)) {
+            mustConditions.add(getMap("terms", getMap(TASK_TYPE, types)));
+        }
+
+        // The ES query is filtered by PENDING status, though results must be validated due to potential sync issues/delays.
+        mustConditions.add(getMap("term", getMap(TASK_STATUS + ".keyword", TASK_STATUS_PENDING)));
+
+        return taskService.getTasksByCondition(from, size, mustConditions);
     }
 
     private Map<String, Object> getMap(String key, Object value) {

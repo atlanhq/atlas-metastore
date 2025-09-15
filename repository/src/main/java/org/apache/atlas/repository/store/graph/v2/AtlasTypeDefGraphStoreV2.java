@@ -36,6 +36,7 @@ import org.apache.atlas.repository.store.graph.AtlasDefStore;
 import org.apache.atlas.repository.store.graph.AtlasTypeDefGraphStore;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.type.AtlasTypeUtil;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -122,6 +123,16 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
         LOG.info("<== AtlasTypeDefGraphStoreV1.init()");
     }
 
+    @Override
+    @GraphTransaction
+    public void initWithoutLock() throws AtlasBaseException {
+        LOG.info("==> AtlasTypeDefGraphStoreV1.initWithoutLock()");
+
+        super.initWithoutLock();
+
+        LOG.info("<== AtlasTypeDefGraphStoreV1.initWithoutLock()");
+    }
+
     AtlasGraph getAtlasGraph() { return atlasGraph; }
 
     @VisibleForTesting
@@ -176,7 +187,7 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
                 .vertices().iterator();
     }
 
-    AtlasVertex createTypeVertex(AtlasBaseTypeDef typeDef) {
+    AtlasVertex createTypeVertex(AtlasBaseTypeDef typeDef) throws AtlasBaseException {
         // Validate all the required checks
         Preconditions.checkArgument(StringUtils.isNotBlank(typeDef.getName()), "Type name can't be null/empty");
 
@@ -190,8 +201,16 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
             typeDef.setVersion(1L);
         }
 
-        if (StringUtils.isBlank(typeDef.getGuid())) {
+        if (StringUtils.isBlank(typeDef.getGuid()) || !RequestContext.get().isAllowCustomGuid() || !AtlasTypeUtil.isAssignedGuid(typeDef.getGuid())) {
             typeDef.setGuid(UUID.randomUUID().toString());
+        }
+
+        // Check if this GUID is already used by another type
+        if (StringUtils.isNotBlank(typeDef.getGuid())) {
+            AtlasVertex existingVertex = findTypeVertexByGuid(typeDef.getGuid());
+            if (existingVertex != null) {
+                throw new AtlasBaseException(AtlasErrorCode.TYPE_ALREADY_EXISTS, typeDef.getGuid());
+            }
         }
 
         if (typeDef.getCreateTime() == null) {
