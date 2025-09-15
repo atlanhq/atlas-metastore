@@ -86,7 +86,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.jetbrains.annotations.NotNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -359,6 +358,9 @@ public class EntityGraphMapper {
 
         if (CollectionUtils.isNotEmpty(context.getEntitiesToRestore())) {
             restoreHandlerV1.restoreEntities(context.getEntitiesToRestore());
+            for (AtlasEntityHeader restoredEntity : reqContext.getRestoredEntities()) {
+                resp.addEntity(UPDATE, restoredEntity);
+            }
         }
 
         Collection<AtlasEntity> createdEntities = context.getCreatedEntities();
@@ -3901,7 +3903,7 @@ public class EntityGraphMapper {
 
     public void addClassificationsV2(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(classifications)) {
-            MetricRecorder metric = RequestContext.get().startMetricRecord("addClassifications");
+            MetricRecorder metric = RequestContext.get().startMetricRecord("addClassificationsV2");
 
             final AtlasVertex                              entityVertex          = context.getVertex(guid);
             final AtlasEntityType                          entityType            = context.getType(guid);
@@ -4051,7 +4053,6 @@ public class EntityGraphMapper {
         }
     }
 
-    @NotNull
     private List<AtlasClassification> mapClassificationsV2(List<AtlasClassification> classifications) throws AtlasBaseException {
         List<AtlasClassification> mappedClassifications = new ArrayList<>(classifications.size());
         for (AtlasClassification c : classifications) {
