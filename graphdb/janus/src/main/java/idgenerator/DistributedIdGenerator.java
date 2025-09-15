@@ -178,6 +178,7 @@ public class DistributedIdGenerator implements AutoCloseable {
 
         if (this.counter.get() == 0) {
             counter.incrementAndGet();
+            logger.info("Generated next ID: {}", current);
             return current;
         }
 
@@ -194,6 +195,7 @@ public class DistributedIdGenerator implements AutoCloseable {
                     currentRangePrefix, serverName, nextId);
         }
 
+        logger.info("Generated next ID: {}", nextId);
         return nextId;
     }
 
