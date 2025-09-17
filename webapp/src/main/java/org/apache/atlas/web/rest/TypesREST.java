@@ -58,6 +58,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.atlas.AtlasErrorCode.APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED;
+import static org.apache.atlas.AtlasErrorCode.ATTRIBUTE_DELETION_NOT_SUPPORTED;
 import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
 import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
 
@@ -79,6 +81,9 @@ public class TypesREST {
     private final TypeCacheRefresher typeCacheRefresher;
     private final ExecutorService cacheRefreshExecutor;
     private String typeDefLock;
+
+    private static final int MAX_RETRIES = 3;
+    private static final long RETRY_DELAY_MS = 1000;
 
     @Inject
     public TypesREST(AtlasTypeDefStore typeDefStore, RedisService redisService, Configuration configuration, TypeCacheRefresher typeCacheRefresher) {
@@ -449,10 +454,7 @@ public class TypesREST {
     @POST
     @Path("/typedefs")
     @Timed
-    public AtlasTypesDef createAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef,
-                                           @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
-                                           @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid,
-                                           @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
+    public AtlasTypesDef createAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
         Lock lock = null;
         AtlasPerfTracer perf = null;
         validateBuiltInTypeNames(typesDef);
@@ -465,73 +467,10 @@ public class TypesREST {
             }
             lock = attemptAcquiringLockV2();
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
-            RequestContext.get().setAllowCustomGuid(allowCustomGuid);
-            
-            // Process BusinessMetadataDefs
-            if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
-                for (AtlasBusinessMetadataDef bmDef : typesDef.getBusinessMetadataDefs()) {
-                    if (allowCustomName) {
-                        // Validate that name is provided
-                        if (bmDef.getName() == null || bmDef.getName().trim().isEmpty()) {
-                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "BusinessMetadataDef");
-                        }
-                        // Validate attribute names
-                        if (CollectionUtils.isNotEmpty(bmDef.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : bmDef.getAttributeDefs()) {
-                                if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
-                                    throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
-                                        "BusinessMetadataDef attribute in " + bmDef.getName());
-                                }
-                            }
-                        }
-                        // Names are already provided by user, no action needed
-                    } else {
-                        // Always generate random names when allowCustomName=false
-                        bmDef.setName(AtlasStructDef.generateRandomName());
-                        // Generate random names for all attributes
-                        if (CollectionUtils.isNotEmpty(bmDef.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : bmDef.getAttributeDefs()) {
-                                attrDef.setName(AtlasStructDef.generateRandomName());
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Process ClassificationDefs
-            if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
-                for (AtlasClassificationDef classDef : typesDef.getClassificationDefs()) {
-                    if (allowCustomName) {
-                        // Validate that name is provided
-                        if (classDef.getName() == null || classDef.getName().trim().isEmpty()) {
-                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "ClassificationDef");
-                        }
-                        // Validate attribute names
-                        if (CollectionUtils.isNotEmpty(classDef.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : classDef.getAttributeDefs()) {
-                                if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
-                                    throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
-                                        "ClassificationDef attribute in " + classDef.getName());
-                                }
-                            }
-                        }
-                        // Names are already provided by user, no action needed
-                    } else {
-                        // Always generate random names when allowCustomName=false
-                        classDef.setName(AtlasStructDef.generateRandomName());
-                        // Generate random names for all attributes
-                        if (CollectionUtils.isNotEmpty(classDef.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : classDef.getAttributeDefs()) {
-                                attrDef.setName(AtlasStructDef.generateRandomName());
-                            }
-                        }
-                    }
-                }
-            }
-            
-            AtlasTypesDef atlasTypesDef = typeDefStore.createTypesDef(typesDef);
+            typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
+            typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
             String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
-            refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+            AtlasTypesDef atlasTypesDef = createTypeDefsWithRetry(typesDef, clientOrigin);
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.createAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -561,8 +500,7 @@ public class TypesREST {
     @Experimental
     @Timed
     public AtlasTypesDef updateAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
-                                             @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName,
-                                             @QueryParam("allowCustomName") @DefaultValue("false") boolean allowCustomName) throws AtlasBaseException {
+                                             @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         validateBuiltInTypeNames(typesDef);
         validateTypeNameExists(typesDef);
@@ -575,100 +513,31 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
-            
-            // Process BusinessMetadataDefs
-            if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
-                for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
-                    AtlasBusinessMetadataDef existingMB = null;
-                    try {
-                        existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
-                    } catch (AtlasBaseException e) {
-                        // This is a new BM
-                    }
-                    
-                    if (allowCustomName) {
-                        // Validate that name is provided
-                        if (mb.getName() == null || mb.getName().trim().isEmpty()) {
-                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "BusinessMetadataDef");
-                        }
-                        // Validate new attribute names
-                        if (CollectionUtils.isNotEmpty(mb.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : mb.getAttributeDefs()) {
-                                if (existingMB == null || !isExistingAttribute(existingMB, attrDef.getName())) {
-                                    if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
-                                        throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
-                                            "BusinessMetadataDef attribute in " + mb.getName());
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Always generate random names when allowCustomName=false
-                        if (existingMB == null) {
-                            // New type - generate random name
-                            mb.setName(AtlasStructDef.generateRandomName());
-                        }
-                        // Generate random names for new attributes only
-                        if (CollectionUtils.isNotEmpty(mb.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : mb.getAttributeDefs()) {
-                                if (existingMB == null || !isExistingAttribute(existingMB, attrDef.getName())) {
-                                    attrDef.setName(AtlasStructDef.generateRandomName());
-                                }
-                            }
-                        }
-                    }
+            for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
+                AtlasBusinessMetadataDef existingMB;
+                try{
+                    existingMB = typeDefStore.getBusinessMetadataDefByGuid(mb.getGuid());
+                }catch (AtlasBaseException e){
+                    //do nothing -- this BM is ew
+                    existingMB = null;
                 }
+                mb.setRandomNameForNewAttributeDefs(existingMB);
             }
-            
-            // Process ClassificationDefs
-            if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
-                for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
-                    AtlasClassificationDef existingClassificationDef = null;
-                    try {
-                        existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
-                    } catch (AtlasBaseException e) {
-                        // This is a new classification
-                    }
-                    
-                    if (allowCustomName) {
-                        // Validate that name is provided
-                        if (classificationDef.getName() == null || classificationDef.getName().trim().isEmpty()) {
-                            throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", "ClassificationDef");
-                        }
-                        // Validate new attribute names
-                        if (CollectionUtils.isNotEmpty(classificationDef.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : classificationDef.getAttributeDefs()) {
-                                if (existingClassificationDef == null || !isExistingAttribute(existingClassificationDef, attrDef.getName())) {
-                                    if (attrDef.getName() == null || attrDef.getName().trim().isEmpty()) {
-                                        throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, "name", 
-                                            "ClassificationDef attribute in " + classificationDef.getName());
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        // Always generate random names when allowCustomName=false
-                        if (existingClassificationDef == null) {
-                            // New type - generate random name
-                            classificationDef.setName(AtlasStructDef.generateRandomName());
-                        }
-                        // Generate random names for new attributes only
-                        if (CollectionUtils.isNotEmpty(classificationDef.getAttributeDefs())) {
-                            for (AtlasStructDef.AtlasAttributeDef attrDef : classificationDef.getAttributeDefs()) {
-                                if (existingClassificationDef == null || !isExistingAttribute(existingClassificationDef, attrDef.getName())) {
-                                    attrDef.setName(AtlasStructDef.generateRandomName());
-                                }
-                            }
-                        }
-                    }
+            for (AtlasClassificationDef classificationDef : typesDef.getClassificationDefs()) {
+                AtlasClassificationDef existingClassificationDef;
+                try{
+                    existingClassificationDef = typeDefStore.getClassificationDefByGuid(classificationDef.getGuid());
+                }catch (AtlasBaseException e){
+                    //do nothing -- this classification is ew
+                    existingClassificationDef = null;
                 }
+                classificationDef.setRandomNameForNewAttributeDefs(existingClassificationDef);
             }
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
-            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
-            AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
-            refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
+            AtlasTypesDef atlasTypesDef = updateTypeDefsWithRetry(typesDef, clientOrigin);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Done");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
@@ -710,9 +579,8 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
-            typeDefStore.deleteTypesDef(typesDef);
             String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
-            refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+            deleteTypeDefsWithRetry(typesDef, clientOrigin);
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -747,8 +615,7 @@ public class TypesREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeByName(" + typeName + ")");
             }
             lock = attemptAcquiringLockV2();
-            typeDefStore.deleteTypeByName(typeName);
-            typeCacheRefresher.refreshAllHostCache();
+            deleteTypeByNameWithRetry(typeName);
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeByName:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -814,7 +681,7 @@ public class TypesREST {
             validateTypeNames(typesDef);
         } catch (AtlasBaseException e) {
             if(AtlasErrorCode.TYPE_NAME_NOT_FOUND.equals(e.getAtlasErrorCode())) {
-                typeDefStore.init();
+                typeDefStore.initWithoutLock();
                 validateTypeNames(typesDef);
             }
         }
@@ -897,20 +764,6 @@ public class TypesREST {
         }
     }
 
-    private boolean isExistingAttribute(AtlasStructDef structDef, String attributeName) {
-        if (structDef == null || attributeName == null || CollectionUtils.isEmpty(structDef.getAttributeDefs())) {
-            return false;
-        }
-        
-        for (AtlasStructDef.AtlasAttributeDef attr : structDef.getAttributeDefs()) {
-            if (attributeName.equals(attr.getName())) {
-                return true;
-            }
-        }
-        
-        return false;
-    }
-
     @PreDestroy
     public void cleanUp() {
         if (cacheRefreshExecutor != null) {
@@ -929,5 +782,180 @@ public class TypesREST {
         }
 
         this.redisService.releaseDistributedLock(typeDefLock);
+    }
+
+    private AtlasTypesDef createTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Enable patching for cache conflicts (Atlas might confuse CREATE with UPDATE)
+                RequestContext.get().setInTypePatching(true);
+                
+                // Perform the creation
+                AtlasTypesDef result = typeDefStore.createTypesDef(typesDef);
+                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                LOG.info("Successfully created typedefs on attempt {}", attempt);
+                return result;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to create typedefs after {} attempts", MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Creation attempt {} failed with retryable error, retrying in {}ms",
+                            attempt, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Creation retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred during creation", e);
+                    throw e;
+                }
+            } finally {
+                // Reset type patching mode
+                RequestContext.get().setInTypePatching(false);
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private AtlasTypesDef updateTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+        boolean originalPatchingState = RequestContext.get().isInTypePatching();
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Enable patching for retries to handle cache sync conflicts
+                if (attempt > 1) {
+                    RequestContext.get().setInTypePatching(true);
+                }
+                
+                AtlasTypesDef result = typeDefStore.updateTypesDef(typesDef);
+                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                LOG.info("Successfully updated typedefs on attempt {}", attempt);
+                return result;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to update typedefs after {} attempts", MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Attempt {} failed with retryable error, retrying in {}ms",
+                            attempt, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred", e);
+                    throw e;
+                }
+            } finally {
+                // Always restore original patching state
+                RequestContext.get().setInTypePatching(originalPatchingState);
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private void deleteTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Perform the deletion
+                typeDefStore.deleteTypesDef(typesDef);
+                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                LOG.info("Successfully deleted typedefs on attempt {}", attempt);
+                return;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to delete typedefs after {} attempts", MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Deletion attempt {} failed with retryable error, retrying in {}ms",
+                            attempt, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Deletion retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred during deletion", e);
+                    throw e;
+                }
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private void deleteTypeByNameWithRetry(String typeName) throws AtlasBaseException {
+        AtlasBaseException lastException = null;
+
+        for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                // Perform the deletion
+                typeDefStore.deleteTypeByName(typeName);
+                refreshAllHostCache(RequestContext.get().getTraceId(), null);
+                LOG.info("Successfully deleted typedef '{}' on attempt {}", typeName, attempt);
+                return;
+
+            } catch (AtlasBaseException e) {
+                lastException = e;
+
+                if (attempt == MAX_RETRIES) {
+                    LOG.error("Failed to delete typedef '{}' after {} attempts", typeName, MAX_RETRIES, e);
+                    throw e;
+                }
+
+                if (isRetryable(e)) {
+                    LOG.warn("Deletion attempt {} for '{}' failed with retryable error, retrying in {}ms",
+                            attempt, typeName, RETRY_DELAY_MS, e);
+                    try {
+                        Thread.sleep(RETRY_DELAY_MS);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        LOG.warn("Deletion retry interrupted, failing operation");
+                        throw e;
+                    }
+                } else {
+                    LOG.error("Non-retryable error occurred during deletion of '{}'", typeName, e);
+                    throw e;
+                }
+            }
+        }
+
+        throw lastException; // Should never reach here, but for completeness
+    }
+
+    private boolean isRetryable(AtlasBaseException e) {
+        return APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode()) ||
+               ATTRIBUTE_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode());
     }
 }
