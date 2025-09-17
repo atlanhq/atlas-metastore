@@ -50,7 +50,11 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         updatedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         deletedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
+    private final Map<String, Map<String, Object>> allInternalAttributesMap     = new HashMap<>();
 
+    public Map<String, Map<String, Object>> getAllInternalAttributesMap() {
+        return allInternalAttributesMap;
+    }
 
     private       Map<String, String>                    lexoRankCache        = null;
     private final Map<String, AtlasEntity>               entityCache          = new HashMap<>();

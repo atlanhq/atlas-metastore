@@ -19,12 +19,14 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
+import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
 import org.codehaus.jettison.json.JSONException;
@@ -34,6 +36,9 @@ import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
+
+import static org.apache.atlas.type.Constants.GUID_PROPERTY_KEY;
+import static org.apache.atlas.type.Constants.INTERNAL_PROPERTY_KEY_PREFIX;
 
 /**
  * Janus implementation of AtlasElement.
@@ -105,23 +110,45 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void removeProperty(String propertyName) {
+        RequestContext context = RequestContext.get();
         Iterator<? extends Property<String>> it = getWrappedElement().properties(propertyName);
         while(it.hasNext()) {
             Property<String> property = it.next();
             property.remove();
+            //fill the map for the entityGuid and remove value
+            if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+                String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+                if (StringUtils.isNotEmpty(entityGuid)) {
+                    context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, null);
+                }
+            }
         }
     }
 
     @Override
     public void removePropertyValue(String propertyName, Object propertyValue) {
+        RequestContext context = RequestContext.get();
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
-
+        // we create a map of properties that are only internal
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
 
             if (Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
+                //fill the map for the entityGuid and remove value
+                if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+                    String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+                    if (StringUtils.isNotEmpty(entityGuid)) {
+                        if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                            context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, null);
+                        } else {
+                            Map<String, Object> map = new HashMap<>();
+                            map.put(propertyName, null);
+                            context.getAllInternalAttributesMap().put(entityGuid, map);
+                        }
+                    }
+                }
                 break;
             }
         }
@@ -130,19 +157,33 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     @Override
     public void removeAllPropertyValue(String propertyName, Object propertyValue) {
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
-
+        RequestContext context = RequestContext.get();
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
 
             if (Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
+                //fill the map for the entityGuid and remove value
+                if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+                    String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+                    if (StringUtils.isNotEmpty(entityGuid)) {
+                        if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                            context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, null);
+                        } else {
+                            Map<String, Object> map = new HashMap<>();
+                            map.put(propertyName, null);
+                            context.getAllInternalAttributesMap().put(entityGuid, map);
+                        }
+                    }
+                }
             }
         }
     }
 
     @Override
     public void setProperty(String propertyName, Object value) {
+        RequestContext context = RequestContext.get();
         try {
             if (value == null) {
                 Object existingVal = getProperty(propertyName, Object.class);
@@ -151,6 +192,19 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 }
             } else {
                 getWrappedElement().property(propertyName, value);
+                //fill all internal properties for the entityGuid
+                if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+                    String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+                    if (StringUtils.isNotEmpty(entityGuid)) {
+                        if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                            context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, value);
+                        } else {
+                            Map<String, Object> map = new HashMap<>();
+                            map.put(propertyName, value);
+                            context.getAllInternalAttributesMap().put(entityGuid, map);
+                        }
+                    }
+                }
             }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
