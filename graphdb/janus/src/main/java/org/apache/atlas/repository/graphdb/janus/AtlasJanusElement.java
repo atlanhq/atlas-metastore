@@ -127,7 +127,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void removePropertyValue(String propertyName, Object propertyValue) {
-        RequestContext context = RequestContext.get();
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
         List<Object> finalValues = new ArrayList<>();
         boolean removedFirst = false;
@@ -169,7 +168,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void setProperty(String propertyName, Object value) {
-        RequestContext context = RequestContext.get();
         try {
             if (value == null) {
                 Object existingVal = getProperty(propertyName, Object.class);
