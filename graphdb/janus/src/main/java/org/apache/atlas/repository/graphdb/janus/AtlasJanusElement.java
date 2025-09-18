@@ -110,18 +110,11 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void removeProperty(String propertyName) {
-        RequestContext context = RequestContext.get();
         Iterator<? extends Property<String>> it = getWrappedElement().properties(propertyName);
         while(it.hasNext()) {
             Property<String> property = it.next();
             property.remove();
-            //fill the map for the entityGuid and remove value
-            if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
-                String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
-                if (StringUtils.isNotEmpty(entityGuid)) {
-                    context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, null);
-                }
-            }
+            recordInternalAttribute(propertyName, null);
         }
     }
 
@@ -334,7 +327,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     @Override
     public void setPropertyFromElementId(String propertyName, AtlasElement value) {
         setProperty(propertyName, value.getId().toString());
-
     }
 
 
