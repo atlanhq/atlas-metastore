@@ -95,10 +95,6 @@ public class FeatureFlagStore implements ApplicationContextAware {
     private void validateDependencies() {
         LOG.info("Validating FeatureFlagStore dependencies...");
         try {
-            if (redisService instanceof NoRedisServiceImpl) {
-                return;
-            }
-
             // Test Redis connectivity with a simple operation
             String testKey = "ff:_health_check";
             redisService.putValue(testKey, "test");

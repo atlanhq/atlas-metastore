@@ -32,6 +32,8 @@ public class RedisServiceImpl extends AbstractRedisService{
                 redisClient = Redisson.create(getProdConfig());
                 redisCacheClient = Redisson.create(getCacheImplConfig());
 
+                LOG.info("Redis Client created!!!");
+
                 if (redisClient == null || redisCacheClient == null) {
                     throw new AtlasException("Failed to create Sentinel redis client.");
                 }
