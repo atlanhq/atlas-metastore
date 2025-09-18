@@ -10,8 +10,6 @@ import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.MeterRegistry;
 
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
@@ -80,15 +78,6 @@ public class FeatureFlagStore implements ApplicationContextAware {
                 preloadAllFlags();
                 initialized = true;
 
-                // Add version tracking metric
-                MeterRegistry meterRegistry = org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
-                Gauge.builder(METRIC_COMPONENT + "_atlas_version_enabled", 
-                            this,
-                            ref -> isTagV2Enabled() ? 2.0 : 1.0)
-                    .description("Indicates which Tag propagation version is enabled (2.0 = v2, 1.0 = v1)")
-                    .tag("component", "version")
-                    .register(meterRegistry);
-
                 long duration = System.currentTimeMillis() - startTime;
                 LOG.info("FeatureFlagStore initialization completed successfully in {}ms", duration);
                 break; // Success! Exit the loop.
@@ -106,10 +95,6 @@ public class FeatureFlagStore implements ApplicationContextAware {
     private void validateDependencies() {
         LOG.info("Validating FeatureFlagStore dependencies...");
         try {
-            if (redisService instanceof NoRedisServiceImpl) {
-                return;
-            }
-
             // Test Redis connectivity with a simple operation
             String testKey = "ff:_health_check";
             redisService.putValue(testKey, "test");
