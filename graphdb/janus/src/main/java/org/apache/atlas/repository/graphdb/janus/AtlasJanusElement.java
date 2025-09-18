@@ -129,33 +129,42 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     public void removePropertyValue(String propertyName, Object propertyValue) {
         RequestContext context = RequestContext.get();
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
-        // we create a map of properties that are only internal
-        fillInternalPropertiesIfApplicable(propertyName, propertyValue, it, context);
-        it = getWrappedElement().properties(propertyName);
+        List<Object> finalValues = new ArrayList<>();
+        boolean removedFirst = false;
+
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
 
-            if (Objects.equals(currentPropertyValue, propertyValue)) {
+            if (Objects.equals(currentPropertyValue, propertyValue) && !removedFirst) {
                 currentProperty.remove();
-                break;
+                removedFirst = true;
+            } else {
+                finalValues.add(currentPropertyValue);
             }
         }
+
+        recordInternalAttribute(propertyName, finalValues);
     }
 
     @Override
     public void removeAllPropertyValue(String propertyName, Object propertyValue) {
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
-        RequestContext context = RequestContext.get();
-        fillInternalPropertiesIfApplicable(propertyName, propertyValue, it, context);
+        List<Object> finalValues = new ArrayList<>();
+
+
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
 
             if (Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
+            } else {
+                finalValues.add(currentPropertyValue);
             }
         }
+
+        recordInternalAttribute(propertyName, finalValues);
     }
 
     @Override
@@ -169,19 +178,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 }
             } else {
                 getWrappedElement().property(propertyName, value);
-                //fill all internal properties for the entityGuid
-                if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
-                    String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
-                    if (StringUtils.isNotEmpty(entityGuid)) {
-                        if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
-                            context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, value);
-                        } else {
-                            Map<String, Object> map = new HashMap<>();
-                            map.put(propertyName, value);
-                            context.getAllInternalAttributesMap().put(entityGuid, map);
-                        }
-                    }
-                }
+                recordInternalAttribute(propertyName, value);
             }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
@@ -348,29 +345,18 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         return true;
     }
 
+    private void recordInternalAttribute(String propertyName, Object finalValue) {
+        if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+            RequestContext context = RequestContext.get();
+            String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
 
-    private void fillInternalPropertiesIfApplicable(String propertyName, Object propertyValue, Iterator<? extends Property<Object>> it, RequestContext context) {
-        while (it.hasNext()) {
-            Property currentProperty      = it.next();
-            Object   currentPropertyValue = currentProperty.value();
-
-            if (!Objects.equals(currentPropertyValue, propertyValue)) {
-                //fill the map with all iterartor values for the entityGuid
-                if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
-                    String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
-                    if (StringUtils.isNotEmpty(entityGuid)) {
-                        if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
-                            Object value = context.getAllInternalAttributesMap().get(entityGuid);
-                            List<Object> values = new ArrayList<>();
-                            values.add(value);
-                            values.add(currentPropertyValue);
-                            context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, values);
-                        } else {
-                            Map<String, Object> map = new HashMap<>();
-                            map.put(propertyName, currentPropertyValue);
-                            context.getAllInternalAttributesMap().put(entityGuid, map);
-                        }
-                    }
+            if (StringUtils.isNotEmpty(entityGuid)) {
+                if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                    context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, finalValue);
+                } else {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put(propertyName, finalValue);
+                    context.getAllInternalAttributesMap().put(entityGuid, map);
                 }
             }
         }
