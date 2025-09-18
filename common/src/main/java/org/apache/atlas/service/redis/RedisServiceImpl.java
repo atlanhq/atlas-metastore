@@ -43,7 +43,7 @@ public class RedisServiceImpl extends AbstractRedisService{
                 break;
             } catch (Exception e) {
                 LOG.warn("Redis connection failed: {}. Application startup is BLOCKED. Retrying in {} seconds...", e.getMessage(), RETRY_DELAY_MS / 1000);
-                MetricUtils.recordRedisConnectionFailure();
+                //MetricUtils.recordRedisConnectionFailure();
                 // Clean up any partially created clients before retrying.
                 shutdownClients();
                 Thread.sleep(RETRY_DELAY_MS);
@@ -60,7 +60,7 @@ public class RedisServiceImpl extends AbstractRedisService{
         
         try {
             // Test cache client
-            LOG.debug("Testing Redis cache client connectivity");
+            LOG.info("Testing Redis cache client connectivity");
             redisCacheClient.getBucket(testKey).set(testValue);
             String retrievedValue = (String) redisCacheClient.getBucket(testKey).get();
             
@@ -69,10 +69,10 @@ public class RedisServiceImpl extends AbstractRedisService{
             }
             
             redisCacheClient.getBucket(testKey).delete();
-            LOG.debug("Redis connectivity test completed successfully");
+            LOG.info("Redis connectivity test completed successfully");
             
         } catch (Exception e) {
-            MetricUtils.recordRedisConnectionFailure();
+            //MetricUtils.recordRedisConnectionFailure();
             throw new Exception("Redis connectivity test failed", e);
         }
     }
