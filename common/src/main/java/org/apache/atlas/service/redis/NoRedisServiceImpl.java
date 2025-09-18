@@ -7,7 +7,7 @@ import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 
-@Component("redisServiceImpl")
+@Component()
 @ConditionalOnAtlasProperty(property = "atlas.redis.service.impl", isDefault = true)
 public class NoRedisServiceImpl extends AbstractRedisService {
 
