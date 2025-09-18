@@ -31,8 +31,6 @@ on:
       - tagscanarymerge
       - fixlabels
       - interceptapis
-      - kv-kuberentes-hardening-poc
-      - mlh-1115-master
 
 jobs:
   build:
