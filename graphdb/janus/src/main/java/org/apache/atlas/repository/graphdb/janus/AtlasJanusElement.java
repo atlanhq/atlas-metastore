@@ -128,7 +128,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
 
-            if (Objects.equals(currentPropertyValue, propertyValue) && !removedFirst) {
+            if (!removedFirst && Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
                 removedFirst = true;
             } else {
