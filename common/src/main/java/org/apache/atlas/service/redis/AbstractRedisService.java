@@ -290,7 +290,11 @@ public abstract class AbstractRedisService implements RedisService {
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
-                .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD));
+                .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
+                .setTimeout(3000)  // ADDED: Explicit timeout
+                .setConnectTimeout(10000)  // ADDED: Connection establishment timeout
+                .setIdleConnectionTimeout(60000)  // ADDED: Clean up idle connections after 1 minute
+                .setSubscriptionConnectionPoolSize(5);  // ADDED: If using pub/sub
         return config;
     }
 
@@ -309,8 +313,10 @@ public abstract class AbstractRedisService implements RedisService {
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
-                .setTimeout(50) //Setting UP timeout to 50ms
-                .setRetryAttempts(10); //Retry 10 times;
+                .setTimeout(1000)  // CHANGED: From 50ms to 1000ms - 50ms is too low (reason for up and down in logs and noise)
+                .setConnectTimeout(10000)  // ADDED: Connection establishment timeout
+                .setIdleConnectionTimeout(60000)  // ADDED: Clean up idle connections after 1 minute
+                .setRetryAttempts(10);
         return config;
     }
 
