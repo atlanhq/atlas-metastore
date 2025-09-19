@@ -335,7 +335,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         return true;
     }
 
-    private void recordInternalAttribute(String propertyName, Object finalValue) {
+    protected void recordInternalAttribute(String propertyName, Object finalValue) {
         if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
             RequestContext context = RequestContext.get();
             String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
@@ -346,6 +346,71 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 } else {
                     Map<String, Object> map = new HashMap<>();
                     map.put(propertyName, finalValue);
+                    context.getAllInternalAttributesMap().put(entityGuid, map);
+                }
+            }
+        }
+    }
+
+    protected void recordInternalAttributeIncrementalAdd(String propertyName, Object value, Class cardinality) {
+        if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+            String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+
+            if (StringUtils.isNotEmpty(entityGuid)) {
+                Collection<Object> currentValues = null;
+
+                if (cardinality == List.class) {
+                    currentValues = getMultiValuedProperty(propertyName, Object.class);
+                } else {
+                    currentValues = getMultiValuedSetProperty(propertyName, Object.class);
+                }
+
+                // Assumption: This method is being called after setting the property on element,
+                // hence assuming currentValues is the final expected state and not adding `value` to `currentValues`
+
+                if (StringUtils.isNotEmpty(entityGuid)) {
+                    RequestContext context = RequestContext.get();
+
+                    if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                        context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, currentValues);
+                    } else {
+                        Map<String, Object> map = new HashMap<>();
+                        map.put(propertyName, currentValues);
+                        context.getAllInternalAttributesMap().put(entityGuid, map);
+                    }
+                }
+            }
+        }
+    }
+
+    protected void recordInternalAttributeIncremental2(String propertyName, Object value, Class cardinality) {
+        if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+            RequestContext context = RequestContext.get();
+            String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+            Collection<Object> values = null;
+
+            if (cardinality == List.class) {
+                values = new ArrayList<>();
+            } else {
+                values = new HashSet<>();
+            }
+
+            if (StringUtils.isNotEmpty(entityGuid)) {
+                if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                    Collection<Object> currentValueInRecord = (Collection) context.getAllInternalAttributesMap().get(entityGuid).get(propertyName);
+
+                    if (currentValueInRecord == null) {
+                        values.add(value);
+                        context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, values);
+                    } else {
+                        currentValueInRecord.add(value);
+                        context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, currentValueInRecord);
+                    }
+                } else {
+                    values.add(value);
+
+                    Map<String, Object> map = new HashMap<>();
+                    map.put(propertyName, values);
                     context.getAllInternalAttributesMap().put(entityGuid, map);
                 }
             }
