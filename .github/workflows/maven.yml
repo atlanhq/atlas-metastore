@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - typdef-ignore-atlas-core
 
 jobs:
   build:
