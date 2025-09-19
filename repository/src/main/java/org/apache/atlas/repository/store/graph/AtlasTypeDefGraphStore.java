@@ -125,19 +125,25 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
     @Override
     public void reloadEnumTypeDefs() throws AtlasBaseException {
         LOG.info("==> AtlasTypeDefGraphStore.reloadEnumTypeDefs()");
-        AtlasTransientTypeRegistry ttr           = null;
-        boolean                    commitUpdates = false;
+        AtlasTransientTypeRegistry ttr = null;
+        boolean commitUpdates = false;
 
         try {
             ttr = typeRegistry.lockTypeRegistryForUpdate(5);
             List<AtlasEnumDef> enumDefs = getEnumDefStore(ttr).getAll();
             for (AtlasBaseTypeDef atlasBaseTypeDef : ttr.getAllEnumDefs()) {
                 if (atlasBaseTypeDef instanceof AtlasEnumDef) {
+                    if ("atlas_core".equalsIgnoreCase(atlasBaseTypeDef.getServiceType())) {
+                        LOG.debug("Skipping removal of built-in enum type: {}", atlasBaseTypeDef.getName());
+                        continue;
+                    }
                     ttr.removeTypeByName(atlasBaseTypeDef.getName());
                 }
             }
             ttr.addTypes(enumDefs);
             commitUpdates = true;
+        } catch (Throwable abe) {
+            LOG.warn("reloadEnumTypeDefs(): failed to reload enum defs", abe);
         } finally {
             typeRegistry.releaseTypeRegistryForUpdate(ttr, commitUpdates);
             LOG.info("<== AtlasTypeDefGraphStore.reloadEnumTypeDefs()");
@@ -155,11 +161,17 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
             List<AtlasStructDef> structDefs = getStructDefStore(ttr).getAll();
             for (AtlasBaseTypeDef atlasBaseTypeDef : ttr.getAllStructDefs()) {
                 if (atlasBaseTypeDef instanceof AtlasStructDef) {
+                    if ("atlas_core".equalsIgnoreCase(atlasBaseTypeDef.getServiceType())) {
+                        LOG.debug("Skipping removal of built-in struct type: {}", atlasBaseTypeDef.getName());
+                        continue;
+                    }
                     ttr.removeTypeByName(atlasBaseTypeDef.getName());
                 }
             }
             ttr.addTypes(structDefs);
             commitUpdates = true;
+        } catch (Throwable abe) {
+            LOG.warn("reloadStructTypeDefs(): failed to reload struct defs", abe);
         } finally {
             typeRegistry.releaseTypeRegistryForUpdate(ttr, commitUpdates);
             LOG.info("<== AtlasTypeDefGraphStore.reloadStructTypeDefs()");
@@ -177,11 +189,17 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
             List<AtlasEntityDef> entityDefs = getEntityDefStore(ttr).getAll();
             for (AtlasBaseTypeDef atlasBaseTypeDef : ttr.getAllEntityDefs()) {
                 if (atlasBaseTypeDef instanceof AtlasEntityDef) {
+                    if ("atlas_core".equalsIgnoreCase(atlasBaseTypeDef.getServiceType())) {
+                        LOG.debug("Skipping removal of built-in entity type: {}", atlasBaseTypeDef.getName());
+                        continue;
+                    }
                     ttr.removeTypeByName(atlasBaseTypeDef.getName());
                 }
             }
             ttr.addTypes(entityDefs);
             commitUpdates = true;
+        } catch (Throwable abe) {
+            LOG.warn("reloadEntityTypeDefs(): failed to reload entity defs", abe);
         } finally {
             typeRegistry.releaseTypeRegistryForUpdate(ttr, commitUpdates);
             LOG.info("<== AtlasTypeDefGraphStore.reloadEntityTypeDefs()");
@@ -199,11 +217,17 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
             List<AtlasRelationshipDef> relationshipDefs = getRelationshipDefStore(ttr).getAll();
             for (AtlasBaseTypeDef atlasBaseTypeDef : ttr.getAllRelationshipDefs()) {
                 if (atlasBaseTypeDef instanceof AtlasRelationshipDef) {
+                    if ("atlas_core".equalsIgnoreCase(atlasBaseTypeDef.getServiceType())) {
+                        LOG.debug("Skipping removal of built-in relationship type: {}", atlasBaseTypeDef.getName());
+                        continue;
+                    }
                     ttr.removeTypeByName(atlasBaseTypeDef.getName());
                 }
             }
             ttr.addTypes(relationshipDefs);
             commitUpdates = true;
+        } catch (Throwable abe) {
+            LOG.warn("reloadRelationshipTypeDefs(): failed to reload relationship defs", abe);
         } finally {
             typeRegistry.releaseTypeRegistryForUpdate(ttr, commitUpdates);
             LOG.info("<== AtlasTypeDefGraphStore.reloadRelationshipTypeDefs()");
@@ -226,6 +250,8 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
             }
             ttr.addTypes(businessMetadataDefs);
             commitUpdates = true;
+        } catch (Throwable abe) {
+            LOG.warn("reloadBusinessMetadataTypeDefs(): failed to reload BM defs", abe);
         } finally {
             typeRegistry.releaseTypeRegistryForUpdate(ttr, commitUpdates);
             LOG.info("<== AtlasTypeDefGraphStore.reloadBusinessMetadataTypeDefs()");
@@ -248,6 +274,8 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
             }
             ttr.addTypes(classificationDefs);
             commitUpdates = true;
+        } catch (Throwable abe) {
+            LOG.warn("reloadClassificationMetadataTypeDefs(): failed to reload classification defs", abe);
         } finally {
             typeRegistry.releaseTypeRegistryForUpdate(ttr, commitUpdates);
             LOG.info("<== AtlasTypeDefGraphStore.reloadClassificationMetadataTypeDefs()");
