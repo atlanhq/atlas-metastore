@@ -14,7 +14,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -35,7 +35,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -64,7 +64,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -93,7 +93,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -114,7 +114,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -135,7 +135,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -1272,7 +1272,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-read"]
@@ -1284,7 +1284,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-create"]
@@ -1297,7 +1297,7 @@
         "relationship-type:*",
 
         "end-one-entity:{entity}/*/rule/*",
-        "end-one-entity-type:alpha_DQRule",
+        "end-one-entity-type:DataQualityRule",
         "end-one-entity-classification:*",
 
         "end-two-entity:*",
@@ -1314,7 +1314,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-update"]
@@ -1326,7 +1326,7 @@
         "relationship-type:*",
 
         "end-one-entity:{entity}/*/rule/*",
-        "end-one-entity-type:alpha_DQRule",
+        "end-one-entity-type:DataQualityRule",
         "end-one-entity-classification:*",
 
         "end-two-entity:*",
@@ -1342,7 +1342,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-delete"]
