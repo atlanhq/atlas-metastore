@@ -43,14 +43,14 @@ public abstract class BaseAtlasIT {
             LOG.info("Environment variables:");
             LOG.info("DOCKER_HOST={}", System.getenv("DOCKER_HOST"));
             LOG.info("HOME={}", System.getenv("HOME"));
-            
+
             // Try to detect Docker socket
             String[] possibleSockets = new String[] {
                 "/var/run/docker.sock",
                 System.getenv("HOME") + "/.colima/docker.sock",
                 "/Users/sriram.aravamuthan/.colima/docker.sock"
             };
-            
+
             for (String socket : possibleSockets) {
                 File f = new File(socket);
                 LOG.info("Checking socket at {}: exists={}, canRead={}", socket, f.exists(), f.canRead());
@@ -67,7 +67,7 @@ public abstract class BaseAtlasIT {
     }
 
     protected static final Network NETWORK = Network.newNetwork();
-    
+
     protected static final ElasticsearchContainer elasticsearch = new ElasticsearchContainer(
             DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:7.17.10"))
             .withNetwork(NETWORK)
@@ -113,7 +113,7 @@ public abstract class BaseAtlasIT {
     @BeforeAll
     public void setUp() throws Exception {
         LOG.info("Starting test setup...");
-        
+
         // First verify Docker connectivity
         try {
             Process process = Runtime.getRuntime().exec("docker ps");
@@ -136,18 +136,18 @@ public abstract class BaseAtlasIT {
             GenericContainer<?> simpleContainer = new GenericContainer<>(DockerImageName.parse("redis:7.2.0"))
                     .withExposedPorts(6379)
                     .withStartupTimeout(Duration.ofMinutes(1));
-            
+
             LOG.info("Starting simple container...");
             simpleContainer.start();
             LOG.info("Simple container started successfully!");
-            
+
             // If simple container works, try our actual containers
             LOG.info("Starting actual test containers...");
             redis.start();
             cassandra.start();
             elasticsearch.start();
             kafka.start();
-            
+
             simpleContainer.stop();
         } catch (Exception e) {
             LOG.error("Failed to start containers", e);
@@ -159,7 +159,7 @@ public abstract class BaseAtlasIT {
         try {
             // Create Atlas configuration
             Configuration configuration = new PropertiesConfiguration();
-            
+
             // Set system properties for Atlas configuration
             configuration.setProperty("atlas.graph.storage.hostname", cassandra.getHost());
             configuration.setProperty("atlas.graph.storage.port", cassandra.getMappedPort(9042));
@@ -231,7 +231,7 @@ public abstract class BaseAtlasIT {
     @AfterAll
     public void tearDown() {
         LOG.info("Stopping Atlas and test containers...");
-        
+
         try {
             if (server != null) {
                 server.stop();
@@ -250,7 +250,7 @@ public abstract class BaseAtlasIT {
     }
 
     private void waitForServicesReady() throws InterruptedException {
-        int maxAttempts = 30;
+        int maxAttempts = 3;
         int attempt = 0;
         boolean ready = false;
 
@@ -279,4 +279,4 @@ public abstract class BaseAtlasIT {
         RequestContext.clear();
         RequestContext.get().setUser("admin", null);
     }
-} 
+}

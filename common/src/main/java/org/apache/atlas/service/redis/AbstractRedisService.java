@@ -234,17 +234,18 @@ public abstract class AbstractRedisService implements RedisService {
 
     Config getProdConfig() throws AtlasException {
         Config config = initAtlasConfig();
-        config.useSentinelServers()
+        config.useSingleServer()
                 .setClientName(ATLAS_METASTORE_SERVICE)
-                .setReadMode(ReadMode.MASTER_SLAVE)
-                .setCheckSentinelsList(false)
+                .setAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_URL))[0])
+                //.setReadMode(ReadMode.MASTER)
+                //.setCheckSentinelsList(false)
                 .setKeepAlive(true)
-                .setMasterConnectionMinimumIdleSize(10)
-                .setMasterConnectionPoolSize(20)
-                .setSlaveConnectionMinimumIdleSize(10)
-                .setSlaveConnectionPoolSize(20)
-                .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
-                .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
+                //.setMasterConnectionMinimumIdleSize(10)
+                //.setMasterConnectionPoolSize(20)
+                //.setSlaveConnectionMinimumIdleSize(10)
+                //.setSlaveConnectionPoolSize(20)
+                //.setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
+                //.addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD));
         return config;
@@ -254,7 +255,7 @@ public abstract class AbstractRedisService implements RedisService {
         Config config = new Config();
         config.useSentinelServers()
                 .setClientName(ATLAS_METASTORE_SERVICE+"-redisCache")
-                .setReadMode(ReadMode.MASTER_SLAVE)
+                .setReadMode(ReadMode.MASTER)
                 .setCheckSentinelsList(false)
                 .setKeepAlive(true)
                 .setMasterConnectionMinimumIdleSize(10)
@@ -262,7 +263,7 @@ public abstract class AbstractRedisService implements RedisService {
                 .setSlaveConnectionMinimumIdleSize(10)
                 .setSlaveConnectionPoolSize(20)
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
-                .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
+                //.addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
                 .setTimeout(50) //Setting UP timeout to 50ms
