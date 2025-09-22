@@ -1164,11 +1164,43 @@
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",
-      "description": "Add/remove datasets to this AIModel",
       "resources": [
-        "entity-type:Process"
+        "relationship-type:*",
+        "end-one-entity-type:AIModel",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+        "end-one-entity:{entity}/*",
+
+        "end-two-entity-type:Catalog",
+        "end-two-entity-type:Connection",
+        "end-two-entity-type:Process",
+        "end-two-entity-type:Namespace",
+        "end-two-entity-type:ProcessExecution",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
       ],
-      "actions": ["entity-update", "entity-delete"]
+      "actions": ["add-relationship", "remove-relationship"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:Catalog",
+        "end-one-entity-type:Connection",
+        "end-one-entity-type:Process",
+        "end-one-entity-type:Namespace",
+        "end-one-entity-type:ProcessExecution",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIModel",
+        "end-two-entity-classification:*",
+        "end-two-entity:*",
+        "end-two-entity:{entity}/*"
+      ],
+      "actions": ["add-relationship", "remove-relationship"]
     }
   ],
   "persona-ai-model-delete": [
