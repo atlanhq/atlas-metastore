@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.CassandraContainer;
 import org.testcontainers.containers.GenericContainer;
@@ -35,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ActiveProfiles("local")
 public class AtlasDockerIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasDockerIntegrationTest.class);
@@ -113,7 +115,7 @@ public class AtlasDockerIntegrationTest {
                 .withCommand("/bin/bash", "-c", createStartupScript())
                 .waitingFor(
                         Wait.forListeningPort()
-                                .withStartupTimeout(Duration.ofMinutes(5))
+                                .withStartupTimeout(Duration.ofMinutes(2))
                 )
                 .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("ATLAS"))
                 .dependsOn(kafka, cassandra, elasticsearch, redis, zookeeper);
@@ -122,15 +124,7 @@ public class AtlasDockerIntegrationTest {
     private static String getDeployDirectoryPath() {
         // Try different paths where deploy directory might be
         String[] possiblePaths = {
-                // Absolute path if set as system property
-                System.getProperty("atlas.deploy.dir"),
-                // Relative to current directory
-                "./deploy",
-                "../deploy",
-                // Relative to project root
-                "../../deploy",
-                // Your specific path
-                System.getProperty("user.home") + "/repositories/atlas-metastore/deploy"
+                System.getProperty("project.dir")+ "/webapp/src/test/resources/deploy"
         };
 
         for (String path : possiblePaths) {
@@ -219,59 +213,12 @@ public class AtlasDockerIntegrationTest {
             sed -i 's/${cassandra.embedded}/false/g' /opt/apache-atlas/conf/atlas-env.sh
             sed -i 's/${elasticsearch.managed}/false/g' /opt/apache-atlas/conf/atlas-env.sh
             
-            # Replace all localhost references with container names
-            echo "Updating configuration for container networking..."
-            # Replace all localhost references with container names
-            echo "Updating configuration for container networking..."
-            sed -i 's/localhost:2181/zookeeper:2181/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/localhost:9027/kafka:9092/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/localhost:9092/kafka:9092/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/localhost:21000/0.0.0.0:21000/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/localhost:22000/0.0.0.0:22000/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/127.0.0.1/0.0.0.0/g' /opt/apache-atlas/conf/atlas-application.properties
-            #sed -i 's|redis://localhost|redis://redis|g' /opt/apache-atlas/conf/atlas-application.properties
-            #sed -i 's|localhost:6379|redis:6379|g' /opt/apache-atlas/conf/atlas-application.properties
-            
-            # Ensure correct backend settings
-            sed -i 's/atlas.graph.storage.hostname=.*/atlas.graph.storage.hostname=cassandra/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/atlas.graph.index.search.hostname=.*/atlas.graph.index.search.hostname=elasticsearch/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/atlas.kafka.bootstrap.servers=.*/atlas.kafka.bootstrap.servers=kafka:9092/g' /opt/apache-atlas/conf/atlas-application.properties
-            sed -i 's/atlas.kafka.zookeeper.connect=.*/atlas.kafka.zookeeper.connect=zookeeper:2181/g' /opt/apache-atlas/conf/atlas-application.properties
-            #sed -i 's|atlas.redis.url=.*|atlas.redis.url=redis://redis:6379|g' /opt/apache-atlas/conf/atlas-application.properties
-            #sed -i 's/atlas.redis.sentinel.urls=.*/atlas.redis.sentinel.urls=redis:6379/g' /opt/apache-atlas/conf/atlas-application.properties
-            
-            # Disable HA mode to avoid Zookeeper dependency for leader election
-            sed -i 's/atlas.server.ha.enabled=.*/atlas.server.ha.enabled=false/g' /opt/apache-atlas/conf/atlas-application.properties
-            
-            # Ensure authentication is disabled
-            sed -i 's/atlas.authentication.method.file=.*/atlas.authentication.method.file=false/g' /opt/apache-atlas/conf/atlas-application.properties
-            
-            # Set bind address
-            sed -i 's/atlas.server.bind.address=.*/atlas.server.bind.address=0.0.0.0/g' /opt/apache-atlas/conf/atlas-application.properties
-            
-            echo "Final configuration:"
-            grep -E "(kafka|zookeeper|cassandra|elasticsearch|redis|localhost)" /opt/apache-atlas/conf/atlas-application.properties | grep -v "^#" | head -20
-            
-            echo "Verifying services in configuration:"
-            echo "Cassandra: $(grep 'atlas.graph.storage.hostname' /opt/apache-atlas/conf/atlas-application.properties | grep -v '^#')"
-            echo "Elasticsearch: $(grep 'atlas.graph.index.search.hostname' /opt/apache-atlas/conf/atlas-application.properties | grep -v '^#')"
-            echo "Kafka: $(grep 'atlas.kafka.bootstrap.servers' /opt/apache-atlas/conf/atlas-application.properties | grep -v '^#')"
-            echo "Zookeeper: $(grep 'atlas.kafka.zookeeper.connect' /opt/apache-atlas/conf/atlas-application.properties | grep -v '^#')"
-            
             # List what we have
             echo "Configuration directory contents:"
             ls -la /opt/apache-atlas/conf/
             
             echo "Elasticsearch directory contents:"
             ls -la /opt/apache-atlas/elasticsearch/
-            
-            # Update users-credentials.properties with container service addresses
-            cat >> /opt/apache-atlas/conf/users-credentials.properties <<'EOF'
-            #username=group::sha256-password
-            admin=ADMIN::8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
-            nobal=NOBAL::0589b2f8ba54ef1569d351d39fa978ba5918fc3ba0a23e479f3fbcd14d357289
-            rangertagsync=RANGER_TAG_SYNC::0afe7a1968b07d4c3ff4ed8c2d809a32ffea706c66cd795ead9048e81cfaf034
-            EOF
             
             # Update atlas-application.properties with container service addresses
             cat >> /opt/apache-atlas/conf/atlas-application.properties <<'EOF'
@@ -481,7 +428,6 @@ public class AtlasDockerIntegrationTest {
     @BeforeAll
     void setup() {
         LOG.info("Setting up test environment...");
-
         // Setup HTTP client
         httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -500,7 +446,7 @@ public class AtlasDockerIntegrationTest {
 
     private void waitForAtlasReady() {
         LOG.info("Waiting for Atlas API to be ready...");
-        int maxRetries = 60;
+        int maxRetries = 5;
 
         for (int i = 0; i < maxRetries; i++) {
             try {

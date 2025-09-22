@@ -1,24 +1,24 @@
 package org.apache.atlas.service.redis;
 
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.redisson.Redisson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 
 @Component
-@ConditionalOnAtlasProperty(property = "atlas.redis.service.impl")
+@Profile("!local")
 public class RedisServiceImpl extends AbstractRedisService{
 
     private static final Logger LOG = LoggerFactory.getLogger(RedisServiceImpl.class);
 
     @PostConstruct
     public void init() throws AtlasException {
-        redisClient = Redisson.create(getLocalConfig());
-        redisCacheClient = Redisson.create(getLocalConfig());
+        redisClient = Redisson.create(getProdConfig());
+        redisCacheClient = Redisson.create(getCacheImplConfig());
         LOG.debug("Sentinel redis client created successfully.");
     }
 
