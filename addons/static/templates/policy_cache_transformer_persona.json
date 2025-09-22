@@ -1164,19 +1164,11 @@
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",
-      "description": "Link/unlink datasets to this AIModel",
+      "description": "Add/remove datasets to this AIModel",
       "resources": [
-        "relationship-type:*",
-
-        "end-one-entity-type:AIModel",
-        "end-one-entity-classification:*",
-        "end-one-entity:*",
-
-        "end-two-entity-type:Process",
-        "end-two-entity-type:ProcessExecution",
-        "end-two-entity:*"
+        "entity-type:Process"
       ],
-      "actions": ["add-relationship", "remove-relationship"]
+      "actions": ["entity-update", "entity-delete"]
     }
   ],
   "persona-ai-model-delete": [
