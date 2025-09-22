@@ -284,7 +284,7 @@ public abstract class DeleteHandlerV1 {
             }
             entity.setVertexId(vertex.getIdForDisplay());
             entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
-            entity.setSuperTypeNames(entityType.getSuperTypes());
+            entity.setSuperTypeNames(entityType.getAllSuperTypes());
             vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
 
             for (AtlasStructType.AtlasAttribute attributeInfo : entityType.getOwnedRefAttributes()) {
