@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.CassandraContainer;
 import org.testcontainers.containers.GenericContainer;
@@ -36,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-@ActiveProfiles("local")
 public class AtlasDockerIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasDockerIntegrationTest.class);
@@ -168,6 +166,8 @@ public class AtlasDockerIntegrationTest {
         env.put("JAVA_HOME", "/usr/lib/jvm/java-17-openjdk-amd64");
         env.put("JDK_JAVA_OPTIONS", "--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED");
 
+        env.put("SPRING_PROFILES_ACTIVE", "local");
+
         // Set atlas.home system property
         env.put("ATLAS_OPTS", "-Datlas.home=/opt/apache-atlas -Datlas.conf=/opt/apache-atlas/conf -Datlas.data=/opt/atlas-deploy/data -Datlas.log.dir=/opt/atlas-deploy/logs");
 
@@ -238,7 +238,7 @@ public class AtlasDockerIntegrationTest {
             
              # Redis configuration
             atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
-            atlas.redis.url = redis://localhost:6379
+            atlas.redis.url = redis://redis:6379
             atlas.redis.sentinel.enabled = false
             atlas.redis.sentinel.check_list.enabled = false
             
@@ -446,7 +446,7 @@ public class AtlasDockerIntegrationTest {
 
     private void waitForAtlasReady() {
         LOG.info("Waiting for Atlas API to be ready...");
-        int maxRetries = 50;
+        int maxRetries = 5;
 
         for (int i = 0; i < maxRetries; i++) {
             try {

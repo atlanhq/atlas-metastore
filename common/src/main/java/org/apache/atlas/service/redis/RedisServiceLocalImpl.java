@@ -17,6 +17,8 @@ public class RedisServiceLocalImpl extends AbstractRedisService {
 
     @PostConstruct
     public void init() throws AtlasException {
+        LOG.info("Initializing RedisServiceLocalImpl");
+
         redisClient = Redisson.create(getLocalConfig());
         redisCacheClient = Redisson.create(getLocalConfig());
         LOG.info("Local redis client created successfully.");
