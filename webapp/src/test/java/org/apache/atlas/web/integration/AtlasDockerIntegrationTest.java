@@ -55,14 +55,14 @@ public class AtlasDockerIntegrationTest {
             .withEnv("ZOO_MY_ID", "1");
 
     @Container
-    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"))
+    static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:6.2.1"))
             .withNetwork(network)
             .withNetworkAliases("kafka")
             .withExternalZookeeper("zookeeper:2181")
             .dependsOn(zookeeper);
 
     @Container
-    static CassandraContainer<?> cassandra = new CassandraContainer<>("cassandra:3.11.13")
+    static CassandraContainer<?> cassandra = new CassandraContainer<>("cassandra:2.1")
             .withNetwork(network)
             .withNetworkAliases("cassandra")
             .withStartupTimeout(Duration.ofMinutes(3))
@@ -71,7 +71,7 @@ public class AtlasDockerIntegrationTest {
 
     @Container
     static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(
-            DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:7.17.10"))
+            DockerImageName.parse("elasticsearch:7.16.2"))
             .withNetwork(network)
             .withNetworkAliases("elasticsearch")
             .withEnv("discovery.type", "single-node")
@@ -79,7 +79,7 @@ public class AtlasDockerIntegrationTest {
             .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
 
     @Container
-    static GenericContainer<?> redis = new GenericContainer<>("redis:7-alpine")
+    static GenericContainer<?> redis = new GenericContainer<>("redis:6.2.14")
             .withNetwork(network)
             .withNetworkAliases("redis")
             .withCommand("redis-server", "--requirepass", "", "--protected-mode", "no")
@@ -238,7 +238,7 @@ public class AtlasDockerIntegrationTest {
             
              # Redis configuration
             atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
-            atlas.redis.url = redis://redis:6379
+            atlas.redis.url = redis://localhost:6379
             atlas.redis.sentinel.enabled = false
             atlas.redis.sentinel.check_list.enabled = false
             
@@ -446,7 +446,7 @@ public class AtlasDockerIntegrationTest {
 
     private void waitForAtlasReady() {
         LOG.info("Waiting for Atlas API to be ready...");
-        int maxRetries = 5;
+        int maxRetries = 50;
 
         for (int i = 0; i < maxRetries; i++) {
             try {
