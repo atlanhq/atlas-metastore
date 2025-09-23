@@ -1164,6 +1164,7 @@
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
+      "description": "Create/delete process to update datasets for this AIModel",
       "resources": [
         "entity:*",
         "entity-type:Process",
