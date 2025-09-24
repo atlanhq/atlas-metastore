@@ -43,21 +43,7 @@ while [[ "$#" -gt 0 ]]; do
     shift
 done
 
-# Step 1: Build Atlas WAR if not skipping
-if [ "$SKIP_BUILD" = false ]; then
-    echo -e "${YELLOW}Building Atlas WAR package...${NC}"
-    mvn clean -Dos.detected.classifier=osx-x86_64 -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
-
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to build Atlas WAR${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}Atlas WAR built successfully${NC}"
-else
-    echo -e "${YELLOW}Skipping Atlas build (--skip-build flag set)${NC}"
-fi
-
-# Step 2: Build Docker image
+# Step 1: Build Docker image
 echo -e "${YELLOW}Building Atlas Docker image...${NC}"
 docker build -t atlanhq/atlas:test .
 
@@ -67,12 +53,12 @@ if [ $? -ne 0 ]; then
 fi
 echo -e "${GREEN}Docker image built successfully${NC}"
 
-# Step 3: Clean up any existing test containers
+# Step 2: Clean up any existing test containers
 echo -e "${YELLOW}Cleaning up existing test containers...${NC}"
 docker rm -f atlas-test-zookeeper atlas-test-kafka atlas-test-cassandra \
              atlas-test-elasticsearch atlas-test-redis atlas-test-atlas 2>/dev/null || true
 
-# Step 4: Set test properties
+# Step 3: Set test properties
 export TESTCONTAINERS_REUSE_ENABLE=true
 export TESTCONTAINERS_RYUK_DISABLED=$KEEP_CONTAINERS
 
@@ -81,7 +67,7 @@ if [ "$DEBUG" = true ]; then
     MAVEN_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"
 fi
 
-# Step 5: Run integration tests
+# Step 4: Run integration tests
 echo -e "${YELLOW}Running integration tests...${NC}"
 
 if [ "$DEBUG" = true ]; then
@@ -94,7 +80,7 @@ fi
 
 TEST_RESULT=$?
 
-# Step 6: Collect logs if tests failed
+# Step 5: Collect logs if tests failed
 if [ $TEST_RESULT -ne 0 ]; then
     echo -e "${RED}Tests failed! Collecting logs...${NC}"
 
@@ -109,7 +95,7 @@ if [ $TEST_RESULT -ne 0 ]; then
     echo -e "${YELLOW}Logs saved to target/test-logs/${NC}"
 fi
 
-# Step 7: Clean up containers if not keeping them
+# Step 6: Clean up containers if not keeping them
 if [ "$KEEP_CONTAINERS" = false ]; then
     echo -e "${YELLOW}Cleaning up test containers...${NC}"
     docker rm -f $(docker ps -a --filter "name=atlas-test" --format "{{.Names}}") 2>/dev/null || true
@@ -120,7 +106,7 @@ else
     echo "  docker rm -f \$(docker ps -a --filter 'name=atlas-test' --format '{{.Names}}')"
 fi
 
-# Step 8: Report results
+# Step 7: Report results
 if [ $TEST_RESULT -eq 0 ]; then
     echo -e "${GREEN}============================================${NC}"
     echo -e "${GREEN}Integration tests completed successfully!${NC}"
