@@ -92,8 +92,8 @@ jobs:
 
       - name: Build with Maven
         run: |
-          echo "Running main build..."
-          mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+          echo "build without dashboard"
+          chmod +x ./build.sh && ./build.sh
 
       - name: Run Integration Tests
         run: |

@@ -25,10 +25,6 @@ echo "Maven Building"
 
 mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
 
-echo "Run Integration tests"
-
-mvn test -pl webapp -Dtest=org.apache.atlas.web.integration.AtlasDockerIntegrationTest -Dsurefire.useFile=false
-
 echo "[DEBUG listing distro/target"
 ls distro/target
 
