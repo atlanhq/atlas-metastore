@@ -382,38 +382,4 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             }
         }
     }
-
-    protected void recordInternalAttributeIncremental2(String propertyName, Object value, Class cardinality) {
-        if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
-            RequestContext context = RequestContext.get();
-            String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
-            Collection<Object> values = null;
-
-            if (cardinality == List.class) {
-                values = new ArrayList<>();
-            } else {
-                values = new HashSet<>();
-            }
-
-            if (StringUtils.isNotEmpty(entityGuid)) {
-                if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
-                    Collection<Object> currentValueInRecord = (Collection) context.getAllInternalAttributesMap().get(entityGuid).get(propertyName);
-
-                    if (currentValueInRecord == null) {
-                        values.add(value);
-                        context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, values);
-                    } else {
-                        currentValueInRecord.add(value);
-                        context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, currentValueInRecord);
-                    }
-                } else {
-                    values.add(value);
-
-                    Map<String, Object> map = new HashMap<>();
-                    map.put(propertyName, values);
-                    context.getAllInternalAttributesMap().put(entityGuid, map);
-                }
-            }
-        }
-    }
 }
