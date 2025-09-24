@@ -45,7 +45,7 @@ done
 
 # Step 1: Build Docker image
 echo -e "${YELLOW}Building Atlas Docker image...${NC}"
-docker build -t atlanhq/atlas:test .
+docker buildx build --load -t atlanhq/atlas:test .
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build Docker image${NC}"
