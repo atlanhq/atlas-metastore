@@ -97,8 +97,8 @@ jobs:
       - name: Run Integration Tests
         env:
           # Configure Testcontainers for GitHub Actions
-          TESTCONTAINERS_RYUK_DISABLED: false
-          TESTCONTAINERS_CHECKS_DISABLE: false
+          TESTCONTAINERS_RYUK_DISABLED: true
+          TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
