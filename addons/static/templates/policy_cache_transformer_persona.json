@@ -1169,8 +1169,6 @@
         "relationship-type:*",
         "end-one-entity-type:AIModel",
         "end-one-entity-classification:*",
-        "end-one-entity:*",
-        "end-one-entity:{entity}/*",
 
         "end-two-entity-type:Catalog",
         "end-two-entity-type:Connection",
@@ -1198,9 +1196,7 @@
         "end-one-entity:*",
 
         "end-two-entity-type:AIModel",
-        "end-two-entity-classification:*",
-        "end-two-entity:*",
-        "end-two-entity:{entity}/*"
+        "end-two-entity-classification:*"
       ],
       "actions": ["add-relationship", "remove-relationship"]
     },
