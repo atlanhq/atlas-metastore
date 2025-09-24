@@ -2786,7 +2786,11 @@ public class EntityGraphMapper {
         MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("addMeaningsToEntityRelations");
         try {
             if (!RequestContext.get().isSkipAuthorizationCheck()) {
-                verifyMeaningsAuthorization(ctx, createdElements, deletedElements, currentElements);
+                try {
+                    verifyMeaningsAuthorization(ctx, createdElements, deletedElements, currentElements);
+                } catch (AtlasBaseException e) {
+                    throw e;
+                }
             }
 
             List<AtlasVertex> assignedEntitiesVertices ;
@@ -2799,6 +2803,7 @@ public class EntityGraphMapper {
             if (!createdElements.isEmpty()) {
 
                 assignedEntitiesVertices = createdElements.stream()
+                        .filter(Objects::nonNull)
                         .map(x -> ((AtlasEdge) x).getInVertex())
                         .filter(x -> ACTIVE.name().equals(x.getProperty(STATE_PROPERTY_KEY, String.class)))
                         .collect(Collectors.toList());
@@ -2853,7 +2858,11 @@ public class EntityGraphMapper {
         MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("addMeaningsToEntityV1");
         try {
             if (!RequestContext.get().isSkipAuthorizationCheck()) {
-                verifyMeaningsAuthorization(ctx, createdElements, deletedElements, currentElements);
+                try {
+                    verifyMeaningsAuthorization(ctx, createdElements, deletedElements, currentElements);
+                } catch (AtlasBaseException e) {
+                    throw e;
+                }
             }
 
             // handle __terms attribute of entity
@@ -2919,7 +2928,7 @@ public class EntityGraphMapper {
 
         List<Object> changedEntities;
 
-        if (currentElements != null && !currentElements.isEmpty()) {
+        if (CollectionUtils.isNotEmpty(currentElements)) {
             Set<Object> createdSet = new HashSet<>(createdElements);
             Set<Object> currentSet = new HashSet<>(currentElements);
 
@@ -2931,7 +2940,7 @@ public class EntityGraphMapper {
             changedEntities = new ArrayList<>(createdElements);
         }
 
-        if (changedEntities != null && !changedEntities.isEmpty()) {
+        if (CollectionUtils.isNotEmpty(changedEntities)) {
             for (Object element : changedEntities) {
                 AtlasEdge edge = (AtlasEdge) element;
                 
@@ -2959,7 +2968,7 @@ public class EntityGraphMapper {
             }
         }
 
-        if (deletedElements != null && !deletedElements.isEmpty()) {
+        if (CollectionUtils.isNotEmpty(deletedElements)) {
             for (AtlasEdge edge : deletedElements) {
                 if (isGlossaryTermContext) {
                     AtlasVertex targetAssetVertex = edge.getInVertex();
