@@ -21,13 +21,13 @@ mkdir -p ~/.m2/repository/org/keycloak
 wget  https://atlan-public.s3.eu-west-1.amazonaws.com/artifact/keycloak-15.0.2.1.zip
 unzip -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
 
+echo "Maven Building"
+
+mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
+
 echo "Run Integration tests"
 
 mvn test -pl webapp -Dtest=org.apache.atlas.web.integration.AtlasDockerIntegrationTest -Dsurefire.useFile=false
-
-echo "Maven Building"
-
-mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
 
 echo "[DEBUG listing distro/target"
 ls distro/target
