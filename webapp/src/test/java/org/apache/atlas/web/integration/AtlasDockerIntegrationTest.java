@@ -9,6 +9,8 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -44,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ExtendWith(TestcontainersExtension.class)
 public class AtlasDockerIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasDockerIntegrationTest.class);
@@ -130,8 +133,9 @@ public class AtlasDockerIntegrationTest {
 
     private static String getDeployDirectoryPath() {
         // Try different paths where deploy directory might be
+        String projectRootPath = System.getProperty("user.dir");
         String[] possiblePaths = {
-                System.getProperty("project.dir")+ "/webapp/src/test/resources/deploy"
+                projectRootPath+ "/src/test/resources/deploy"
         };
 
         for (String path : possiblePaths) {

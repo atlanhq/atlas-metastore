@@ -1813,7 +1813,7 @@
                 <dependencies>
                     <dependency>
                         <groupId>org.apache.maven.surefire</groupId>
-                        <artifactId>surefire-testng</artifactId>
+                        <artifactId>surefire-junit-platform</artifactId>
                         <version>${surefire.version}</version>
                     </dependency>
                 </dependencies>
