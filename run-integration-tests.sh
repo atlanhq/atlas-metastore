@@ -67,6 +67,9 @@ if [ "$DEBUG" = true ]; then
     MAVEN_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"
 fi
 
+echo "Listing docker images"
+docker image ls
+
 # Step 4: Run integration tests
 echo -e "${YELLOW}Running integration tests...${NC}"
 
