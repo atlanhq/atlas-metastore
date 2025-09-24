@@ -47,8 +47,8 @@ jobs:
       # Set up Docker service
       docker:
         image: docker:dind
-        privileged: true
-        options: --privileged
+        options: >-
+          --privileged
 
     steps:
       - uses: actions/checkout@v3
