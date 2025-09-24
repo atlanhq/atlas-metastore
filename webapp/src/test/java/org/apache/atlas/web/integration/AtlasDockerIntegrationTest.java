@@ -549,19 +549,6 @@ public class AtlasDockerIntegrationTest {
         LOG.info("Found {} entity types", types.get("entityDefs").size());
     }
 
-    private KafkaConsumer<String, String> createKafkaConsumer() {
-        Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:" + kafka.getFirstMappedPort());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
-        consumer.subscribe(Collections.singletonList("ATLAS_ENTITIES"));
-        return consumer;
-    }
-
     @Test
     @Order(3)
     @DisplayName("Test Create Table Asset and Verify Kafka Notification")
@@ -683,5 +670,18 @@ public class AtlasDockerIntegrationTest {
     @AfterAll
     void tearDown() {
         LOG.info("Test completed");
+    }
+
+    private KafkaConsumer<String, String> createKafkaConsumer() {
+        Properties props = new Properties();
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:" + kafka.getFirstMappedPort());
+        props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group");
+        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+        consumer.subscribe(Collections.singletonList("ATLAS_ENTITIES"));
+        return consumer;
     }
 }
