@@ -85,11 +85,11 @@ fi
 echo -e "${YELLOW}Running integration tests...${NC}"
 
 if [ "$DEBUG" = true ]; then
-    mvn test -Dtest=AtlasDockerIntegrationTest \
+    mvn test -pl webapp -Dtest=AtlasDockerIntegrationTest \
              -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
-             -Dorg.testcontainers.log.level=DEBUG
+             -Dorg.testcontainers.log.level=DEBUG -Dsurefire.useFile=false
 else
-    mvn test -Dtest=AtlasDockerIntegrationTest
+    mvn test -pl webapp -Dtest=AtlasDockerIntegrationTest -Dsurefire.useFile=false
 fi
 
 TEST_RESULT=$?
