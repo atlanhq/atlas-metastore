@@ -50,6 +50,7 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         updatedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         deletedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
+    private final Map<String, Map<String, Object>> allInternalAttributesMap     = new HashMap<>();
 
 
     private       Map<String, String>                    lexoRankCache        = null;
@@ -200,6 +201,7 @@ public class RequestContext {
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
+        this.allInternalAttributesMap.clear();
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -875,6 +877,10 @@ public class RequestContext {
 
     public boolean isInvokedByLineage() {
         return isInvokedByLineage;
+    }
+
+    public Map<String, Map<String, Object>> getAllInternalAttributesMap() {
+        return allInternalAttributesMap;
     }
 
     public class EntityGuidPair {

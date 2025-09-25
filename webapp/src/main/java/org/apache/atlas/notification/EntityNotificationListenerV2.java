@@ -307,6 +307,13 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
                 }
             }
 
+            // fill the internal properties like __glossary, __meanings etc. (ES Isolation)
+            RequestContext context = RequestContext.get();
+            Map<String, Object> allInternalAttributesMap = context.getAllInternalAttributesMap().get(entity.getGuid());
+            if (MapUtils.isNotEmpty(allInternalAttributesMap)) {
+                ret.setInternalAttributes(allInternalAttributesMap);
+            }
+
             //Add relationship attributes which has isOptional as false
             Map<String, Object> rel = new HashMap<>();
             for (Map<String, AtlasAttribute> attrs : entityType.getRelationshipAttributes().values()) {

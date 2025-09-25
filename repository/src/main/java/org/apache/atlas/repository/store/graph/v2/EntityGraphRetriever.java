@@ -83,6 +83,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.apache.tinkerpop.gremlin.structure.*;
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.graphdb.relations.CacheVertexProperty;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.javatuples.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -1449,8 +1450,11 @@ public class EntityGraphRetriever {
             if (entityExtInfo != null) {
                 entityExtInfo.addReferredEntity(guid, entity);
             }
-
+            
             mapSystemAttributes(entityVertex, entity);
+
+            entity.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            entity.setSuperTypeNames(typeRegistry.getEntityTypeByName(entity.getTypeName()).getAllSuperTypes());
 
             mapBusinessAttributes(entityVertex, entity);
 
@@ -1733,6 +1737,9 @@ public class EntityGraphRetriever {
             }
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
+            ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            ret.setSuperTypeNames(entityType.getAllSuperTypes());
+
             if (entityType != null) {
                 for (AtlasAttribute headerAttribute : entityType.getHeaderAttributes().values()) {
                     Object attrValue = getVertexAttribute(entityVertex, headerAttribute, vertexEdgePropertiesCache);
@@ -1838,6 +1845,9 @@ public class EntityGraphRetriever {
             }
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
+            ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            ret.setSuperTypeNames(entityType.getAllSuperTypes());
+
             if (entityType != null) {
                 for (AtlasAttribute headerAttribute : entityType.getHeaderAttributes().values()) {
                     Object attrValue = getVertexAttribute(entityVertex, headerAttribute);
@@ -1910,6 +1920,9 @@ public class EntityGraphRetriever {
 
             ret.setTypeName(typeName);
             ret.setGuid(guid);
+
+            ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            ret.setSuperTypeNames(entityType.getAllSuperTypes());
 
             String state = (String)properties.get(Constants.STATE_PROPERTY_KEY);
             Id.EntityState entityState = state == null ? null : Id.EntityState.valueOf(state);

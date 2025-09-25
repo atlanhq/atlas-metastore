@@ -87,6 +87,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -5609,6 +5610,9 @@ public class EntityGraphMapper {
             header.setUpdatedBy(getModifiedByAsString(vertex));
             header.setAttribute(NAME, vertex.getProperty(NAME, String.class));
             header.setAttribute(QUALIFIED_NAME, vertex.getProperty(QUALIFIED_NAME, String.class));
+
+            header.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            header.setSuperTypeNames(typeRegistry.getEntityTypeByName(header.getTypeName()).getAllSuperTypes());
 
             if (!req.isUpdatedEntity(header.getGuid())) {
                 updateModificationMetadata(vertex);
