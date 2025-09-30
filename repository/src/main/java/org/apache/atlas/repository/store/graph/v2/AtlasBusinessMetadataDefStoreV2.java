@@ -464,7 +464,7 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
         int newRichTextCount = 0;
         for (AtlasStructDef.AtlasAttributeDef attributeDef : businessMetadataDef.getAttributeDefs()) {
-            if (isRichTextAttribute(attributeDef)) {
+            if (isRichTextAttribute(attributeDef) && !isArchivedAttribute(attributeDef)) {
                 newRichTextCount++;
             }
         }
@@ -495,6 +495,15 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
         return "true".equalsIgnoreCase(isRichText);
     }
 
+    private boolean isArchivedAttribute(AtlasStructDef.AtlasAttributeDef attributeDef) {
+        if (attributeDef.getOptions() == null) {
+            return false;
+        }
+
+        String isArchived = attributeDef.getOptions().get("isArchived");
+        return "true".equalsIgnoreCase(isArchived);
+    }
+
     private int countExistingRichTextAttributes(String excludeBusinessMetadataGuid) throws AtlasBaseException {
         int count = 0;
 
@@ -508,14 +517,14 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
                 if (CollectionUtils.isNotEmpty(bmDef.getAttributeDefs())) {
                     for (AtlasStructDef.AtlasAttributeDef attributeDef : bmDef.getAttributeDefs()) {
-                        if (isRichTextAttribute(attributeDef)) {
+                        if (isRichTextAttribute(attributeDef) && !isArchivedAttribute(attributeDef)) {
                             count++;
                         }
                     }
                 }
             }
         } catch (Exception e) {
-            LOG.error("Error counting existing rich text attributes", e);
+            LOG.error("Failed to count existing rich text attributes, at business metadata : {}", excludeBusinessMetadataGuid, e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, "Failed to validate rich text attribute limit");
         }
 

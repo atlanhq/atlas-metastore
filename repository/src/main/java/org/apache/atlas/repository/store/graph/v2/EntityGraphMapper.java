@@ -2484,7 +2484,7 @@ public class EntityGraphMapper {
             return true;
         }
 
-        if (attributeDef.getIndexType() == AtlasAttributeDef.IndexType.STRING) {
+        if (AtlasAttributeDef.IndexType.STRING == attributeDef.getIndexType()) {
             return true;
         }
 
