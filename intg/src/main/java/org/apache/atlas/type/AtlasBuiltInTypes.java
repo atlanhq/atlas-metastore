@@ -706,6 +706,7 @@ public class AtlasBuiltInTypes {
 
         @Override
         public String getNormalizedValue(Object obj) {
+            //keeping this as-is since it is invoked in many places
             if (obj != null) {
                 return obj.toString();
             }
