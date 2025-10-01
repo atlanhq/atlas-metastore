@@ -701,7 +701,7 @@ public class AtlasBuiltInTypes {
 
         @Override
         public boolean isValidValue(Object obj) {
-            return true;
+            return obj == null || obj instanceof String;
         }
 
         @Override
