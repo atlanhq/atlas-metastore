@@ -352,7 +352,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         }
     }
 
-    protected void recordInternalAttributeIncrementalAdd(String propertyName, Object value, Class cardinality) {
+    protected void recordInternalAttributeIncrementalAdd(String propertyName, Class cardinality) {
         if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
             String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
 
