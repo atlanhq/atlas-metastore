@@ -17,15 +17,14 @@
  */
 package org.apache.atlas.web.rest;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.SearchFilter;
 import org.apache.atlas.model.typedef.*;
-import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graph.TypeCacheRefresher;
 import org.apache.atlas.repository.util.FilterUtil;
 import org.apache.atlas.service.redis.RedisService;
@@ -47,20 +46,17 @@ import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
-import java.io.IOException;
-import java.net.URISyntaxException;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.locks.Lock;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.Lock;
 
 import static org.apache.atlas.AtlasErrorCode.APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED;
 import static org.apache.atlas.AtlasErrorCode.ATTRIBUTE_DELETION_NOT_SUPPORTED;
-import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PRODUCT;
 import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
 
 /**
@@ -460,7 +456,6 @@ public class TypesREST {
         validateBuiltInTypeNames(typesDef);
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         try {
-            typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.createAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
@@ -507,7 +502,6 @@ public class TypesREST {
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         Lock lock = null;
         try {
-            typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.updateAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
@@ -573,7 +567,6 @@ public class TypesREST {
         validateBuiltInTypeNames(typesDef);
         validateTypeNameExists(typesDef);
         try {
-            typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeDefs(" +
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
@@ -610,7 +603,6 @@ public class TypesREST {
         Lock lock = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
         try {
-            typeCacheRefresher.verifyCacheRefresherHealth();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeByName(" + typeName + ")");
             }
@@ -717,50 +709,12 @@ public class TypesREST {
         return ret;
     }
 
-    private void refreshAllHostCache(String traceId, String clientOrigin){
-        if (CLIENT_ORIGIN_PRODUCT.equals(clientOrigin) && AtlasConfiguration.ENABLE_ASYNC_TYPE_UPDATE.getBoolean()){
-            cacheRefreshExecutor.submit(() -> {
-                RequestContext.get().setTraceId(traceId);
-                try {
-                    int maxRetries = 5;
-                    int retryCount = 0;
-                    boolean success = false;
-
-                    while (!success && retryCount < maxRetries) {
-                        try {
-                            typeCacheRefresher.refreshAllHostCache();
-                            LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef refreshed successfully on attempt {}", retryCount + 1);
-                            success = true;
-                        } catch (IOException | URISyntaxException | RepositoryException e) {
-                            retryCount++;
-                            if (retryCount >= maxRetries) {
-                                LOG.error("TypesRest.updateAtlasTypeDefs:: Failed to refresh typedef after {} attempts", maxRetries, e);
-                                break;
-                            }
-
-                            // Exponential backoff: wait longer between each retry
-                            long waitTimeMs = 1000 * (long)Math.pow(2, retryCount - 1);
-                            LOG.warn("TypesRest.updateAtlasTypeDefs:: Retry attempt {} after {} ms", retryCount, waitTimeMs);
-
-                            try {
-                                Thread.sleep(waitTimeMs);
-                            } catch (InterruptedException ie) {
-                                Thread.currentThread().interrupt();
-                                LOG.warn("Retry interrupted", ie);
-                                break;
-                            }
-                        }
-                    }
-                } catch (Exception e) {
-                    LOG.error("Unexpected error in async cache refresh", e);
-                }
-            });
-        } else {
-            try {
-                typeCacheRefresher.refreshAllHostCache();
-            } catch (IOException | URISyntaxException | RepositoryException e) {
-                LOG.error("Error while refreshing all host cache", e);
-            }
+    private void refreshAllHostCache() throws AtlasBaseException {
+        try {
+            typeCacheRefresher.refreshAllHostCache();
+        } catch (Exception e) {
+            LOG.error("Error while refreshing all host cache", e);
+            throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_REFRESH_TYPE_CACHE, e.getMessage());
         }
     }
 
@@ -794,7 +748,7 @@ public class TypesREST {
                 
                 // Perform the creation
                 AtlasTypesDef result = typeDefStore.createTypesDef(typesDef);
-                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                refreshAllHostCache();
                 LOG.info("Successfully created typedefs on attempt {}", attempt);
                 return result;
 
@@ -841,7 +795,7 @@ public class TypesREST {
                 }
                 
                 AtlasTypesDef result = typeDefStore.updateTypesDef(typesDef);
-                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                refreshAllHostCache();
                 LOG.info("Successfully updated typedefs on attempt {}", attempt);
                 return result;
 
@@ -883,7 +837,7 @@ public class TypesREST {
             try {
                 // Perform the deletion
                 typeDefStore.deleteTypesDef(typesDef);
-                refreshAllHostCache(RequestContext.get().getTraceId(), clientOrigin);
+                refreshAllHostCache();
                 LOG.info("Successfully deleted typedefs on attempt {}", attempt);
                 return;
 
@@ -922,7 +876,7 @@ public class TypesREST {
             try {
                 // Perform the deletion
                 typeDefStore.deleteTypeByName(typeName);
-                refreshAllHostCache(RequestContext.get().getTraceId(), null);
+                refreshAllHostCache();
                 LOG.info("Successfully deleted typedef '{}' on attempt {}", typeName, attempt);
                 return;
 
