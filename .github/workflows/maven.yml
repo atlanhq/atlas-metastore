@@ -25,7 +25,6 @@ on:
       - beta
       - master
       - staging
-      - mlh-1226-denorm-attrs-push-kafka
 
 jobs:
   build:
