@@ -2,13 +2,15 @@ name: Build & Publish Helm Chart
 
 on:
   workflow_run:
-    workflows: ["Java CI with Maven"]
-    types: [completed]
+    workflows:
+      - "Java CI with Maven"
     branches:
       - beta
       - master
       - staging
-      - atlas-ci-cd-updates
+      - atlas_ci_cd_updates
+    types:
+      - completed
 
 jobs:
   helm-publish:
@@ -16,7 +18,7 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     strategy:
       matrix:
-        chart: [atlas, atlas-read]
+        chart: ['atlas', 'atlas-read']
     
     steps:
       - name: Checkout code

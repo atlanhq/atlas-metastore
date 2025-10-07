@@ -2,7 +2,7 @@ apiVersion: v2
 name: atlas-read
 description: Apache Atlas Read Replica for Metadata Management
 type: application
-version: 1.0.0-atlas-ci-cd-updates.8275fa956
+version: 1.0.0
 appVersion: "3.0.0"  # Will be updated by CI with commit ID
 maintainers:
   - name: Atlan Engineering

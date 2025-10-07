@@ -8,7 +8,7 @@ on:
       - master
       - staging
       - beta
-      - atlas-ci-cd-updates
+      - atlas_ci_cd_updates
       - mlh41-integration-tests
       - mlh41tests
       - mlh40java17
