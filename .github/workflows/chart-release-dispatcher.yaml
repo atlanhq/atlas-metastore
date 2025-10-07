@@ -3,7 +3,7 @@ name: Charts Values Seed Trigger Dispatcher
 on:
   workflow_run:
     workflows:
-      - "Build & Publish Helm Chart"   # Triggers AFTER helm charts are published to OCI
+      - "Java CI with Maven"   # Triggers AFTER Maven build (which includes Helm publish)
     branches:
       - master
       - staging
