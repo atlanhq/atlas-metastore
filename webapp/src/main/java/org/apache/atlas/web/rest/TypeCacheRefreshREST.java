@@ -2,9 +2,10 @@ package org.apache.atlas.web.rest;
 
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graph.IAtlasGraphProvider;
-import org.apache.atlas.store.AtlasTypeDefStore;
+import org.apache.atlas.repository.store.graph.AtlasTypeDefGraphStore;
 import org.apache.atlas.web.service.AtlasHealthStatus;
 import org.apache.atlas.web.service.ServiceState;
 import org.apache.atlas.web.util.Servlets;
@@ -29,15 +30,13 @@ import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
 public class TypeCacheRefreshREST {
     private static final Logger LOG = LoggerFactory.getLogger(TypeCacheRefreshREST.class);
 
-    private final AtlasTypeDefStore typeDefStore;
-    private final IAtlasGraphProvider provider;
+    private final AtlasTypeDefGraphStore typeDefStore;
     private final ServiceState serviceState;
     private final AtlasHealthStatus atlasHealthStatus;
 
     @Inject
-    public TypeCacheRefreshREST(AtlasTypeDefStore typeDefStore, IAtlasGraphProvider provider, ServiceState serviceState, AtlasHealthStatus atlasHealthStatus) {
+    public TypeCacheRefreshREST(AtlasTypeDefGraphStore typeDefStore, ServiceState serviceState, AtlasHealthStatus atlasHealthStatus) {
         this.typeDefStore = typeDefStore;
-        this.provider = provider;
         this.serviceState = serviceState;
         this.atlasHealthStatus = atlasHealthStatus;
     }
@@ -52,13 +51,13 @@ public class TypeCacheRefreshREST {
     @POST
     @Path("/refresh")
     @Timed
-    public void refreshCache(@QueryParam("traceId") String traceId) throws AtlasBaseException {
+    public void refreshCache(final AtlasTypesDef typesDef, @QueryParam("action") String action,  @QueryParam("traceId") String traceId) throws AtlasBaseException {
         try {
             if (serviceState.getState() != ServiceState.ServiceStateValue.ACTIVE) {
                 LOG.warn("Node is in {} state. skipping refreshing type-def-cache :: traceId {}", serviceState.getState(), traceId);
                 return;
             }
-            refreshTypeDef(traceId);
+            refreshTypeDef(typesDef, action, traceId);
         } catch (Exception e) {
             LOG.error("Error during refreshing cache  :: traceId " + traceId + " " + e.getMessage(), e);
             serviceState.setState(ServiceState.ServiceStateValue.PASSIVE, true);
@@ -67,12 +66,21 @@ public class TypeCacheRefreshREST {
         }
     }
 
-    private synchronized void refreshTypeDef(final String traceId) throws RepositoryException, InterruptedException, AtlasBaseException {
-        LOG.info("Initiating type-def cache refresh with : traceId {}", traceId);
-        LOG.info("Size of field keys before refresh = {}", provider.get().getManagementSystem().getGraphIndex(VERTEX_INDEX).getFieldKeys().size());
-        //Reload in-memory cache of type-registry
-        typeDefStore.init();
-        LOG.info("Size of field keys after refresh = {}", provider.get().getManagementSystem().getGraphIndex(VERTEX_INDEX).getFieldKeys().size());
+    private synchronized void refreshTypeDef(AtlasTypesDef typesDef, String action, final String traceId) throws RepositoryException, InterruptedException, AtlasBaseException {
+        LOG.info("Refreshing type-def cache with action {} :: traceId {}", action, traceId);
+        if (action == null) {
+            action = "INIT";
+        }
+        switch (action.toUpperCase()) {
+            case "CREATE":
+            case "UPDATE":
+                typeDefStore.getTypeRegistry().addTypes(typesDef);
+                break;
+            case "DELETE":
+            case "INIT":
+            default:
+                typeDefStore.init();
+        }
         LOG.info("Completed type-def cache refresh :: traceId {}", traceId);
     }
 }

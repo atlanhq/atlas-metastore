@@ -7,10 +7,13 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.model.typedef.AtlasTypesDef;
+import org.apache.atlas.type.AtlasType;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.conn.ConnectTimeoutException;
+import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
@@ -42,10 +45,10 @@ public class TypeCacheRefresher {
     private KubernetesClient k8sClient;
     private CloseableHttpClient httpClient;
 
-    @Value("${atlas.refresh.timeout:30}")
+    @Value("${atlas.refresh.timeout:60}")
     private int refreshTimeoutSeconds;
 
-    @Value("${atlas.refresh.retries:2}")
+    @Value("${atlas.refresh.retries:3}")
     private long refreshRetries;
 
 
@@ -91,7 +94,7 @@ public class TypeCacheRefresher {
     /**
      * Notify all other Atlas pods of typedef update
      */
-    public void refreshAllHostCache() {
+    public void refreshAllHostCache(AtlasTypesDef typesDef, String action) {
         final String traceId = RequestContext.get().getTraceId();
 
         // Get current pod's IP to exclude self
@@ -110,7 +113,7 @@ public class TypeCacheRefresher {
         // Parallel refresh of all other pods
         List<CompletableFuture<RefreshResult>> futures = otherPodIps.stream()
                 .map(podIp -> CompletableFuture.supplyAsync(() ->
-                                refreshPodWithRetry(podIp, traceId),
+                                refreshPodWithRetry(podIp, traceId, typesDef, action),
                         getAsyncExecutor()
                 ))
                 .collect(Collectors.toList());
@@ -243,11 +246,11 @@ public class TypeCacheRefresher {
     /**
      * Refresh typedef cache on a specific pod with retry logic
      */
-    private RefreshResult refreshPodWithRetry(String podIp, String traceId) {
+    private RefreshResult refreshPodWithRetry(String podIp, String traceId, AtlasTypesDef typesDef, String action) {
         String lastError = null;
 
         for (int attempt = 1; attempt <= refreshRetries; attempt++) {
-            RefreshResult result = refreshPod(podIp, traceId, attempt);
+            RefreshResult result = refreshPod(podIp, traceId, attempt, typesDef, action);
 
             if (result.isSuccess()) {
                 return result;
@@ -277,15 +280,25 @@ public class TypeCacheRefresher {
     /**
      * Refresh typedef cache on a specific pod using Apache HttpClient
      */
-    private RefreshResult refreshPod(String podIp, String traceId, int attempt) {
-        String url = String.format("http://%s:21000/api/atlas/admin/types/refresh?traceId=%s",
-                podIp, traceId);
+    private RefreshResult refreshPod(String podIp, String traceId, int attempt, AtlasTypesDef typesDef, String action) {
+        String url = String.format("http://%s:21000/api/atlas/admin/types/refresh?traceId=%s&action=%s",
+                podIp, traceId, action);
 
         HttpPost httpPost = new HttpPost(url);
+        if( action != null && !"DELETE".equalsIgnoreCase(action)) {
+            //convert typesDef to json string
+            String jsonBody = AtlasType.toJson(typesDef);
+            httpPost.setEntity(new StringEntity(jsonBody, "UTF-8"));
+        } else {
+            //initialise an empty AtlasTypeDef
+            AtlasTypesDef emptyDef = new AtlasTypesDef();
+            String jsonBody = AtlasType.toJson(emptyDef);
+            httpPost.setEntity(new StringEntity(jsonBody, "UTF-8"));
+        }
         long startTime = System.currentTimeMillis();
 
         try {
-            LOG.debug("Sending refresh request to pod {} (attempt {}): {}", podIp, attempt, url);
+            LOG.debug("Sending refresh request to pod {}, action {} (attempt {}): {}", podIp, action, attempt, url);
 
             CloseableHttpResponse response = httpClient.execute(httpPost);
             long duration = System.currentTimeMillis() - startTime;
@@ -309,29 +322,29 @@ public class TypeCacheRefresher {
 
         } catch (SocketTimeoutException e) {
             long duration = System.currentTimeMillis() - startTime;
-            LOG.error("Timeout refreshing pod {} after {}ms (attempt {}): {}",
-                    podIp, duration, attempt, e.getMessage());
+            LOG.error("Timeout refreshing pod {} action {} after {}ms (attempt {}): {}",
+                    podIp, action, duration, attempt, e.getMessage());
             return new RefreshResult(podIp, false, duration, attempt,
                     "Timeout after " + refreshTimeoutSeconds + "s");
 
         } catch (ConnectTimeoutException e) {
             long duration = System.currentTimeMillis() - startTime;
-            LOG.error("Connection timeout to pod {} after {}ms (attempt {}): {}",
-                    podIp, duration, attempt, e.getMessage());
+            LOG.error("Connection timeout to pod {} action {} after {}ms (attempt {}): {}",
+                    podIp, action, duration, attempt, e.getMessage());
             return new RefreshResult(podIp, false, duration, attempt,
                     "Connection timeout: " + e.getMessage());
 
         } catch (IOException e) {
             long duration = System.currentTimeMillis() - startTime;
-            LOG.error("IO error refreshing pod {} after {}ms (attempt {}): {}",
-                    podIp, duration, attempt, e.getMessage());
+            LOG.error("IO error refreshing pod {} action {} after {}ms (attempt {}): {}",
+                    podIp, action, duration, attempt, e.getMessage());
             return new RefreshResult(podIp, false, duration, attempt,
                     "IO error: " + e.getMessage());
 
         } catch (Exception e) {
             long duration = System.currentTimeMillis() - startTime;
-            LOG.error("Unexpected error refreshing pod {} after {}ms (attempt {}): {}",
-                    podIp, duration, attempt, e.getMessage(), e);
+            LOG.error("Unexpected error refreshing pod {} action {} after {}ms (attempt {}): {}",
+                    podIp, action, duration, attempt, e.getMessage(), e);
             return new RefreshResult(podIp, false, duration, attempt,
                     "Unexpected error: " + e.getMessage());
 

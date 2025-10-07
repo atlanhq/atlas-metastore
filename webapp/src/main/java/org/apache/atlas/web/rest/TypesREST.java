@@ -697,9 +697,9 @@ public class TypesREST {
         return ret;
     }
 
-    private void refreshAllHostCache() throws AtlasBaseException {
+    private void refreshAllHostCache(AtlasTypesDef typesDef, String action) throws AtlasBaseException {
         try {
-            typeCacheRefresher.refreshAllHostCache();
+            typeCacheRefresher.refreshAllHostCache(typesDef, action);
         } catch (Exception e) {
             LOG.error("Error while refreshing all host cache", e);
             throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_REFRESH_TYPE_CACHE, e.getMessage());
@@ -721,7 +721,7 @@ public class TypesREST {
                 
                 // Perform the creation
                 AtlasTypesDef result = typeDefStore.createTypesDef(typesDef);
-                refreshAllHostCache();
+                refreshAllHostCache(typesDef, "CREATE");
                 LOG.info("Successfully created typedefs on attempt {}", attempt);
                 return result;
 
@@ -768,7 +768,7 @@ public class TypesREST {
                 }
                 
                 AtlasTypesDef result = typeDefStore.updateTypesDef(typesDef);
-                refreshAllHostCache();
+                refreshAllHostCache(typesDef, "UPDATE");
                 LOG.info("Successfully updated typedefs on attempt {}", attempt);
                 return result;
 
@@ -810,7 +810,7 @@ public class TypesREST {
             try {
                 // Perform the deletion
                 typeDefStore.deleteTypesDef(typesDef);
-                refreshAllHostCache();
+                refreshAllHostCache(typesDef, "DELETE");
                 LOG.info("Successfully deleted typedefs on attempt {}", attempt);
                 return;
 
@@ -849,7 +849,7 @@ public class TypesREST {
             try {
                 // Perform the deletion
                 typeDefStore.deleteTypeByName(typeName);
-                refreshAllHostCache();
+                refreshAllHostCache(null, "DELETE");
                 LOG.info("Successfully deleted typedef '{}' on attempt {}", typeName, attempt);
                 return;
 
