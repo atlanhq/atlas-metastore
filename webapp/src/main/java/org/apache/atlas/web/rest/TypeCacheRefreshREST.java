@@ -52,13 +52,13 @@ public class TypeCacheRefreshREST {
     @POST
     @Path("/refresh")
     @Timed
-    public void refreshCache(@QueryParam("expectedFieldKeys") int expectedFieldKeys, @QueryParam("traceId") String traceId) throws AtlasBaseException {
+    public void refreshCache(@QueryParam("traceId") String traceId) throws AtlasBaseException {
         try {
             if (serviceState.getState() != ServiceState.ServiceStateValue.ACTIVE) {
                 LOG.warn("Node is in {} state. skipping refreshing type-def-cache :: traceId {}", serviceState.getState(), traceId);
                 return;
             }
-            refreshTypeDef(expectedFieldKeys, traceId);
+            refreshTypeDef(traceId);
         } catch (Exception e) {
             LOG.error("Error during refreshing cache  :: traceId " + traceId + " " + e.getMessage(), e);
             serviceState.setState(ServiceState.ServiceStateValue.PASSIVE, true);
@@ -67,32 +67,11 @@ public class TypeCacheRefreshREST {
         }
     }
 
-    private synchronized void refreshTypeDef(int expectedFieldKeys,final String traceId) throws RepositoryException, InterruptedException, AtlasBaseException {
-        LOG.info("Initiating type-def cache refresh with expectedFieldKeys = {} :: traceId {}", expectedFieldKeys,traceId);
-        int currentSize = provider.get().getManagementSystem().getGraphIndex(VERTEX_INDEX).getFieldKeys().size();
-        LOG.info("Size of field keys before refresh = {} :: traceId {}", currentSize,traceId);
-
-        long totalWaitTimeInMillis = 5 * 1000;//5 seconds
-        long sleepTimeInMillis = 500;
-        long totalIterationsAllowed = 5;
-        int counter = 0;
-
-        while (currentSize < expectedFieldKeys && counter++ < totalIterationsAllowed) {
-            currentSize = provider.get().getManagementSystem().getGraphIndex(VERTEX_INDEX).getFieldKeys().size();
-            LOG.info("field keys size found = {} at iteration {} :: traceId {}", currentSize, counter, traceId);
-            Thread.sleep(sleepTimeInMillis);
-        }
-        //This condition will hold true when expected fieldKeys did not appear even after waiting for totalWaitTimeInMillis
-        if (counter > totalIterationsAllowed) {
-            final String errorMessage = String.format("Could not find desired count of fieldKeys %d after %d ms of wait. Current size of field keys is %d :: traceId %s",
-                    expectedFieldKeys, totalWaitTimeInMillis, currentSize, traceId);
-            throw new AtlasBaseException(errorMessage);
-        } else {
-            LOG.info("Found desired size of fieldKeys in iteration {} :: traceId {}", counter, traceId);
-        }
+    private synchronized void refreshTypeDef(final String traceId) throws RepositoryException, InterruptedException, AtlasBaseException {
+        LOG.info("Initiating type-def cache refresh with : traceId {}", traceId);
+        LOG.info("Size of field keys before refresh = {}", provider.get().getManagementSystem().getGraphIndex(VERTEX_INDEX).getFieldKeys().size());
         //Reload in-memory cache of type-registry
         typeDefStore.init();
-
         LOG.info("Size of field keys after refresh = {}", provider.get().getManagementSystem().getGraphIndex(VERTEX_INDEX).getFieldKeys().size());
         LOG.info("Completed type-def cache refresh :: traceId {}", traceId);
     }

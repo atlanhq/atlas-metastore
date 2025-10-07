@@ -18,7 +18,6 @@
 package org.apache.atlas.web.rest;
 
 import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
@@ -50,9 +49,6 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Lock;
 
 import static org.apache.atlas.AtlasErrorCode.APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED;
@@ -75,7 +71,6 @@ public class TypesREST {
     private final AtlasTypeDefStore typeDefStore;
     private final RedisService redisService;
     private final TypeCacheRefresher typeCacheRefresher;
-    private final ExecutorService cacheRefreshExecutor;
     private String typeDefLock;
 
     private static final int MAX_RETRIES = 3;
@@ -88,13 +83,6 @@ public class TypesREST {
         this.typeCacheRefresher = typeCacheRefresher;
         this.typeDefLock = configuration.getString(ApplicationProperties.TYPEDEF_LOCK_NAME, "atlas:type-def:lock");
         LOG.info("TypeDef lock name: {}", this.typeDefLock);
-
-        this.cacheRefreshExecutor = Executors.newFixedThreadPool(AtlasConfiguration.MAX_THREADS_TYPE_UPDATE.getInt(), r -> {
-            Thread t = new Thread(r);
-            t.setName("Atlas-Cache-Refresh-" + t.getId());
-            t.setDaemon(true);
-            return t;
-        });
     }
 
     /**
@@ -720,21 +708,6 @@ public class TypesREST {
 
     @PreDestroy
     public void cleanUp() {
-        if (cacheRefreshExecutor != null) {
-            try {
-                LOG.info("Shutting down cache refresh executor");
-                cacheRefreshExecutor.shutdown();
-                if (!cacheRefreshExecutor.awaitTermination(10, TimeUnit.SECONDS)) {
-                    LOG.warn("Cache refresh executor did not terminate in time - forcing shutdown");
-                    cacheRefreshExecutor.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                LOG.warn("Interrupted while waiting for cache refresh executor to shut down", e);
-                cacheRefreshExecutor.shutdownNow();
-            }
-        }
-
         this.redisService.releaseDistributedLock(typeDefLock);
     }
 
