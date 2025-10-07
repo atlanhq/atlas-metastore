@@ -285,16 +285,12 @@ public class TypeCacheRefresher {
                 podIp, traceId, action);
 
         HttpPost httpPost = new HttpPost(url);
-        if( action != null && !"DELETE".equalsIgnoreCase(action)) {
-            //convert typesDef to json string
-            String jsonBody = AtlasType.toJson(typesDef);
-            httpPost.setEntity(new StringEntity(jsonBody, "UTF-8"));
-        } else {
-            //initialise an empty AtlasTypeDef
-            AtlasTypesDef emptyDef = new AtlasTypesDef();
-            String jsonBody = AtlasType.toJson(emptyDef);
-            httpPost.setEntity(new StringEntity(jsonBody, "UTF-8"));
-        }
+        //convert typesDef to json string
+        String jsonBody = AtlasType.toJson(typesDef);
+        StringEntity entity = new StringEntity(jsonBody, "UTF-8");
+        entity.setContentType("application/json");
+        httpPost.setEntity(entity);
+
         long startTime = System.currentTimeMillis();
 
         try {

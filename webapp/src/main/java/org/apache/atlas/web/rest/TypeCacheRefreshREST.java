@@ -77,6 +77,7 @@ public class TypeCacheRefreshREST {
                 typeDefStore.getTypeRegistry().addTypes(typesDef);
                 break;
             case "DELETE":
+                typeDefStore.deleteTypesDefInCache(typesDef);
             case "INIT":
             default:
                 typeDefStore.init();

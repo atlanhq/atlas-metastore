@@ -848,8 +848,8 @@ public class TypesREST {
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
             try {
                 // Perform the deletion
-                typeDefStore.deleteTypeByName(typeName);
-                refreshAllHostCache(null, "DELETE");
+                AtlasTypesDef typesDef = typeDefStore.deleteTypeByName(typeName);
+                refreshAllHostCache(typesDef, "DELETE");
                 LOG.info("Successfully deleted typedef '{}' on attempt {}", typeName, attempt);
                 return;
 
