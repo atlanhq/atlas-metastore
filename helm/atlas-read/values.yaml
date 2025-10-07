@@ -14,7 +14,10 @@ global:
     enabled: false
   atlasNginx:
     enabled: false
-
+  globalSvcIsolation:
+    enabled: false
+  esIsolation:
+    enabled: false
 hpa:
   enabled: false
   name: atlas-read
