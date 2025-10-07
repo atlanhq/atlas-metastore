@@ -26,6 +26,7 @@ on:
       - master
       - staging
       - mlh-1226-denorm-attrs-push-kafka
+      - mlh-1240-improve-cm-refresh
 
 jobs:
   build:
