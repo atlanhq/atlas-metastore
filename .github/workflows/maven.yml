@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - atlas-ci-cd-updates
 
 jobs:
   build:
@@ -144,7 +145,7 @@ jobs:
       - name: Scan Image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'ubuntu:18.04'
+          image-ref: 'ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}'
           vuln-type: 'os,library'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
