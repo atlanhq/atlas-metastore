@@ -27,7 +27,8 @@ mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=
 
 echo "Run Integration tests"
 
-mvn test -pl webapp -Dtest=org.apache.atlas.web.integration.AtlasDockerIntegrationTest -Dsurefire.useFile=false
+mvn test -pl webapp -Dspring.profiles.active=test
+
 
 echo "[DEBUG listing distro/target"
 ls distro/target
