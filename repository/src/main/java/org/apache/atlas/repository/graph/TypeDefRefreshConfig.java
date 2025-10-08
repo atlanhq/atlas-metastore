@@ -7,7 +7,6 @@ import org.apache.atlas.service.redis.RedisService;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.EnableScheduling;
-import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 
 import javax.inject.Inject;
@@ -56,38 +55,5 @@ public class TypeDefRefreshConfig {
         
         executor.initialize();
         return executor;
-    }
-
-    /**
-     * Scheduled task that runs every 30 minutes to check if the local typedef version
-     * is behind the version in Redis. If so, triggers a typedef refresh.
-     */
-    @Scheduled(fixedRate = 1800000) // 30 minutes in milliseconds
-    public void checkTypeDefVersion() {
-        try {
-            // Get version from Redis
-            String redisVersionStr = redisService.getValue(AtlasTypeDefStoreInitializer.TYPEDEF_LATEST_VERSION, "1");
-            long redisVersion = Long.parseLong(redisVersionStr);
-
-            // Get current version
-            long currentVersion = AtlasTypeDefStoreInitializer.getCurrentTypedefInternalVersion();
-
-            LOG.debug("TypeDef version check - Redis: {}, Current: {}", redisVersion, currentVersion);
-
-            if (currentVersion < redisVersion) {
-                LOG.info("Local TypeDef version {} is behind Redis version {}. Triggering refresh...", 
-                        currentVersion, redisVersion);
-                
-                try {
-                    typeDefStoreInitializer.init();
-                    LOG.info("TypeDef refresh completed successfully. New version: {}", 
-                            AtlasTypeDefStoreInitializer.getCurrentTypedefInternalVersion());
-                } catch (Exception e) {
-                    LOG.error("Failed to refresh TypeDefs", e);
-                }
-            }
-        } catch (Exception e) {
-            LOG.error("Error checking TypeDef versions", e);
-        }
     }
 }
