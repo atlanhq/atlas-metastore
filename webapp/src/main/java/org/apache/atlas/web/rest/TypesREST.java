@@ -438,7 +438,7 @@ public class TypesREST {
     @POST
     @Path("/typedefs")
     @Timed
-    public AtlasTypesDef createAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
+    public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
         Lock lock = null;
         AtlasPerfTracer perf = null;
         validateBuiltInTypeNames(typesDef);
@@ -452,8 +452,7 @@ public class TypesREST {
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
             typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
-            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
-            AtlasTypesDef atlasTypesDef = createTypeDefsWithRetry(typesDef, clientOrigin);
+            AtlasTypesDef atlasTypesDef = createTypeDefsWithRetry(typesDef);
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.createAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
@@ -482,7 +481,7 @@ public class TypesREST {
     @Path("/typedefs")
     @Experimental
     @Timed
-    public AtlasTypesDef updateAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
+    public AtlasTypesDef updateAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("patch") final boolean patch,
                                              @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         validateBuiltInTypeNames(typesDef);
@@ -518,8 +517,7 @@ public class TypesREST {
             RequestContext.get().setInTypePatching(patch);
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Typedef patch enabled:" + patch);
-            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
-            AtlasTypesDef atlasTypesDef = updateTypeDefsWithRetry(typesDef, clientOrigin);
+            AtlasTypesDef atlasTypesDef = updateTypeDefsWithRetry(typesDef);
             LOG.info("TypesRest.updateAtlasTypeDefs:: Done");
             return atlasTypesDef;
         } catch (AtlasBaseException atlasBaseException) {
@@ -548,7 +546,7 @@ public class TypesREST {
     @Path("/typedefs")
     @Experimental
     @Timed
-    public void deleteAtlasTypeDefs(@Context HttpServletRequest servletRequest, final AtlasTypesDef typesDef) throws AtlasBaseException {
+    public void deleteAtlasTypeDefs(final AtlasTypesDef typesDef) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         Lock lock = null;
         RequestContext.get().setTraceId(UUID.randomUUID().toString());
@@ -560,8 +558,7 @@ public class TypesREST {
                                                                AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
-            String clientOrigin = servletRequest.getHeader(X_ATLAN_CLIENT_ORIGIN);
-            deleteTypeDefsWithRetry(typesDef, clientOrigin);
+            deleteTypeDefsWithRetry(typesDef);
         } catch (AtlasBaseException atlasBaseException) {
             LOG.error("TypesREST.deleteAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
             throw atlasBaseException;
@@ -711,7 +708,7 @@ public class TypesREST {
         this.redisService.releaseDistributedLock(typeDefLock);
     }
 
-    private AtlasTypesDef createTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+    private AtlasTypesDef createTypeDefsWithRetry(AtlasTypesDef typesDef) throws AtlasBaseException {
         AtlasBaseException lastException = null;
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {
@@ -756,7 +753,7 @@ public class TypesREST {
         throw lastException; // Should never reach here, but for completeness
     }
 
-    private AtlasTypesDef updateTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+    private AtlasTypesDef updateTypeDefsWithRetry(AtlasTypesDef typesDef) throws AtlasBaseException {
         AtlasBaseException lastException = null;
         boolean originalPatchingState = RequestContext.get().isInTypePatching();
 
@@ -803,7 +800,7 @@ public class TypesREST {
         throw lastException; // Should never reach here, but for completeness
     }
 
-    private void deleteTypeDefsWithRetry(AtlasTypesDef typesDef, String clientOrigin) throws AtlasBaseException {
+    private void deleteTypeDefsWithRetry(AtlasTypesDef typesDef) throws AtlasBaseException {
         AtlasBaseException lastException = null;
 
         for (int attempt = 1; attempt <= MAX_RETRIES; attempt++) {

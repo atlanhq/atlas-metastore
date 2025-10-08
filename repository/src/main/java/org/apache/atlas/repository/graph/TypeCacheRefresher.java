@@ -340,25 +340,15 @@ public class TypeCacheRefresher {
         String url = String.format("http://%s:%d/api/atlas/admin/types/refresh?traceId=%s&action=%s",
                 podIp, atlasPort, traceId, action);
 
-        HttpPost httpPost = new HttpPost(url);
-        
-        // Convert typesDef to json string
-        String jsonBody = AtlasType.toJson(typesDef);
-        
-        // Create entity with explicit charset
-        StringEntity entity = new StringEntity(jsonBody, CHARSET_UTF8);
-        entity.setContentType("application/json; charset=" + CHARSET_UTF8);
-        
-        // Set additional headers for clarity
-        httpPost.setHeader("Accept", "application/json; charset=" + CHARSET_UTF8);
-        httpPost.setHeader("Accept-Charset", CHARSET_UTF8);
-        
-        httpPost.setEntity(entity);
-
         long startTime = System.currentTimeMillis();
-
+        HttpPost httpPost = new HttpPost(url);
         try {
             LOG.debug("Sending refresh request to pod {}, action {} (attempt {}): {}", podIp, action, attempt, url);
+            //convert typesDef to json string
+            String jsonBody = AtlasType.toJson(typesDef);
+            StringEntity entity = new StringEntity(jsonBody);
+            entity.setContentType("application/json");
+            httpPost.setEntity(entity);
 
             CloseableHttpResponse response = httpClient.execute(httpPost);
             long duration = System.currentTimeMillis() - startTime;
