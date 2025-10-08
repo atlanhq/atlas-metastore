@@ -19,8 +19,8 @@ import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -42,6 +42,7 @@ import java.util.stream.Collectors;
 public class TypeCacheRefresher {
     private static final Logger LOG = LoggerFactory.getLogger(TypeCacheRefresher.class);
     private final IAtlasGraphProvider provider;
+    private final Executor executor;
     private KubernetesClient k8sClient;
     private CloseableHttpClient httpClient;
 
@@ -53,8 +54,9 @@ public class TypeCacheRefresher {
 
 
     @Inject
-    public TypeCacheRefresher(final IAtlasGraphProvider provider) {
+    public TypeCacheRefresher(final IAtlasGraphProvider provider, @Qualifier("typeDefAsyncExecutor") Executor executor) {
         this.provider = provider;
+        this.executor = executor;
     }
 
     @PostConstruct
@@ -114,7 +116,7 @@ public class TypeCacheRefresher {
         List<CompletableFuture<RefreshResult>> futures = otherPodIps.stream()
                 .map(podIp -> CompletableFuture.supplyAsync(() ->
                                 refreshPodWithRetry(podIp, traceId, typesDef, action),
-                        getAsyncExecutor()
+                        this.executor
                 ))
                 .collect(Collectors.toList());
 
@@ -347,16 +349,6 @@ public class TypeCacheRefresher {
         } finally {
             httpPost.reset();
         }
-    }
-
-    private Executor getAsyncExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(5);
-        executor.setMaxPoolSize(10);
-        executor.setQueueCapacity(25);
-        executor.setThreadNamePrefix("typedef-refresh-");
-        executor.initialize();
-        return executor;
     }
 
     /**
