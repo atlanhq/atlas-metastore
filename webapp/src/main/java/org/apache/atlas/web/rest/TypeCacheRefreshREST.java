@@ -67,9 +67,22 @@ public class TypeCacheRefreshREST {
     private synchronized void refreshTypeDef(AtlasTypesDef typesDef, String action, final String traceId) throws RepositoryException, InterruptedException, AtlasBaseException {
         LOG.info("Refreshing type-def cache with action {} :: traceId {}", action, traceId);
 
-        if (action == null || typesDef == null || isTypeDefSeederAction(typesDef)) {
+        // Handle null action
+        if (action == null) {
             action = "INIT";
         }
+
+        // Force INIT for null typesDef
+        if (typesDef == null) {
+            action = "INIT";
+        }
+
+        // Check if this is a seeder action
+        if (isTypeDefSeederAction(typesDef)) {
+            action = "INIT";
+        }
+
+        // Process actions
         switch (action.toUpperCase()) {
             case "CREATE":
             case "UPDATE":
@@ -86,12 +99,13 @@ public class TypeCacheRefreshREST {
     }
 
     private boolean isTypeDefSeederAction(AtlasTypesDef typesDef) {
-        // assuming if one of the non ui typedefs are changing, request is from typedef seeder
-        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs()) ||
-                CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs()) ||
-                CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
-            return true;
+        if (typesDef == null) {
+            return false;
         }
-        return false;
+
+        // Check if any of the non-UI typedefs are changing (indicating a seeder action)
+        return CollectionUtils.isNotEmpty(typesDef.getEntityDefs()) ||
+               CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs()) ||
+               CollectionUtils.isNotEmpty(typesDef.getStructDefs());
     }
 }
