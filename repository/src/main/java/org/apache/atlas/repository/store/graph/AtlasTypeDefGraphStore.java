@@ -867,6 +867,7 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
     private AtlasTransientTypeRegistry lockTypeRegistryAndReleasePostCommitWithoutHook() throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("lockTypeRegistryAndReleasePostCommit");
         AtlasTransientTypeRegistry ttr = typeRegistry.lockTypeRegistryForUpdate(typeUpdateLockMaxWaitTimeSeconds);
+        typeRegistry.releaseTypeRegistryForUpdate(ttr, true);
         RequestContext.get().endMetricRecord(metricRecorder);
         return ttr;
     }
