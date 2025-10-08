@@ -1,20 +1,12 @@
 package org.apache.atlas.web.integration;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.time.Duration;
-import java.util.Collections;
-import java.util.Properties;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.BindMode;
@@ -34,11 +26,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
-
-import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Integration test for Apache Atlas using Docker containers with local deploy directory.
@@ -51,10 +40,12 @@ public class AtlasDockerIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasDockerIntegrationTest.class);
     private static final Network network = Network.newNetwork();
-    private static final ObjectMapper mapper = new ObjectMapper();
 
-    private HttpClient httpClient;
-    private String atlasBaseUrl;
+    static final ObjectMapper mapper = new ObjectMapper();
+
+    HttpClient httpClient;
+    public static String ATLAS_BASE_URL;
+    public static String ES_URL;
 
     // Define containers
     @Container
@@ -62,13 +53,15 @@ public class AtlasDockerIntegrationTest {
             .withNetwork(network)
             .withNetworkAliases("zookeeper")
             .withExposedPorts(2181)
-            .withEnv("ZOO_MY_ID", "1");
+            .withEnv("ZOO_MY_ID", "1")
+            .withReuse(true);
 
     @Container
     static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"))
             .withNetwork(network)
             .withNetworkAliases("kafka")
             .withExternalZookeeper("zookeeper:2181")
+            .withReuse(true)
             .dependsOn(zookeeper);
 
     @Container
@@ -77,7 +70,8 @@ public class AtlasDockerIntegrationTest {
             .withNetworkAliases("cassandra")
             .withStartupTimeout(Duration.ofMinutes(3))
             .withEnv("CASSANDRA_CLUSTER_NAME", "atlas-cluster")
-            .withEnv("CASSANDRA_DC", "datacenter1");
+            .withEnv("CASSANDRA_DC", "datacenter1")
+            .withReuse(true);
 
     @Container
     static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(
@@ -86,14 +80,16 @@ public class AtlasDockerIntegrationTest {
             .withNetworkAliases("elasticsearch")
             .withEnv("discovery.type", "single-node")
             .withEnv("xpack.security.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
+            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+            .withReuse(true);
 
     @Container
     static GenericContainer<?> redis = new GenericContainer<>("redis:6.2.14")
             .withNetwork(network)
             .withNetworkAliases("redis")
             .withCommand("redis-server", "--requirepass", "", "--protected-mode", "no")
-            .withExposedPorts(6379);
+            .withExposedPorts(6379)
+            .withReuse(true);
 
     // Atlas container with volume mount
     @Container
@@ -128,6 +124,7 @@ public class AtlasDockerIntegrationTest {
                                 .withStartupTimeout(Duration.ofMinutes(2))
                 )
                 .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("ATLAS"))
+                .withReuse(true)
                 .dependsOn(kafka, cassandra, elasticsearch, redis, zookeeper);
     }
 
@@ -450,13 +447,15 @@ public class AtlasDockerIntegrationTest {
 
         // Setup base URL
         int mappedPort = atlas.getMappedPort(21000);
-        atlasBaseUrl = String.format("http://localhost:%d/api/atlas/v2", mappedPort);
+        ATLAS_BASE_URL = String.format("http://localhost:%d/api/atlas/v2", mappedPort);
 
-        LOG.info("Atlas URL: {}", atlasBaseUrl);
+        LOG.info("Atlas URL: {}", ATLAS_BASE_URL);
         LOG.info("Atlas container is running: {}", atlas.isRunning());
 
         // Wait for Atlas API to be ready
         waitForAtlasReady();
+
+        ES_URL = elasticsearch.getHttpHostAddress();
     }
 
     private void waitForAtlasReady() {
@@ -466,7 +465,7 @@ public class AtlasDockerIntegrationTest {
         for (int i = 0; i < maxRetries; i++) {
             try {
                 HttpRequest request = HttpRequest.newBuilder()
-                        .uri(URI.create(atlasBaseUrl + "/types"))
+                        .uri(URI.create(ATLAS_BASE_URL + "/types"))
                         .header("Accept", "application/json")
                         .GET()
                         .timeout(Duration.ofSeconds(5))
@@ -496,188 +495,6 @@ public class AtlasDockerIntegrationTest {
         LOG.error(atlas.getLogs());
 
         throw new RuntimeException("Atlas API failed to become ready after " + maxRetries + " attempts");
-    }
-
-    @Test
-    @Order(1)
-    @DisplayName("Test Atlas Health Check")
-    void testHealthCheck() throws Exception {
-        LOG.info("Testing Atlas health check...");
-
-        // Create basic auth header
-        String auth = "admin:admin";
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(atlasBaseUrl.replace("/api/atlas/v2", "") + "/api/atlas/admin/version"))
-                .header("Authorization", "Basic "+encodedAuth)
-                .GET()
-                .timeout(Duration.ofSeconds(10))
-                .build();
-
-        HttpResponse<String> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        LOG.info("Health check response: {} - {}", response.statusCode(), response.body());
-        assertEquals(200, response.statusCode());
-    }
-
-    @Test
-    @Order(2)
-    @DisplayName("Test Get Types")
-    void testGetTypes() throws Exception {
-        LOG.info("Testing get types...");
-        // Create basic auth header
-        String auth = "admin:admin";
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(atlasBaseUrl + "/types/typedefs"))
-                .header("Accept", "application/json")
-                .header("Authorization", "Basic "+encodedAuth)
-                .GET()
-                .timeout(Duration.ofSeconds(10))
-                .build();
-
-        HttpResponse<String> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        LOG.info("Get types response: {}", response.statusCode());
-        assertEquals(200, response.statusCode());
-
-        ObjectNode types = mapper.readValue(response.body(), ObjectNode.class);
-        assertNotNull(types.get("entityDefs"));
-        LOG.info("Found {} entity types", types.get("entityDefs").size());
-    }
-
-    private KafkaConsumer<String, String> createKafkaConsumer() {
-        Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:" + kafka.getFirstMappedPort());
-        props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group");
-        props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
-        consumer.subscribe(Collections.singletonList("ATLAS_ENTITIES"));
-        return consumer;
-    }
-
-    @Test
-    @Order(3)
-    @DisplayName("Test Create Table Asset and Verify Kafka Notification")
-    void testCreateTableAssetAndVerifyResponseAndKafkaNotification() throws Exception {
-        LOG.info("Testing create asset...");
-        
-        // Create Kafka consumer
-        KafkaConsumer<String, String> consumer = createKafkaConsumer();
-        
-        // Create basic auth header
-        String auth = "admin:admin";
-        String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
-
-        // Create the payload
-        String payload = """
-            {
-                "entities": [
-                    {
-                        "typeName": "Table",
-                        "guid": "-1",
-                        "attributes": {
-                            "qualifiedName": "ANALYTICS_4",
-                            "name": "ANALYTICS_4",
-                            "description": "test",
-                            "connectionQualifiedName": "Connection2",
-                            "connectorName": "snowflake",
-                            "adminGroups": ["Dev", "admin"]
-                        }
-                    }
-                ]
-            }""";
-
-        // Create the request
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(atlasBaseUrl + "/entity/bulk"))
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json")
-                .header("Authorization", "Basic " + encodedAuth)
-                .POST(HttpRequest.BodyPublishers.ofString(payload))
-                .timeout(Duration.ofSeconds(10))
-                .build();
-
-        // Send the request
-        HttpResponse<String> response =
-                httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        LOG.info("Create asset response: {} - {}", response.statusCode(), response.body());
-        assertEquals(200, response.statusCode());
-
-        // Parse and verify the response
-        ObjectNode result = mapper.readValue(response.body(), ObjectNode.class);
-        assertNotNull(result.get("mutatedEntities"));
-        assertTrue(result.get("mutatedEntities").has("CREATE"));
-        assertEquals(1, result.get("mutatedEntities").get("CREATE").size());
-        
-        // Get the created entity's GUID
-        String createdGuid = result.get("mutatedEntities")
-                                 .get("CREATE")
-                                 .get(0)
-                                 .get("guid")
-                                 .asText();
-        
-        // Wait for and verify Kafka message
-        boolean messageFound = false;
-        int maxAttempts = 10;
-        ObjectNode kafkaMessage = null;
-        
-        for (int i = 0; i < maxAttempts && !messageFound; i++) {
-            ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(1));
-            for (ConsumerRecord<String, String> record : records) {
-                ObjectNode message = mapper.readValue(record.value(), ObjectNode.class);
-                
-                // Check if this is our message by matching the GUID
-                if (message.has("message") && 
-                    message.get("message").has("entity") &&
-                    message.get("message").get("entity").has("guid") &&
-                    message.get("message").get("entity").get("guid").asText().equals(createdGuid)) {
-                    
-                    messageFound = true;
-                    kafkaMessage = message;
-                    break;
-                }
-            }
-        }
-        
-        assertTrue(messageFound, "Kafka message for created entity not found");
-        assertNotNull(kafkaMessage, "Kafka message should not be null");
-        
-        // Verify message structure and content
-        JsonNode messageNode = kafkaMessage.get("message");
-        
-        // Verify operation type
-        assertEquals("ENTITY_NOTIFICATION_V2", messageNode.get("type").asText());
-        assertEquals("ENTITY_CREATE", messageNode.get("operationType").asText());
-        
-        // Verify entity section
-        JsonNode entityNode = messageNode.get("entity");
-        assertEquals("Table", entityNode.get("typeName").asText());
-        assertEquals(createdGuid, entityNode.get("guid").asText());
-        
-        // Verify attributes
-        JsonNode attributesNode = entityNode.get("attributes");
-        assertEquals("ANALYTICS_4", attributesNode.get("qualifiedName").asText());
-        assertEquals("ANALYTICS_4", attributesNode.get("name").asText());
-        assertEquals("test", attributesNode.get("description").asText());
-        assertEquals("Connection2", attributesNode.get("connectionQualifiedName").asText());
-        assertEquals("snowflake", attributesNode.get("connectorName").asText());
-        
-        // Verify admin groups
-        assertTrue(attributesNode.get("adminGroups").isArray());
-        assertEquals(2, attributesNode.get("adminGroups").size());
-        assertEquals("Dev", attributesNode.get("adminGroups").get(0).asText());
-        assertEquals("admin", attributesNode.get("adminGroups").get(1).asText());
-        
-        // Clean up
-        consumer.close();
     }
 
     @AfterAll
