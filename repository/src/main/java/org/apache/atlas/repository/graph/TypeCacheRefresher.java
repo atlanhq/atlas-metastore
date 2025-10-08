@@ -22,6 +22,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
@@ -337,17 +339,26 @@ public class TypeCacheRefresher {
      * Refresh typedef cache on a specific pod using Apache HttpClient
      */
     private RefreshResult refreshPod(String podIp, String traceId, int attempt, AtlasTypesDef typesDef, String action) {
+        // URL encode parameters
+        String encodedTraceId = URLEncoder.encode(traceId, StandardCharsets.UTF_8);
+        String encodedAction = URLEncoder.encode(action, StandardCharsets.UTF_8);
+        
         String url = String.format("http://%s:%d/api/atlas/admin/types/refresh?traceId=%s&action=%s",
-                podIp, atlasPort, traceId, action);
+                podIp, atlasPort, encodedTraceId, encodedAction);
 
         long startTime = System.currentTimeMillis();
         HttpPost httpPost = new HttpPost(url);
         try {
             LOG.debug("Sending refresh request to pod {}, action {} (attempt {}): {}", podIp, action, attempt, url);
-            //convert typesDef to json string
+            
+            // Convert typesDef to json string and set with UTF-8 encoding
             String jsonBody = AtlasType.toJson(typesDef);
-            StringEntity entity = new StringEntity(jsonBody);
+            StringEntity entity = new StringEntity(jsonBody, StandardCharsets.UTF_8);
             entity.setContentType("application/json");
+            
+            // Set accept header for response
+            httpPost.setHeader("Accept", "application/json");
+            
             httpPost.setEntity(entity);
 
             CloseableHttpResponse response = httpClient.execute(httpPost);
