@@ -2,6 +2,7 @@ package org.apache.atlas.repository.store.graph.v2.repair;
 
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
@@ -22,11 +23,14 @@ public class RemoveInvalidGuidsRepairStrategy implements AtlasRepairAttributeStr
 
     private final TransactionInterceptHelper transactionInterceptHelper;
 
-    private static final String REPAIR_TYPE = "REMOVE_INVALID_GUIDS";
 
-    public RemoveInvalidGuidsRepairStrategy(EntityGraphRetriever entityRetriever, TransactionInterceptHelper transactionInterceptHelper) {
+    private static final String REPAIR_TYPE = "REMOVE_INVALID_OUTPUT_PORT_GUIDS";
+    private AtlasGraph graph;
+
+    public RemoveInvalidGuidsRepairStrategy(EntityGraphRetriever entityRetriever, TransactionInterceptHelper transactionInterceptHelper, AtlasGraph graph) {
         this.entityRetriever = entityRetriever;
         this.transactionInterceptHelper = transactionInterceptHelper;
+        this.graph = graph;
     }
 
     @Override
@@ -104,21 +108,35 @@ public class RemoveInvalidGuidsRepairStrategy implements AtlasRepairAttributeStr
                 return false;
             }
 
-            vertex.removeProperty(OUTPUT_PORT_GUIDS_ATTR);
+            List<String> validGuids = new ArrayList<>();
+            List<String> invalidGuids = new ArrayList<>();
 
             for (String guid : outputPortGuids) {
-                AtlasVertex portVertex = entityRetriever.getEntityVertex(guid);
+                AtlasVertex portVertex = AtlasGraphUtilsV2.findByGuid(this.graph, guid);
                 if (portVertex != null) {
-                    AtlasGraphUtilsV2.addEncodedProperty(vertex, OUTPUT_PORT_GUIDS_ATTR , guid);
-                    isCommitRequired = true;
+                    validGuids.add(guid);
                 } else {
-                    LOG.info("Removing invalid or hard deleted guid: {}", guid);
+                    invalidGuids.add(guid);
                 }
+            }
+
+            if (!invalidGuids.isEmpty()) {
+                LOG.info("Removing invalid guids: {} from attribute: {} for entity: {}", invalidGuids, OUTPUT_PORT_GUIDS_ATTR, vertex.getProperty("guid", String.class));
+
+                vertex.removeProperty(OUTPUT_PORT_GUIDS_ATTR);
+
+                for (String validGuid : validGuids) {
+                    AtlasGraphUtilsV2.addEncodedProperty(vertex, OUTPUT_PORT_GUIDS_ATTR, validGuid);
+                }
+
+                isCommitRequired = true;
+            } else {
+                LOG.info("All guids in attribute: {} for entity: {} are valid. No repair needed.", OUTPUT_PORT_GUIDS_ATTR, vertex.getProperty("guid", String.class));
             }
 
             return isCommitRequired;
         } catch (Exception e) {
-            LOG.error("Failed to migrate unique qualifiedName attribute for entity: ", e);
+            LOG.error("Failed to repair attribute for entity: ", e);
             throw e;
         }
     }
