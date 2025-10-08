@@ -58,6 +58,11 @@ public class TypeCacheRefresher {
     @Value("${atlas.k8s.namespace:atlas}")
     private String namespace;
 
+    @Value("${atlas.server.http.port:21000}")
+    private int atlasPort;
+
+    private static final String CHARSET_UTF8 = "UTF-8";
+
 
     @Inject
     public TypeCacheRefresher(final IAtlasGraphProvider provider, @Qualifier("typeDefAsyncExecutor") Executor executor) {
@@ -181,7 +186,14 @@ public class TypeCacheRefresher {
             }
         }
 
-        LOG.info("TypeDef refresh configuration - Namespace: {}, Pod Labels: {}", namespace, podLabels);
+        // Validate port
+        if (atlasPort <= 0 || atlasPort > 65535) {
+            LOG.warn("Invalid port configured: {}. Using default port: 21000", atlasPort);
+            atlasPort = 21000;
+        }
+
+        LOG.info("TypeDef refresh configuration - Namespace: {}, Pod Labels: {}, Port: {}", 
+                 namespace, podLabels, atlasPort);
     }
 
     private boolean isKubernetesEnvironment() {
@@ -325,14 +337,22 @@ public class TypeCacheRefresher {
      * Refresh typedef cache on a specific pod using Apache HttpClient
      */
     private RefreshResult refreshPod(String podIp, String traceId, int attempt, AtlasTypesDef typesDef, String action) {
-        String url = String.format("http://%s:21000/api/atlas/admin/types/refresh?traceId=%s&action=%s",
-                podIp, traceId, action);
+        String url = String.format("http://%s:%d/api/atlas/admin/types/refresh?traceId=%s&action=%s",
+                podIp, atlasPort, traceId, action);
 
         HttpPost httpPost = new HttpPost(url);
-        //convert typesDef to json string
+        
+        // Convert typesDef to json string
         String jsonBody = AtlasType.toJson(typesDef);
-        StringEntity entity = new StringEntity(jsonBody, "UTF-8");
-        entity.setContentType("application/json");
+        
+        // Create entity with explicit charset
+        StringEntity entity = new StringEntity(jsonBody, CHARSET_UTF8);
+        entity.setContentType("application/json; charset=" + CHARSET_UTF8);
+        
+        // Set additional headers for clarity
+        httpPost.setHeader("Accept", "application/json; charset=" + CHARSET_UTF8);
+        httpPost.setHeader("Accept-Charset", CHARSET_UTF8);
+        
         httpPost.setEntity(entity);
 
         long startTime = System.currentTimeMillis();
