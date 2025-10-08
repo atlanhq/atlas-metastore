@@ -1,3 +1,4 @@
+{{- if .Values.global.atlasLogstash.enabled }}
 {{- if .Values.extraContainers }}
 apiVersion: v1
 kind: ConfigMap
@@ -64,4 +65,5 @@ data:
             
     logging.level: info
     logging.to_stderr: true
+{{- end }}
 {{- end }}

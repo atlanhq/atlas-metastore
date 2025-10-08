@@ -1,3 +1,4 @@
+{{- if .Values.global.atlasLogstash.enabled }}
 {{- if .Values.ingress.enabled -}}
 {{- $fullName := include "logstash.fullname" . -}}
 {{- $httpPort := .Values.httpPort -}}
@@ -66,4 +67,5 @@ spec:
       {{- end }}
     {{- end }}
   {{- end }}
+{{- end }}
 {{- end }}

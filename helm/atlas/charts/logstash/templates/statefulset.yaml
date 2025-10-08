@@ -1,3 +1,4 @@
+{{- if .Values.global.atlasLogstash.enabled }}
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -236,3 +237,4 @@ spec:
 {{ toYaml .Values.extraContainers | indent 6 }}
       {{- end }}      
       {{- end }}
+{{- end }}

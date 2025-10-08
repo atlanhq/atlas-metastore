@@ -1,3 +1,4 @@
+{{- if .Values.global.atlasLogstash.enabled }}
 {{- if .Values.serviceMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -66,4 +67,5 @@ spec:
     - sourceLabels: [__meta_kubernetes_namespace]
       targetLabel: clusterName
       replacement: "$1"
+{{- end }}
 {{- end }}

@@ -1,3 +1,4 @@
+{{- if .Values.global.atlasLogstash.enabled }}
 {{- if .Values.podSecurityPolicy.create -}}
 {{- $fullName := include "logstash.fullname" . -}}
 apiVersion: policy/v1beta1
@@ -12,3 +13,4 @@ metadata:
 spec:
 {{ toYaml .Values.podSecurityPolicy.spec | indent 2 }}
 {{- end -}}
+{{- end }}

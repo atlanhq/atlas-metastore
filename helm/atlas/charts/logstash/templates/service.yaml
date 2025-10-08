@@ -1,3 +1,4 @@
+{{- if .Values.global.atlasLogstash.enabled }}
 {{- if .Values.service }}
 ---
 kind: Service
@@ -30,4 +31,5 @@ spec:
     release: {{ .Release.Name | quote }}
   ports:
 {{ toYaml .Values.service.ports | indent 4 }}
+{{- end }}
 {{- end }}
