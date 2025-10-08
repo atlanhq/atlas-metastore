@@ -52,6 +52,12 @@ public class TypeCacheRefresher {
     @Value("${atlas.refresh.retries:3}")
     private long refreshRetries;
 
+    @Value("${atlas.k8s.pod.labels:atlas,atlas-read}")
+    private String podLabels;
+
+    @Value("${atlas.k8s.namespace:atlas}")
+    private String namespace;
+
 
     @Inject
     public TypeCacheRefresher(final IAtlasGraphProvider provider, @Qualifier("typeDefAsyncExecutor") Executor executor) {
@@ -61,6 +67,9 @@ public class TypeCacheRefresher {
 
     @PostConstruct
     public void init() throws AtlasException {
+        // Validate configuration
+        validateConfig();
+
         // Only initialize K8s client in non-local environments
         if (isKubernetesEnvironment()) {
             try {
@@ -151,6 +160,30 @@ public class TypeCacheRefresher {
     /**
      * Check if running in Kubernetes environment
      */
+    private void validateConfig() {
+        // Validate namespace
+        if (namespace == null || namespace.trim().isEmpty()) {
+            LOG.warn("No Kubernetes namespace configured. Using default: atlas");
+            namespace = "atlas";
+        }
+
+        // Validate pod labels
+        if (podLabels == null || podLabels.trim().isEmpty()) {
+            LOG.warn("No pod labels configured. Using defaults: atlas,atlas-read");
+            podLabels = "atlas,atlas-read";
+        } else {
+            // Validate label format
+            String[] labels = podLabels.split(",");
+            for (String label : labels) {
+                if (!label.matches("[a-z0-9]([-a-z0-9]*[a-z0-9])?")) {
+                    LOG.warn("Invalid pod label format: {}. Labels must consist of alphanumeric characters, '-', and must start/end with an alphanumeric character.", label);
+                }
+            }
+        }
+
+        LOG.info("TypeDef refresh configuration - Namespace: {}, Pod Labels: {}", namespace, podLabels);
+    }
+
     private boolean isKubernetesEnvironment() {
         String kubernetesServiceHost = System.getenv("KUBERNETES_SERVICE_HOST");
         if (kubernetesServiceHost == null || kubernetesServiceHost.isEmpty()) {
@@ -198,9 +231,18 @@ public class TypeCacheRefresher {
         }
 
         try {
+            // Split pod labels into array
+            String[] labels = podLabels.split(",");
+            if (labels.length == 0) {
+                LOG.warn("No pod labels configured. Using default labels: atlas,atlas-read");
+                labels = new String[]{"atlas", "atlas-read"};
+            }
+
+            LOG.debug("Looking for pods with labels {} in namespace {}", String.join(",", labels), namespace);
+
             List<String> podIps = k8sClient.pods()
-                    .inNamespace("atlas")
-                    .withLabelIn("app", "atlas", "atlas-read")
+                    .inNamespace(namespace)
+                    .withLabelIn("app", labels)
                     .list()
                     .getItems()
                     .stream()
