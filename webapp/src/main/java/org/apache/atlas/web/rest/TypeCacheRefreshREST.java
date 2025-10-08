@@ -4,11 +4,11 @@ import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.RepositoryException;
-import org.apache.atlas.repository.graph.IAtlasGraphProvider;
 import org.apache.atlas.repository.store.graph.AtlasTypeDefGraphStore;
 import org.apache.atlas.web.service.AtlasHealthStatus;
 import org.apache.atlas.web.service.ServiceState;
 import org.apache.atlas.web.util.Servlets;
+import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -19,8 +19,6 @@ import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
 
 import static org.apache.atlas.AtlasErrorCode.FAILED_TO_REFRESH_TYPE_DEF_CACHE;
-import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
-
 
 @Path("admin/types")
 @Singleton
@@ -68,13 +66,14 @@ public class TypeCacheRefreshREST {
 
     private synchronized void refreshTypeDef(AtlasTypesDef typesDef, String action, final String traceId) throws RepositoryException, InterruptedException, AtlasBaseException {
         LOG.info("Refreshing type-def cache with action {} :: traceId {}", action, traceId);
-        if (action == null) {
+
+        if (action == null || typesDef == null || isTypeDefSeederAction(typesDef)) {
             action = "INIT";
         }
         switch (action.toUpperCase()) {
             case "CREATE":
             case "UPDATE":
-                typeDefStore.getTypeRegistry().addTypes(typesDef);
+                typeDefStore.addTypesDefInCache(typesDef);
                 break;
             case "DELETE":
                 typeDefStore.deleteTypesDefInCache(typesDef);
@@ -83,5 +82,15 @@ public class TypeCacheRefreshREST {
                 typeDefStore.init();
         }
         LOG.info("Completed type-def cache refresh :: traceId {}", traceId);
+    }
+
+    private boolean isTypeDefSeederAction(AtlasTypesDef typesDef) {
+        // assuming if one of the non ui typedefs are changing, request is from typedef seeder
+        if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs()) ||
+                CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs()) ||
+                CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            return true;
+        }
+        return false;
     }
 }

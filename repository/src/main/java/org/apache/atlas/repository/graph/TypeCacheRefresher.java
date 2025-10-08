@@ -198,7 +198,7 @@ public class TypeCacheRefresher {
         try {
             List<String> podIps = k8sClient.pods()
                     .inNamespace("atlas")
-                    .withLabel("app", "atlas")
+                    .withLabelIn("app", "atlas", "atlas-read")
                     .list()
                     .getItems()
                     .stream()

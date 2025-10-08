@@ -721,7 +721,7 @@ public class TypesREST {
                 
                 // Perform the creation
                 AtlasTypesDef result = typeDefStore.createTypesDef(typesDef);
-                refreshAllHostCache(typesDef, "CREATE");
+                refreshAllHostCache(result, "CREATE");
                 LOG.info("Successfully created typedefs on attempt {}", attempt);
                 return result;
 
@@ -768,7 +768,7 @@ public class TypesREST {
                 }
                 
                 AtlasTypesDef result = typeDefStore.updateTypesDef(typesDef);
-                refreshAllHostCache(typesDef, "UPDATE");
+                refreshAllHostCache(result, "UPDATE");
                 LOG.info("Successfully updated typedefs on attempt {}", attempt);
                 return result;
 
