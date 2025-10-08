@@ -1841,13 +1841,11 @@ public abstract class DeleteHandlerV1 {
         }
 
     }
-    private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
 
-        removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
+    private boolean updateAssetHasLineageStatusWithDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, AtlasEdgeDirection direction, Set<String> exclusionList) {
 
         Iterator<AtlasEdge> edgeIterator = assetVertex.query()
-                .direction(AtlasEdgeDirection.BOTH)
+                .direction(direction)
                 .label(PROCESS_EDGE_LABELS)
                 .has(STATE_PROPERTY_KEY, ACTIVE.name())
                 .edges()
@@ -1857,7 +1855,7 @@ public abstract class DeleteHandlerV1 {
 
         while (edgeIterator.hasNext()) {
             AtlasEdge edge = edgeIterator.next();
-            if (!RequestContext.get().getDeletedEdgesIdsForResetHasLineage().contains(edge.getIdForDisplay()) && !currentEdge.equals(edge)) {
+            if (!exclusionList.contains(edge.getIdForDisplay()) && !currentEdge.equals(edge)) {
                 AtlasVertex relatedProcessVertex = edge.getOutVertex();
                 boolean processHasLineage = getEntityHasLineage(relatedProcessVertex);
                 if (processHasLineage) {
@@ -1866,8 +1864,41 @@ public abstract class DeleteHandlerV1 {
                 }
             }
         }
+        return processHasLineageCount > 0;
+    }
 
-        if (processHasLineageCount == 0) {
+    private boolean updateAssetHasLineageStatusWithOUTDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Set<String> exclusionList) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusWithOUTDirection");
+        boolean hasLineage = updateAssetHasLineageStatusWithDirection(assetVertex, currentEdge, AtlasEdgeDirection.OUT, exclusionList);
+        RequestContext.get().endMetricRecord(metricRecorder);
+        return hasLineage;
+    }
+
+    private boolean updateAssetHasLineageStatusWithINDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Set<String> exclusionList) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusWithINDirection");
+        boolean hasLineage = updateAssetHasLineageStatusWithDirection(assetVertex, currentEdge, AtlasEdgeDirection.IN, exclusionList);
+        RequestContext.get().endMetricRecord(metricRecorder);
+        return hasLineage;
+    }
+
+    private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
+
+        // Add removed edges to the context
+        removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
+        Set<String> exclusionList = RequestContext.get().getDeletedEdgesIdsForResetHasLineage();
+
+        // First check in OUT direction
+        boolean hasActiveLineage = updateAssetHasLineageStatusWithOUTDirection(assetVertex, currentEdge, exclusionList);
+
+        // If no active lineage found in OUT direction, check IN direction
+        if (!hasActiveLineage) {
+            hasActiveLineage = updateAssetHasLineageStatusWithINDirection(assetVertex, currentEdge, exclusionList);
+        }
+
+        if (hasActiveLineage) {
+            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
+        } else {
             AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
         }
 

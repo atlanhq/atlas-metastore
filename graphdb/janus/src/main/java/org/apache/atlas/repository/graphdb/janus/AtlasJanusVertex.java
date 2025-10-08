@@ -56,7 +56,7 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     public <T> void addProperty(String propertyName, T value) {
         try {
             getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
-            recordInternalAttributeIncrementalAdd(propertyName, value, Set.class);
+            recordInternalAttributeIncrementalAdd(propertyName, Set.class);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         }
@@ -66,7 +66,7 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     public <T> void addListProperty(String propertyName, T value) {
         try {
             getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
-            recordInternalAttributeIncrementalAdd(propertyName, value, List.class);
+            recordInternalAttributeIncrementalAdd(propertyName, List.class);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         }
