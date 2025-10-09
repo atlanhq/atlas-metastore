@@ -28,7 +28,6 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
@@ -81,7 +80,6 @@ import static org.apache.atlas.type.Constants.GLOSSARY_PROPERTY_KEY;
 public class ESAliasStore implements IndexAliasStore {
     private static final Logger LOG = LoggerFactory.getLogger(ESAliasStore.class);
     public static final String NEW_WILDCARD_DOMAIN_SUPER = "default/domain/*/super";
-    public static final String ENABLE_PERSONA_HIERARCHY_FILTER = "enable_persona_hierarchy_filter";
 
     private final AtlasGraph graph;
     private final EntityGraphRetriever entityRetriever;
@@ -175,8 +173,7 @@ public class ESAliasStore implements IndexAliasStore {
             policies.add(policy);
         }
         if (CollectionUtils.isNotEmpty(policies)) {
-            boolean useHierarchicalQualifiedNameFilter =  FeatureFlagStore.evaluate(ENABLE_PERSONA_HIERARCHY_FILTER, "true");
-            personaPolicyToESDslClauses(policies, allowClauseList, denyClauseList, useHierarchicalQualifiedNameFilter);
+            personaPolicyToESDslClauses(policies, allowClauseList, denyClauseList);
         }
 
         return esClausesToFilter(allowClauseList, denyClauseList);
@@ -193,18 +190,18 @@ public class ESAliasStore implements IndexAliasStore {
         return esClausesToFilter(allowClauseList, denyClauseList);
     }
 
-    private void personaPolicyToESDslClauses(List<AtlasEntity> policies,
-                                             List<Map<String, Object>> allowClauseList, List<Map<String, Object>> denyClauseList, boolean useHierarchicalQualifiedNameFilter) throws AtlasBaseException {
-        
+    protected void personaPolicyToESDslClauses(List<AtlasEntity> policies,
+                                             List<Map<String, Object>> allowClauseList, List<Map<String, Object>> denyClauseList) throws AtlasBaseException {
+
         // Group related collections together
         TermCollections allowCollections = new TermCollections();
         TermCollections denyCollections = new TermCollections();
-        
+
         for (AtlasEntity policy: policies) {
 
             if (policy.getStatus() == null || AtlasEntity.Status.ACTIVE.equals(policy.getStatus())) {
                 boolean isAllowPolicy = getIsAllowPolicy(policy);
-                
+
                 // Select the appropriate terms and clause list based on policy type
                 TermCollections terms = isAllowPolicy ? allowCollections : denyCollections;
                 List<Map<String, Object>> clauseList = isAllowPolicy ? allowClauseList : denyClauseList;
@@ -256,17 +253,17 @@ public class ESAliasStore implements IndexAliasStore {
                         if (isHierarchical) {
                             asset = asset.substring(0, asset.length() - 2);
                         }
-                        boolean isWildcard = asset.contains("*") || asset.contains("?");
-                        if (isWildcard) {
-                            clauseList.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
-                        } else if (useHierarchicalQualifiedNameFilter) {
+                        boolean isWildcard = (asset.contains("*") && asset.indexOf("*") != asset.length() - 1) || asset.contains("?");
+                        if (isHierarchical) {
                             terms.metadataPolicyQualifiedNames.add(asset);
+                        } else if (isWildcard) {
+                            clauseList.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset)));
                         } else {
                             terms.qualifiedNames.add(asset);
                         }
 
-                        if (!useHierarchicalQualifiedNameFilter || isWildcard) {
-                            clauseList.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*")));
+                        if (isWildcard) {
+                            clauseList.add(mapOf("term", mapOf(QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, asset)));
                         }
                     }
 
@@ -284,19 +281,23 @@ public class ESAliasStore implements IndexAliasStore {
                         } else {
                             asset = NEW_WILDCARD_DOMAIN_SUPER;
                         }
-                        clauseList.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "*")));
+                        if(NEW_WILDCARD_DOMAIN_SUPER.equalsIgnoreCase(asset)) {
+                            clauseList.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "*")));
+                        } else {
+                            clauseList.add(mapOf("term", mapOf(QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, asset)));
+                        }
                     }
                 } else if (policyActions.contains(ACCESS_READ_PERSONA_SUB_DOMAIN)) {
                     for (String asset : assets) {
                         List<Map<String, Object>> mustMap = new ArrayList<>();
-                        mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*domain/*")));
+                        mustMap.add(mapOf("term", mapOf(QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, asset + "/domain")));
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataDomain")));
                         clauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
                 } else if (policyActions.contains(ACCESS_READ_PERSONA_PRODUCT)) {
                     for (String asset : assets) {
                         List<Map<String, Object>> mustMap = new ArrayList<>();
-                        mustMap.add(mapOf("wildcard", mapOf(QUALIFIED_NAME, asset + "/*product/*")));
+                        mustMap.add(mapOf("term", mapOf(QUALIFIED_NAME_HIERARCHY_PROPERTY_KEY, asset + "/product")));
                         mustMap.add(mapOf("term", mapOf("__typeName.keyword", "DataProduct")));
                         clauseList.add(mapOf("bool", mapOf("must", mustMap)));
                     }
