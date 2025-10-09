@@ -56,6 +56,7 @@ public class TaskQueueWatcher implements Runnable {
     private static final String ATLAS_TASK_LOCK = "atlas:task:lock";
 
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
+    private final AtomicBoolean isProcessingTasks = new AtomicBoolean(false);
 
     public TaskQueueWatcher(ExecutorService executorService, TaskRegistry registry,
                             Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
@@ -77,6 +78,10 @@ public class TaskQueueWatcher implements Runnable {
     public void shutdown() {
         shouldRun.set(false);
         LOG.info("TaskQueueWatcher: Shutdown");
+    }
+
+    public boolean isProcessingTasks() {
+        return isProcessingTasks.get();
     }
 
     @Override
@@ -112,10 +117,15 @@ public class TaskQueueWatcher implements Runnable {
                 taskMetricsService.updateQueueSize(tasks != null ? tasks.size() : 0);
                 
                 if (CollectionUtils.isNotEmpty(tasks)) {
-                    final CountDownLatch latch = new CountDownLatch(tasks.size());
-                    submitAll(tasks, latch);
-                    LOG.info("Submitted {} tasks to the queue", tasks.size());
-                    waitForTasksToComplete(latch);
+                    isProcessingTasks.set(true);
+                    try {
+                        final CountDownLatch latch = new CountDownLatch(tasks.size());
+                        submitAll(tasks, latch);
+                        LOG.info("Submitted {} tasks to the queue", tasks.size());
+                        waitForTasksToComplete(latch);
+                    } finally {
+                        isProcessingTasks.set(false);
+                    }
                 } else {
                     LOG.info("TaskQueueWatcher: No tasks fetched during this cycle.");
                 }
