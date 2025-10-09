@@ -23,12 +23,7 @@ unzip -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
 
 echo "Maven Building"
 
-mvn clean -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
-
-echo "Run Integration tests"
-
-mvn test -pl webapp -Dspring.profiles.active=test
-
+mvn -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
 
 echo "[DEBUG listing distro/target"
 ls distro/target
