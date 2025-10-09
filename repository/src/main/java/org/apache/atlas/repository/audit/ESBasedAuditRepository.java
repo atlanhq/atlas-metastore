@@ -564,7 +564,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         return httpHosts;
     }
 
-    private static String getESHosts() throws AtlasException {
+    public static String getESHosts() throws AtlasException {
         Configuration configuration = ApplicationProperties.get();
         //get es write hosts if available (ES Isolation)
         String esHostNames = configuration.getString(INDEX_WRITE_BACKEND_CONF);
