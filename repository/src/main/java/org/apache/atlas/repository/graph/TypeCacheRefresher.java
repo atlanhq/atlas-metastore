@@ -1,5 +1,6 @@
 package org.apache.atlas.repository.graph;
 
+import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.client.KubernetesClient;
 import io.fabric8.kubernetes.client.KubernetesClientBuilder;
 import io.fabric8.kubernetes.client.KubernetesClientException;
@@ -263,7 +264,18 @@ public class TypeCacheRefresher {
                     .filter(pod -> {
                         // Only include Running pods
                         String phase = pod.getStatus().getPhase();
-                        return "Running".equals(phase);
+                        if (!"Running".equals(phase)) {
+                            return false;
+                        }
+
+                        // Check if all containers are ready
+                        List<ContainerStatus> containerStatuses = pod.getStatus().getContainerStatuses();
+                        if (containerStatuses == null || containerStatuses.isEmpty()) {
+                            return false;
+                        }
+
+                        // All containers must be ready
+                        return containerStatuses.stream().allMatch(ContainerStatus::getReady);
                     })
                     .map(pod -> pod.getStatus().getPodIP())
                     .filter(ip -> ip != null && !ip.equals(currentPodIp))
