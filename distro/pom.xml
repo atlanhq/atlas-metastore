@@ -136,7 +136,7 @@ atlas.graph.storage.hbase.regions-per-server=1
     </profiles>
 
     <build>
-        <outputDirectory>target</outputDirectory>
+        <outputDirectory>target/classes</outputDirectory>
         <resources>
             <resource>
                 <directory>src/bin</directory>

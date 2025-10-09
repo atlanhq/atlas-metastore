@@ -26,6 +26,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -137,7 +138,7 @@ public class ESUtil {
         } catch (Exception e) {
             LOG.info("Re-creating highLevelClient");
             try {
-                highLevelClient = getClient(true);
+                highLevelClient = getClient();
                 return highLevelClient.search(searchRequest, requestOptions);
             } catch (Exception ec) {
                 ec.printStackTrace();
@@ -159,7 +160,7 @@ public class ESUtil {
         } catch (Exception e) {
             LOG.info("Re-creating highLevelClient");
             try {
-                highLevelClient = getClient(true);
+                highLevelClient = getClient();
                 //return highLevelClient.search(searchRequest, requestOptions);
             } catch (Exception ec) {
                 ec.printStackTrace();
@@ -169,25 +170,17 @@ public class ESUtil {
         return null;
     }
 
-    private static RestHighLevelClient getClient(boolean force) {
-        try {
-            RestClientBuilder restClientBuilder = RestClient.builder(AtlasDockerIntegrationTest.ES_URL)
-                    .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder.setConnectTimeout(900000)
-                            .setSocketTimeout(900000));
-            highLevelClient =
-                    new RestHighLevelClient(restClientBuilder);
-        } catch (Exception e) {
-            LOG.error("Failed to initialize high level client for ES");
-        }
-        return highLevelClient;
-    }
-
     private static RestHighLevelClient getClient() {
         if (highLevelClient == null) {
             synchronized (ESUtil.class) {
                 if (highLevelClient == null) {
                     try {
-                        RestClientBuilder restClientBuilder = RestClient.builder(ES_URL)
+                        String[] hostAndPort = ES_URL.split(":");
+                        System.out.println(hostAndPort);
+                        List<HttpHost> httpHosts = new ArrayList<>(1);
+                        httpHosts.add(new HttpHost(hostAndPort[0], Integer.parseInt(hostAndPort[1])));
+
+                        RestClientBuilder restClientBuilder = RestClient.builder(httpHosts.toArray(new HttpHost[0]))
                                 .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
                                         .setConnectTimeout(90)
                                         .setSocketTimeout(90)

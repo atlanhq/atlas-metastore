@@ -456,6 +456,7 @@ public class AtlasDockerIntegrationTest {
         waitForAtlasReady();
 
         ES_URL = elasticsearch.getHttpHostAddress();
+        System.out.println("ES_URL: " + ES_URL);
     }
 
     private void waitForAtlasReady() {
