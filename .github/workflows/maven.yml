@@ -28,8 +28,49 @@ on:
       - atlas_ci_cd_updates
 
 jobs:
-  build:
+  helm-lint:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        chart: ['atlas', 'atlas-read']
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+      
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.12.0'
+      
+      - name: Update helm dependencies
+        run: |
+          cd helm/${{ matrix.chart }}
+          helm dependency update
+          
+          echo "Chart dependencies:"
+          ls -la charts/
+      
+      - name: Lint helm chart
+        run: |
+          helm lint helm/${{ matrix.chart }}/
+          echo "✅ ${{ matrix.chart }} chart lint passed!"
+      
+      - name: Validate Chart.yaml
+        run: |
+          # Check for required fields
+          if ! grep -q "^version:" helm/${{ matrix.chart }}/Chart.yaml; then
+            echo "❌ Error: version field missing in Chart.yaml"
+            exit 1
+          fi
+          if ! grep -q "^appVersion:" helm/${{ matrix.chart }}/Chart.yaml; then
+            echo "❌ Error: appVersion field missing in Chart.yaml"
+            exit 1
+          fi
+          echo "✅ Chart.yaml validation passed!"
 
+  build:
+    needs: helm-lint
     runs-on: ubuntu-latest
 
     steps:
@@ -156,7 +197,7 @@ jobs:
           sarif_file: 'trivy-image-results.sarif'
 
   helm-publish:
-    needs: build
+    needs: build  # build already depends on helm-lint, so linting is done
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -215,10 +256,6 @@ jobs:
           
           echo "Chart dependencies:"
           ls -la charts/
-      
-      - name: Lint helm chart
-        run: |
-          helm lint helm/${{ matrix.chart }}/
       
       - name: Package helm chart
         run: |
