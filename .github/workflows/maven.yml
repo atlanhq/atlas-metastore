@@ -43,6 +43,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # Set up Docker
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: image=moby/buildkit:master
+          install: true
+
       - name: Set up JDK 17
         uses: actions/setup-java@v1
         with:
@@ -50,6 +57,12 @@ jobs:
 
       - name: Print JDK version
         run: java -version
+
+      # Verify Docker is available
+      - name: Verify Docker
+        run: |
+         docker --version
+         docker info
 
       - name: Cache Maven packages
         uses: actions/cache@v3
@@ -77,6 +90,16 @@ jobs:
         run: |
           echo "build without dashboard"
           chmod +x ./build.sh && ./build.sh
+
+      - name: Run Integration Tests
+        env:
+          # Configure Testcontainers for GitHub Actions
+          TESTCONTAINERS_RYUK_DISABLED: true
+          TESTCONTAINERS_CHECKS_DISABLE: true
+          DOCKER_HOST: unix:///var/run/docker.sock
+        run: |
+          echo "Running integration tests..."
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
 
       - name: Get Repository Name
         run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV

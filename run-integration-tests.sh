@@ -59,7 +59,7 @@ fi
 
 # Step 2: Build Docker image
 echo -e "${YELLOW}Building Atlas Docker image...${NC}"
-docker build -t atlanhq/atlas:test .
+docker buildx build --load -t atlanhq/atlas:test .
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to build Docker image${NC}"
@@ -81,15 +81,18 @@ if [ "$DEBUG" = true ]; then
     MAVEN_OPTS="-Xdebug -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5005"
 fi
 
-# Step 5: Run integration tests
+echo "Listing docker images"
+docker image ls
+
+# Step 4: Run integration tests
 echo -e "${YELLOW}Running integration tests...${NC}"
 
 if [ "$DEBUG" = true ]; then
-    mvn test -Dtest=AtlasDockerIntegrationTest \
+    mvn test -pl webapp -Dtest=AtlasDockerIntegrationTest \
              -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
-             -Dorg.testcontainers.log.level=DEBUG
+             -Dorg.testcontainers.log.level=DEBUG -Dsurefire.useFile=false
 else
-    mvn test -Dtest=AtlasDockerIntegrationTest
+    mvn test -pl webapp -Dsurefire.useFile=false
 fi
 
 TEST_RESULT=$?
