@@ -304,9 +304,11 @@ public class FeatureFlagStore implements ApplicationContextAware {
             String value = loadFlagFromRedisWithRetry(namespacedKey, key);
             if (value != null)
                 updateBothCaches(namespacedKey, value);
+            else
+                cacheStore.removeFromBothCaches(namespacedKey); // Flag is null in Redis, treat as a deletion
             return value;
         } catch (Exception e) {
-            LOG.error("Failed to fetch flag '{}' from Redis", key, e);
+            LOG.error("Failed to fetch flag '{}' from Redis", key, e); // Handle error and return value from fallback cache if available
             return null;
         }
     }
