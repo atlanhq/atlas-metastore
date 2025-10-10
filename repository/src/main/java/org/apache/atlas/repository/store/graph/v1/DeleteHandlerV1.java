@@ -42,6 +42,8 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.AtlasGraphTraversal;
+import org.apache.atlas.repository.graphdb.AtlasGraphTraversalSource;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
@@ -58,9 +60,11 @@ import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.atlas.v1.model.instance.Id;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.structure.Direction;
@@ -92,6 +96,7 @@ import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getState;
 import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.__.id;
+import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.__.not;
 import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.__.outV;
 
 public abstract class DeleteHandlerV1 {
@@ -1841,33 +1846,82 @@ public abstract class DeleteHandlerV1 {
         }
 
     }
+
+    private boolean updateAssetHasLineageStatusWithDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, AtlasEdgeDirection direction, Set<String> exclusionList) {
+        GraphTraversal<Edge, Map<String, Object>> edgeTraversal;
+
+        // Create the appropriate directional traversal
+        if (AtlasEdgeDirection.OUT.equals(direction)) {
+            edgeTraversal = ((AtlasJanusGraph) graph).V(assetVertex.getId())
+                    .outE(PROCESS_EDGE_LABELS)
+                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE);
+        } else if (AtlasEdgeDirection.IN.equals(direction)) {
+            edgeTraversal = ((AtlasJanusGraph) graph).V(assetVertex.getId())
+                    .inE(PROCESS_EDGE_LABELS)
+                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE);
+        } else{
+            edgeTraversal = ((AtlasJanusGraph) graph).V(assetVertex.getId())
+                    .bothE(PROCESS_EDGE_LABELS)
+                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE);
+        }
+
+
+        List<Map<String, Object>> edgeList = edgeTraversal.project("id", HAS_LINEAGE)
+                .by(id())
+                .by(outV().values(HAS_LINEAGE))
+                .toList();
+
+        for (Map<String, Object> edge : edgeList) {
+            Object edgeId = edge.get("id");
+            String edgeIdStr = (edgeId != null) ? edgeId.toString() : "";
+            Boolean outVHasLineage = edge.get(HAS_LINEAGE) != null ? (Boolean) edge.get(HAS_LINEAGE) : false;
+
+            // Skip if in deleted list
+            if (exclusionList.contains(edgeIdStr)){
+                continue;
+            }
+
+            // Check if this edge has lineage
+            if (Boolean.TRUE.equals(outVHasLineage)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean updateAssetHasLineageStatusWithOUTDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Set<String> exclusionList) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusWithOUTDirection");
+        boolean hasLineage = updateAssetHasLineageStatusWithDirection(assetVertex, currentEdge, AtlasEdgeDirection.OUT, exclusionList);
+        RequestContext.get().endMetricRecord(metricRecorder);
+        return hasLineage;
+    }
+
+    private boolean updateAssetHasLineageStatusWithINDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Set<String> exclusionList) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusWithINDirection");
+        boolean hasLineage = updateAssetHasLineageStatusWithDirection(assetVertex, currentEdge, AtlasEdgeDirection.IN, exclusionList);
+        RequestContext.get().endMetricRecord(metricRecorder);
+        return hasLineage;
+    }
+
     private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
 
+        // Add removed edges to the context
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
+        Set<String> exclusionList = RequestContext.get().getDeletedEdgesIdsForResetHasLineage();
+        exclusionList.add(currentEdge.getIdForDisplay());
 
-        Iterator<AtlasEdge> edgeIterator = assetVertex.query()
-                .direction(AtlasEdgeDirection.BOTH)
-                .label(PROCESS_EDGE_LABELS)
-                .has(STATE_PROPERTY_KEY, ACTIVE.name())
-                .edges()
-                .iterator();
+        // First check in OUT direction
+        boolean hasActiveLineage = updateAssetHasLineageStatusWithOUTDirection(assetVertex, currentEdge, exclusionList);
 
-        int processHasLineageCount = 0;
-
-        while (edgeIterator.hasNext()) {
-            AtlasEdge edge = edgeIterator.next();
-            if (!RequestContext.get().getDeletedEdgesIdsForResetHasLineage().contains(edge.getIdForDisplay()) && !currentEdge.equals(edge)) {
-                AtlasVertex relatedProcessVertex = edge.getOutVertex();
-                boolean processHasLineage = getEntityHasLineage(relatedProcessVertex);
-                if (processHasLineage) {
-                    processHasLineageCount++;
-                    break;
-                }
-            }
+        // If no active lineage found in OUT direction, check IN direction
+        if (!hasActiveLineage) {
+            hasActiveLineage = updateAssetHasLineageStatusWithINDirection(assetVertex, currentEdge, exclusionList);
         }
 
-        if (processHasLineageCount == 0) {
+        if (hasActiveLineage) {
+            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
+        } else {
             AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
         }
 
