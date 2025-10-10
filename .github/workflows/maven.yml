@@ -76,6 +76,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      # Set up Docker
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v2
+        with:
+          driver-opts: image=moby/buildkit:master
+          install: true
+
       - name: Set up JDK 17
         uses: actions/setup-java@v1
         with:
@@ -83,6 +90,12 @@ jobs:
 
       - name: Print JDK version
         run: java -version
+
+      # Verify Docker is available
+      - name: Verify Docker
+        run: |
+         docker --version
+         docker info
 
       - name: Cache Maven packages
         uses: actions/cache@v3
@@ -110,6 +123,16 @@ jobs:
         run: |
           echo "build without dashboard"
           chmod +x ./build.sh && ./build.sh
+
+      - name: Run Integration Tests
+        env:
+          # Configure Testcontainers for GitHub Actions
+          TESTCONTAINERS_RYUK_DISABLED: true
+          TESTCONTAINERS_CHECKS_DISABLE: true
+          DOCKER_HOST: unix:///var/run/docker.sock
+        run: |
+          echo "Running integration tests..."
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
 
       - name: Get Repository Name
         run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
@@ -144,41 +167,20 @@ jobs:
           username: $GITHUB_ACTOR
           password: ${{ secrets.ORG_PAT_GITHUB }}
 
-      - name: Build and push with retry
+      - name: Build and push
         id: docker_build
-        run: |
-          # Build and push with retry logic
-          echo "Building and pushing Docker image with retry mechanism..."
-          retry_count=0
-          max_retries=3
-          retry_delay=5
-          
-          while [ $retry_count -lt $max_retries ]; do
-            echo "Build and push attempt $((retry_count + 1)) of $max_retries"
-            
-            if docker buildx build \
-              --platform linux/amd64,linux/arm64 \
-              --file ./Dockerfile \
-              --no-cache \
-              --sbom=true \
-              --provenance=true \
-              --push \
-              --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest \
-              --tag ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
-              .; then
-              echo "Build and push successful!"
-              break
-            else
-              retry_count=$((retry_count + 1))
-              if [ $retry_count -lt $max_retries ]; then
-                echo "Build and push failed. Retrying in $retry_delay seconds..."
-                sleep $retry_delay
-              else
-                echo "Build and push failed after $max_retries attempts. Exiting."
-                exit 1
-              fi
-            fi
-          done
+        uses: docker/build-push-action@v3
+        with:
+          platforms: linux/amd64,linux/arm64
+          context: .
+          file: ./Dockerfile
+          no-cache: true
+          sbom: true
+          provenance: true
+          push: true
+          tags: |
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
 
       - name: Check Image Manifest
         run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
