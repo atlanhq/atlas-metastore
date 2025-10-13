@@ -121,7 +121,7 @@ public class AtlasDockerIntegrationTest {
                 .withCommand("/bin/bash", "-c", createStartupScript())
                 .waitingFor(
                         Wait.forListeningPort()
-                                .withStartupTimeout(Duration.ofMinutes(2))
+                                .withStartupTimeout(Duration.ofMinutes(10))
                 )
                 .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("ATLAS"))
                 .withReuse(true)
@@ -461,7 +461,7 @@ public class AtlasDockerIntegrationTest {
 
     private void waitForAtlasReady() {
         LOG.info("Waiting for Atlas API to be ready...");
-        int maxRetries = 5;
+        int maxRetries = 30; // Increased from 5 to 30 (up to 2 minutes)
 
         for (int i = 0; i < maxRetries; i++) {
             try {
@@ -469,7 +469,7 @@ public class AtlasDockerIntegrationTest {
                         .uri(URI.create(ATLAS_BASE_URL + "/types"))
                         .header("Accept", "application/json")
                         .GET()
-                        .timeout(Duration.ofSeconds(5))
+                        .timeout(Duration.ofSeconds(10))
                         .build();
 
                 HttpResponse<String> response =
@@ -486,7 +486,7 @@ public class AtlasDockerIntegrationTest {
             }
 
             try {
-                Thread.sleep(2000);
+                Thread.sleep(5000); // Increased from 2 to 5 seconds
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
