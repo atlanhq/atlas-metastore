@@ -213,6 +213,13 @@ jobs:
           echo "**Expected:** ${{ matrix.expected-result }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           
+          # Show test duration
+          if [ -f test-output.log ]; then
+            START_TIME=$(grep -oP "Total time:.*" test-output.log | head -1 || echo "N/A")
+            echo "**Test Duration:** $START_TIME" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
           # Check test results from file
           if [ -f test-output.log ] && grep -q "BUILD FAILURE" test-output.log; then
             TEST_FAILED=true
