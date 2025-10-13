@@ -29,8 +29,8 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          username: atlan-ci
+          password: ${{ secrets.ORG_PAT_GITHUB }}
 
       - name: Pull the failing image
         run: |
