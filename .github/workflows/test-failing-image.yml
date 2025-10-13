@@ -190,9 +190,21 @@ jobs:
           fi
           echo "=========================================="
           
-          # Exit with the actual test result (but allow workflow to continue)
-          # We'll check expected vs actual in the summary
-          exit 0
+          # Save the test result for summary
+          echo "$TEST_RESULT" > test-result.txt
+          
+          # Exit with appropriate code based on expectation
+          if [ "${{ matrix.expected-result }}" == "fail" ]; then
+            # For failing image, we expect failure, so invert the result
+            if [ $TEST_RESULT -ne 0 ]; then
+              exit 0  # Test failed as expected
+            else
+              exit 1  # Test passed unexpectedly
+            fi
+          else
+            # For working image, exit with actual result
+            exit $TEST_RESULT
+          fi
 
       - name: Upload test logs
         if: failure()
@@ -220,14 +232,14 @@ jobs:
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
-          # Check test results from file
-          if [ -f test-output.log ] && grep -q "BUILD FAILURE" test-output.log; then
-            TEST_FAILED=true
+          # Check test results from saved file
+          if [ -f test-result.txt ]; then
+            TEST_RESULT=$(cat test-result.txt)
           else
-            TEST_FAILED=false
+            TEST_RESULT=1  # Assume failure if no result file
           fi
           
-          if [ "$TEST_FAILED" == "true" ]; then
+          if [ "$TEST_RESULT" -ne 0 ]; then
             echo "**Result:** ❌ FAILED" >> $GITHUB_STEP_SUMMARY
             if [ "${{ matrix.expected-result }}" == "fail" ]; then
               echo "**Status:** ✅ Expected - Bug reproduced successfully!" >> $GITHUB_STEP_SUMMARY
@@ -235,6 +247,8 @@ jobs:
               echo "GitHub Actions successfully caught the bug on Azure infrastructure." >> $GITHUB_STEP_SUMMARY
             else
               echo "**Status:** ⚠️ Unexpected - This image should work!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "🔍 **This indicates test flakiness or environmental issues.**" >> $GITHUB_STEP_SUMMARY
             fi
           else
             echo "**Result:** ✅ PASSED" >> $GITHUB_STEP_SUMMARY
@@ -244,6 +258,11 @@ jobs:
               echo "This image is safe to deploy to fix Azure production issues." >> $GITHUB_STEP_SUMMARY
             else
               echo "**Status:** ⚠️ Unexpected - Bug was not reproduced!" >> $GITHUB_STEP_SUMMARY
+              echo "" >> $GITHUB_STEP_SUMMARY
+              echo "🔍 **Possible causes:**" >> $GITHUB_STEP_SUMMARY
+              echo "- Bug is intermittent/timing-dependent" >> $GITHUB_STEP_SUMMARY
+              echo "- Configuration fix resolved the issue" >> $GITHUB_STEP_SUMMARY
+              echo "- Test environment differs from production" >> $GITHUB_STEP_SUMMARY
             fi
           fi
 
