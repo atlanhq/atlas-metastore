@@ -91,11 +91,17 @@ jobs:
           echo "=========================================="
           echo ""
           
-          # Run tests in background with proper process management
-          (mvn test -pl webapp \
-               -Dsurefire.useFile=false \
-               -Dorg.slf4j.simpleLogger.defaultLogLevel=info > test-output.log 2>&1
-           echo $? > test-exit-code.txt) &
+          # Run tests in background with proper exit code capture
+          (
+            set +e  # Don't exit on error
+            mvn test -pl webapp \
+                 -Dsurefire.useFile=false \
+                 -Dorg.slf4j.simpleLogger.defaultLogLevel=info > test-output.log 2>&1
+            TEST_EXIT=$?
+            echo "$TEST_EXIT" > test-exit-code.txt
+            echo "Test completed with exit code: $TEST_EXIT" >> test-output.log
+            exit $TEST_EXIT
+          ) &
           
           TEST_PID=$!
           echo $TEST_PID > test-pid.txt
@@ -155,11 +161,11 @@ jobs:
           echo "Waiting for test process to complete..."
           
           # Poll for test completion (check every 10 seconds for up to 20 minutes)
-          MAX_WAIT=120  # 20 minutes
+          MAX_WAIT=120  # 20 minutes (120 * 10 seconds)
           ELAPSED=0
           while [ $ELAPSED -lt $MAX_WAIT ]; do
             if [ -f test-exit-code.txt ]; then
-              echo "Tests completed!"
+              echo "✅ Tests completed! Exit code file found."
               break
             fi
             
@@ -167,21 +173,52 @@ jobs:
             if [ -f test-pid.txt ]; then
               TEST_PID=$(cat test-pid.txt)
               if ! ps -p $TEST_PID > /dev/null 2>&1; then
-                echo "Test process no longer running but no exit code found. Waiting..."
+                echo "⚠️  Test process no longer running but no exit code found yet. Waiting a bit more..."
+                # Give it 30 more seconds for file to be written
+                sleep 5
+                if [ -f test-exit-code.txt ]; then
+                  echo "✅ Exit code file appeared!"
+                  break
+                fi
+              else
+                echo "🔄 Test process still running (PID: $TEST_PID, ${ELAPSED}0s elapsed)"
               fi
             fi
             
-            echo "Still running... (${ELAPSED}0 seconds elapsed)"
             sleep 10
             ELAPSED=$((ELAPSED + 1))
           done
           
+          # Final check after loop
+          if [ ! -f test-exit-code.txt ]; then
+            echo "⚠️ Timeout reached or process died without writing exit code"
+            echo "Checking test output for results..."
+            if [ -f test-output.log ]; then
+              tail -50 test-output.log
+            fi
+          fi
+          
           # Get test result
           if [ -f test-exit-code.txt ]; then
             TEST_RESULT=$(cat test-exit-code.txt)
+            echo "📊 Test exit code from file: $TEST_RESULT"
           else
-            echo "⚠️ Test did not complete in time or was killed"
-            TEST_RESULT=1
+            echo "⚠️ Test did not complete in time or exit code not captured"
+            # Try to infer from test output
+            if [ -f test-output.log ]; then
+              if grep -q "BUILD SUCCESS" test-output.log; then
+                echo "📊 Found 'BUILD SUCCESS' in logs, assuming exit code 0"
+                TEST_RESULT=0
+              elif grep -q "BUILD FAILURE" test-output.log; then
+                echo "📊 Found 'BUILD FAILURE' in logs, assuming exit code 1"
+                TEST_RESULT=1
+              else
+                echo "📊 Could not determine result from logs, assuming failure"
+                TEST_RESULT=1
+              fi
+            else
+              TEST_RESULT=1
+            fi
           fi
           
           # Show test output
