@@ -60,6 +60,11 @@ jobs:
           key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
           restore-keys: ${{ runner.os }}-m2
 
+      - name: Build project (compile only, skip tests)
+        run: |
+          echo "Building project to compile test classes..."
+          mvn clean install -DskipTests -Dmaven.javadoc.skip=true -B -V
+
       - name: Run Integration Tests with Failing Image
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
