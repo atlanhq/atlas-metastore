@@ -102,10 +102,10 @@ jobs:
           # Wait for dependencies to start, then Atlas
           echo ""
           echo "Waiting for dependencies to start (Zookeeper, Kafka, Cassandra, ES, Redis)..."
-          sleep 90
+          sleep 60
           
           echo ""
-          echo "Containers running after 90 seconds:"
+          echo "Containers running after 60 seconds:"
           docker ps -a
           
           # Wait for Atlas container to appear

@@ -141,6 +141,8 @@ public class AtlasDockerIntegrationTest {
                 .withFileSystemBind(deployPath + "/models", "/opt/apache-atlas/models", BindMode.READ_ONLY)
                 .withEnv(getAtlasEnvironment())
                 .withCommand("/bin/bash", "-c", createStartupScript())
+                // Run as root to allow the container's startup script to chmod mounted volumes
+                .withCreateContainerCmdModifier(cmd -> cmd.withUser("root"))
                 .waitingFor(
                         Wait.forListeningPort()
                                 .withStartupTimeout(Duration.ofMinutes(10))
