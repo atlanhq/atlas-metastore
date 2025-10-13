@@ -87,12 +87,48 @@ jobs:
           echo $! > test-pid.txt
           echo "Tests started with PID: $(cat test-pid.txt)"
           
-          # Wait a bit for containers to start
-          sleep 60
+          # Wait for dependencies to start, then Atlas
+          echo ""
+          echo "Waiting for dependencies to start (Zookeeper, Kafka, Cassandra, ES, Redis)..."
+          sleep 90
           
           echo ""
-          echo "Containers running:"
+          echo "Containers running after 90 seconds:"
           docker ps -a
+          
+          # Wait for Atlas container to appear
+          echo ""
+          echo "Waiting for Atlas container to start..."
+          for i in {1..30}; do
+            if docker ps -a | grep -q "atlanhq/atlas:test"; then
+              echo "✅ Atlas container started!"
+              break
+            fi
+            echo "Attempt $i/30: Atlas container not found yet, waiting 10 seconds..."
+            sleep 10
+          done
+          
+          echo ""
+          echo "Final container status:"
+          docker ps -a
+          
+          # Get Atlas container ID if it exists
+          ATLAS_CONTAINER=$(docker ps -a --filter ancestor=atlanhq/atlas:test --format "{{.ID}}" | head -1)
+          if [ -n "$ATLAS_CONTAINER" ]; then
+            echo ""
+            echo "================================================"
+            echo "Atlas Container ID: $ATLAS_CONTAINER"
+            echo "================================================"
+            echo ""
+            echo "To view logs during tmate session, run:"
+            echo "  docker logs -f $ATLAS_CONTAINER"
+            echo ""
+            echo "To exec into container:"
+            echo "  docker exec -it $ATLAS_CONTAINER bash"
+            echo "================================================"
+          else
+            echo "⚠️  Atlas container not found yet - it may still be starting"
+          fi
           
       - name: Setup tmate session for debugging
         uses: mxschmitt/action-tmate@v3

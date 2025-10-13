@@ -233,81 +233,74 @@ public class AtlasDockerIntegrationTest {
             # Update atlas-application.properties with container service addresses
             cat >> /opt/apache-atlas/conf/atlas-application.properties <<'EOF'
             
-            # Container service overrides
-            atlas.graph.storage.backend=cql
-            atlas.graph.storage.hostname=cassandra
-            atlas.graph.storage.cql.port=9042
-            atlas.graph.storage.cql.keyspace=atlas
+# Container service overrides
+atlas.graph.storage.backend=cql
+atlas.graph.storage.hostname=cassandra
+atlas.graph.storage.cql.port=9042
+atlas.graph.storage.cql.keyspace=atlas
+
+atlas.graph.index.search.backend=elasticsearch
+atlas.graph.index.search.hostname=elasticsearch:9200
+atlas.graph.index.search.elasticsearch.rest-port=9200
+
+atlas.kafka.bootstrap.servers=kafka:9092
+atlas.kafka.zookeeper.connect=zookeeper:2181
+
+# Redis configuration
+atlas.redis.service.impl=org.apache.atlas.service.redis.RedisServiceImpl
+atlas.redis.url=redis://redis:6379
+atlas.redis.sentinel.enabled=false
+atlas.redis.sentinel.check_list.enabled=false
             
-            atlas.graph.index.search.backend=elasticsearch
-            atlas.graph.index.search.hostname=elasticsearch:9200
-            atlas.graph.index.search.elasticsearch.rest-port=9200
+atlas.server.bind.address=0.0.0.0
+atlas.authentication.method.file=true
+atlas.authentication.method.kerberos=false
+
+# Disable HBase transaction logging since we're using Cassandra
+atlas.graph.tx.log.tx=false
+atlas.graph.tx.recovery.verbose=false
+
+# Disable HBase audit
+atlas.audit.hbase.zookeeper.quorum=
+atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository
+
+atlas.authorizer.impl=none
+atlas.enableTLS=false
             
-            atlas.kafka.bootstrap.servers=kafka:9092
-            atlas.kafka.zookeeper.connect=zookeeper:2181
+atlas.kafka.zookeeper.session.timeout.ms=400
+atlas.kafka.zookeeper.connection.timeout.ms=200
+atlas.kafka.zookeeper.sync.time.ms=20
+atlas.kafka.auto.commit.interval.ms=1000
+atlas.kafka.hook.group.id=atlas
+atlas.kafka.enable.auto.commit=false
+atlas.kafka.auto.offset.reset=earliest
+atlas.kafka.session.timeout.ms=30000
+atlas.kafka.offsets.topic.replication.factor=1
+atlas.kafka.poll.timeout.ms=1000
+atlas.notification.create.topics=true
+atlas.notification.replicas=1
+atlas.notification.topics=ATLAS_ENTITIES
+atlas.notification.log.failed.messages=true
+atlas.notification.consumer.retry.interval=500
+atlas.notification.hook.retry.interval=1000
             
-             # Redis configuration
-            atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
-            atlas.redis.url = redis://redis:6379
-            atlas.redis.sentinel.enabled = false
-            atlas.redis.sentinel.check_list.enabled = false
-            
-            atlas.server.bind.address=0.0.0.0
-            atlas.authentication.method.file=true
-            atlas.authentication.method.kerberos=false
-            
-            # Disable HBase transaction logging since we're using Cassandra
-            atlas.graph.tx.log.tx=false
-            atlas.graph.tx.recovery.verbose=false
-            
-            # Disable HBase audit
-            atlas.audit.hbase.zookeeper.quorum=
-            atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository
-            
-            atlas.redis.sentinel.check_list.enabled=false
-            atlas.authorizer.impl=none
-            #atlas.authorizer.simple.authz.policy.file=deploy/conf/atlas-simple-authz-policy.json
-            atlas.authentication.method.file=true
-            
-            atlas.enableTLS=false
-            atlas.authentication.method.kerberos=false
-            atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
-            
-            atlas.kafka.zookeeper.session.timeout.ms=400
-            atlas.kafka.zookeeper.connection.timeout.ms=200
-            atlas.kafka.zookeeper.sync.time.ms=20
-            atlas.kafka.auto.commit.interval.ms=1000
-            atlas.kafka.hook.group.id=atlas
-            atlas.kafka.enable.auto.commit=false
-            atlas.kafka.auto.offset.reset=earliest
-            atlas.kafka.session.timeout.ms=30000
-            atlas.kafka.offsets.topic.replication.factor=1
-            atlas.kafka.poll.timeout.ms=1000
-            atlas.notification.create.topics=true
-            atlas.notification.replicas=1
-            atlas.notification.topics=ATLAS_ENTITIES
-            atlas.notification.log.failed.messages=true
-            atlas.notification.consumer.retry.interval=500
-            atlas.notification.hook.retry.interval=1000
-            
-            atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository
-            atlas.EntityAuditRepositorySearch.impl=org.apache.atlas.repository.audit.ESBasedAuditRepository
-            atlas.EntityAuditRepository.keyspace=atlas_audit
-            atlas.EntityAuditRepository.replicationFactor=1
+atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository
+atlas.EntityAuditRepositorySearch.impl=org.apache.atlas.repository.audit.ESBasedAuditRepository
+atlas.EntityAuditRepository.keyspace=atlas_audit
+atlas.EntityAuditRepository.replicationFactor=1
         
-            atlas.authentication.method.ldap.type=none
-            #### user credentials file
-            atlas.authentication.method.file.filename=/opt/apache-atlas/conf/users-credentials.properties
-            atlas.authentication.method.file=true
-            atlas.authentication.method.ldap=false
-            atlas.authentication.method.keycloak=false
-            atlas.authentication.method.pam=false
-            atlas.authentication.method.keycloak=false
-            #atlas.authentication.method.keycloak.file=${sys:atlas.home}/conf/keycloak.json
-            #atlas.authentication.method.keycloak.ugi-groups=false
-            #atlas.authentication.method.keycloak.groups_claim=groups
-            atlas.http.authentication.enabled=false
-            EOF
+atlas.authentication.method.ldap.type=none
+#### user credentials file
+atlas.authentication.method.file.filename=/opt/apache-atlas/conf/users-credentials.properties
+atlas.authentication.method.file=true
+atlas.authentication.method.ldap=false
+atlas.authentication.method.keycloak=false
+atlas.authentication.method.pam=false
+#atlas.authentication.method.keycloak.file=${sys:atlas.home}/conf/keycloak.json
+#atlas.authentication.method.keycloak.ugi-groups=false
+#atlas.authentication.method.keycloak.groups_claim=groups
+atlas.http.authentication.enabled=false
+EOF
             
             # Export required environment variables
             export ATLAS_HOME=/opt/apache-atlas
