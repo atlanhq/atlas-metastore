@@ -78,7 +78,7 @@ jobs:
           echo "Building project to compile test classes..."
           mvn clean install -DskipTests -Dmaven.javadoc.skip=true -B -V
 
-      - name: Start Integration Tests (Background)
+      - name: Start Integration Tests (Background) and Monitor
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
@@ -91,13 +91,15 @@ jobs:
           echo "=========================================="
           echo ""
           
-          # Run tests in background so we can debug while they run
-          nohup mvn test -pl webapp \
+          # Run tests in background with proper process management
+          (mvn test -pl webapp \
                -Dsurefire.useFile=false \
-               -Dorg.slf4j.simpleLogger.defaultLogLevel=info > test-output.log 2>&1 &
+               -Dorg.slf4j.simpleLogger.defaultLogLevel=info > test-output.log 2>&1
+           echo $? > test-exit-code.txt) &
           
-          echo $! > test-pid.txt
-          echo "Tests started with PID: $(cat test-pid.txt)"
+          TEST_PID=$!
+          echo $TEST_PID > test-pid.txt
+          echo "Tests started with PID: $TEST_PID"
           
           # Wait for dependencies to start, then Atlas
           echo ""
@@ -150,12 +152,35 @@ jobs:
       - name: Wait for tests to complete
         if: always()
         run: |
-          if [ -f test-pid.txt ]; then
-            TEST_PID=$(cat test-pid.txt)
-            echo "Waiting for test process (PID: $TEST_PID) to complete..."
-            wait $TEST_PID || true
-            TEST_RESULT=$?
+          echo "Waiting for test process to complete..."
+          
+          # Poll for test completion (check every 10 seconds for up to 20 minutes)
+          MAX_WAIT=120  # 20 minutes
+          ELAPSED=0
+          while [ $ELAPSED -lt $MAX_WAIT ]; do
+            if [ -f test-exit-code.txt ]; then
+              echo "Tests completed!"
+              break
+            fi
+            
+            # Check if test process is still running
+            if [ -f test-pid.txt ]; then
+              TEST_PID=$(cat test-pid.txt)
+              if ! ps -p $TEST_PID > /dev/null 2>&1; then
+                echo "Test process no longer running but no exit code found. Waiting..."
+              fi
+            fi
+            
+            echo "Still running... (${ELAPSED}0 seconds elapsed)"
+            sleep 10
+            ELAPSED=$((ELAPSED + 1))
+          done
+          
+          # Get test result
+          if [ -f test-exit-code.txt ]; then
+            TEST_RESULT=$(cat test-exit-code.txt)
           else
+            echo "⚠️ Test did not complete in time or was killed"
             TEST_RESULT=1
           fi
           
