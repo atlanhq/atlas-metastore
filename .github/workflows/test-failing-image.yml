@@ -65,7 +65,7 @@ jobs:
           echo "Building project to compile test classes..."
           mvn clean install -DskipTests -Dmaven.javadoc.skip=true -B -V
 
-      - name: Run Integration Tests with Failing Image
+      - name: Start Integration Tests with Failing Image (Background)
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
@@ -79,13 +79,49 @@ jobs:
           echo "⚠️  If this test PASSES → GitHub Actions CANNOT catch the bug ❌"
           echo ""
           
-          # Run tests (don't fail the workflow immediately)
-          # This will run all integration tests that extend AtlasDockerIntegrationTest
-          set +e
-          mvn test -pl webapp \
+          # Run tests in background so we can debug while they run
+          nohup mvn test -pl webapp \
                -Dsurefire.useFile=false \
-               -Dorg.slf4j.simpleLogger.defaultLogLevel=info
-          TEST_RESULT=$?
+               -Dorg.slf4j.simpleLogger.defaultLogLevel=info > test-output.log 2>&1 &
+          
+          echo $! > test-pid.txt
+          echo "Tests started with PID: $(cat test-pid.txt)"
+          
+          # Wait a bit for containers to start
+          sleep 60
+          
+          echo ""
+          echo "Containers running:"
+          docker ps -a
+          
+      - name: Setup tmate session for debugging
+        uses: mxschmitt/action-tmate@v3
+        timeout-minutes: 30
+        with:
+          limit-access-to-actor: true
+          detached: false
+          
+      - name: Wait for tests to complete
+        if: always()
+        run: |
+          if [ -f test-pid.txt ]; then
+            TEST_PID=$(cat test-pid.txt)
+            echo "Waiting for test process (PID: $TEST_PID) to complete..."
+            wait $TEST_PID || true
+            TEST_RESULT=$?
+          else
+            TEST_RESULT=1
+          fi
+          
+          # Show test output
+          if [ -f test-output.log ]; then
+            echo ""
+            echo "=========================================="
+            echo "Test Output:"
+            echo "=========================================="
+            cat test-output.log
+          fi
+          
           set -e
           
           echo ""
