@@ -107,6 +107,19 @@ public class AtlasDockerIntegrationTest {
                     ". Please ensure the deploy directory exists with conf, data, elasticsearch, etc.");
         }
 
+        // Create logs and data directories on host if they don't exist
+        // This fixes permission issues with pre-built images that run as non-root
+        File logsDir = new File(deployDir, "logs");
+        File dataDir = new File(deployDir, "data");
+        if (!logsDir.exists()) {
+            logsDir.mkdirs();
+            LOG.info("Created logs directory: {}", logsDir.getAbsolutePath());
+        }
+        if (!dataDir.exists()) {
+            dataDir.mkdirs();
+            LOG.info("Created data directory: {}", dataDir.getAbsolutePath());
+        }
+
         return new GenericContainer<>(DockerImageName.parse("atlanhq/atlas:test"))
                 .withNetwork(network)
                 .withNetworkAliases("atlas")
