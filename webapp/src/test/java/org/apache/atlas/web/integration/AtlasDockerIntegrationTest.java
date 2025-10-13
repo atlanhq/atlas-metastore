@@ -223,6 +223,12 @@ public class AtlasDockerIntegrationTest {
             sed -i 's/${cassandra.embedded}/false/g' /opt/apache-atlas/conf/atlas-env.sh
             sed -i 's/${elasticsearch.managed}/false/g' /opt/apache-atlas/conf/atlas-env.sh
             
+            # Create required directories with proper permissions
+            echo "Creating required directories..."
+            mkdir -p /opt/atlas-deploy/data
+            mkdir -p /opt/atlas-deploy/logs
+            chmod -R 777 /opt/atlas-deploy
+            
             # List what we have
             echo "Configuration directory contents:"
             ls -la /opt/apache-atlas/conf/
