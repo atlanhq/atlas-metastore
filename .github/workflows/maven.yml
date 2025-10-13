@@ -32,6 +32,7 @@ on:
       - fixlabels
       - interceptapis
       - fix-pg-prod-cm-soft-ref
+      - test-redis-configmap-bug
 
 jobs:
   build:
