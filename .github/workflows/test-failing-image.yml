@@ -80,13 +80,11 @@ jobs:
           echo ""
           
           # Run tests (don't fail the workflow immediately)
+          # This will run all integration tests that extend AtlasDockerIntegrationTest
           set +e
           mvn test -pl webapp \
-               -Dtest=org.apache.atlas.web.integration.AtlasDockerIntegrationTest \
-               -DfailIfNoTests=false \
-               -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
-               -Dorg.testcontainers.log.level=DEBUG \
-               -Dsurefire.useFile=false
+               -Dsurefire.useFile=false \
+               -Dorg.slf4j.simpleLogger.defaultLogLevel=info
           TEST_RESULT=$?
           set -e
           
