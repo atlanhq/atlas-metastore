@@ -119,6 +119,15 @@ public class AtlasDockerIntegrationTest {
             dataDir.mkdirs();
             LOG.info("Created data directory: {}", dataDir.getAbsolutePath());
         }
+        
+        // Set world-writable permissions on deploy directory and subdirectories
+        // This allows non-root container users to write to mounted volumes
+        try {
+            setDirectoryPermissions(deployDir, true);
+            LOG.info("Set permissions on deploy directory for container access");
+        } catch (Exception e) {
+            LOG.warn("Failed to set permissions on deploy directory: {}", e.getMessage());
+        }
 
         return new GenericContainer<>(DockerImageName.parse("atlanhq/atlas:test"))
                 .withNetwork(network)
@@ -164,6 +173,42 @@ public class AtlasDockerIntegrationTest {
         throw new IllegalStateException(
                 "Could not find deploy directory. Please set -Datlas.deploy.dir=/path/to/deploy or ensure deploy directory exists in project root"
         );
+    }
+
+    private static void setDirectoryPermissions(File dir, boolean recursive) throws Exception {
+        // Try using chmod command for more reliable permission setting
+        try {
+            ProcessBuilder pb = new ProcessBuilder("chmod", "-R", "777", dir.getAbsolutePath());
+            Process process = pb.start();
+            int exitCode = process.waitFor();
+            if (exitCode == 0) {
+                LOG.debug("Successfully set permissions on {} using chmod", dir.getAbsolutePath());
+                return;
+            }
+        } catch (Exception e) {
+            LOG.debug("Could not use chmod command, falling back to Java API: {}", e.getMessage());
+        }
+        
+        // Fallback to Java API (less powerful but cross-platform)
+        setPermissionsRecursive(dir);
+    }
+    
+    private static void setPermissionsRecursive(File file) {
+        if (file.isDirectory()) {
+            file.setReadable(true, false);
+            file.setWritable(true, false);
+            file.setExecutable(true, false);
+            
+            File[] children = file.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    setPermissionsRecursive(child);
+                }
+            }
+        } else {
+            file.setReadable(true, false);
+            file.setWritable(true, false);
+        }
     }
 
     private static Map<String, String> getAtlasEnvironment() {
