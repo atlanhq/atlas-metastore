@@ -81,7 +81,9 @@ jobs:
           
           # Run tests (don't fail the workflow immediately)
           set +e
-          mvn test -pl webapp -Dtest=AtlasDockerIntegrationTest \
+          mvn test -pl webapp \
+               -Dtest=org.apache.atlas.web.integration.AtlasDockerIntegrationTest \
+               -DfailIfNoTests=false \
                -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
                -Dorg.testcontainers.log.level=DEBUG \
                -Dsurefire.useFile=false
