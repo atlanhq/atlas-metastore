@@ -33,7 +33,6 @@ on:
       - interceptapis
       - tags_intg_test
       - nb_tags_intg_test
-      - mlh_1379
 
 
 jobs:
