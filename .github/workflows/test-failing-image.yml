@@ -19,7 +19,7 @@ jobs:
             expected-result: "fail"
             enable-tmate: true
           - image-name: "Working Image (Latest Beta)"
-            image-tag: "1e2539e53"
+            image-tag: "e123c83abcd"
             expected-result: "pass"
             enable-tmate: true
     
