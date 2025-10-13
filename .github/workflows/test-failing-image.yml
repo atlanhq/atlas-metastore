@@ -97,9 +97,6 @@ jobs:
       - name: Setup tmate session for debugging
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 30
-        with:
-          limit-access-to-actor: true
-          detached: false
           
       - name: Wait for tests to complete
         if: always()
