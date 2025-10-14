@@ -215,6 +215,7 @@ public abstract class AbstractRedisService implements RedisService {
         waitTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WAIT_TIME_MS, DEFAULT_REDIS_WAIT_TIME_MS);
         leaseTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LEASE_TIME_MS, DEFAULT_REDIS_LEASE_TIME_MS);
         watchdogTimeoutInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WATCHDOG_TIMEOUT_MS, DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS);
+        checkSentinelsList = atlasConfig.getBoolean(CHECK_SENTINELS_LIST, true);
         Config redisConfig = new Config();
         redisConfig.setLockWatchdogTimeout(watchdogTimeoutInMS);
         return redisConfig;
@@ -259,16 +260,16 @@ public abstract class AbstractRedisService implements RedisService {
                 .setReadMode(ReadMode.MASTER_SLAVE)
                 .setCheckSentinelsList(checkSentinelsList)
                 .setKeepAlive(true)
-                .setMasterConnectionMinimumIdleSize(10)
-                .setMasterConnectionPoolSize(20)
-                .setSlaveConnectionMinimumIdleSize(10)
-                .setSlaveConnectionPoolSize(20)
+                .setMasterConnectionMinimumIdleSize(5)
+                .setMasterConnectionPoolSize(5)
+                .setSlaveConnectionMinimumIdleSize(5)
+                .setSlaveConnectionPoolSize(5)
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
                 .setTimeout(50) //Setting UP timeout to 50ms
-                .setRetryAttempts(0);
+                .setRetryAttempts(10); //Retry 10 times;
         return config;
     }
 
