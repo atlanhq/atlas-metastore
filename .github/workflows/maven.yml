@@ -93,7 +93,6 @@ jobs:
           chmod +x ./build.sh && ./build.sh
 
       - name: Run Integration Tests
-        if: false  # DISABLED: Skip tests to build image for production testing
         env:
           # Configure Testcontainers for GitHub Actions
           TESTCONTAINERS_RYUK_DISABLED: true
