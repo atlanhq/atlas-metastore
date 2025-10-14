@@ -2922,8 +2922,7 @@ public class EntityGraphRetriever {
                 } catch (IllegalStateException ile) {
                     String entityVertexId = entityVertex.getIdForDisplay();
                     String entityGuid = getGuid(entityVertex);
-                    LOG.error("IllegalStateException for vertexId {}, entityGuid {}, GraphHelper.elementExists(referenceVertex) {}",
-                            entityVertexId, entityGuid, GraphHelper.elementExists(referenceVertex));
+                    LOG.error("IllegalStateException for vertexId {}, entityGuid {}", entityVertexId, entityGuid);
                     try {
                         LOG.error("IllegalStateException GraphHelper.elementExists(referenceVertex) {}", GraphHelper.elementExists(referenceVertex));
                     } catch (Exception ignored) {}
