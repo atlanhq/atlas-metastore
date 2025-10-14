@@ -100,20 +100,13 @@ public class AtlasDockerIntegrationTest {
     static GenericContainer<?> redisSentinel = new GenericContainer<>("redis:6.2.14")
             .withNetwork(network)
             .withNetworkAliases("redis-sentinel")
-            .withCommand("sh", "-c", 
-                    "echo 'Creating Sentinel configuration...' && " +
-                    "echo 'port 26379' > /tmp/sentinel.conf && " +
-                    "echo 'sentinel monitor mymaster redis-master 6379 1' >> /tmp/sentinel.conf && " +
-                    "echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf && " +
-                    "echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf && " +
-                    "echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf && " +
-                    "echo 'protected-mode no' >> /tmp/sentinel.conf && " +
-                    "echo 'Sentinel config created:' && cat /tmp/sentinel.conf && " +
-                    "echo 'Starting Redis Sentinel...' && " +
-                    "redis-sentinel /tmp/sentinel.conf")
+            .withCommand("redis-sentinel", "/etc/redis/sentinel.conf")
             .withExposedPorts(26379)
-            .waitingFor(Wait.forListeningPort().withStartupTimeout(Duration.ofSeconds(30)))
-            .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("SENTINEL"))
+            .withFileSystemBind(
+                    getSentinelConfigPath(),
+                    "/etc/redis/sentinel.conf",
+                    BindMode.READ_ONLY
+            )
             .dependsOn(redisMaster)
             .withReuse(true);
 
@@ -179,6 +172,31 @@ public class AtlasDockerIntegrationTest {
         );
     }
 
+    private static String getSentinelConfigPath() {
+        try {
+            // Create a temporary file for Sentinel configuration
+            File sentinelConfig = File.createTempFile("sentinel-", ".conf");
+            sentinelConfig.deleteOnExit();
+            
+            // Write Sentinel configuration
+            String config = """
+                port 26379
+                sentinel monitor mymaster redis-master 6379 1
+                sentinel down-after-milliseconds mymaster 5000
+                sentinel parallel-syncs mymaster 1
+                sentinel failover-timeout mymaster 10000
+                # No authentication for test environment
+                protected-mode no
+                """;
+            
+            java.nio.file.Files.writeString(sentinelConfig.toPath(), config);
+            LOG.info("Created Sentinel config at: {}", sentinelConfig.getAbsolutePath());
+            return sentinelConfig.getAbsolutePath();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create Sentinel config file", e);
+        }
+    }
+
     private static Map<String, String> getAtlasEnvironment() {
         Map<String, String> env = new HashMap<>();
 
@@ -228,42 +246,13 @@ public class AtlasDockerIntegrationTest {
             while ! nc -z kafka 9092; do sleep 2; done
             echo "Kafka is ready"
             
-            echo "=========================================="
-            echo "DEBUGGING: Testing Redis Sentinel Setup"
-            echo "=========================================="
-            
             echo "Waiting for Redis Master..."
-            while ! nc -z redis-master 6379; do 
-                echo "  [WAIT] Redis Master not ready yet..."
-                sleep 2
-            done
-            echo "✅ Redis Master is ready"
+            while ! nc -z redis-master 6379; do sleep 2; done
+            echo "Redis Master is ready"
             
             echo "Waiting for Redis Sentinel..."
-            while ! nc -z redis-sentinel 26379; do 
-                echo "  [WAIT] Redis Sentinel not ready yet..."
-                sleep 2
-            done
-            echo "✅ Redis Sentinel is ready"
-            
-            echo ""
-            echo "Testing Redis Sentinel connectivity..."
-            
-            # Install redis-cli if not available (for debugging)
-            if ! command -v redis-cli &> /dev/null; then
-                echo "redis-cli not found, skipping detailed checks"
-            else
-                echo "Checking Sentinel info:"
-                redis-cli -h redis-sentinel -p 26379 ping || echo "⚠️  Sentinel ping failed"
-                redis-cli -h redis-sentinel -p 26379 sentinel masters || echo "⚠️  Sentinel masters check failed"
-                
-                echo "Checking Redis Master:"
-                redis-cli -h redis-master -p 6379 ping || echo "⚠️  Master ping failed"
-            fi
-            
-            echo ""
-            echo "✅ All Redis components ready for Atlas startup"
-            echo "=========================================="
+            while ! nc -z redis-sentinel 26379; do sleep 2; done
+            echo "Redis Sentinel is ready"
             
             # Create required directories
             mkdir -p /opt/atlas-deploy/logs
@@ -290,10 +279,6 @@ public class AtlasDockerIntegrationTest {
             ls -la /opt/apache-atlas/elasticsearch/
             
             # Update atlas-application.properties with container service addresses
-            echo ""
-            echo "=========================================="
-            echo "DEBUGGING: Writing Redis Sentinel config"
-            echo "=========================================="
             cat >> /opt/apache-atlas/conf/atlas-application.properties <<'EOF'
             
             # Container service overrides
@@ -373,18 +358,6 @@ public class AtlasDockerIntegrationTest {
             #atlas.authentication.method.keycloak.groups_claim=groups
             atlas.http.authentication.enabled=false
             EOF
-            
-            echo ""
-            echo "=========================================="
-            echo "DEBUGGING: Verifying Redis config written"
-            echo "=========================================="
-            echo "Checking for Redis configuration in atlas-application.properties:"
-            grep -i "redis" /opt/apache-atlas/conf/atlas-application.properties || echo "⚠️  No Redis config found!"
-            echo ""
-            echo "Full Redis configuration:"
-            grep -A5 "Redis Sentinel configuration" /opt/apache-atlas/conf/atlas-application.properties
-            echo "=========================================="
-            echo ""
             
             # Export required environment variables
             export ATLAS_HOME=/opt/apache-atlas
@@ -516,20 +489,7 @@ public class AtlasDockerIntegrationTest {
 
     @BeforeAll
     void setup() {
-        LOG.info("=================================================");
-        LOG.info("DEBUGGING: Test Environment Setup");
-        LOG.info("=================================================");
-        
-        // Log all container statuses
-        LOG.info("Container Status:");
-        LOG.info("  Zookeeper: {}", zookeeper.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        LOG.info("  Kafka: {}", kafka.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        LOG.info("  Cassandra: {}", cassandra.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        LOG.info("  Elasticsearch: {}", elasticsearch.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        LOG.info("  Redis Master: {}", redisMaster.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        LOG.info("  Redis Sentinel: {}", redisSentinel.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        LOG.info("  Atlas: {}", atlas.isRunning() ? "✅ RUNNING" : "❌ NOT RUNNING");
-        
+        LOG.info("Setting up test environment...");
         // Setup HTTP client
         httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -540,13 +500,13 @@ public class AtlasDockerIntegrationTest {
         ATLAS_BASE_URL = String.format("http://localhost:%d/api/atlas/v2", mappedPort);
 
         LOG.info("Atlas URL: {}", ATLAS_BASE_URL);
-        LOG.info("=================================================");
+        LOG.info("Atlas container is running: {}", atlas.isRunning());
 
         // Wait for Atlas API to be ready
         waitForAtlasReady();
 
         ES_URL = elasticsearch.getHttpHostAddress();
-        LOG.info("ES_URL: {}", ES_URL);
+        System.out.println("ES_URL: " + ES_URL);
     }
 
     private void waitForAtlasReady() {
