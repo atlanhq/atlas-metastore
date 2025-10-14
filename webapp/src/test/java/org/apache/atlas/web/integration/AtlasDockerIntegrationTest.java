@@ -93,8 +93,7 @@ public class AtlasDockerIntegrationTest {
                     "--protected-mode", "no",
                     "--requirepass", "")
             .withExposedPorts(6379)
-            .waitingFor(Wait.forListeningPort().withStartupTimeout(Duration.ofSeconds(30)))
-            .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("REDIS-MASTER"));
+            .withReuse(true);
 
     // Redis Sentinel
     @Container
@@ -102,24 +101,21 @@ public class AtlasDockerIntegrationTest {
             .withNetwork(network)
             .withNetworkAliases("redis-sentinel")
             .withCommand("sh", "-c", 
-                    "echo '=== Creating Sentinel configuration ===' && " +
-                    "mkdir -p /data && " +  // Ensure writable directory
-                    "echo 'port 26379' > /data/sentinel.conf && " +
-                    "echo 'dir /data' >> /data/sentinel.conf && " +  // Sentinel needs to write state
-                    "echo 'sentinel monitor mymaster redis-master 6379 1' >> /data/sentinel.conf && " +
-                    "echo 'sentinel down-after-milliseconds mymaster 10000' >> /data/sentinel.conf && " +
-                    "echo 'sentinel parallel-syncs mymaster 1' >> /data/sentinel.conf && " +
-                    "echo 'sentinel failover-timeout mymaster 30000' >> /data/sentinel.conf && " +
-                    "echo 'sentinel deny-scripts-reconfig yes' >> /data/sentinel.conf && " +  // Prevent config overwrite
-                    "echo 'protected-mode no' >> /data/sentinel.conf && " +
-                    "echo '=== Sentinel config created ===' && " +
-                    "cat /data/sentinel.conf && " +
-                    "echo '=== Starting Redis Sentinel ===' && " +
-                    "redis-sentinel /data/sentinel.conf --loglevel verbose")  // Verbose logging
+                    "echo 'Creating Sentinel configuration...' && " +
+                    "echo 'port 26379' > /tmp/sentinel.conf && " +
+                    "echo 'sentinel monitor mymaster redis-master 6379 1' >> /tmp/sentinel.conf && " +
+                    "echo 'sentinel down-after-milliseconds mymaster 5000' >> /tmp/sentinel.conf && " +
+                    "echo 'sentinel parallel-syncs mymaster 1' >> /tmp/sentinel.conf && " +
+                    "echo 'sentinel failover-timeout mymaster 10000' >> /tmp/sentinel.conf && " +
+                    "echo 'protected-mode no' >> /tmp/sentinel.conf && " +
+                    "echo 'Sentinel config created:' && cat /tmp/sentinel.conf && " +
+                    "echo 'Starting Redis Sentinel...' && " +
+                    "redis-sentinel /tmp/sentinel.conf")
             .withExposedPorts(26379)
-            .waitingFor(Wait.forLogMessage(".*monitor master.*", 1).withStartupTimeout(Duration.ofSeconds(60)))  // Wait for Sentinel to detect master
-            .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("REDIS-SENTINEL"))
-            .dependsOn(redisMaster);
+            .waitingFor(Wait.forListeningPort().withStartupTimeout(Duration.ofSeconds(30)))
+            .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("SENTINEL"))
+            .dependsOn(redisMaster)
+            .withReuse(true);
 
     // Atlas container with volume mount
     @Container
@@ -237,45 +233,15 @@ public class AtlasDockerIntegrationTest {
             echo "=========================================="
             
             echo "Waiting for Redis Master..."
-            max_retries=60
-            retry_count=0
-            while ! nc -z redis-master 6379 2>/dev/null; do 
-                retry_count=$((retry_count + 1))
-                if [ $retry_count -gt $max_retries ]; then
-                    echo "❌ Redis Master failed to start after ${max_retries} attempts"
-                    exit 1
-                fi
-                echo "  [WAIT] Redis Master not ready yet (attempt $retry_count/$max_retries)..."
+            while ! nc -z redis-master 6379; do 
+                echo "  [WAIT] Redis Master not ready yet..."
                 sleep 2
             done
             echo "✅ Redis Master is ready"
             
-            echo "Waiting for Redis Sentinel DNS..."
-            # First wait for DNS resolution (network alias to be registered)
-            retry_count=0
-            while ! getent hosts redis-sentinel >/dev/null 2>&1; do 
-                retry_count=$((retry_count + 1))
-                if [ $retry_count -gt $max_retries ]; then
-                    echo "❌ Redis Sentinel DNS failed to resolve after ${max_retries} attempts"
-                    echo "Available hosts:"
-                    getent hosts redis-master || echo "  redis-master: NOT FOUND"
-                    exit 1
-                fi
-                echo "  [WAIT] Redis Sentinel DNS not resolved yet (attempt $retry_count/$max_retries)..."
-                sleep 2
-            done
-            echo "✅ Redis Sentinel DNS resolved"
-            
-            echo "Waiting for Redis Sentinel port..."
-            # Then wait for the port to be open
-            retry_count=0
-            while ! nc -z redis-sentinel 26379 2>/dev/null; do 
-                retry_count=$((retry_count + 1))
-                if [ $retry_count -gt $max_retries ]; then
-                    echo "❌ Redis Sentinel port failed to open after ${max_retries} attempts"
-                    exit 1
-                fi
-                echo "  [WAIT] Redis Sentinel port not ready yet (attempt $retry_count/$max_retries)..."
+            echo "Waiting for Redis Sentinel..."
+            while ! nc -z redis-sentinel 26379; do 
+                echo "  [WAIT] Redis Sentinel not ready yet..."
                 sleep 2
             done
             echo "✅ Redis Sentinel is ready"

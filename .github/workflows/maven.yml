@@ -93,8 +93,6 @@ jobs:
           chmod +x ./build.sh && ./build.sh
 
       - name: Run Integration Tests
-        id: integration_tests
-        continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions
           TESTCONTAINERS_RYUK_DISABLED: true
@@ -104,112 +102,12 @@ jobs:
           echo "Running integration tests..."
           chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
       
-      - name: Capture container logs and state on failure
-        if: steps.integration_tests.outcome == 'failure'
-        run: |
-          echo "=========================================="
-          echo "CAPTURING CONTAINER STATE FOR DEBUGGING"
-          echo "=========================================="
-          
-          mkdir -p test-debug-logs
-          
-          echo "All containers (including stopped):"
-          docker ps -a | tee test-debug-logs/docker-ps.log
-          
-          echo ""
-          echo "Capturing logs from all containers..."
-          
-          # Get all container IDs (including stopped ones)
-          for container in $(docker ps -a --format '{{.Names}}'); do
-            echo "Capturing logs for: $container"
-            docker logs "$container" > "test-debug-logs/${container}.log" 2>&1 || echo "Failed to get logs for $container"
-          done
-          
-          echo ""
-          echo "Checking for test-related containers..."
-          docker ps -a --filter "name=test" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-          
-          echo ""
-          echo "Disk space:"
-          df -h
-          
-          echo ""
-          echo "=========================================="
-          echo "Logs saved to test-debug-logs/ directory"
-          echo "Containers are still available (stopped but not removed)"
-          echo "=========================================="
-          
-          ls -lh test-debug-logs/
-          
-          echo ""
-          echo "=========================================="
-          echo "PREVENTING CONTAINER CLEANUP"
-          echo "=========================================="
-          # Docker containers should NOT be auto-removed (Ryuk is disabled)
-          # But let's verify and show container states
-          
-          echo "Container states:"
-          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Ports}}"
-          
-          echo ""
-          echo "If you SSH in via tmate, these containers will still be available:"
-          echo "  - Use: docker ps -a"
-          echo "  - Use: docker logs <container-name>"
-          echo "  - Use: docker inspect <container-name>"
-          echo "  - Use: docker exec <container-name> <command>"
-          echo ""
-          echo "Logs are also saved in test-debug-logs/ for offline inspection"
-          echo "=========================================="
-          
-          echo ""
-          echo "=========================================="
-          echo "PREVIEW: Atlas Container Logs (last 100 lines)"
-          echo "=========================================="
-          # Find and show Atlas container logs immediately
-          atlas_container=$(docker ps -a --filter "ancestor=atlanhq/atlas:test" --format "{{.Names}}" | head -1)
-          if [ -n "$atlas_container" ]; then
-            echo "Atlas container: $atlas_container"
-            docker logs "$atlas_container" 2>&1 | tail -100 || echo "No Atlas logs available"
-          else
-            echo "No Atlas container found"
-          fi
-          
-          echo ""
-          echo "=========================================="
-          echo "PREVIEW: Redis Sentinel Logs (last 50 lines)"
-          echo "=========================================="
-          sentinel_container=$(docker ps -a --filter "ancestor=redis:6.2.14" --filter "name=sentinel" --format "{{.Names}}" | head -1)
-          if [ -n "$sentinel_container" ]; then
-            echo "Sentinel container: $sentinel_container"
-            docker logs "$sentinel_container" 2>&1 | tail -50 || echo "No Sentinel logs available"
-          else
-            echo "No Sentinel container found"
-          fi
-          
-          echo ""
-          echo "=========================================="
-          echo "Full logs available in artifacts and via tmate SSH"
-          echo "=========================================="
-      
-      - name: Upload container logs as artifact
-        if: steps.integration_tests.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-logs-${{ github.run_id }}
-          path: test-debug-logs/
-          retention-days: 5
-      
       - name: Setup tmate session on test failure
-        if: steps.integration_tests.outcome == 'failure'
+        if: failure()
         uses: mxschmitt/action-tmate@v3
         timeout-minutes: 30
         with:
           detached: true
-          limit-access-to-actor: false  # Allow connection without pre-registered SSH keys
-      
-      - name: Fail the workflow if tests failed
-        if: steps.integration_tests.outcome == 'failure'
-        run: exit 1
 
       - name: Get Repository Name
         run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
