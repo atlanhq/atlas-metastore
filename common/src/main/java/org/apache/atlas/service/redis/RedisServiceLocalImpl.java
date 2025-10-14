@@ -5,12 +5,14 @@ import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.redisson.Redisson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 
 @Component("redisServiceImpl")
 @ConditionalOnAtlasProperty(property = "atlas.redis.service.impl")
+@Profile("local")  // Use this simple Redis implementation in tests
 public class RedisServiceLocalImpl extends AbstractRedisService {
 
     private static final Logger LOG = LoggerFactory.getLogger(RedisServiceLocalImpl.class);
