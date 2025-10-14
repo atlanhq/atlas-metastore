@@ -83,31 +83,12 @@ public class AtlasDockerIntegrationTest {
             .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
             .withReuse(true);
 
-    // Redis Master
     @Container
-    static GenericContainer<?> redisMaster = new GenericContainer<>("redis:6.2.14")
+    static GenericContainer<?> redis = new GenericContainer<>("redis:6.2.14")
             .withNetwork(network)
-            .withNetworkAliases("redis-master")
-            .withCommand("redis-server", 
-                    "--port", "6379",
-                    "--protected-mode", "no",
-                    "--requirepass", "")
+            .withNetworkAliases("redis")
+            .withCommand("redis-server", "--requirepass", "", "--protected-mode", "no")
             .withExposedPorts(6379)
-            .withReuse(true);
-
-    // Redis Sentinel
-    @Container
-    static GenericContainer<?> redisSentinel = new GenericContainer<>("redis:6.2.14")
-            .withNetwork(network)
-            .withNetworkAliases("redis-sentinel")
-            .withCommand("redis-sentinel", "/etc/redis/sentinel.conf")
-            .withExposedPorts(26379)
-            .withFileSystemBind(
-                    getSentinelConfigPath(),
-                    "/etc/redis/sentinel.conf",
-                    BindMode.READ_ONLY
-            )
-            .dependsOn(redisMaster)
             .withReuse(true);
 
     // Atlas container with volume mount
@@ -144,7 +125,7 @@ public class AtlasDockerIntegrationTest {
                 )
                 .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("ATLAS"))
                 .withReuse(true)
-                .dependsOn(kafka, cassandra, elasticsearch, redisMaster, redisSentinel, zookeeper);
+                .dependsOn(kafka, cassandra, elasticsearch, redis, zookeeper);
     }
 
     private static String getDeployDirectoryPath() {
@@ -170,31 +151,6 @@ public class AtlasDockerIntegrationTest {
         throw new IllegalStateException(
                 "Could not find deploy directory. Please set -Datlas.deploy.dir=/path/to/deploy or ensure deploy directory exists in project root"
         );
-    }
-
-    private static String getSentinelConfigPath() {
-        try {
-            // Create a temporary file for Sentinel configuration
-            File sentinelConfig = File.createTempFile("sentinel-", ".conf");
-            sentinelConfig.deleteOnExit();
-            
-            // Write Sentinel configuration
-            String config = """
-                port 26379
-                sentinel monitor mymaster redis-master 6379 1
-                sentinel down-after-milliseconds mymaster 5000
-                sentinel parallel-syncs mymaster 1
-                sentinel failover-timeout mymaster 10000
-                # No authentication for test environment
-                protected-mode no
-                """;
-            
-            java.nio.file.Files.writeString(sentinelConfig.toPath(), config);
-            LOG.info("Created Sentinel config at: {}", sentinelConfig.getAbsolutePath());
-            return sentinelConfig.getAbsolutePath();
-        } catch (Exception e) {
-            throw new RuntimeException("Failed to create Sentinel config file", e);
-        }
     }
 
     private static Map<String, String> getAtlasEnvironment() {
@@ -246,13 +202,9 @@ public class AtlasDockerIntegrationTest {
             while ! nc -z kafka 9092; do sleep 2; done
             echo "Kafka is ready"
             
-            echo "Waiting for Redis Master..."
-            while ! nc -z redis-master 6379; do sleep 2; done
-            echo "Redis Master is ready"
-            
-            echo "Waiting for Redis Sentinel..."
-            while ! nc -z redis-sentinel 26379; do sleep 2; done
-            echo "Redis Sentinel is ready"
+            echo "Waiting for Redis..."
+            while ! nc -z redis 6379; do sleep 2; done
+            echo "Redis is ready"
             
             # Create required directories
             mkdir -p /opt/atlas-deploy/logs
@@ -294,14 +246,11 @@ public class AtlasDockerIntegrationTest {
             atlas.kafka.bootstrap.servers=kafka:9092
             atlas.kafka.zookeeper.connect=zookeeper:2181
             
-            # Redis Sentinel configuration (matches production)
-            atlas.redis.service.impl=org.apache.atlas.service.redis.RedisServiceImpl
-            atlas.redis.sentinel.enabled=true
-            atlas.redis.sentinel.urls=redis-sentinel:26379
-            atlas.redis.master.name=mymaster
-            atlas.redis.username=
-            atlas.redis.password=
-            atlas.redis.sentinel.check_list.enabled=false
+             # Redis configuration
+            atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
+            atlas.redis.url = redis://redis:6379
+            atlas.redis.sentinel.enabled = false
+            atlas.redis.sentinel.check_list.enabled = false
             
             atlas.server.bind.address=0.0.0.0
             atlas.authentication.method.file=true
@@ -322,6 +271,7 @@ public class AtlasDockerIntegrationTest {
             
             atlas.enableTLS=false
             atlas.authentication.method.kerberos=false
+            atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
             
             atlas.kafka.zookeeper.session.timeout.ms=400
             atlas.kafka.zookeeper.connection.timeout.ms=200
