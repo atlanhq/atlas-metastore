@@ -6,6 +6,7 @@ import org.apache.atlas.service.metrics.MetricUtils;
 import org.redisson.Redisson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -15,6 +16,7 @@ import javax.annotation.PostConstruct;
 @Component
 @ConditionalOnAtlasProperty(property = "atlas.redis.service.impl")
 @Order(Ordered.HIGHEST_PRECEDENCE)
+@Profile("!local")
 public class RedisServiceImpl extends AbstractRedisService {
 
     private static final Logger LOG = LoggerFactory.getLogger(RedisServiceImpl.class);
