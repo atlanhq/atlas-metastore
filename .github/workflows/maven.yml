@@ -33,6 +33,7 @@ on:
       - interceptapis
       - tags_intg_test
       - nb_tags_intg_test
+      - prove-ci-blind-fresh
 
 
 jobs:
