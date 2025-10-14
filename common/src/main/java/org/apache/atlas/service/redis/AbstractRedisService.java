@@ -2,7 +2,6 @@ package org.apache.atlas.service.redis;
 
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.ArrayUtils;
 import org.redisson.api.RLock;
@@ -182,51 +181,28 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public String getValue(String key) {
-        try {
-            return (String) redisCacheClient.getBucket(convertToNamespace(key)).get();
-        } catch (Exception e) {
-            MetricUtils.recordRedisConnectionFailure();
-            getLogger().error("Redis getValue operation failed for key: {}", key, e);
-            throw e;
-        }
+        // If value doesn't exist, return null else return the value
+        return (String) redisCacheClient.getBucket(convertToNamespace(key)).get();
     }
 
     @Override
     public String putValue(String key, String value) {
-        try {
-            // Put the value in the redis cache with TTL
-            redisCacheClient.getBucket(convertToNamespace(key)).set(value);
-            return value;
-        } catch (Exception e) {
-            MetricUtils.recordRedisConnectionFailure();
-            getLogger().warn("Redis putValue operation failed for key: {}", key, e);
-            throw e;
-        }
+        // Put the value in the redis cache with TTL
+        redisCacheClient.getBucket(convertToNamespace(key)).set(value);
+        return value;
     }
 
     @Override
     public String putValue(String key, String value, int timeout) {
-        try {
-            // Put the value in the redis cache with TTL
-            redisCacheClient.getBucket(convertToNamespace(key)).set(value, timeout, TimeUnit.SECONDS);
-            return value;
-        } catch (Exception e) {
-            MetricUtils.recordRedisConnectionFailure();
-            getLogger().warn("Redis putValue with TTL operation failed for key: {}", key, e);
-            throw e;
-        }
+        // Put the value in the redis cache with TTL
+        redisCacheClient.getBucket(convertToNamespace(key)).set(value, timeout, TimeUnit.SECONDS);
+        return value;
     }
 
     @Override
     public void removeValue(String key)  {
-        try {
-            // Remove the value from the redis cache
-            redisCacheClient.getBucket(convertToNamespace(key)).delete();
-        } catch (Exception e) {
-            MetricUtils.recordRedisConnectionFailure();
-            getLogger().warn("Redis removeValue operation failed for key: {}", key, e);
-            throw e;
-        }
+        // Remove the value from the redis cache
+        redisCacheClient.getBucket(convertToNamespace(key)).delete();
     }
 
     private String getHostAddress() throws UnknownHostException {
@@ -239,7 +215,6 @@ public abstract class AbstractRedisService implements RedisService {
         waitTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WAIT_TIME_MS, DEFAULT_REDIS_WAIT_TIME_MS);
         leaseTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LEASE_TIME_MS, DEFAULT_REDIS_LEASE_TIME_MS);
         watchdogTimeoutInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WATCHDOG_TIMEOUT_MS, DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS);
-        checkSentinelsList = atlasConfig.getBoolean(CHECK_SENTINELS_LIST, true);
         Config redisConfig = new Config();
         redisConfig.setLockWatchdogTimeout(watchdogTimeoutInMS);
         return redisConfig;
@@ -284,16 +259,16 @@ public abstract class AbstractRedisService implements RedisService {
                 .setReadMode(ReadMode.MASTER_SLAVE)
                 .setCheckSentinelsList(checkSentinelsList)
                 .setKeepAlive(true)
-                .setMasterConnectionMinimumIdleSize(5)
-                .setMasterConnectionPoolSize(5)
-                .setSlaveConnectionMinimumIdleSize(5)
-                .setSlaveConnectionPoolSize(5)
+                .setMasterConnectionMinimumIdleSize(10)
+                .setMasterConnectionPoolSize(20)
+                .setSlaveConnectionMinimumIdleSize(10)
+                .setSlaveConnectionPoolSize(20)
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
                 .setTimeout(50) //Setting UP timeout to 50ms
-                .setRetryAttempts(10); //Retry 10 times;
+                .setRetryAttempts(0);
         return config;
     }
 
