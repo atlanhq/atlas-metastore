@@ -1,24 +1,22 @@
 package org.apache.atlas.service.redis;
 
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
 import org.redisson.Redisson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
 
-@Component
-@Profile("local")
+@Component("redisServiceImpl")
+@ConditionalOnAtlasProperty(property = "atlas.redis.service.impl")
 public class RedisServiceLocalImpl extends AbstractRedisService {
 
     private static final Logger LOG = LoggerFactory.getLogger(RedisServiceLocalImpl.class);
 
     @PostConstruct
     public void init() throws AtlasException {
-        LOG.info("Initializing RedisServiceLocalImpl");
-
         redisClient = Redisson.create(getLocalConfig());
         redisCacheClient = Redisson.create(getLocalConfig());
         LOG.info("Local redis client created successfully.");
@@ -26,17 +24,17 @@ public class RedisServiceLocalImpl extends AbstractRedisService {
 
     @Override
     public String getValue(String key) {
-        return null;
+        return super.getValue(key);
     }
 
     @Override
     public String putValue(String key, String value, int timeout) {
-        return null;
+        return super.putValue(key, value, timeout);
     }
 
     @Override
     public void removeValue(String key) {
-
+        super.removeValue(key);
     }
 
     @Override
