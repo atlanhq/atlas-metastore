@@ -195,8 +195,8 @@ public class TypeCacheRefresher {
             atlasPort = 21000;
         }
 
-        LOG.info("TypeDef refresh configuration - Namespace: {}, Pod Labels: {}, Port: {}", 
-                 namespace, podLabels, atlasPort);
+        LOG.info("TypeDef refresh configuration - Namespace: {}, Pod Labels: {}, Port: {}",
+                namespace, podLabels, atlasPort);
     }
 
     private boolean isKubernetesEnvironment() {
@@ -354,7 +354,7 @@ public class TypeCacheRefresher {
         // URL encode parameters
         String encodedTraceId = URLEncoder.encode(traceId, StandardCharsets.UTF_8);
         String encodedAction = URLEncoder.encode(action, StandardCharsets.UTF_8);
-        
+
         String url = String.format("http://%s:%d/api/atlas/admin/types/refresh?traceId=%s&action=%s",
                 podIp, atlasPort, encodedTraceId, encodedAction);
 
@@ -362,15 +362,15 @@ public class TypeCacheRefresher {
         HttpPost httpPost = new HttpPost(url);
         try {
             LOG.debug("Sending refresh request to pod {}, action {} (attempt {}): {}", podIp, action, attempt, url);
-            
+
             // Convert typesDef to json string and set with UTF-8 encoding
             String jsonBody = AtlasType.toJson(typesDef);
             StringEntity entity = new StringEntity(jsonBody, StandardCharsets.UTF_8);
             entity.setContentType("application/json");
-            
+
             // Set accept header for response
             httpPost.setHeader("Accept", "application/json");
-            
+
             httpPost.setEntity(entity);
 
             CloseableHttpResponse response = httpClient.execute(httpPost);
