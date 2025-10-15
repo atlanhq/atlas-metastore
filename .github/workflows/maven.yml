@@ -232,6 +232,33 @@ jobs:
         if: steps.integration_tests.outcome == 'failure'
         run: exit 1
 
+      - name: Clean up after integration tests
+        run: |
+          echo "=========================================="
+          echo "CLEANING UP AFTER INTEGRATION TESTS"
+          echo "=========================================="
+          
+          # Remove test containers and images
+          echo "Removing test containers and images..."
+          docker system prune -af --volumes || true
+          
+          # Clean Maven artifacts to free up space
+          echo "Cleaning Maven artifacts..."
+          rm -rf ~/.m2/repository/org/apache/atlas/ || true
+          
+          # Clean test artifacts
+          echo "Cleaning test artifacts..."
+          rm -rf webapp/target/surefire-reports/ || true
+          rm -rf test-debug-logs/ || true
+          
+          # Clean temp files
+          echo "Cleaning temp files..."
+          sudo rm -rf /tmp/* || true
+          
+          echo ""
+          echo "Disk space after cleanup:"
+          df -h / | tail -1
+
       - name: Get Repository Name
         run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
         shell: bash
