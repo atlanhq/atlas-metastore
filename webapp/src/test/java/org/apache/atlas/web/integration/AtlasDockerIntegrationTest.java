@@ -102,6 +102,22 @@ public class AtlasDockerIntegrationTest {
                     ". Please ensure the deploy directory exists with conf, data, elasticsearch, etc.");
         }
 
+        // Create logs and data directories with proper permissions
+        File logsDir = new File(deployPath, "logs");
+        File dataDir = new File(deployPath, "data");
+        if (!logsDir.exists()) {
+            logsDir.mkdirs();
+            logsDir.setWritable(true, false);
+            logsDir.setReadable(true, false);
+            logsDir.setExecutable(true, false);
+        }
+        if (!dataDir.exists()) {
+            dataDir.mkdirs();
+            dataDir.setWritable(true, false);
+            dataDir.setReadable(true, false);
+            dataDir.setExecutable(true, false);
+        }
+
         return new GenericContainer<>(DockerImageName.parse("atlanhq/atlas:test"))
                 .withNetwork(network)
                 .withNetworkAliases("atlas")
