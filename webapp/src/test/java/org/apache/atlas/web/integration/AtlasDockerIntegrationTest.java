@@ -471,7 +471,7 @@ public class AtlasDockerIntegrationTest {
 
     private void waitForAtlasReady() {
         LOG.info("Waiting for Atlas API to be ready...");
-        int maxRetries = 5;
+        int maxRetries = 60;  // 60 retries * 5s = 5 minutes max
 
         for (int i = 0; i < maxRetries; i++) {
             try {
@@ -479,24 +479,24 @@ public class AtlasDockerIntegrationTest {
                         .uri(URI.create(ATLAS_BASE_URL + "/types"))
                         .header("Accept", "application/json")
                         .GET()
-                        .timeout(Duration.ofSeconds(5))
+                        .timeout(Duration.ofSeconds(10))
                         .build();
 
                 HttpResponse<String> response =
                         httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-                LOG.debug("Atlas API check attempt {}: status {}", i, response.statusCode());
+                LOG.info("Atlas API check attempt {}/{}: status {}", i+1, maxRetries, response.statusCode());
 
                 if (response.statusCode() == 200 || response.statusCode() == 401) {
-                    LOG.info("Atlas API is ready!");
+                    LOG.info("✅ Atlas API is ready!");
                     return;
                 }
             } catch (Exception e) {
-                LOG.debug("Atlas API not ready yet (attempt {}): {}", i, e.getMessage());
+                LOG.info("Atlas API not ready yet (attempt {}/{}): {}", i+1, maxRetries, e.getMessage());
             }
 
             try {
-                Thread.sleep(2000);
+                Thread.sleep(5000);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
