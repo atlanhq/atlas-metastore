@@ -448,7 +448,7 @@ public class TypesREST {
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.createAtlasTypeDefs(" +
-                                                               AtlasTypeUtil.toDebugString(typesDef) + ")");
+                        AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
             RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
@@ -497,7 +497,7 @@ public class TypesREST {
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.updateAtlasTypeDefs(" +
-                                                               AtlasTypeUtil.toDebugString(typesDef) + ")");
+                        AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
             for (AtlasBusinessMetadataDef mb : typesDef.getBusinessMetadataDefs()) {
@@ -565,7 +565,7 @@ public class TypesREST {
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.deleteAtlasTypeDefs(" +
-                                                               AtlasTypeUtil.toDebugString(typesDef) + ")");
+                        AtlasTypeUtil.toDebugString(typesDef) + ")");
             }
             lock = attemptAcquiringLockV2();
             deleteTypeDefsWithRetry(typesDef);
@@ -733,7 +733,7 @@ public class TypesREST {
             try {
                 // Enable patching for cache conflicts (Atlas might confuse CREATE with UPDATE)
                 RequestContext.get().setInTypePatching(true);
-                
+
                 // Perform the creation
                 AtlasTypesDef result = typeDefStore.createTypesDef(typesDef);
                 refreshAllHostCache(result, "CREATE");
@@ -781,7 +781,7 @@ public class TypesREST {
                 if (attempt > 1) {
                     RequestContext.get().setInTypePatching(true);
                 }
-                
+
                 AtlasTypesDef result = typeDefStore.updateTypesDef(typesDef);
                 refreshAllHostCache(result, "UPDATE");
                 LOG.info("Successfully updated typedefs on attempt {}", attempt);
@@ -898,6 +898,6 @@ public class TypesREST {
 
     private boolean isRetryable(AtlasBaseException e) {
         return APPLICABLE_ENTITY_TYPES_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode()) ||
-               ATTRIBUTE_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode());
+                ATTRIBUTE_DELETION_NOT_SUPPORTED.equals(e.getAtlasErrorCode());
     }
 }

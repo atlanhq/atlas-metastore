@@ -105,7 +105,7 @@ public class TypeCacheRefreshREST {
 
         // Check if any of the non-UI typedefs are changing (indicating a seeder action)
         return CollectionUtils.isNotEmpty(typesDef.getEntityDefs()) ||
-               CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs()) ||
-               CollectionUtils.isNotEmpty(typesDef.getStructDefs());
+                CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs()) ||
+                CollectionUtils.isNotEmpty(typesDef.getStructDefs());
     }
 }
