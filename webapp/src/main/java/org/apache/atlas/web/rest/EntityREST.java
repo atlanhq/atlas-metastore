@@ -1829,7 +1829,7 @@ public class EntityREST {
 
             AtlasEntityWithExtInfo entity = entitiesStore.getById(guid);
             Map<String, AtlasEntity> referredEntities = entity.getReferredEntities();
-            RepairIndex repairIndex = new RepairIndex();
+            RepairIndex repairIndex = new RepairIndex(entityMutationService);
             repairIndex.setupGraph();
 
             repairIndex.restoreSelective(guid, referredEntities);
@@ -1853,7 +1853,7 @@ public class EntityREST {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairEntityIndexBulk(" + guids.size() + ")");
             }
-            RepairIndex repairIndex = new RepairIndex();
+            RepairIndex repairIndex = new RepairIndex(entityMutationService);
             repairIndex.setupGraph();
 
             repairIndex.restoreByIds(guids);
@@ -1911,7 +1911,7 @@ public class EntityREST {
 
             AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index");
 
-            RepairIndex repairIndex = new RepairIndex();
+            RepairIndex repairIndex = new RepairIndex(entityMutationService);
             repairIndex.setupGraph();
 
             LOG.info("Repairing index for entities in " + typename);
