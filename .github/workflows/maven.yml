@@ -1,4 +1,3 @@
-
 #
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
@@ -37,42 +36,23 @@ on:
 
 
 jobs:
+  # ==========================================
+  # Job 1: Build with Maven
+  # Runs on GitHub-hosted (has Maven, internet)
+  # ==========================================
   build:
-
-    runs-on: [atlas-metastore-runner-aws]
+    name: Maven Build
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v3
 
-      # Set up Docker (only for GitHub-hosted runners)
-      # Self-hosted runners already have Docker via DinD sidecar
-      - name: Set up Docker
-        if: runner.environment == 'github-hosted'
-        uses: docker/setup-buildx-action@v2
-        with:
-          driver-opts: image=moby/buildkit:master
-          install: true
-
       - name: Set up JDK 17
-        uses: actions/setup-java@v1
+        uses: actions/setup-java@v3
         with:
-          java-version: 17
-
-      - name: Print JDK version
-        run: java -version
-
-      # Verify Docker is available
-      - name: Verify Docker
-        run: |
-         docker --version
-         docker info
-
-      - name: Cache Maven packages
-        uses: actions/cache@v3
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/build.sh') }}
-          restore-keys: ${{ runner.os }}-m2
+          java-version: '17'
+          distribution: 'temurin'
+          cache: 'maven'
 
       - name: Get branch name
         run: |
@@ -91,208 +71,181 @@ jobs:
 
       - name: Build with Maven
         run: |
-          echo "build without dashboard"
+          echo "Building Atlas without dashboard"
           chmod +x ./build.sh && ./build.sh
 
-      - name: Check disk space before tests
-        run: |
-          echo "=========================================="
-          echo "DISK SPACE CHECK"
-          echo "=========================================="
-          df -h / | grep -E '^/dev/' || df -h / | tail -1
-          echo ""
-          
-          # Get disk usage percentage (remove % sign)
-          DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
-          echo "Current disk usage: ${DISK_USAGE}%"
-          
-          if [ "$DISK_USAGE" -gt 80 ]; then
-            echo "Disk usage is high (${DISK_USAGE}%), cleanup required"
-          else
-            echo "Disk space is adequate (${DISK_USAGE}%)"
-          fi
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas-build-${{ github.sha }}
+          path: |
+            distro/target/*.tar.gz
+            webapp/target/*.war
+            **/target/*.jar
+            **/pom.xml
+          retention-days: 1
 
-      - name: Free up disk space for tests
+  # ==========================================
+  # Job 2: Integration Tests
+  # Runs on self-hosted AWS runner
+  # ==========================================
+  integration-test:
+    name: Integration Tests (AWS)
+    needs: build
+    runs-on: [atlas-metastore-runner-aws]
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: atlas-build-${{ github.sha }}
+
+      - name: Create Maven Settings
+        uses: s4u/maven-settings-action@v2.8.0
+        with:
+          servers: |
+            [{
+                "id": "github",
+                "username": "atlan-ci",
+                "password": "${{ secrets.ORG_PAT_GITHUB }}"
+            }]
+
+      - name: Check disk space
         run: |
-          echo "=========================================="
-          echo "CLEANING UP DISK SPACE"
-          echo "=========================================="
-          
-          # Clean Docker system (main space consumer)
-          echo "Cleaning Docker system..."
-          docker system prune -af || true
-          
-          # Clean temp files
-          echo "Cleaning temp files..."
-          rm -rf /tmp/* || true
-          
-          echo ""
-          echo "Disk space after cleanup:"
+          echo "Disk space before tests:"
           df -h / | tail -1
 
-      - name: Verify sufficient disk space
+      - name: Free up disk space
         run: |
-          echo "=========================================="
-          echo "VERIFYING DISK SPACE"
-          echo "=========================================="
-          
-          DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
-          AVAILABLE_GB=$(df -h / | tail -1 | awk '{print $4}')
-          
-          echo "Current disk usage: ${DISK_USAGE}%"
-          echo "Available space: ${AVAILABLE_GB}"
-          
-          # Fail if disk usage is still above 85%
-          if [ "$DISK_USAGE" -gt 85 ]; then
-            echo "ERROR: Insufficient disk space (${DISK_USAGE}% used)"
-            echo "Tests require at least 15% free space to run reliably"
-            echo "Elasticsearch will fail with high disk watermark errors at 90%+"
-            exit 1
-          else
-            echo "Sufficient disk space available (${DISK_USAGE}% used)"
-          fi
+          echo "Cleaning Docker system..."
+          docker system prune -af || true
+          rm -rf /tmp/* || true
+          df -h / | tail -1
+
+      - name: Verify Docker
+        run: |
+          docker --version
+          docker info
 
       - name: Run Integration Tests
         id: integration_tests
         continue-on-error: true
         env:
-          # Configure Testcontainers for GitHub Actions
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
-          echo "Running integration tests..."
+          echo "Running integration tests on AWS EKS..."
           chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
-      
+
       - name: Capture container logs on failure
         if: steps.integration_tests.outcome == 'failure'
         run: |
-          echo "=========================================="
-          echo "CAPTURING CONTAINER LOGS"
-          echo "=========================================="
-          
           mkdir -p test-debug-logs
-          
-          echo "All containers:"
           docker ps -a | tee test-debug-logs/docker-ps.log
           
-          echo ""
-          echo "Capturing logs..."
           for container in $(docker ps -a --format '{{.Names}}'); do
             echo "Capturing logs for: $container"
-            docker logs "$container" > "test-debug-logs/${container}.log" 2>&1 || echo "Failed to get logs for $container"
+            docker logs "$container" > "test-debug-logs/${container}.log" 2>&1 || true
           done
-          
-          echo ""
-          echo "=========================================="
-          echo "PREVIEW: Atlas Container Logs (last 100 lines)"
-          echo "=========================================="
-          atlas_container=$(docker ps -a --filter "ancestor=atlanhq/atlas:test" --format "{{.Names}}" | head -1)
-          if [ -n "$atlas_container" ]; then
-            echo "Atlas container: $atlas_container"
-            docker logs "$atlas_container" 2>&1 | tail -100 || echo "No Atlas logs available"
-          else
-            echo "No Atlas container found"
-          fi
-          
-          ls -lh test-debug-logs/
-      
-      - name: Upload container logs as artifact
-        if: steps.integration_tests.outcome == 'failure'
+
+      - name: Upload test results
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: container-logs-${{ github.run_id }}
-          path: test-debug-logs/
+          name: test-results-${{ github.sha }}
+          path: |
+            test-debug-logs/
+            **/target/surefire-reports/
           retention-days: 5
-      
-      # tmate debugging - only for manual workflow runs
-      # For self-hosted runners, use: kubectl exec -it -n github-action-runner <pod-name> -- bash
-      - name: Setup tmate session on test failure
-        if: steps.integration_tests.outcome == 'failure' && github.event_name == 'workflow_dispatch'
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 15
-        with:
-          detached: true
-          limit-access-to-actor: false
-      
-      - name: Fail the workflow if tests failed
+
+      - name: Fail if tests failed
         if: steps.integration_tests.outcome == 'failure'
         run: exit 1
 
-      - name: Clean up after integration tests
-        run: |
-          echo "=========================================="
-          echo "CLEANING UP AFTER INTEGRATION TESTS"
-          echo "=========================================="
-          
-          # Clean Docker cache before building final image
-          echo "Removing test containers and images..."
-          docker system prune -af || true
-          
-          echo ""
-          echo "Disk space after cleanup:"
-          df -h / | tail -1
+      - name: Cleanup
+        if: always()
+        run: docker system prune -af || true
+
+  # ==========================================
+  # Job 3: Build and Push Docker Image
+  # Runs on GitHub-hosted (has internet, multi-arch)
+  # Only runs if tests pass
+  # ==========================================
+  docker-build-push:
+    name: Build and Push Docker Image
+    needs: [build, integration-test]
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: atlas-build-${{ github.sha }}
 
       - name: Get Repository Name
-        run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
-        shell: bash
+        run: echo "REPOSITORY_NAME=$(echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}')" >> $GITHUB_ENV
 
-      - name: Get version tag
-        # run: echo "##[set-output name=version;]$(echo `git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7`)abcd"
-        run: |
-          echo "VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | head -n 1)abcd"
-          echo "VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | tr -d '[:space:]')abcd"
-          echo "VERSION=$(git ls-remote https://${{ secrets.ORG_PAT_GITHUB }}@github.com/atlanhq/${REPOSITORY_NAME}.git ${{ env.BRANCH_NAME }} | awk '{ print $1}' | cut -c1-7 | tr -d '[:space:]')abcd" >> $GITHUB_ENV
+      - name: Get branch name
+        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
 
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
 
-      # QEMU is required to build arm from a non-arm build machine
       - name: Set up QEMU
-        id: qemu
         uses: docker/setup-qemu-action@v3
         with:
           image: tonistiigi/binfmt:qemu-v7.0.0-28
           platforms: arm64
 
-      - name: Set up Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v1
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to GitHub Registry
-        uses: docker/login-action@v1
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: $GITHUB_ACTOR
+          username: ${{ github.actor }}
           password: ${{ secrets.ORG_PAT_GITHUB }}
 
       - name: Build and push
-        id: docker_build
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v5
         with:
           platforms: linux/amd64,linux/arm64
           context: .
           file: ./Dockerfile
-          no-cache: true
+          no-cache: false
           sbom: true
           provenance: true
           push: true
           tags: |
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+            ghcr.io/atlanhq/${{ env.REPOSITORY_NAME }}-${{ env.BRANCH_NAME }}:latest
+            ghcr.io/atlanhq/${{ env.REPOSITORY_NAME }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Check Image Manifest
-        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ env.REPOSITORY_NAME }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
 
       - name: Scan Image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}'
+          image-ref: 'ghcr.io/atlanhq/${{ env.REPOSITORY_NAME }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}'
           vuln-type: 'os,library'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2.1.33
+        uses: github/codeql-action/upload-sarif@v2
         with:
           sarif_file: 'trivy-image-results.sarif'
