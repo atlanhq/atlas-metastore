@@ -44,8 +44,10 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
-      # Set up Docker
+      # Set up Docker (only for GitHub-hosted runners)
+      # Self-hosted runners already have Docker via DinD sidecar
       - name: Set up Docker
+        if: runner.environment == 'github-hosted'
         uses: docker/setup-buildx-action@v2
         with:
           driver-opts: image=moby/buildkit:master
