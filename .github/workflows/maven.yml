@@ -37,9 +37,11 @@ on:
 
 
 jobs:
-  build:
+  # Temporarily disabled for smoke test development
+  build-disabled:
 
     runs-on: ubuntu-latest
+    if: false  # Disabled
 
     steps:
       - uses: actions/checkout@v3
@@ -326,7 +328,7 @@ jobs:
   # Smoke test on vclusters (matrix for multi-cloud)
   smoke-test:
     name: Smoke Test (${{ matrix.cloud }})
-    needs: build
+    # needs: build  # Disabled - using hardcoded test image
     runs-on: ubuntu-latest
     
     strategy:
@@ -346,11 +348,8 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
       
-      - name: Get commit ID
-        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
-      
-      - name: Get branch name
-        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+      - name: Set test image
+        run: echo "TEST_IMAGE=ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd" >> $GITHUB_ENV
       
       - name: Connect to VPN
         uses: atlanhq/github-actions/globalprotect-connect-action@main
@@ -394,12 +393,12 @@ jobs:
           echo "Namespace: atlas"
           echo "Deployment: atlas"
           echo "Container: atlas-main"
-          echo "New Image: ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}"
+          echo "New Image: ${{ env.TEST_IMAGE }}"
           echo ""
           
           # Patch the deployment
           kubectl set image deployment/atlas \
-            atlas-main=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
+            atlas-main=${{ env.TEST_IMAGE }} \
             -n atlas
           
           echo "✓ Deployment patched successfully"
