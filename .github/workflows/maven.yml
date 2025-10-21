@@ -333,7 +333,7 @@ jobs:
     
     permissions:
       contents: read
-      actions: read
+      actions: write
     
     strategy:
       fail-fast: false  # Continue testing other clouds even if one fails
