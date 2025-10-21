@@ -352,6 +352,12 @@ jobs:
       - name: Set test image
         run: echo "TEST_IMAGE=ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd" >> $GITHUB_ENV
       
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+      
+      - name: Install vCluster CLI
+        uses: loft-sh/setup-vcluster@main
+      
       - name: Connect to GlobalProtect VPN
         env:
           VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
@@ -426,12 +432,6 @@ jobs:
             echo "VPN connectivity failed after 3 attempts"
             exit 1
           fi
-      
-      - name: Install kubectl
-        uses: azure/setup-kubectl@v3
-      
-      - name: Install vCluster CLI
-        uses: loft-sh/setup-vcluster@main
       
       - name: Login to vCluster Platform
         env:
