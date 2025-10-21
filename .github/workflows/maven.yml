@@ -402,17 +402,18 @@ jobs:
       - name: Connect to vCluster
         run: |
           echo "Connecting to vCluster: ${{ matrix.vcluster_name }} (Project: default)"
-          vcluster platform connect vcluster ${{ matrix.vcluster_name }} --project default \
-            --update-current=false --print-kube-config > kubeconfig.yaml
-          export KUBECONFIG=$PWD/kubeconfig.yaml
+          
+          # Connect to vCluster and save kubeconfig
+          vcluster platform connect vcluster ${{ matrix.vcluster_name }} --project default
+          
+          # Export kubeconfig path
+          export KUBECONFIG=$HOME/.kube/config
           
           echo "Verifying connection..."
           kubectl cluster-info
           kubectl get namespaces
       
       - name: Patch Atlas deployment
-        env:
-          KUBECONFIG: ${{ github.workspace }}/kubeconfig.yaml
         run: |
           echo "=========================================="
           echo "Patching Atlas Deployment (${{ matrix.cloud }})"
@@ -431,8 +432,6 @@ jobs:
           echo "✓ Deployment patched successfully"
       
       - name: Wait for rollout
-        env:
-          KUBECONFIG: ${{ github.workspace }}/kubeconfig.yaml
         run: |
           echo "=========================================="
           echo "Waiting for Rollout (${{ matrix.cloud }})"
