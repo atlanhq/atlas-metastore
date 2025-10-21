@@ -352,67 +352,38 @@ jobs:
         run: echo "TEST_IMAGE=ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd" >> $GITHUB_ENV
       
       - name: Connect to GlobalProtect VPN
+        env:
+          VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
         run: |
-          echo "🔄 Connecting to GlobalProtect VPN using OpenConnect..."
+          echo "🔄 Connecting to GlobalProtect VPN..."
           
           # Install OpenConnect
-          echo "📦 Installing OpenConnect..."
-          sudo apt-get update
+          sudo apt-get update -qq
           sudo apt-get install -y openconnect
           
-          echo "🌐 Attempting OpenConnect to: ${{ vars.GLOBALPROTECT_PORTAL_URL }}"
-          
-          # Connect via OpenConnect
+          # Connect to VPN in background
           echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
             --protocol=gp \
             --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
             --passwd-on-stdin \
             --background \
-            "${{ vars.GLOBALPROTECT_PORTAL_URL }}" || {
-            echo "❌ OpenConnect connection failed"
-            exit 1
-          }
+            "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
           
           # Wait for connection to establish
           sleep 10
           
-          # Find the VPN tunnel interface
-          echo "🔍 Finding VPN tunnel interface..."
-          VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: (tun|ppp|vpn)' | head -1 | cut -d: -f2 | tr -d ' ')
-          if [ -z "$VPN_INTERFACE" ]; then
-            echo "⚠️ No tunnel interface found, trying tun0 as default"
-            VPN_INTERFACE="tun0"
-          fi
-          echo "VPN interface: $VPN_INTERFACE"
+          # Configure routing for vCluster Platform (172.17.0.0/16)
+          VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
+          sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || true
+          sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE
           
-          # Remove conflicting docker0 route if it exists
-          echo "🗑️ Removing conflicting docker0 route..."
-          sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || echo "No docker0 route to remove"
-          
-          # Add route for vCluster Platform network through VPN
-          echo "🛣️ Adding route for 172.17.0.0/16 network via $VPN_INTERFACE..."
-          sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE 2>/dev/null || echo "Route may already exist"
-          
-          # Show routes for debugging
-          echo "Current routes:"
-          ip route | grep 172.17 || echo "No 172.17 routes found"
-          
-          # Test connectivity
-          echo "🔍 Testing connectivity to Phoenix AI..."
-          if curl -k -sS https://phoenix-ai.atlan.com -o /dev/null --max-time 10; then
-            echo "✅ VPN connection established successfully"
-          else
-            echo "❌ Connectivity test failed"
+          # Verify connectivity to vCluster Platform
+          if ! curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 10; then
+            echo "❌ VPN connectivity test failed"
             exit 1
           fi
           
-          # Test connectivity to vCluster Platform
-          echo "🔍 Testing connectivity to vCluster Platform..."
-          if curl -k -sS https://onboarding-tenant.atlan.com -o /dev/null --max-time 10; then
-            echo "✅ vCluster Platform reachable"
-          else
-            echo "⚠️ vCluster Platform connectivity test failed (may still work)"
-          fi
+          echo "✅ VPN connected successfully"
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -431,7 +402,7 @@ jobs:
       - name: Connect to vCluster
         run: |
           echo "Connecting to vCluster: ${{ matrix.vcluster_name }} (Project: default)"
-          vcluster platform connect vcluster ${{ matrix.vcluster_name }} -p default \
+          vcluster platform connect vcluster ${{ matrix.vcluster_name }} --project default \
             --update-current=false --print-kube-config > kubeconfig.yaml
           export KUBECONFIG=$PWD/kubeconfig.yaml
           
