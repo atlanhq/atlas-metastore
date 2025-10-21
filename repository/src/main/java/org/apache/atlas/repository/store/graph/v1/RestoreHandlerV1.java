@@ -439,10 +439,10 @@ public class RestoreHandlerV1 {
             Iterable<AtlasEdge> incomingEdges;
 
         // Restore external references to this vertex - incoming edges from lineage or glossary term edges
-            if (RequestContext.get().isSkipProcessEdgeRestoration())
+          //  if (RequestContext.get().isSkipProcessEdgeRestoration())
                     incomingEdges = instanceVertex.getInEdges(PROCESS_EDGE_LABELS);
-            else
-                    incomingEdges = instanceVertex.getInEdges(null);
+//            else
+//                    incomingEdges = instanceVertex.getInEdges(null);
 
             for (AtlasEdge edge : incomingEdges) {
                 AtlasEntity.Status edgeStatus = getStatus(edge);
