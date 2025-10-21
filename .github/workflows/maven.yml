@@ -362,53 +362,68 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
           
-          # Connect to VPN in background (cloud-specific options)
-          echo "VPN options for ${{ matrix.cloud }}: ${{ matrix.vpn_options }}"
-          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
-            --protocol=gp \
-            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
-            --passwd-on-stdin \
-            --background \
-            ${{ matrix.vpn_options }} \
-            "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
-          
-          # Wait for connection to establish
-          echo "Waiting for VPN connection to stabilize..."
-          sleep 20
-          
-          # Check if VPN is still running
-          if ! pgrep -x openconnect > /dev/null; then
-            echo "ERROR: OpenConnect exited unexpectedly"
-            exit 1
-          fi
-          echo "VPN process is running (PID: $(pgrep -x openconnect))"
-          
-          # Configure routing for vCluster Platform (172.17.0.0/16)
-          VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
-          echo "Using VPN interface: $VPN_INTERFACE"
-          
-          sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || true
-          sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE
-          
-          # Show routes for debugging
-          echo "Current routes for 172.17.0.0/16:"
-          ip route | grep 172.17 || echo "No routes found"
-          
-          # Verify connectivity to vCluster Platform with retries
-          echo "Testing connectivity to vCluster Platform..."
-          CONNECTED=false
-          for i in {1..3}; do
-            if curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 30; then
-              echo "VPN connected successfully"
-              CONNECTED=true
-              break
+          # Retry VPN connection up to 3 times (handles parallel job conflicts)
+          VPN_CONNECTED=false
+          for attempt in {1..3}; do
+            echo ""
+            echo "=== VPN Connection Attempt $attempt/3 ==="
+            
+            # Clean up any existing openconnect processes
+            sudo pkill -9 openconnect 2>/dev/null || true
+            sleep 2
+            
+            # Connect to VPN in background (cloud-specific options)
+            echo "VPN options for ${{ matrix.cloud }}: ${{ matrix.vpn_options }}"
+            echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+              --protocol=gp \
+              --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+              --passwd-on-stdin \
+              --background \
+              ${{ matrix.vpn_options }} \
+              "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
+            
+            # Wait for connection to establish
+            echo "Waiting for VPN connection to stabilize..."
+            sleep 20
+            
+            # Check if VPN is still running
+            if ! pgrep -x openconnect > /dev/null; then
+              echo "ERROR: OpenConnect exited unexpectedly (likely session conflict)"
+              if [ $attempt -lt 3 ]; then
+                echo "Retrying in 30 seconds (other job should finish VPN connection by then)..."
+                sleep 30
+                continue
+              else
+                echo "All retry attempts failed"
+                exit 1
+              fi
             fi
-            echo "Attempt $i failed, retrying..."
-            sleep 5
+            echo "VPN process is running (PID: $(pgrep -x openconnect))"
+            
+            # Configure routing for vCluster Platform (172.17.0.0/16)
+            VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
+            echo "Using VPN interface: $VPN_INTERFACE"
+            
+            sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || true
+            sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE
+            
+            # Verify connectivity to vCluster Platform
+            echo "Testing connectivity to vCluster Platform..."
+            if curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 30; then
+              echo "VPN connected successfully!"
+              VPN_CONNECTED=true
+              break
+            else
+              echo "Connectivity test failed"
+              if [ $attempt -lt 3 ]; then
+                echo "Retrying..."
+                continue
+              fi
+            fi
           done
           
-          if [ "$CONNECTED" = "false" ]; then
-            echo "VPN connectivity test failed after 3 attempts"
+          if [ "$VPN_CONNECTED" = "false" ]; then
+            echo "VPN connectivity failed after 3 attempts"
             exit 1
           fi
       
