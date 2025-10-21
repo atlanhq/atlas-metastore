@@ -73,23 +73,35 @@ public class RestoreHandlerV1 {
     }
 
     private void restoreEdge(AtlasEdge edge) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> RestoreHandlerV1.restoreEdge({})", string(edge));
-        }
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("RestoreHandlerV1.restoreEdge");
 
-        if (isClassificationEdge(edge)) {
-            AtlasVertex classificationVertex = edge.getInVertex();
-            AtlasGraphUtilsV2.setEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_STATUS, ACTIVE.name());
-        }
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("==> RestoreHandlerV1.restoreEdge({})", string(edge));
+            }
 
-        if (AtlasGraphUtilsV2.getState(edge) == DELETED) {
-            AtlasGraphUtilsV2.setEncodedProperty(edge, STATE_PROPERTY_KEY, ACTIVE.name());
-            AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-            AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
-        }
+            if (isClassificationEdge(edge)) {
+                AtlasVertex classificationVertex = edge.getInVertex();
+                AtlasGraphUtilsV2.setEncodedProperty(classificationVertex, CLASSIFICATION_ENTITY_STATUS, ACTIVE.name());
+            }
 
-        if (isRelationshipEdge(edge))
-            AtlasRelationshipStoreV2.recordRelationshipMutation(AtlasRelationshipStoreV2.RelationshipMutation.RELATIONSHIP_RESTORE, edge, entityRetriever);
+
+            boolean isEitherProcessInputOrProcessOutput = PROCESS_INPUTS.equals(edge.getLabel()) ||
+                    PROCESS_OUTPUTS.equals(edge.getLabel());
+
+
+            // Restore all edges except edges with label PROCESS_INPUTS or PROCESS_OUTPUTS
+            if (AtlasGraphUtilsV2.getState(edge) == DELETED && !isEitherProcessInputOrProcessOutput) {
+                AtlasGraphUtilsV2.setEncodedProperty(edge, STATE_PROPERTY_KEY, ACTIVE.name());
+                AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+                AtlasGraphUtilsV2.setEncodedProperty(edge, MODIFIED_BY_KEY, RequestContext.get().getUser());
+            }
+
+            if (isRelationshipEdge(edge))
+                AtlasRelationshipStoreV2.recordRelationshipMutation(AtlasRelationshipStoreV2.RelationshipMutation.RELATIONSHIP_RESTORE, edge, entityRetriever);
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
     }
 
 
@@ -493,6 +505,10 @@ public class RestoreHandlerV1 {
                     boolean isOwned = isEntityType && attributeInfo.isOwnedRef();
                     AtlasType attrType = attributeInfo.getAttributeType();
                     String edgeLabel = attributeInfo.getRelationshipEdgeLabel();
+
+                    if (PROCESS_INPUTS.equals(edgeLabel) || PROCESS_OUTPUTS.equals(edgeLabel)) {
+                       continue;
+                    }
 
                     switch (attrType.getTypeCategory()) {
                         case OBJECT_ID_TYPE:
