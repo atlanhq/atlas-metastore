@@ -107,9 +107,9 @@ jobs:
           echo "Current disk usage: ${DISK_USAGE}%"
           
           if [ "$DISK_USAGE" -gt 80 ]; then
-            echo "⚠️  Disk usage is high (${DISK_USAGE}%), cleanup required"
+            echo "Disk usage is high (${DISK_USAGE}%), cleanup required"
           else
-            echo "✅ Disk space is adequate (${DISK_USAGE}%)"
+            echo "Disk space is adequate (${DISK_USAGE}%)"
           fi
 
       - name: Free up disk space for tests
@@ -161,12 +161,12 @@ jobs:
           
           # Fail if disk usage is still above 85%
           if [ "$DISK_USAGE" -gt 85 ]; then
-            echo "❌ ERROR: Insufficient disk space (${DISK_USAGE}% used)"
+            echo "ERROR: Insufficient disk space (${DISK_USAGE}% used)"
             echo "Tests require at least 15% free space to run reliably"
             echo "Elasticsearch will fail with high disk watermark errors at 90%+"
             exit 1
           else
-            echo "✅ Sufficient disk space available (${DISK_USAGE}% used)"
+            echo "Sufficient disk space available (${DISK_USAGE}% used)"
           fi
 
       - name: Run Integration Tests
@@ -337,10 +337,8 @@ jobs:
         include:
           - cloud: AWS
             vcluster_name: hkmeta02
-
-          # - cloud: Azure
-          #   vcluster_name: your-azure-vcluster
-          
+          - cloud: Azure
+            vcluster_name: enpla1cp21
           # - cloud: GCP
           #   vcluster_name: your-gcp-vcluster
     
@@ -355,7 +353,7 @@ jobs:
         env:
           VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
         run: |
-          echo "🔄 Connecting to GlobalProtect VPN..."
+          echo "Connecting to GlobalProtect VPN..."
           
           # Install OpenConnect
           sudo apt-get update -qq
@@ -379,11 +377,11 @@ jobs:
           
           # Verify connectivity to vCluster Platform
           if ! curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 10; then
-            echo "❌ VPN connectivity test failed"
+            echo "VPN connectivity test failed"
             exit 1
           fi
           
-          echo "✅ VPN connected successfully"
+          echo "VPN connected successfully"
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -429,7 +427,7 @@ jobs:
             atlas-main=${{ env.TEST_IMAGE }} \
             -n atlas
           
-          echo "✓ Deployment patched successfully"
+          echo "Deployment patched successfully"
       
       - name: Wait for rollout
         run: |
@@ -442,7 +440,7 @@ jobs:
           # Wait for rollout with 10 minute timeout
           if kubectl rollout status deployment/atlas -n atlas --timeout=10m; then
             echo ""
-            echo "✓ Rollout completed successfully!"
+            echo "Rollout completed successfully!"
             
             # Show pod status
             echo ""
@@ -450,7 +448,7 @@ jobs:
             kubectl get pods -n atlas -l app=atlas
           else
             echo ""
-            echo "✗ Rollout failed or timed out!"
+            echo "Rollout failed or timed out!"
             
             # Debug information
             echo ""
@@ -467,3 +465,46 @@ jobs:
             
             exit 1
           fi
+      
+      - name: Run Atlas Smoke Tests
+        run: |
+          echo "=========================================="
+          echo "Running Atlas Smoke Tests (${{ matrix.cloud }})"
+          echo "=========================================="
+          
+          # Install jq for JSON parsing
+          sudo apt-get install -y jq
+          
+          # Get Atlas service endpoint
+          ATLAS_HOST=$(kubectl get svc atlas-service-atlas -n atlas -o jsonpath='{.spec.clusterIP}')
+          ATLAS_PORT=$(kubectl get svc atlas-service-atlas -n atlas -o jsonpath='{.spec.ports[0].port}')
+          
+          if [ -z "$ATLAS_HOST" ]; then
+            echo "Could not determine Atlas service endpoint"
+            exit 1
+          fi
+          
+          ATLAS_URL="http://${ATLAS_HOST}:${ATLAS_PORT}"
+          echo "Atlas URL: $ATLAS_URL"
+          echo ""
+          
+          # Status Check - Verify Atlas is running
+          echo "Status Check"
+          STATUS_RESPONSE=$(curl -f -s "${ATLAS_URL}/api/atlas/admin/status")
+          if [ $? -eq 0 ]; then
+            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.Status')
+            if [ "$STATUS" = "ACTIVE" ]; then
+              echo "Atlas is ACTIVE"
+            else
+              echo "Status check failed - Status: $STATUS"
+              exit 1
+            fi
+          else
+            echo "Status check failed - Could not reach endpoint"
+            exit 1
+          fi
+          
+          echo ""
+          echo "=========================================="
+          echo "Smoke test passed on ${{ matrix.cloud }}!"
+          echo "=========================================="
