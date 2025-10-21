@@ -34,11 +34,24 @@ on:
       - tags_intg_test
       - nb_tags_intg_test
       - prove-ci-blind-fresh
+  
+  workflow_dispatch:
+    inputs:
+      skip_build:
+        description: 'Skip build job and use pre-built image'
+        required: false
+        type: boolean
+        default: false
+      test_image:
+        description: 'Docker image to use for smoke tests (when skip_build=true)'
+        required: false
+        type: string
+        default: 'ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd'
 
 
 jobs:
   build:
-
+    if: ${{ !inputs.skip_build }}
     runs-on: ubuntu-latest
 
     steps:
@@ -327,6 +340,7 @@ jobs:
   smoke-test:
     name: Smoke Test (${{ matrix.cloud }})
     needs: build
+    if: ${{ !cancelled() }}  # Run even if build is skipped
     runs-on: ubuntu-latest
     
     strategy:
@@ -351,6 +365,16 @@ jobs:
       
       - name: Get branch name
         run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+      
+      - name: Determine image to use
+        run: |
+          if [ "${{ inputs.skip_build }}" = "true" ]; then
+            echo "IMAGE_TO_USE=${{ inputs.test_image }}" >> $GITHUB_ENV
+            echo "Using pre-built image: ${{ inputs.test_image }}"
+          else
+            echo "IMAGE_TO_USE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
+            echo "Using freshly built image from build job"
+          fi
       
       - name: Connect to VPN
         uses: atlanhq/github-actions/globalprotect-connect-action@main
@@ -394,12 +418,12 @@ jobs:
           echo "Namespace: atlas"
           echo "Deployment: atlas"
           echo "Container: atlas-main"
-          echo "New Image: ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}"
+          echo "New Image: ${{ env.IMAGE_TO_USE }}"
           echo ""
           
           # Patch the deployment
           kubectl set image deployment/atlas \
-            atlas-main=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
+            atlas-main=${{ env.IMAGE_TO_USE }} \
             -n atlas
           
           echo "✓ Deployment patched successfully"
