@@ -39,6 +39,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    if: false  # Temporarily disabled for smoke test development
 
     steps:
       - uses: actions/checkout@v3
@@ -322,38 +323,18 @@ jobs:
         with:
           sarif_file: 'trivy-image-results.sarif'
 
-  # Smoke test on vclusters (matrix for multi-cloud)
+  # Smoke test on vclusters (parallel with single VPN)
   smoke-test:
-    name: Smoke Test (${{ matrix.cloud }})
-    needs: build
+    name: Multi-Cloud Smoke Test
+    # needs: build  # Disabled while build job is disabled
     runs-on: ubuntu-latest
-    
-    strategy:
-      fail-fast: false  # Continue testing other clouds even if one fails
-      matrix:
-        include:
-          - cloud: AWS
-            vcluster_name: hkmeta02
-            vpn_options: ""  # AWS works with default DTLS/ESP
-          - cloud: Azure
-            vcluster_name: enpla1cp21
-            vpn_options: "--no-dtls"  # Azure requires no-DTLS
-          # - cloud: GCP
-          #   vcluster_name: your-gcp-vcluster
-          #   vpn_options: ""
     
     steps:
       - name: Checkout
         uses: actions/checkout@v3
       
-      - name: Get branch name
-        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
-      
-      - name: Get commit ID
-        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
-      
-      - name: Set test image
-        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
+      - name: Set test image (hardcoded for testing)
+        run: echo "TEST_IMAGE=ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd" >> $GITHUB_ENV
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -361,78 +342,52 @@ jobs:
       - name: Install vCluster CLI
         uses: loft-sh/setup-vcluster@main
       
+      - name: Install jq
+        run: sudo apt-get install -y jq
+      
       - name: Connect to GlobalProtect VPN
         env:
           VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
         run: |
-          echo "Connecting to GlobalProtect VPN..."
+          echo "=================================================="
+          echo "CONNECTING TO VPN (Shared for all clouds)"
+          echo "=================================================="
           
           # Install OpenConnect
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
           
-          # Retry VPN connection up to 3 times (handles parallel job conflicts)
-          VPN_CONNECTED=false
-          for attempt in {1..3}; do
-            echo ""
-            echo "=== VPN Connection Attempt $attempt/3 ==="
-            
-            # Clean up any existing openconnect processes
-            sudo pkill -9 openconnect 2>/dev/null || true
-            sleep 2
-            
-            # Connect to VPN in background (cloud-specific options)
-            echo "VPN options for ${{ matrix.cloud }}: ${{ matrix.vpn_options }}"
-            echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
-              --protocol=gp \
-              --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
-              --passwd-on-stdin \
-              --background \
-              ${{ matrix.vpn_options }} \
-              "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
-            
-            # Wait for connection to establish
-            echo "Waiting for VPN connection to stabilize..."
-            sleep 20
-            
-            # Check if VPN is still running
-            if ! pgrep -x openconnect > /dev/null; then
-              echo "ERROR: OpenConnect exited unexpectedly (likely session conflict)"
-              if [ $attempt -lt 3 ]; then
-                echo "Retrying in 30 seconds (other job should finish VPN connection by then)..."
-                sleep 30
-                continue
-              else
-                echo "All retry attempts failed"
-                exit 1
-              fi
-            fi
-            echo "VPN process is running (PID: $(pgrep -x openconnect))"
-            
-            # Configure routing for vCluster Platform (172.17.0.0/16)
-            VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
-            echo "Using VPN interface: $VPN_INTERFACE"
-            
-            sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || true
-            sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE
-            
-            # Verify connectivity to vCluster Platform
-            echo "Testing connectivity to vCluster Platform..."
-            if curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 30; then
-              echo "VPN connected successfully!"
-              VPN_CONNECTED=true
-              break
-            else
-              echo "Connectivity test failed"
-              if [ $attempt -lt 3 ]; then
-                echo "Retrying..."
-                continue
-              fi
-            fi
-          done
+          # Connect to VPN (using default DTLS/ESP for AWS compatibility)
+          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+            --protocol=gp \
+            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+            --passwd-on-stdin \
+            --background \
+            "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
           
-          if [ "$VPN_CONNECTED" = "false" ]; then
-            echo "VPN connectivity failed after 3 attempts"
+          # Wait for connection to establish
+          echo "Waiting for VPN connection to stabilize..."
+          sleep 20
+          
+          # Check if VPN is running
+          if ! pgrep -x openconnect > /dev/null; then
+            echo "ERROR: OpenConnect exited unexpectedly"
+            exit 1
+          fi
+          echo "VPN process is running (PID: $(pgrep -x openconnect))"
+          
+          # Configure routing for vCluster Platform (172.17.0.0/16)
+          VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
+          echo "Using VPN interface: $VPN_INTERFACE"
+          
+          sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || true
+          sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE
+          
+          # Verify connectivity
+          if curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 30; then
+            echo "✓ VPN connected successfully"
+          else
+            echo "ERROR: VPN connectivity test failed"
             exit 1
           fi
       
@@ -441,118 +396,188 @@ jobs:
           VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
           VCLUSTER_ACCESS_KEY: ${{ secrets.VCLUSTER_ACCESS_KEY }}
         run: |
-          echo "Logging in to vCluster Platform..."
+          echo "=================================================="
+          echo "LOGGING IN TO VCLUSTER PLATFORM (Shared)"
+          echo "=================================================="
           vcluster platform login $VCLUSTER_PLATFORM_URL --access-key $VCLUSTER_ACCESS_KEY
+          echo "✓ Login successful"
       
-      - name: Connect to vCluster
+      - name: Connect to all vClusters
         run: |
-          echo "Connecting to vCluster: ${{ matrix.vcluster_name }} (Project: default)"
+          echo "=================================================="
+          echo "CONNECTING TO ALL VCLUSTERS"
+          echo "=================================================="
           
-          # Connect to vCluster and save kubeconfig
-          vcluster platform connect vcluster ${{ matrix.vcluster_name }} --project default
+          # Connect to AWS vCluster
+          echo "Connecting to AWS vCluster (hkmeta02)..."
+          vcluster platform connect vcluster hkmeta02 --project default --print-kube-config > kubeconfig-aws.yaml
+          echo "✓ AWS kubeconfig saved"
           
-          # Export kubeconfig path
-          export KUBECONFIG=$HOME/.kube/config
+          # Connect to Azure vCluster  
+          echo "Connecting to Azure vCluster (enpla1cp21)..."
+          vcluster platform connect vcluster enpla1cp21 --project default --print-kube-config > kubeconfig-azure.yaml
+          echo "✓ Azure kubeconfig saved"
           
-          echo "Verifying connection..."
-          kubectl cluster-info
-          kubectl get namespaces
-      
-      - name: Patch Atlas deployment
-        run: |
-          echo "=========================================="
-          echo "Patching Atlas Deployment (${{ matrix.cloud }})"
-          echo "=========================================="
-          echo "Namespace: atlas"
-          echo "Deployment: atlas"
-          echo "Container: atlas-main"
-          echo "New Image: ${{ env.TEST_IMAGE }}"
           echo ""
-          
-          # Patch the deployment
-          kubectl set image deployment/atlas \
-            atlas-main=${{ env.TEST_IMAGE }} \
-            -n atlas
-          
-          echo "Deployment patched successfully"
+          echo "All vCluster connections established"
       
-      - name: Wait for rollout
+      - name: Run parallel smoke tests
         run: |
-          echo "=========================================="
-          echo "Waiting for Rollout (${{ matrix.cloud }})"
-          echo "=========================================="
-          echo "Timeout: 10 minutes"
-          echo ""
+          echo "=================================================="
+          echo "STARTING PARALLEL SMOKE TESTS"
+          echo "=================================================="
           
-          # Wait for rollout with 10 minute timeout
-          if kubectl rollout status deployment/atlas -n atlas --timeout=10m; then
-            echo ""
-            echo "Rollout completed successfully!"
+          # Create logs directory
+          mkdir -p smoke-test-logs
+          
+          # Define test function
+          test_cloud() {
+            CLOUD=$1
+            KUBECONFIG_FILE=$2
+            LOG_FILE="smoke-test-logs/${CLOUD}.log"
             
-            # Show pod status
-            echo ""
-            echo "Pod status:"
-            kubectl get pods -n atlas -l app=atlas
+            {
+              echo "=========================================="
+              echo "[${CLOUD}] Starting smoke test"
+              echo "=========================================="
+              echo "Image: $TEST_IMAGE"
+              echo "Kubeconfig: $KUBECONFIG_FILE"
+              echo ""
+              
+              # Patch deployment
+              echo "[${CLOUD}] Patching Atlas deployment..."
+              if ! KUBECONFIG=$KUBECONFIG_FILE kubectl set image deployment/atlas \
+                atlas-main=$TEST_IMAGE \
+                -n atlas; then
+                echo "[${CLOUD}] ERROR: Failed to patch deployment"
+                exit 1
+              fi
+              echo "[${CLOUD}] ✓ Deployment patched"
+              echo ""
+              
+              # Wait for rollout
+              echo "[${CLOUD}] Waiting for rollout (10 min timeout)..."
+              if KUBECONFIG=$KUBECONFIG_FILE kubectl rollout status deployment/atlas -n atlas --timeout=10m; then
+                echo "[${CLOUD}] ✓ Rollout completed successfully"
+              else
+                echo "[${CLOUD}] ERROR: Rollout failed or timed out"
+                echo "[${CLOUD}] Pod status:"
+                KUBECONFIG=$KUBECONFIG_FILE kubectl get pods -n atlas -l app=atlas
+                echo "[${CLOUD}] Recent events (excluding Normal):"
+                KUBECONFIG=$KUBECONFIG_FILE kubectl get events -n atlas --sort-by='.lastTimestamp' | grep -v "Normal" | tail -20
+                exit 1
+              fi
+              echo ""
+              
+              # Port-forward and test
+              echo "[${CLOUD}] Setting up port-forward..."
+              # Use unique port per cloud to avoid conflicts
+              if [ "$CLOUD" = "AWS" ]; then
+                LOCAL_PORT=21001
+              elif [ "$CLOUD" = "Azure" ]; then
+                LOCAL_PORT=21002
+              else
+                LOCAL_PORT=21003
+              fi
+              
+              KUBECONFIG=$KUBECONFIG_FILE kubectl port-forward -n atlas svc/atlas-service-atlas $LOCAL_PORT:80 > /dev/null 2>&1 &
+              PF_PID=$!
+              sleep 5
+              
+              # Status check
+              echo "[${CLOUD}] Running status check..."
+              STATUS_RESPONSE=$(curl -f -s "http://localhost:$LOCAL_PORT/api/atlas/admin/status")
+              if [ $? -eq 0 ]; then
+                STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.Status')
+                if [ "$STATUS" = "ACTIVE" ]; then
+                  echo "[${CLOUD}] ✓ Atlas is ACTIVE"
+                else
+                  echo "[${CLOUD}] ERROR: Status check failed - Status: $STATUS"
+                  kill $PF_PID 2>/dev/null || true
+                  exit 1
+                fi
+              else
+                echo "[${CLOUD}] ERROR: Could not reach endpoint"
+                kill $PF_PID 2>/dev/null || true
+                exit 1
+              fi
+              
+              # Cleanup
+              kill $PF_PID 2>/dev/null || true
+              
+              echo ""
+              echo "[${CLOUD}] ✓✓✓ SMOKE TEST PASSED ✓✓✓"
+              echo ""
+            } > "$LOG_FILE" 2>&1
+          }
+          
+          # Export variables for subshells
+          export TEST_IMAGE=${{ env.TEST_IMAGE }}
+          export -f test_cloud
+          
+          # Start tests in parallel
+          echo "Launching AWS test..."
+          bash -c "test_cloud AWS kubeconfig-aws.yaml" &
+          PID_AWS=$!
+          
+          echo "Launching Azure test..."
+          bash -c "test_cloud Azure kubeconfig-azure.yaml" &
+          PID_AZURE=$!
+          
+          echo ""
+          echo "Both tests running in parallel..."
+          echo "AWS PID: $PID_AWS"
+          echo "Azure PID: $PID_AZURE"
+          echo ""
+          
+          # Tail logs in real-time (interleaved)
+          tail -f smoke-test-logs/AWS.log 2>/dev/null | sed 's/^/[AWS-LOG] /' &
+          TAIL_AWS=$!
+          tail -f smoke-test-logs/Azure.log 2>/dev/null | sed 's/^/[Azure-LOG] /' &
+          TAIL_AZURE=$!
+          
+          # Wait for tests to complete
+          FAILED=0
+          
+          if wait $PID_AWS; then
+            echo "✓ AWS test completed successfully"
           else
-            echo ""
-            echo "Rollout failed or timed out!"
-            
-            # Debug information
-            echo ""
-            echo "Pod status:"
-            kubectl get pods -n atlas -l app=atlas
-            
-            echo ""
-            echo "Recent events (excluding Normal):"
-            kubectl get events -n atlas --sort-by='.lastTimestamp' | grep -v "Normal" | tail -20
-
+            echo "✗ AWS test failed"
+            FAILED=1
+          fi
+          
+          if wait $PID_AZURE; then
+            echo "✓ Azure test completed successfully"
+          else
+            echo "✗ Azure test failed"
+            FAILED=1
+          fi
+          
+          # Stop tailing logs
+          kill $TAIL_AWS $TAIL_AZURE 2>/dev/null || true
+          
+          # Show final summary
+          echo ""
+          echo "=================================================="
+          echo "SMOKE TEST RESULTS"
+          echo "=================================================="
+          cat smoke-test-logs/AWS.log | tail -5
+          echo ""
+          cat smoke-test-logs/Azure.log | tail -5
+          echo "=================================================="
+          
+          # Exit with failure if any test failed
+          if [ $FAILED -eq 1 ]; then
+            echo "ERROR: One or more smoke tests failed"
             exit 1
           fi
+          
+          echo "✓ All smoke tests passed!"
       
-      - name: Run Atlas Smoke Tests
-        run: |
-          echo "=========================================="
-          echo "Running Atlas Smoke Tests (${{ matrix.cloud }})"
-          echo "=========================================="
-          
-          # Install jq for JSON parsing
-          sudo apt-get install -y jq
-          
-          # Start port-forward in background
-          echo "Starting port-forward to Atlas service..."
-          kubectl port-forward -n atlas svc/atlas-service-atlas 21000:80 > /dev/null 2>&1 &
-          PORT_FORWARD_PID=$!
-          
-          # Wait for port-forward to establish
-          echo "Waiting for port-forward to establish..."
-          sleep 5
-          
-          ATLAS_URL="http://localhost:21000"
-          echo "Atlas URL: $ATLAS_URL (via kubectl port-forward)"
-          echo ""
-          
-          # Status Check - Verify Atlas is running
-          echo "Status Check"
-          STATUS_RESPONSE=$(curl -f -s "${ATLAS_URL}/api/atlas/admin/status")
-          if [ $? -eq 0 ]; then
-            STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.Status')
-            if [ "$STATUS" = "ACTIVE" ]; then
-              echo "Atlas is ACTIVE"
-            else
-              echo "Status check failed - Status: $STATUS"
-              kill $PORT_FORWARD_PID 2>/dev/null || true
-              exit 1
-            fi
-          else
-            echo "Status check failed - Could not reach endpoint"
-            kill $PORT_FORWARD_PID 2>/dev/null || true
-            exit 1
-          fi
-          
-          # Clean up port-forward
-          kill $PORT_FORWARD_PID 2>/dev/null || true
-          
-          echo ""
-          echo "=========================================="
-          echo "Smoke test passed on ${{ matrix.cloud }}!"
-          echo "=========================================="
+      - name: Upload smoke test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-test-logs-${{ github.run_id }}
+          path: smoke-test-logs/
+          retention-days: 5
