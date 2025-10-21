@@ -39,7 +39,6 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    if: false  # Temporarily disabled for smoke test development
 
     steps:
       - uses: actions/checkout@v3
@@ -326,15 +325,21 @@ jobs:
   # Smoke test on vclusters (parallel with single VPN)
   smoke-test:
     name: Multi-Cloud Smoke Test
-    # needs: build  # Disabled while build job is disabled
+    needs: build
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout
         uses: actions/checkout@v3
       
-      - name: Set test image (hardcoded for testing)
-        run: echo "TEST_IMAGE=ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd" >> $GITHUB_ENV
+      - name: Get branch name
+        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+      
+      - name: Get commit ID
+        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
+      
+      - name: Set test image
+        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
