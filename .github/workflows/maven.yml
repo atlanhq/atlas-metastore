@@ -337,10 +337,13 @@ jobs:
         include:
           - cloud: AWS
             vcluster_name: hkmeta02
+            vpn_options: ""  # AWS works with default DTLS/ESP
           - cloud: Azure
             vcluster_name: enpla1cp21
+            vpn_options: "--no-dtls"  # Azure requires no-DTLS
           # - cloud: GCP
           #   vcluster_name: your-gcp-vcluster
+          #   vpn_options: ""
     
     steps:
       - name: Checkout
@@ -359,13 +362,14 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
           
-          # Connect to VPN in background (disable ESP/DTLS to avoid fallback issues)
+          # Connect to VPN in background (cloud-specific options)
+          echo "VPN options for ${{ matrix.cloud }}: ${{ matrix.vpn_options }}"
           echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
             --protocol=gp \
             --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
             --passwd-on-stdin \
             --background \
-            --no-dtls \
+            ${{ matrix.vpn_options }} \
             "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
           
           # Wait for connection to establish
@@ -481,13 +485,9 @@ jobs:
             kubectl get pods -n atlas -l app=atlas
             
             echo ""
-            echo "Recent events:"
-            kubectl get events -n atlas --sort-by='.lastTimestamp' | tail -20
-            
-            echo ""
-            echo "Deployment description:"
-            kubectl describe deployment atlas -n atlas
-            
+            echo "Recent events (excluding Normal):"
+            kubectl get events -n atlas --sort-by='.lastTimestamp' | grep -v "Normal" | tail -20
+
             exit 1
           fi
       
