@@ -368,20 +368,37 @@ jobs:
             "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
           
           # Wait for connection to establish
-          sleep 10
+          echo "Waiting for VPN connection to stabilize..."
+          sleep 20
           
           # Configure routing for vCluster Platform (172.17.0.0/16)
           VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
+          echo "Using VPN interface: $VPN_INTERFACE"
+          
           sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || true
           sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE
           
-          # Verify connectivity to vCluster Platform
-          if ! curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 10; then
-            echo "VPN connectivity test failed"
+          # Show routes for debugging
+          echo "Current routes for 172.17.0.0/16:"
+          ip route | grep 172.17 || echo "No routes found"
+          
+          # Verify connectivity to vCluster Platform with retries
+          echo "Testing connectivity to vCluster Platform..."
+          CONNECTED=false
+          for i in {1..3}; do
+            if curl -k -sS $VCLUSTER_PLATFORM_URL -o /dev/null --max-time 30; then
+              echo "VPN connected successfully"
+              CONNECTED=true
+              break
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 5
+          done
+          
+          if [ "$CONNECTED" = "false" ]; then
+            echo "VPN connectivity test failed after 3 attempts"
             exit 1
           fi
-          
-          echo "VPN connected successfully"
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -475,17 +492,17 @@ jobs:
           # Install jq for JSON parsing
           sudo apt-get install -y jq
           
-          # Get Atlas service endpoint
-          ATLAS_HOST=$(kubectl get svc atlas-service-atlas -n atlas -o jsonpath='{.spec.clusterIP}')
-          ATLAS_PORT=$(kubectl get svc atlas-service-atlas -n atlas -o jsonpath='{.spec.ports[0].port}')
+          # Start port-forward in background
+          echo "Starting port-forward to Atlas service..."
+          kubectl port-forward -n atlas svc/atlas-service-atlas 21000:80 > /dev/null 2>&1 &
+          PORT_FORWARD_PID=$!
           
-          if [ -z "$ATLAS_HOST" ]; then
-            echo "Could not determine Atlas service endpoint"
-            exit 1
-          fi
+          # Wait for port-forward to establish
+          echo "Waiting for port-forward to establish..."
+          sleep 5
           
-          ATLAS_URL="http://${ATLAS_HOST}:${ATLAS_PORT}"
-          echo "Atlas URL: $ATLAS_URL"
+          ATLAS_URL="http://localhost:21000"
+          echo "Atlas URL: $ATLAS_URL (via kubectl port-forward)"
           echo ""
           
           # Status Check - Verify Atlas is running
@@ -497,12 +514,17 @@ jobs:
               echo "Atlas is ACTIVE"
             else
               echo "Status check failed - Status: $STATUS"
+              kill $PORT_FORWARD_PID 2>/dev/null || true
               exit 1
             fi
           else
             echo "Status check failed - Could not reach endpoint"
+            kill $PORT_FORWARD_PID 2>/dev/null || true
             exit 1
           fi
+          
+          # Clean up port-forward
+          kill $PORT_FORWARD_PID 2>/dev/null || true
           
           echo ""
           echo "=========================================="
