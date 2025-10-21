@@ -376,9 +376,22 @@ jobs:
           # Wait for connection to establish
           sleep 10
           
-          # Add route for vCluster Platform network
-          echo "🛣️ Adding route for 172.17.0.0/16 network..."
-          sudo ip route add 172.17.0.0/16 dev tun0 2>/dev/null || echo "Route may already exist or using different interface"
+          # Find the VPN tunnel interface
+          echo "🔍 Finding VPN tunnel interface..."
+          VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: (tun|ppp|vpn)' | head -1 | cut -d: -f2 | tr -d ' ')
+          if [ -z "$VPN_INTERFACE" ]; then
+            echo "⚠️ No tunnel interface found, trying tun0 as default"
+            VPN_INTERFACE="tun0"
+          fi
+          echo "VPN interface: $VPN_INTERFACE"
+          
+          # Remove conflicting docker0 route if it exists
+          echo "🗑️ Removing conflicting docker0 route..."
+          sudo ip route del 172.17.0.0/16 dev docker0 2>/dev/null || echo "No docker0 route to remove"
+          
+          # Add route for vCluster Platform network through VPN
+          echo "🛣️ Adding route for 172.17.0.0/16 network via $VPN_INTERFACE..."
+          sudo ip route add 172.17.0.0/16 dev $VPN_INTERFACE 2>/dev/null || echo "Route may already exist"
           
           # Show routes for debugging
           echo "Current routes:"
