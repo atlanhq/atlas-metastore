@@ -410,16 +410,28 @@ jobs:
           
           # Connect to AWS vCluster
           echo "Connecting to AWS vCluster (hkmeta02)..."
-          vcluster platform connect vcluster hkmeta02 --project default --print-kube-config > kubeconfig-aws.yaml
-          echo "✓ AWS kubeconfig saved"
+          KUBECONFIG=kubeconfig-aws.yaml vcluster platform connect vcluster hkmeta02 --project default
+          echo "✓ AWS kubeconfig saved to kubeconfig-aws.yaml"
           
           # Connect to Azure vCluster  
           echo "Connecting to Azure vCluster (enpla1cp21)..."
-          vcluster platform connect vcluster enpla1cp21 --project default --print-kube-config > kubeconfig-azure.yaml
-          echo "✓ Azure kubeconfig saved"
+          KUBECONFIG=kubeconfig-azure.yaml vcluster platform connect vcluster enpla1cp21 --project default
+          echo "✓ Azure kubeconfig saved to kubeconfig-azure.yaml"
           
           echo ""
-          echo "All vCluster connections established"
+          echo "Verifying kubeconfigs..."
+          ls -lh kubeconfig-*.yaml
+          
+          echo ""
+          echo "Testing AWS connection..."
+          KUBECONFIG=kubeconfig-aws.yaml kubectl cluster-info | head -1
+          
+          echo ""
+          echo "Testing Azure connection..."
+          KUBECONFIG=kubeconfig-azure.yaml kubectl cluster-info | head -1
+          
+          echo ""
+          echo "✓ All vCluster connections established"
       
       - name: Run parallel smoke tests
         run: |
