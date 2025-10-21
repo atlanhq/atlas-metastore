@@ -376,6 +376,14 @@ jobs:
           # Wait for connection to establish
           sleep 10
           
+          # Add route for vCluster Platform network
+          echo "🛣️ Adding route for 172.17.0.0/16 network..."
+          sudo ip route add 172.17.0.0/16 dev tun0 2>/dev/null || echo "Route may already exist or using different interface"
+          
+          # Show routes for debugging
+          echo "Current routes:"
+          ip route | grep 172.17 || echo "No 172.17 routes found"
+          
           # Test connectivity
           echo "🔍 Testing connectivity to Phoenix AI..."
           if curl -k -sS https://phoenix-ai.atlan.com -o /dev/null --max-time 10; then
@@ -383,6 +391,14 @@ jobs:
           else
             echo "❌ Connectivity test failed"
             exit 1
+          fi
+          
+          # Test connectivity to vCluster Platform
+          echo "🔍 Testing connectivity to vCluster Platform..."
+          if curl -k -sS https://onboarding-tenant.atlan.com -o /dev/null --max-time 10; then
+            echo "✅ vCluster Platform reachable"
+          else
+            echo "⚠️ vCluster Platform connectivity test failed (may still work)"
           fi
       
       - name: Install kubectl
