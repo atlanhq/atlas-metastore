@@ -331,6 +331,10 @@ jobs:
     # needs: build  # Disabled - using hardcoded test image
     runs-on: ubuntu-latest
     
+    permissions:
+      contents: read
+      actions: read
+    
     strategy:
       fail-fast: false  # Continue testing other clouds even if one fails
       matrix:
