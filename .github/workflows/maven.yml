@@ -322,3 +322,123 @@ jobs:
         uses: github/codeql-action/upload-sarif@v2.1.33
         with:
           sarif_file: 'trivy-image-results.sarif'
+
+  # Smoke test on vclusters (matrix for multi-cloud)
+  smoke-test:
+    name: Smoke Test (${{ matrix.cloud }})
+    needs: build
+    runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false  # Continue testing other clouds even if one fails
+      matrix:
+        include:
+          - cloud: AWS
+            vcluster_name: hkmeta02
+
+          # - cloud: Azure
+          #   vcluster_name: your-azure-vcluster
+          
+          # - cloud: GCP
+          #   vcluster_name: your-gcp-vcluster
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+      
+      - name: Get commit ID
+        run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
+      
+      - name: Get branch name
+        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+      
+      - name: Connect to VPN
+        uses: atlanhq/github-actions/globalprotect-connect-action@main
+        with:
+          portal-url: ${{ vars.GLOBALPROTECT_PORTAL_URL }}
+          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
+          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
+      
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+      
+      - name: Install vCluster CLI
+        uses: loft-sh/setup-vcluster@main
+      
+      - name: Login to vCluster Platform
+        env:
+          VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
+          VCLUSTER_ACCESS_KEY: ${{ secrets.VCLUSTER_ACCESS_KEY }}
+        run: |
+          echo "Logging in to vCluster Platform..."
+          vcluster platform login $VCLUSTER_PLATFORM_URL --access-key $VCLUSTER_ACCESS_KEY
+      
+      - name: Connect to vCluster
+        run: |
+          echo "Connecting to vCluster: ${{ matrix.vcluster_name }} (Project: default)"
+          vcluster platform connect vcluster ${{ matrix.vcluster_name }} -p default \
+            --update-current=false --print-kube-config > kubeconfig.yaml
+          export KUBECONFIG=$PWD/kubeconfig.yaml
+          
+          echo "Verifying connection..."
+          kubectl cluster-info
+          kubectl get namespaces
+      
+      - name: Patch Atlas deployment
+        env:
+          KUBECONFIG: ${{ github.workspace }}/kubeconfig.yaml
+        run: |
+          echo "=========================================="
+          echo "Patching Atlas Deployment (${{ matrix.cloud }})"
+          echo "=========================================="
+          echo "Namespace: atlas"
+          echo "Deployment: atlas"
+          echo "Container: atlas-main"
+          echo "New Image: ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}"
+          echo ""
+          
+          # Patch the deployment
+          kubectl set image deployment/atlas \
+            atlas-main=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }} \
+            -n atlas
+          
+          echo "✓ Deployment patched successfully"
+      
+      - name: Wait for rollout
+        env:
+          KUBECONFIG: ${{ github.workspace }}/kubeconfig.yaml
+        run: |
+          echo "=========================================="
+          echo "Waiting for Rollout (${{ matrix.cloud }})"
+          echo "=========================================="
+          echo "Timeout: 10 minutes"
+          echo ""
+          
+          # Wait for rollout with 10 minute timeout
+          if kubectl rollout status deployment/atlas -n atlas --timeout=10m; then
+            echo ""
+            echo "✓ Rollout completed successfully!"
+            
+            # Show pod status
+            echo ""
+            echo "Pod status:"
+            kubectl get pods -n atlas -l app=atlas
+          else
+            echo ""
+            echo "✗ Rollout failed or timed out!"
+            
+            # Debug information
+            echo ""
+            echo "Pod status:"
+            kubectl get pods -n atlas -l app=atlas
+            
+            echo ""
+            echo "Recent events:"
+            kubectl get events -n atlas --sort-by='.lastTimestamp' | tail -20
+            
+            echo ""
+            echo "Deployment description:"
+            kubectl describe deployment atlas -n atlas
+            
+            exit 1
+          fi
