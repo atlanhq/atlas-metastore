@@ -331,10 +331,6 @@ jobs:
     # needs: build  # Disabled - using hardcoded test image
     runs-on: ubuntu-latest
     
-    permissions:
-      contents: read
-      actions: write
-    
     strategy:
       fail-fast: false  # Continue testing other clouds even if one fails
       matrix:
@@ -355,12 +351,39 @@ jobs:
       - name: Set test image
         run: echo "TEST_IMAGE=ghcr.io/atlanhq/atlas-metastore-prove-ci-blind-fresh:064f482abcd" >> $GITHUB_ENV
       
-      - name: Connect to VPN
-        uses: atlanhq/github-actions/globalprotect-connect-action@main
-        with:
-          portal-url: ${{ vars.GLOBALPROTECT_PORTAL_URL }}
-          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
-          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
+      - name: Connect to GlobalProtect VPN
+        run: |
+          echo "🔄 Connecting to GlobalProtect VPN using OpenConnect..."
+          
+          # Install OpenConnect
+          echo "📦 Installing OpenConnect..."
+          sudo apt-get update
+          sudo apt-get install -y openconnect
+          
+          echo "🌐 Attempting OpenConnect to: ${{ vars.GLOBALPROTECT_PORTAL_URL }}"
+          
+          # Connect via OpenConnect
+          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+            --protocol=gp \
+            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+            --passwd-on-stdin \
+            --background \
+            "${{ vars.GLOBALPROTECT_PORTAL_URL }}" || {
+            echo "❌ OpenConnect connection failed"
+            exit 1
+          }
+          
+          # Wait for connection to establish
+          sleep 10
+          
+          # Test connectivity
+          echo "🔍 Testing connectivity to Phoenix AI..."
+          if curl -k -sS https://phoenix-ai.atlan.com -o /dev/null --max-time 10; then
+            echo "✅ VPN connection established successfully"
+          else
+            echo "❌ Connectivity test failed"
+            exit 1
+          fi
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
