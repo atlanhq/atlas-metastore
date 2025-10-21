@@ -359,17 +359,25 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
           
-          # Connect to VPN in background
+          # Connect to VPN in background (disable ESP/DTLS to avoid fallback issues)
           echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
             --protocol=gp \
             --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
             --passwd-on-stdin \
             --background \
+            --no-dtls \
             "${{ vars.GLOBALPROTECT_PORTAL_URL }}"
           
           # Wait for connection to establish
           echo "Waiting for VPN connection to stabilize..."
           sleep 20
+          
+          # Check if VPN is still running
+          if ! pgrep -x openconnect > /dev/null; then
+            echo "ERROR: OpenConnect exited unexpectedly"
+            exit 1
+          fi
+          echo "VPN process is running (PID: $(pgrep -x openconnect))"
           
           # Configure routing for vCluster Platform (172.17.0.0/16)
           VPN_INTERFACE=$(ip addr show | grep -E '^[0-9]+: tun' | head -1 | cut -d: -f2 | tr -d ' ' || echo "tun0")
