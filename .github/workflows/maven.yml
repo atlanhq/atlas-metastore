@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - mlh-1477-staging
 
 jobs:
   build:
