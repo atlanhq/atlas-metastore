@@ -1,5 +1,6 @@
 package org.apache.atlas.service;
 
+import org.apache.atlas.service.redis.NoRedisServiceImpl;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.BeansException;
@@ -82,8 +83,8 @@ public class FeatureFlagStore implements ApplicationContextAware {
                 // Add version tracking metric
                 MeterRegistry meterRegistry = org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
                 Gauge.builder(METRIC_COMPONENT + "_atlas_version_enabled", 
-                            this,
-                            ref -> isTagV2Enabled() ? 2.0 : 1.0)
+                            null, 
+                            unused -> isTagV2Enabled() ? 2.0 : 1.0)
                     .description("Indicates which Tag propagation version is enabled (2.0 = v2, 1.0 = v1)")
                     .tag("component", "version")
                     .register(meterRegistry);
@@ -105,6 +106,10 @@ public class FeatureFlagStore implements ApplicationContextAware {
     private void validateDependencies() {
         LOG.info("Validating FeatureFlagStore dependencies...");
         try {
+            if (redisService instanceof NoRedisServiceImpl) {
+                return;
+            }
+
             // Test Redis connectivity with a simple operation
             String testKey = "ff:_health_check";
             redisService.putValue(testKey, "test");
@@ -182,7 +187,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
     }
 
     public static boolean isTagV2Enabled() {
-        return !evaluate(FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey(), "false"); // Default value is false, if the flag is present or has value true it's treated as enabled
+        return false;
     }
 
     public static boolean evaluate(String key, String expectedValue) {
@@ -317,7 +322,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
     public static void setFlag(String key, String value) {
         if (!isValidFlag(key)) {
-            LOG.error("Cannot set invalid feature flag: '{}'. Only predefined flags are allowed: {}",
+            LOG.error("Cannot set invalid feature flag: '{}'. Only predefined flags are allowed: {}", 
                      key, String.join(", ", FeatureFlag.getAllKeys()));
             return;
         }
@@ -348,7 +353,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
     public static void deleteFlag(String key) {
         if (!isValidFlag(key)) {
-            LOG.error("Cannot delete invalid feature flag: '{}'. Only predefined flags are allowed: {}",
+            LOG.error("Cannot delete invalid feature flag: '{}'. Only predefined flags are allowed: {}", 
                      key, String.join(", ", FeatureFlag.getAllKeys()));
             return;
         }
