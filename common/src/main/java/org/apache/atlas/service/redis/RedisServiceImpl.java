@@ -2,7 +2,6 @@ package org.apache.atlas.service.redis;
 
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.annotation.ConditionalOnAtlasProperty;
-import org.apache.atlas.service.metrics.MetricUtils;
 import org.redisson.Redisson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +15,7 @@ import javax.annotation.PostConstruct;
 @Component
 @ConditionalOnAtlasProperty(property = "atlas.redis.service.impl")
 @Order(Ordered.HIGHEST_PRECEDENCE)
-@Profile("!local")  // Don't use in tests - use RedisServiceLocalImpl for tests
+@Profile("!local")  // Don't use in tests (local profile) - has ConfigMap timing bug
 public class RedisServiceImpl extends AbstractRedisService {
 
     private static final Logger LOG = LoggerFactory.getLogger(RedisServiceImpl.class);
@@ -45,7 +44,6 @@ public class RedisServiceImpl extends AbstractRedisService {
                 break;
             } catch (Exception e) {
                 LOG.warn("Redis connection failed: {}. Application startup is BLOCKED. Retrying in {} seconds...", e.getMessage(), RETRY_DELAY_MS / 1000);
-                MetricUtils.recordRedisConnectionFailure();
                 // Clean up any partially created clients before retrying.
                 shutdownClients();
                 Thread.sleep(RETRY_DELAY_MS);
@@ -74,7 +72,6 @@ public class RedisServiceImpl extends AbstractRedisService {
             LOG.debug("Redis connectivity test completed successfully");
             
         } catch (Exception e) {
-            MetricUtils.recordRedisConnectionFailure();
             throw new Exception("Redis connectivity test failed", e);
         }
     }
