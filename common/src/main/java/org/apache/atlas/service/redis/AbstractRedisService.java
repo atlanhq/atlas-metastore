@@ -2,8 +2,10 @@ package org.apache.atlas.service.redis;
 
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.ArrayUtils;
+import org.apache.commons.lang.StringUtils;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
@@ -181,28 +183,67 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public String getValue(String key) {
-        // If value doesn't exist, return null else return the value
-        return (String) redisCacheClient.getBucket(convertToNamespace(key)).get();
+        try {
+            return (String) redisCacheClient.getBucket(convertToNamespace(key)).get();
+        } catch (Exception e) {
+            MetricUtils.recordRedisConnectionFailure();
+            getLogger().error("Redis getValue operation failed for key: {}", key, e);
+            throw e;
+        }
+    }
+
+    @Override
+    public String getValue(String key, String defaultValue) {
+        try {
+            String value = (String) redisCacheClient.getBucket(convertToNamespace(key)).get();
+            if (StringUtils.isEmpty(value)) {
+                return defaultValue;
+            } else {
+                return value;
+            }
+        } catch (Exception e) {
+            MetricUtils.recordRedisConnectionFailure();
+            getLogger().error("Redis getValue operation failed for key: {}", key, e);
+            throw e;
+        }
     }
 
     @Override
     public String putValue(String key, String value) {
-        // Put the value in the redis cache with TTL
-        redisCacheClient.getBucket(convertToNamespace(key)).set(value);
-        return value;
+        try {
+            // Put the value in the redis cache with TTL
+            redisCacheClient.getBucket(convertToNamespace(key)).set(value);
+            return value;
+        } catch (Exception e) {
+            MetricUtils.recordRedisConnectionFailure();
+            getLogger().warn("Redis putValue operation failed for key: {}", key, e);
+            throw e;
+        }
     }
 
     @Override
     public String putValue(String key, String value, int timeout) {
-        // Put the value in the redis cache with TTL
-        redisCacheClient.getBucket(convertToNamespace(key)).set(value, timeout, TimeUnit.SECONDS);
-        return value;
+        try {
+            // Put the value in the redis cache with TTL
+            redisCacheClient.getBucket(convertToNamespace(key)).set(value, timeout, TimeUnit.SECONDS);
+            return value;
+        } catch (Exception e) {
+            MetricUtils.recordRedisConnectionFailure();
+            getLogger().warn("Redis putValue with TTL operation failed for key: {}", key, e);
+            throw e;
+        }
     }
 
     @Override
     public void removeValue(String key)  {
-        // Remove the value from the redis cache
-        redisCacheClient.getBucket(convertToNamespace(key)).delete();
+        try {
+            // Remove the value from the redis cache
+            redisCacheClient.getBucket(convertToNamespace(key)).delete();
+        } catch (Exception e) {
+            MetricUtils.recordRedisConnectionFailure();
+            getLogger().warn("Redis removeValue operation failed for key: {}", key, e);
+            throw e;
+        }
     }
 
     private String getHostAddress() throws UnknownHostException {
