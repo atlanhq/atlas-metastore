@@ -20,20 +20,15 @@ public class RedisServiceImpl extends AbstractRedisService {
 
     private static final Logger LOG = LoggerFactory.getLogger(RedisServiceImpl.class);
     private static final long RETRY_DELAY_MS = 1000L;
-    private static final int MAX_RETRY_ATTEMPTS = 60; // 60 seconds total
 
     @PostConstruct
     public void init() throws InterruptedException {
         LOG.info("==> RedisServiceImpl.init() - Starting Redis service initialization.");
 
-        int attemptCount = 0;
-        Exception lastException = null;
-
-        // Try to connect with a maximum number of retries to avoid infinite hang
-        while (attemptCount < MAX_RETRY_ATTEMPTS) {
-            attemptCount++;
+        // This loop will block the main application thread until a connection is successful.
+        while (true) {
             try {
-                LOG.info("Attempting to connect to Redis (attempt {}/{})...", attemptCount, MAX_RETRY_ATTEMPTS);
+                LOG.info("Attempting to connect to Redis...");
 
                 redisClient = Redisson.create(getProdConfig());
                 redisCacheClient = Redisson.create(getCacheImplConfig());
@@ -46,28 +41,14 @@ public class RedisServiceImpl extends AbstractRedisService {
                 testRedisConnectivity();
 
                 LOG.info("RedisServiceImpl initialization completed successfully!");
-                return; // Success!
+                break;
             } catch (Exception e) {
-                lastException = e;
-                LOG.warn("Redis connection failed (attempt {}/{}): {}. Retrying in {} seconds...", 
-                        attemptCount, MAX_RETRY_ATTEMPTS, e.getMessage(), RETRY_DELAY_MS / 1000);
+                LOG.warn("Redis connection failed: {}. Application startup is BLOCKED. Retrying in {} seconds...", e.getMessage(), RETRY_DELAY_MS / 1000);
                 // Clean up any partially created clients before retrying.
                 shutdownClients();
-                
-                if (attemptCount < MAX_RETRY_ATTEMPTS) {
-                    Thread.sleep(RETRY_DELAY_MS);
-                }
+                Thread.sleep(RETRY_DELAY_MS);
             }
         }
-
-        // Failed after all retries - fail fast so K8s can restart the pod
-        String errorMsg = String.format(
-            "Failed to initialize Redis after %d attempts (waited %d seconds). " +
-            "This may be due to slow ConfigMap mounting, Redis unavailability, or misconfiguration. " +
-            "Kubernetes will restart the pod with exponential backoff, which may allow ConfigMaps to mount successfully.",
-            MAX_RETRY_ATTEMPTS, MAX_RETRY_ATTEMPTS * RETRY_DELAY_MS / 1000);
-        LOG.error(errorMsg, lastException);
-        throw new RuntimeException(errorMsg, lastException);
     }
     
     /**
