@@ -87,6 +87,30 @@ docker image ls
 # Step 4: Run integration tests
 echo -e "${YELLOW}Running integration tests...${NC}"
 
+# Start container log capture in background
+mkdir -p target/test-logs
+echo "Starting container log monitor..."
+bash -c '
+    while true; do
+        for container_id in $(docker ps -q 2>/dev/null); do
+            container_name=$(docker inspect --format="{{.Name}}" "$container_id" 2>/dev/null | sed "s/^\///")
+            if [ -n "$container_name" ]; then
+                log_file="target/test-logs/${container_name}.log"
+                if [ ! -f "${log_file}.capturing" ]; then
+                    echo "Capturing logs from: $container_name"
+                    touch "${log_file}.capturing"
+                    docker logs -f "$container_id" > "$log_file" 2>&1 &
+                    echo "$!" >> /tmp/log-capture-pids.txt
+                fi
+            fi
+        done
+        sleep 2
+    done
+' &
+MONITOR_PID=$!
+echo "Container monitor started (PID: $MONITOR_PID)"
+
+# Run tests
 if [ "$DEBUG" = true ]; then
     mvn test -pl webapp -Dtest=AtlasDockerIntegrationTest \
              -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
@@ -96,6 +120,20 @@ else
 fi
 
 TEST_RESULT=$?
+
+# Stop log capture
+echo "Stopping container log monitor..."
+kill $MONITOR_PID 2>/dev/null || true
+if [ -f /tmp/log-capture-pids.txt ]; then
+    while read pid; do
+        kill "$pid" 2>/dev/null || true
+    done < /tmp/log-capture-pids.txt
+    rm -f /tmp/log-capture-pids.txt
+fi
+rm -f target/test-logs/*.capturing
+
+echo "Container logs saved to target/test-logs/"
+ls -lh target/test-logs/ 2>/dev/null || true
 
 # Step 6: Collect logs if tests failed
 if [ $TEST_RESULT -ne 0 ]; then

@@ -212,74 +212,14 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
-          
-          # Start log capture in background
-          mkdir -p test-debug-logs
-          bash -c '
-            echo "Waiting for Atlas container..."
-            for i in {1..60}; do
-              ATLAS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -i atlas | head -1)
-              if [ -n "$ATLAS_CONTAINER" ]; then
-                echo "Found Atlas container: $ATLAS_CONTAINER"
-                echo "Capturing logs to test-debug-logs/atlas-live.log..."
-                docker logs -f "$ATLAS_CONTAINER" > test-debug-logs/atlas-live.log 2>&1 &
-                LOG_PID=$!
-                echo "Log capture started (PID: $LOG_PID)"
-                echo "$LOG_PID" > /tmp/atlas-log-capture.pid
-                break
-              fi
-              sleep 2
-            done
-          ' &
-          
-          # Run tests
           chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
-          
-          # Stop log capture
-          if [ -f /tmp/atlas-log-capture.pid ]; then
-            kill $(cat /tmp/atlas-log-capture.pid) 2>/dev/null || true
-            rm -f /tmp/atlas-log-capture.pid
-          fi
-      
-      - name: Capture container logs on failure
-        if: steps.integration_tests.outcome == 'failure'
-        run: |
-          echo "=========================================="
-          echo "CAPTURING CONTAINER LOGS"
-          echo "=========================================="
-          
-          mkdir -p test-debug-logs
-          
-          echo "All containers:"
-          docker ps -a | tee test-debug-logs/docker-ps.log
-          
-          echo ""
-          echo "Capturing logs..."
-          for container in $(docker ps -a --format '{{.Names}}'); do
-            echo "Capturing logs for: $container"
-            docker logs "$container" > "test-debug-logs/${container}.log" 2>&1 || echo "Failed to get logs for $container"
-          done
-          
-          echo ""
-          echo "=========================================="
-          echo "PREVIEW: Atlas Container Logs (last 100 lines)"
-          echo "=========================================="
-          atlas_container=$(docker ps -a --filter "ancestor=atlanhq/atlas:test" --format "{{.Names}}" | head -1)
-          if [ -n "$atlas_container" ]; then
-            echo "Atlas container: $atlas_container"
-            docker logs "$atlas_container" 2>&1 | tail -100 || echo "No Atlas logs available"
-          else
-            echo "No Atlas container found"
-          fi
-          
-          ls -lh test-debug-logs/
       
       - name: Upload container logs as artifact
         if: always()  # Upload logs even if tests pass (for debugging)
         uses: actions/upload-artifact@v4
         with:
           name: container-logs-${{ github.run_id }}
-          path: test-debug-logs/
+          path: target/test-logs/
           retention-days: 5
       
       - name: Setup tmate session on test failure
