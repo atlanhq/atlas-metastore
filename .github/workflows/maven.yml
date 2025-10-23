@@ -27,11 +27,6 @@ on:
       - development
       - master
       - staging
-      - tagscanary
-      - tagscanarymerge
-      - fixlabels
-      - interceptapis
-      - mlh-1240-improve-cm-refresh-master
 
 jobs:
   build:
