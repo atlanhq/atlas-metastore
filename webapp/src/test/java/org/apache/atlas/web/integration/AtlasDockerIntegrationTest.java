@@ -256,8 +256,7 @@ public class AtlasDockerIntegrationTest {
             atlas.kafka.bootstrap.servers=kafka:9092
             atlas.kafka.zookeeper.connect=zookeeper:2181
             
-             # Redis configuration
-            atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
+             # Redis configuration (using local profile RedisServiceLocalImpl)
             atlas.redis.url = redis://redis:6379
             atlas.redis.sentinel.enabled = false
             atlas.redis.sentinel.check_list.enabled = false
@@ -281,7 +280,6 @@ public class AtlasDockerIntegrationTest {
             
             atlas.enableTLS=false
             atlas.authentication.method.kerberos=false
-            atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
             
             atlas.kafka.zookeeper.session.timeout.ms=400
             atlas.kafka.zookeeper.connection.timeout.ms=200
