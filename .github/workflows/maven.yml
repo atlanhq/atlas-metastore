@@ -26,6 +26,7 @@ on:
       - master
       - staging
       - atlas_ci_cd_updates
+      - MLH-1379
 
 jobs:
   helm-lint:
