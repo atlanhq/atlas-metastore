@@ -125,6 +125,7 @@ jobs:
           chmod +x ./build.sh && ./build.sh
 
       - name: Check disk space before tests
+        id: check_disk
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK"
@@ -135,14 +136,16 @@ jobs:
           # Get disk usage percentage (remove % sign)
           DISK_USAGE=$(df / | tail -1 | awk '{print $5}' | sed 's/%//')
           echo "Current disk usage: ${DISK_USAGE}%"
+          echo "disk_usage=$DISK_USAGE" >> $GITHUB_OUTPUT
           
-          if [ "$DISK_USAGE" -gt 80 ]; then
-            echo "Disk usage is high (${DISK_USAGE}%), cleanup required"
+          if [ "$DISK_USAGE" -gt 70 ]; then
+            echo "⚠️  Disk usage is high (${DISK_USAGE}%), cleanup will run"
           else
-            echo "Disk space is adequate (${DISK_USAGE}%)"
+            echo "✅ Disk space is adequate (${DISK_USAGE}%), skipping cleanup"
           fi
 
       - name: Free up disk space for tests
+        if: steps.check_disk.outputs.disk_usage > 70
         run: |
           echo "=========================================="
           echo "CLEANING UP DISK SPACE"
@@ -209,7 +212,34 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
+          
+          # Start log capture in background
+          mkdir -p test-debug-logs
+          bash -c '
+            echo "Waiting for Atlas container..."
+            for i in {1..60}; do
+              ATLAS_CONTAINER=$(docker ps --format "{{.Names}}" | grep -i atlas | head -1)
+              if [ -n "$ATLAS_CONTAINER" ]; then
+                echo "Found Atlas container: $ATLAS_CONTAINER"
+                echo "Capturing logs to test-debug-logs/atlas-live.log..."
+                docker logs -f "$ATLAS_CONTAINER" > test-debug-logs/atlas-live.log 2>&1 &
+                LOG_PID=$!
+                echo "Log capture started (PID: $LOG_PID)"
+                echo "$LOG_PID" > /tmp/atlas-log-capture.pid
+                break
+              fi
+              sleep 2
+            done
+          ' &
+          
+          # Run tests
           chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
+          
+          # Stop log capture
+          if [ -f /tmp/atlas-log-capture.pid ]; then
+            kill $(cat /tmp/atlas-log-capture.pid) 2>/dev/null || true
+            rm -f /tmp/atlas-log-capture.pid
+          fi
       
       - name: Capture container logs on failure
         if: steps.integration_tests.outcome == 'failure'
@@ -245,7 +275,7 @@ jobs:
           ls -lh test-debug-logs/
       
       - name: Upload container logs as artifact
-        if: steps.integration_tests.outcome == 'failure'
+        if: always()  # Upload logs even if tests pass (for debugging)
         uses: actions/upload-artifact@v4
         with:
           name: container-logs-${{ github.run_id }}
