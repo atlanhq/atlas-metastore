@@ -100,30 +100,67 @@ test_cloud() {
       LOCAL_PORT=21003
     fi
     
-    KUBECONFIG=$KUBECONFIG_FILE kubectl port-forward -n atlas svc/atlas-service-atlas $LOCAL_PORT:80 > /dev/null 2>&1 &
-    PF_PID=$!
-    sleep 5
-    
-    # Status check
-    echo "[${CLOUD}] Running status check..."
-    STATUS_RESPONSE=$(curl -f -s "http://localhost:$LOCAL_PORT/api/atlas/admin/status")
-    if [ $? -eq 0 ]; then
-      STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.Status')
-      if [ "$STATUS" = "ACTIVE" ]; then
-        echo "[${CLOUD}] ✓ Atlas is ACTIVE"
-      else
-        echo "[${CLOUD}] ❌ ERROR: Status check failed - Status: $STATUS"
-        kill $PF_PID 2>/dev/null || true
-        exit 1
-      fi
-    else
-      echo "[${CLOUD}] ❌ ERROR: Could not reach endpoint"
-      kill $PF_PID 2>/dev/null || true
+    # Check if service exists
+    if ! KUBECONFIG=$KUBECONFIG_FILE kubectl get svc atlas-service-atlas -n atlas &>/dev/null; then
+      echo "[${CLOUD}] ❌ ERROR: Service atlas-service-atlas not found"
+      KUBECONFIG=$KUBECONFIG_FILE kubectl get svc -n atlas
       exit 1
     fi
     
+    KUBECONFIG=$KUBECONFIG_FILE kubectl port-forward -n atlas svc/atlas-service-atlas $LOCAL_PORT:80 > /tmp/pf-${CLOUD}.log 2>&1 &
+    PF_PID=$!
+    
+    # Wait for port-forward to be ready (with timeout)
+    echo "[${CLOUD}] Waiting for port-forward to be ready..."
+    for i in {1..30}; do
+      if lsof -i :$LOCAL_PORT &>/dev/null; then
+        echo "[${CLOUD}] ✓ Port-forward is ready"
+        break
+      fi
+      if [ $i -eq 30 ]; then
+        echo "[${CLOUD}] ❌ ERROR: Port-forward failed to start"
+        echo "[${CLOUD}] Port-forward logs:"
+        cat /tmp/pf-${CLOUD}.log 2>/dev/null || echo "No logs available"
+        kill $PF_PID 2>/dev/null || true
+        exit 1
+      fi
+      sleep 1
+    done
+    
+    # Status check with retries
+    echo "[${CLOUD}] Running status check..."
+    MAX_RETRIES=5
+    for attempt in $(seq 1 $MAX_RETRIES); do
+      STATUS_RESPONSE=$(curl -f -s "http://localhost:$LOCAL_PORT/api/atlas/admin/status" 2>&1)
+      CURL_EXIT=$?
+      
+      if [ $CURL_EXIT -eq 0 ]; then
+        STATUS=$(echo "$STATUS_RESPONSE" | jq -r '.Status' 2>/dev/null)
+        if [ "$STATUS" = "ACTIVE" ]; then
+          echo "[${CLOUD}] ✓ Atlas is ACTIVE"
+          break
+        else
+          echo "[${CLOUD}] ⚠ Status: $STATUS (attempt $attempt/$MAX_RETRIES)"
+        fi
+      else
+        echo "[${CLOUD}] ⚠ Curl failed with code $CURL_EXIT (attempt $attempt/$MAX_RETRIES)"
+        echo "[${CLOUD}] Response: $STATUS_RESPONSE"
+      fi
+      
+      if [ $attempt -eq $MAX_RETRIES ]; then
+        echo "[${CLOUD}] ❌ ERROR: Could not reach endpoint after $MAX_RETRIES attempts"
+        echo "[${CLOUD}] Port-forward logs:"
+        cat /tmp/pf-${CLOUD}.log 2>/dev/null || echo "No logs available"
+        kill $PF_PID 2>/dev/null || true
+        exit 1
+      fi
+      
+      sleep 5
+    done
+    
     # Cleanup
     kill $PF_PID 2>/dev/null || true
+    rm -f /tmp/pf-${CLOUD}.log
     
     echo ""
     echo "[${CLOUD}] ✅✅✅ SMOKE TEST PASSED ✅✅✅"
