@@ -504,7 +504,7 @@ jobs:
           sed -i "s/ATLAS_BRANCH_NAME/${{ steps.branch.outputs.name }}/g" helm/${{ matrix.chart }}/values.yaml
           
           echo "Image configuration in ${{ matrix.chart }}/values.yaml:"
-          grep -A 3 "image:" helm/${{ matrix.chart }}/values.yaml | head -5
+          grep -A 3 "image:" helm/${{ matrix.chart }}/values.yaml | head -10
       
       - name: Update helm dependencies
         run: |

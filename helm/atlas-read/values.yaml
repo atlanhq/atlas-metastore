@@ -97,7 +97,7 @@ atlas:
 
   image:
     repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
-    tag: 8275fa956
+    tag: ATLAS_LATEST_IMAGE_TAG
     pullPolicy: IfNotPresent
   imagePullSecrets: {}
   tolerations: []
