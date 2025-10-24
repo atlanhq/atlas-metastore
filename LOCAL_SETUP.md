@@ -148,3 +148,4 @@ For more detailed information, refer to:
 - The build command skips tests and various checks for faster development builds
 - For production builds, remove the skip flags
 - Keep your GitHub PAT token secure and never commit it to version control
+- Adjust memory and CPU settings in Colima based on your machine's capabilities
