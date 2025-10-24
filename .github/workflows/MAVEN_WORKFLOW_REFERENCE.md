@@ -18,6 +18,7 @@
   - [Job 2: build](#job-2-build)
   - [Job 3: smoke-test](#job-3-smoke-test)
   - [Job 4: helm-publish](#job-4-helm-publish)
+  - [Cross-Repository Automation](#cross-repository-automation)
 - [Script Documentation](#script-documentation)
 - [Environment Variables](#environment-variables)
 - [Secrets](#secrets)
@@ -84,6 +85,15 @@ Developer Push
   - Publish to GHCR
   - Create GitHub releases
   - ONLY if ALL smoke tests pass
+     ↓
+5. Chart Release Dispatcher (30 sec)
+  - Detect helm-publish completion
+  - Send repository_dispatch to atlan repo
+     ↓
+6. Atlan Receiver (1-2 min)
+  - Update Chart.yaml versions
+  - Create PR in atlan repo
+  - Ready for review & merge
 ```
 
 ### Detailed Flow Diagram
@@ -249,7 +259,74 @@ Developer Push
 │ 11. Publish summary                                                 │
 │                                                                     │
 │  ✓ Job Complete (Helm charts published successfully!)               │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  CROSS-REPO AUTOMATION: Chart Release Dispatcher     ~30 seconds    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Workflow: chart-release-dispatcher.yaml                            │
+│  Trigger: workflow_run (on helm-publish completion)                 │
+│                                                                     │
+│  1. Detect helm-publish completion                                  │
+│  2. Extract chart versions from releases                            │
+│  3. Send repository_dispatch to atlanhq/atlan                       │
+│     Event Type: atlas-chart-release                                 │
+│     Payload:                                                        │
+│       - atlas_version: 1.0.0-branch.commitid                        │
+│       - atlas_read_version: 1.0.0-branch.commitid                   │
+│       - source_repo: atlas-metastore                                │
+│       - source_branch: atlas_ci_cd_updates                          │
+│       - source_commit: b208324abcd                                  │
+│                                                                     │
+│  ✓ Dispatch sent to atlan repository                                │
+└───────────────────────────────┬─────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  ATLAN REPO: Chart Values Update Receiver         ~1-2 minutes      │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Repository: atlanhq/atlan                                          │
+│  Workflow: chart-values-dispatch-receiver.yaml                      │
+│  Trigger: repository_dispatch (atlas-chart-release)                 │
+│                                                                     │
+│  1. Checkout atlan repository (atlas_ci_cd_updates-base branch)     │
+│  2. Update charts/Chart.yaml:                                       │
+│     OLD:                                                            │
+│       version: "1.0.0-atlas-ci-cd-updates.f716f52abcd"              │
+│     NEW:                                                            │
+│       version: "1.0.0-atlas-ci-cd-updates.b208324abcd"              │
+│                                                                     │
+│     OLD (atlas-read):                                               │
+│       version: "1.0.0-atlas-ci-cd-updates.f716f52abcd"              │
+│     NEW:                                                            │
+│       version: "1.0.0-atlas-ci-cd-updates.b208324abcd"              │
+│                                                                     │
+│  3. Update charts/values.yaml (repository URLs)                     │
+│     repository: oci://ghcr.io/atlanhq/helm-charts/atlas             │
+│                                                                     │
+│  4. Commit changes                                                  │
+│                                                                     │
+│  5. Create/Update Pull Request                                      │
+│     Title: "Update Atlas charts to version ..."                     │
+│     Branch: atlas_ci_cd_updates-base                                │
+│     Target: main                                                    │
+│                                                                     │
+│  ✓ PR created: Ready for review and merge                           │
 └─────────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+                          ┌─────────────┐
+                          │   COMPLETE  │
+                          │             │
+                          │ ✅ Charts   │
+                          │  Published  │
+                          │             │
+                          │ ✅ Atlan    │
+                          │  PR Ready   │
+                          └─────────────┘
 ```
 
 **Key Points (Ideal Success Scenario):**
@@ -260,7 +337,10 @@ Developer Push
 - ✅ **GCP smoke test** passes (deployment succeeds, Atlas ACTIVE)
 - ✅ **Helm-publish job** RUNS (quality gate passed - all clouds validated)
 - ✅ **Helm charts published** to `oci://ghcr.io/atlanhq/helm-charts/`
-- **Result:** Complete CI/CD pipeline success! All stages pass, charts validated across clouds, ready for production
+- ✅ **Chart release dispatcher** automatically notifies atlan repository
+- ✅ **Atlan receiver workflow** updates Chart.yaml with new versions
+- ✅ **Pull request created** in atlan repository for chart version updates
+- **Result:** Complete end-to-end CI/CD pipeline success! Charts validated across clouds, published to registry, and downstream repositories automatically updated with PR ready for review
 
 **Note:** For failure scenarios (proving CI blind spot), see `CI_CD_WORKFLOW_GUIDE.md`
 
@@ -1826,6 +1906,287 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
 
 ---
 
+### Cross-Repository Automation
+
+**Purpose:** Automatically propagate chart version updates from atlas-metastore to downstream atlan repository
+
+**Flow:** atlas-metastore (helm-publish) → dispatcher → atlan (receiver) → PR created
+
+#### Part 1: Chart Release Dispatcher
+
+**File:** `.github/workflows/chart-release-dispatcher.yaml` (in atlas-metastore)
+
+**Trigger:** `workflow_run` event when `maven.yml` completes successfully
+
+**Duration:** ~30 seconds
+
+**What it does:**
+
+1. **Detect Completion**
+   ```yaml
+   on:
+     workflow_run:
+       workflows: ["Maven CI/CD with Multi-Cloud Smoke Tests"]
+       types: [completed]
+   ```
+   - Triggers automatically after maven.yml finishes
+   - Only runs if maven.yml succeeded
+
+2. **Extract Chart Versions**
+   ```bash
+   # Get latest releases
+   ATLAS_VERSION=$(gh release list --limit 1 | grep "helm-atlas-v" | awk '{print $1}')
+   ATLAS_READ_VERSION=$(gh release list --limit 1 | grep "helm-atlas-read-v" | awk '{print $1}')
+   ```
+   - Fetches latest GitHub releases
+   - Extracts version numbers
+   - Example: `1.0.0-atlas_ci_cd_updates.b208324abcd`
+
+3. **Send Repository Dispatch**
+   ```bash
+   curl -X POST \
+     -H "Authorization: token ${{ secrets.ORG_PAT_GITHUB }}" \
+     -H "Accept: application/vnd.github.v3+json" \
+     https://api.github.com/repos/atlanhq/atlan/dispatches \
+     -d '{
+       "event_type": "atlas-chart-release",
+       "client_payload": {
+         "atlas_version": "1.0.0-branch.commitid",
+         "atlas_read_version": "1.0.0-branch.commitid",
+         "source_repo": "atlas-metastore",
+         "source_branch": "atlas_ci_cd_updates",
+         "source_commit": "b208324abcd"
+       }
+     }'
+   ```
+   - Uses GitHub API to send custom event
+   - Includes chart versions in payload
+   - Triggers receiver in atlan repository
+
+**Why This Approach:**
+- ✅ Automatic - No manual version updates
+- ✅ Fast - Triggers immediately after publish
+- ✅ Reliable - Uses GitHub's native dispatch mechanism
+- ✅ Traceable - All metadata included in payload
+
+---
+
+#### Part 2: Chart Values Dispatch Receiver (atlan repo)
+
+**Repository:** `atlanhq/atlan`
+
+**File:** `.github/workflows/chart-values-dispatch-receiver.yaml`
+
+**Trigger:** `repository_dispatch` event with type `atlas-chart-release`
+
+**Duration:** ~1-2 minutes
+
+**What it does:**
+
+1. **Receive Dispatch**
+   ```yaml
+   on:
+     repository_dispatch:
+       types: [atlas-chart-release]
+   ```
+   - Listens for dispatch from atlas-metastore
+   - Extracts payload data
+
+2. **Checkout Target Branch**
+   ```yaml
+   - uses: actions/checkout@v3
+     with:
+       ref: atlas_ci_cd_updates-base
+       token: ${{ secrets.ORG_PAT_GITHUB }}
+   ```
+   - Checks out the base branch for updates
+   - Uses PAT for permission to push
+
+3. **Update Chart.yaml**
+   ```bash
+   # Update atlas chart version
+   sed -i "s/version: \".*atlas.*\"/version: \"${{ github.event.client_payload.atlas_version }}\"/" \
+     charts/Chart.yaml
+   
+   # Update atlas-read chart version
+   sed -i "s/version: \".*atlas-read.*\"/version: \"${{ github.event.client_payload.atlas_read_version }}\"/" \
+     charts/Chart.yaml
+   ```
+   
+   **Before:**
+   ```yaml
+   dependencies:
+     - name: atlas
+       version: "1.0.0-atlas-ci-cd-updates.f716f52abcd"
+       repository: oci://ghcr.io/atlanhq/helm-charts
+     - name: atlas-read
+       version: "1.0.0-atlas-ci-cd-updates.f716f52abcd"
+       repository: oci://ghcr.io/atlanhq/helm-charts
+   ```
+   
+   **After:**
+   ```yaml
+   dependencies:
+     - name: atlas
+       version: "1.0.0-atlas-ci-cd-updates.b208324abcd"
+       repository: oci://ghcr.io/atlanhq/helm-charts
+     - name: atlas-read
+       version: "1.0.0-atlas-ci-cd-updates.b208324abcd"
+       repository: oci://ghcr.io/atlanhq/helm-charts
+   ```
+
+4. **Commit Changes**
+   ```bash
+   git config user.name "atlan-ci"
+   git config user.email "ci@atlan.com"
+   git add charts/Chart.yaml charts/values.yaml
+   git commit -m "atlan-repository-dispatch-receiver from atlas-metastore
+   
+   Source: atlas-metastore/${{ github.event.client_payload.source_branch }}
+   Commit: ${{ github.event.client_payload.source_commit }}
+   Atlas: ${{ github.event.client_payload.atlas_version }}
+   Atlas-Read: ${{ github.event.client_payload.atlas_read_version }}"
+   git push origin atlas_ci_cd_updates-base
+   ```
+
+5. **Create Pull Request**
+   ```bash
+   gh pr create \
+     --title "Update Atlas charts to ${{ github.event.client_payload.atlas_version }}" \
+     --body "Automated chart version update from atlas-metastore
+     
+     **Charts Updated:**
+     - atlas: ${{ github.event.client_payload.atlas_version }}
+     - atlas-read: ${{ github.event.client_payload.atlas_read_version }}
+     
+     **Source:**
+     - Repository: atlas-metastore
+     - Branch: ${{ github.event.client_payload.source_branch }}
+     - Commit: ${{ github.event.client_payload.source_commit }}
+     
+     **Registry:**
+     - oci://ghcr.io/atlanhq/helm-charts/atlas
+     - oci://ghcr.io/atlanhq/helm-charts/atlas-read
+     
+     **Installation:**
+     \`\`\`bash
+     helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \\
+       --version ${{ github.event.client_payload.atlas_version }}
+     \`\`\`
+     
+     **Validation:**
+     ✅ Helm charts published
+     ✅ Multi-cloud smoke tests passed (AWS, Azure, GCP)
+     ✅ Ready for review and merge" \
+     --base main \
+     --head atlas_ci_cd_updates-base
+   ```
+
+**PR Result:**
+- **Title:** "Update Atlas charts to version 1.0.0-atlas_ci_cd_updates.b208324abcd"
+- **Branch:** `atlas_ci_cd_updates-base` → `main`
+- **Status:** Ready for review
+- **Reviewers:** Auto-assigned (optional)
+- **Labels:** `automated`, `chart-update`, `atlas`
+
+**What Happens Next:**
+1. Team reviews PR in atlan repository
+2. CI runs for atlan repository (validates chart references)
+3. If approved, PR is merged
+4. atlan's CD pipeline deploys updated charts
+
+---
+
+#### Benefits of Cross-Repo Automation
+
+**Speed:**
+- Manual process: ~10-15 minutes (find versions, update files, create PR)
+- Automated process: ~2 minutes (fully automatic)
+
+**Accuracy:**
+- Manual: Risk of typos, wrong versions, missing updates
+- Automated: Exact versions from source, consistent format
+
+**Traceability:**
+- Every update includes source commit, branch, and chart versions
+- Easy to trace which atlas-metastore build corresponds to which atlan PR
+
+**Reliability:**
+- No human error
+- Runs every time charts are published
+- Fails loudly if something goes wrong
+
+**Developer Experience:**
+- Developers only merge to atlas-metastore
+- Charts automatically flow to atlan
+- Focus on code, not deployment plumbing
+
+---
+
+#### Troubleshooting Cross-Repo Automation
+
+**Dispatcher Not Triggering:**
+
+1. **Check workflow_run trigger**
+   ```yaml
+   on:
+     workflow_run:
+       workflows: ["Maven CI/CD with Multi-Cloud Smoke Tests"]
+       types: [completed]
+   ```
+   - Workflow name must match exactly
+   - Only triggers on `completed` (success or failure)
+
+2. **Verify completion condition**
+   ```yaml
+   if: ${{ github.event.workflow_run.conclusion == 'success' }}
+   ```
+   - Dispatcher only runs if maven.yml succeeded
+   - Check maven.yml run status
+
+**Receiver Not Receiving:**
+
+1. **Check repository_dispatch event type**
+   - Must match exactly: `atlas-chart-release`
+   - Case-sensitive
+
+2. **Verify PAT permissions**
+   - `ORG_PAT_GITHUB` must have:
+     - `repo` scope (full repository access)
+     - `workflow` scope (trigger workflows)
+   - Check token expiration
+
+**PR Creation Fails:**
+
+1. **Branch conflicts**
+   ```bash
+   # Receiver tries to create PR from existing branch
+   # If branch has conflicts, PR creation fails
+   ```
+   
+   **Fix:** Manually resolve conflicts or delete branch
+
+2. **Permission issues**
+   ```bash
+   # PAT lacks permission to create PR
+   ```
+   
+   **Fix:** Update PAT with `pull_request` scope
+
+**Chart Version Mismatch:**
+
+1. **Check release name format**
+   - Expected: `helm-atlas-v1.0.0-branch.commitid`
+   - Dispatcher parses release names
+
+2. **Verify sed patterns**
+   ```bash
+   # Ensure regex matches Chart.yaml format
+   sed -i "s/version: \".*atlas.*\"/version: \"$VERSION\"/"
+   ```
+
+---
+
 ## Script Documentation
 
 ### multi-cloud-smoke-test.sh
@@ -2197,6 +2558,37 @@ NC='\033[0m'          # Reset
 - ✅ Helm-lint passes
 - ✅ Build passes
 - ✅ ALL smoke tests pass (AWS, Azure, GCP)
+
+---
+
+### Cross-Repository Automation Outputs
+
+**Chart Release Dispatcher:**
+- **Repository Dispatch Event:** Sent to `atlanhq/atlan`
+  - Event Type: `atlas-chart-release`
+  - Payload: Chart versions, source metadata
+  - Trigger Time: Immediately after helm-publish completes
+
+**Atlan Receiver Workflow:**
+- **Updated Files (in atlanhq/atlan):**
+  - `charts/Chart.yaml` - Updated chart dependency versions
+  - `charts/values.yaml` - Updated image references (if applicable)
+  
+- **Pull Request:**
+  - Title: "Update Atlas charts to version {version}"
+  - Branch: `atlas_ci_cd_updates-base` → `main`
+  - Status: Ready for review
+  - Contains: Installation instructions, validation status, source traceability
+  
+- **Commit:**
+  - Author: `atlan-ci`
+  - Message: Includes source repo, branch, commit, and chart versions
+  - Pushed to: `atlas_ci_cd_updates-base` branch
+
+**Only Triggered If:**
+- ✅ Maven workflow completes successfully
+- ✅ Helm charts published (quality gate passed)
+- ✅ GitHub releases created
 
 ---
 
