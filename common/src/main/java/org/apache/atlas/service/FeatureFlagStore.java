@@ -317,7 +317,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
     public static void setFlag(String key, String value) {
         if (!isValidFlag(key)) {
-            LOG.error("Cannot set invalid feature flag: '{}'. Only predefined flags are allowed: {}", 
+            LOG.error("Cannot set invalid feature flag: '{}'. Only predefined flags are allowed: {}",
                      key, String.join(", ", FeatureFlag.getAllKeys()));
             return;
         }
@@ -348,7 +348,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
     public static void deleteFlag(String key) {
         if (!isValidFlag(key)) {
-            LOG.error("Cannot delete invalid feature flag: '{}'. Only predefined flags are allowed: {}", 
+            LOG.error("Cannot delete invalid feature flag: '{}'. Only predefined flags are allowed: {}",
                      key, String.join(", ", FeatureFlag.getAllKeys()));
             return;
         }
