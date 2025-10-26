@@ -3,12 +3,11 @@ name: Charts Values Seed Trigger Dispatcher
 on:
   workflow_run:
     workflows:
-      - "Java CI with Maven"   # Triggers AFTER Maven build (which includes Helm publish)
+      - "Java CI with Maven"
     branches:
       - master
       - staging
       - beta
-      - atlas_ci_cd_updates
       - mlh41-integration-tests
       - mlh41tests
       - mlh40java17
@@ -16,7 +15,6 @@ on:
       - poctagprophashedrebased
       - idonlycanary
       - idonlycanarybeta
-      - atlas_ci_cd_updates
     types:
       - completed
 
