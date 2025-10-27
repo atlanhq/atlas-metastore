@@ -9,10 +9,16 @@ metadata:
     chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
+{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "atlas-read-config,atlas-read-logback-config,atlas-read-audit-index,atlas-read-keycloak-config,atlas-read-init-script,atlas-read-init-container-script,sentry-dsn-read-config"
+    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-read-keycloak-config"
+{{- else }}
   annotations:
     configmap.reloader.stakater.com/reload: "atlas-read-config,atlas-read-logback-config,atlas-read-audit-index,atlas-read-keycloak-config,atlas-read-init-script,atlas-read-init-container-script"
     secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-read-keycloak-config"
     argocd.argoproj.io/sync-wave: "1"
+{{- end }}
 spec:
   selector:
     matchLabels:
@@ -55,15 +61,6 @@ spec:
             {{- end }}
           {{- else }}
           preferredDuringSchedulingIgnoredDuringExecution:
-          {{- if and .Values.multiarch (hasKey .Values.multiarch "enabled") (eq .Values.multiarch.enabled true) }}
-          - weight: 100
-            preference:
-              matchExpressions:
-                - key: kubernetes.io/arch
-                  operator: In
-                  values:
-                    - arm64
-          {{- end }}
             {{- toYaml .Values.atlas.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
           {{- end }}
         {{- if eq .Values.atlas.podAntiAffinity true }}
@@ -77,19 +74,6 @@ spec:
       {{- with .Values.atlas.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- $multiarchEnabled := and .Values.multiarch (eq .Values.multiarch.enabled true) }}
-      {{- if or .Values.atlas.tolerations $multiarchEnabled }}
-      tolerations:
-      {{- if .Values.atlas.tolerations }}
-      {{ toYaml .Values.atlas.tolerations | nindent 8 }}
-      {{- end }}
-      {{- if $multiarchEnabled }}
-        - key: "archtype"
-          operator: "Equal"
-          value: "arm64"
-          effect: "NoSchedule"
-      {{- end }}
       {{- end }}
       initContainers:
       {{- if .Values.atlas.initContainers }}
@@ -140,7 +124,7 @@ spec:
               value: http://$(HOST_IP):4317
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: >-
-                k8s.pod.name=$(K8S_POD_NAME),k8s.container.image={{ .Values.atlas.image.repository }}:{{ .Values.atlas.image.tag }},k8s.pod.uid=$(POD_UID),k8s.node.name=$(K8S_NODE_NAME),k8s.namespace.name=$(Namespace),k8s.log.type=service-logs
+                k8s.pod.name=$(K8S_POD_NAME),k8s.pod.uid=$(POD_UID),k8s.node.name=$(K8S_NODE_NAME),k8s.namespace.name=$(Namespace),k8s.log.type=service-logs
           {{- toYaml .Values.atlas.env | nindent 12 }}
           {{- if eq .Values.albTenant true }}
             - name: ALB_ENABLED
@@ -178,6 +162,11 @@ spec:
             - name: create-atlas-keycloak-config
               mountPath: /create-atlas-keycloak-config.sh
               subPath: create-atlas-keycloak-config.sh
+          {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+            - name: sentry-dsn-read-config
+              mountPath: /opt/apache-atlas/conf/sentry.properties
+              subPath: sentry.properties
+          {{- end}}
             - name: atlas-logs
               mountPath: /opt/apache-atlas/logs
           {{- if .Values.atlas.lifecycle }}
@@ -224,6 +213,11 @@ spec:
           configMap:
             name: create-atlas-read-keycloak-config-cm
             defaultMode: 0755
+      {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+        - name: sentry-dsn-read-config
+          configMap:
+            name: sentry-dsn-read-config
+      {{- end }}
         - name: atlas-read-init-script
           configMap:
             name: atlas-read-init-script

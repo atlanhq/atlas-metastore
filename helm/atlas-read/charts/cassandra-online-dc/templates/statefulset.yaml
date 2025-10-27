@@ -67,15 +67,6 @@ spec:
                 {{- end }}
           {{- else }}
           preferredDuringSchedulingIgnoredDuringExecution:
-          {{- if and .Values.multiarch (hasKey .Values.multiarch "enabled") (eq .Values.multiarch.enabled true) }}
-          - weight: 100
-            preference:
-              matchExpressions:
-                - key: kubernetes.io/arch
-                  operator: In
-                  values:
-                    - arm64
-          {{- end }}
             {{- toYaml .Values.affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
           {{- end }}
         podAntiAffinity:
@@ -95,19 +86,10 @@ spec:
             {{- toYaml .Values.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
         {{- end }}
 {{- end }}
-      {{- $multiarchEnabled := and .Values.multiarch (eq .Values.multiarch.enabled true) }}
-      {{- if or .Values.tolerations $multiarchEnabled }}
+{{- if .Values.tolerations }}
       tolerations:
-      {{- if .Values.tolerations }}
-      {{ toYaml .Values.tolerations | nindent 8 }}
-      {{- end }}
-      {{- if $multiarchEnabled }}
-        - key: "archtype"
-          operator: "Equal"
-          value: "arm64"
-          effect: "NoSchedule"
-      {{- end }}
-      {{- end }}
+{{ toYaml .Values.tolerations | indent 8 }}
+{{- end }}
 # {{- if .Values.configOverrides }}
 #       initContainers:
 #       - name: config-copier

@@ -129,6 +129,9 @@ data:
                         "all"
                     ]
                 },
+                "reqEntityGuid": {
+                    "type": "keyword"
+                },
                 "resType": {
                     "type": "keyword"
                 },

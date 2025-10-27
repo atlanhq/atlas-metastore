@@ -18,6 +18,7 @@ global:
     enabled: false
   esIsolation:
     enabled: false
+
 hpa:
   enabled: false
   name: atlas-read
@@ -34,7 +35,11 @@ albTenant: false
 podDisruptionBudget:
   enabled: true
   minAvailable: "1"
+otel:
+  enabled: false
+
 atlas:
+  maintenanceMode: false
   cache:
     enabled: false
   podAntiAffinity: true
@@ -57,6 +62,7 @@ atlas:
     janusgraph_tx_buffer_size: 8192
   keycloak:
     token_introspection: true
+    resource_pagination_size: 500
     introspection_cache: false
   indexsearch:
     enable_api_limit: false
@@ -64,25 +70,23 @@ atlas:
     enable_async: true
     request_timeout_in_secs: 60
     enable_janus_optimization: true
+    enable_request_isolation: false
     enable_janus_optimization_for_relationship: true
-    enable_janus_optimization_for_classifications: false
     enable_janus_optimization_extended: true
-    enable_janus_optimization_for_lineage: false
-  jg:
-    super_vertex_edge_count: 100000
-    super_vertex_edge_timeout: 30
   bulk:
     max_entities_allowed: 10000
     enable_janus_optimization: true
   lineage:
-    optimised_calculation: true
+    optimised_calculation: false
     enable_connection_lineage: false
   authorizer:
     enable_delta_based_refresh: true
     enable_abac: true
+    read_restriction_level: "scrub" # scrub, guid_only, full
   index:
     audit_index_field_limit: 10000
     audit_index_refresh_interval: 1s
+    search_write_hostname: "atlas-elasticsearch-master.atlas.svc.cluster.local"
   distributed_task:
     enabled: false
     cleanup_supported_asset_types: "Process,AirflowTask"
@@ -94,14 +98,15 @@ atlas:
 
   podAnnotations:
     backup.velero.io/backup-volumes-excludes: master
+    instrumentation.opentelemetry.io/inject-java: non-otel-instrumentation
 
   image:
     repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
     tag: ATLAS_LATEST_IMAGE_TAG
     pullPolicy: IfNotPresent
   imagePullSecrets: {}
-  tolerations: []
 
+  tolerations: []
   # Affinity rules for atlas
   affinity:
     nodeAffinity:
@@ -146,7 +151,7 @@ atlas:
         - curl -X GET http://localhost:21000/api/atlas/admin/killtheleader
 
   # Kubernetes ingress for atlas
-  # Primary ingress. all traffic is switched to secondary ingress.
+  # Primary ingress.
   ingress:
     enabled: false
     serviceName: atlas-read-ui-service
@@ -191,11 +196,7 @@ atlas:
     labels: {}
     ## Extra paths to prepend to every host configuration. This is useful when working with annotation based services.
     extraPaths: []
-    annotations:
-      kubernetes.io/ingress.class: "kong"
-      konghq.com/strip-path: "true"
-      konghq.com/preserve-host: "true"
-      konghq.com/plugins: keycloak-jwt, xss
+    annotations: {}
     tls: []
   # Secrets for SSl
     tlsSecrets:
@@ -225,17 +226,9 @@ atlas:
         - name: atlas-read-init-container-script
           mountPath: /scripts/atlas-init-container.sh
           subPath: atlas-init-container.sh
-      env:
-        - name: ATLAS_SERVICE_NAME
-          value: 'atlas'
-        - name: RANGER_SERVICE_URL
-          value: "http://ranger-service.ranger.svc.cluster.local:80/api/policy"
-        - name: RANGER_USERNAME
-          value: ''
-        - name: RANGER_PASSWORD
-          value: ''
-        - name: KEYCLOAK_ADDRESS
-          value: 'http://keycloak-http.keycloak.svc.cluster.local/auth'
+      envFrom:
+          - secretRef:
+              name: atlas-init-secret
       command:
       - /scripts/atlas-init-container.sh
 
@@ -299,7 +292,6 @@ atlas:
       value: "atlas"
     - name: ATLAS_USE_LEGACY_SEARCH
       value: "false"
-
 
   # We are using these in configmap for atlas-keycloak
   secrets:
@@ -374,17 +366,17 @@ cassandra:
       memory: 5Gi
       #cpu: 2000m
 
-  # Config for cassandra
-
   max_heap_size: 2048M
   heap_new_size: 512M
 
+  # Config for cassandra
   config:
     cluster_domain: cluster.local
     cluster_name: cassandra
     cluster_size: 3
     seed_size: 3
     start_rpc: true
+
     ports:
       cql: 9042
 
@@ -420,8 +412,8 @@ cassandra:
         release: "prometheus-operator"
       # prometheus: default
     image:
-      repo: ghcr.io/atlanhq/cassandra_exporter
-      tag: 2.0.2
+      repo: ghcr.io/atlanhq/cassandra-exporter-atlan-v2
+      tag: 2.0.2-multiarch
     jvmOpts: ""
     resources:
       limits:
@@ -437,12 +429,12 @@ cassandra:
     enabled: false
     schedule:
     - keyspace: atlas
-      cron: "0 3 * * *"
+      cron: "0 6 * * *"
     annotations:
       iam.amazonaws.com/role: ""
     image:
-      repository: ghcr.io/atlanhq/cain
-      tag: 0.6.0
+      repository: ghcr.io/atlanhq/cain-atlan-v2
+      tag: 0.6.1-multiarch
     # Name of the secret containing the credentials of the service account used by GOOGLE_APPLICATION_CREDENTIALS, as a credentials.json file
     extraArgs:
       - -c
@@ -460,3 +452,4 @@ cassandra:
         memory: 1Gi
         #cpu: 1
     destination: ""
+

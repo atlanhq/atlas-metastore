@@ -82,10 +82,8 @@ service:
 #     # agent: 61621
 
 # Config for cassandra
-
 max_heap_size: 2048M
 heap_new_size: 512M
-
 config:
   cluster_domain: cluster.local
   cluster_name: cassandra
@@ -97,7 +95,6 @@ config:
   start_rpc: true
   ports:
     cql: 9042
-
 
 ## Cassandra config files overrides
 configOverrides: {}
@@ -185,7 +182,7 @@ securityContext:
 # PriorityClassName
 priorityClassName: ""
 
-
+# podAntiAffinity: false
 antiAffinity: "hard"
 
 custom_deployment:
@@ -318,8 +315,7 @@ extraVolumes:
     configMap:
       name: cassandra-online-dc-config
   - name: pre-install
-    emptyDir: {}
-    
+    emptyDir: {}     
 extraVolumeMounts:
   - name: varlog
     mountPath: /var/log/cassandra/
@@ -343,6 +339,7 @@ extraContainers:
     volumeMounts:
     - name: varlog
       mountPath: /var/log/cassandra/
+
 janusgraph:
   atomic_mutation: true
   cassandra_batch_size_warn_threshold_in_kb: 4096
