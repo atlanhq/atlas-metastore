@@ -7,11 +7,14 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.janusgraph.diskstorage.Backend;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.BaseTransaction;
+import org.janusgraph.diskstorage.StandardIndexProvider;
 import org.janusgraph.diskstorage.configuration.Configuration;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
+import org.janusgraph.diskstorage.indexing.IndexProvider;
 import org.janusgraph.diskstorage.util.StandardBaseTransactionConfig;
 import org.janusgraph.diskstorage.indexing.IndexEntry;
 import org.janusgraph.diskstorage.indexing.IndexMutation;
@@ -26,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import javax.annotation.PostConstruct;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.HashMap;
@@ -49,39 +53,26 @@ public class DLQReplayService {
     private final String dlqTopic="ATLAS_ES_DLQ";
     @Value("${atlas.kafka.dlq.consumerGroupId:atlas_dq_replay_group}")
     private final String consumerGroupId= "atlas_dq_replay_group";
-    private volatile ElasticSearchIndex esIndex;
+    private final ElasticSearchIndex esIndex;
     private final ObjectMapper mapper = new ObjectMapper();
-    private final Configuration elasticsearchConfig;
-
     private volatile KafkaConsumer<String, String> consumer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private final AtomicInteger processedCount = new AtomicInteger(0);
     private final AtomicInteger errorCount = new AtomicInteger(0);
 
-    public DLQReplayService(AtlasJanusGraph graph) {
+    public DLQReplayService(AtlasJanusGraph graph) throws BackendException {
         // Extract ES configuration from existing graph
         GraphDatabaseConfiguration graphConfig = ((StandardJanusGraph)graph.getGraph()).getConfiguration();
         Configuration fullConfig = graphConfig.getConfiguration();
-
-        // Store the config for lazy initialization
-        this.elasticsearchConfig = fullConfig.restrictTo("elasticsearch");
-    }
-
-    private synchronized void initializeElasticsearch() throws BackendException {
-        if (esIndex == null) {
-            try {
-                this.esIndex = new ElasticSearchIndex(elasticsearchConfig);
-                log.info("Successfully initialized Elasticsearch connection");
-            } catch (Exception e) {
-                log.error("Failed to initialize Elasticsearch connection", e);
-                throw e;
-            }
-        }
+        IndexProvider indexProvider = Backend.getImplementationClass(fullConfig.restrictTo("search"), fullConfig.get(GraphDatabaseConfiguration.INDEX_BACKEND,"search"),
+                StandardIndexProvider.getAllProviderClasses());
+        esIndex = (ElasticSearchIndex) indexProvider;
     }
 
     /**
      * Start replaying DLQ messages
      */
+    @PostConstruct
     public synchronized void startReplay() {
         if (isRunning.get()) {
             log.warn("DLQ replay is already running");
@@ -185,11 +176,6 @@ public class DLQReplayService {
      * Replay a single DLQ entry
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
-        // Initialize Elasticsearch if not already done
-        if (esIndex == null) {
-            initializeElasticsearch();
-        }
-
         DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
 
         log.debug("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
