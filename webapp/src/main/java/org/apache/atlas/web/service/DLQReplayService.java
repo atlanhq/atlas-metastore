@@ -54,14 +54,14 @@ public class DLQReplayService {
 
     private String bootstrapServers;
     @Value("${atlas.kafka.dlq.topic:ATLAS_ES_DLQ}")
-
     private final String dlqTopic="ATLAS_ES_DLQ";
-    @Value("${atlas.kafka.dlq.consumerGroupId:atlas_dq_replay_group}")
 
+    @Value("${atlas.kafka.dlq.consumerGroupId:atlas_dq_replay_group}")
     private final String consumerGroupId= "atlas_dq_replay_group";
+
     private final ElasticSearchIndex esIndex;
     private final ObjectMapper mapper;
-    
+
     private ObjectMapper configureMapper() {
         ObjectMapper mapper = new ObjectMapper();
         // Configure to handle property name differences
@@ -72,40 +72,41 @@ public class DLQReplayService {
             @Override
             public SerializableIndexMutation deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
                 JsonNode node = p.getCodec().readTree(p);
-                
+
                 // Handle both "new" and "isNew" fields
-                boolean isNew = node.has("new") ? node.get("new").asBoolean() : 
-                              node.has("isNew") ? node.get("isNew").asBoolean() : false;
-                
+                boolean isNew = node.has("new") ? node.get("new").asBoolean() :
+                        node.has("isNew") ? node.get("isNew").asBoolean() : false;
+
                 boolean isDeleted = node.has("isDeleted") ? node.get("isDeleted").asBoolean() : false;
-                
+
                 List<SerializableIndexMutation.SerializableIndexEntry> additions = new ArrayList<>();
                 List<SerializableIndexMutation.SerializableIndexEntry> deletions = new ArrayList<>();
-                
+
                 if (node.has("additions") && node.get("additions").isArray()) {
                     for (JsonNode entry : node.get("additions")) {
                         additions.add(new SerializableIndexMutation.SerializableIndexEntry(
-                            entry.get("field").asText(),
-                            mapper.treeToValue(entry.get("value"), Object.class)
+                                entry.get("field").asText(),
+                                mapper.treeToValue(entry.get("value"), Object.class)
                         ));
                     }
                 }
-                
+
                 if (node.has("deletions") && node.get("deletions").isArray()) {
                     for (JsonNode entry : node.get("deletions")) {
                         deletions.add(new SerializableIndexMutation.SerializableIndexEntry(
-                            entry.get("field").asText(),
-                            mapper.treeToValue(entry.get("value"), Object.class)
+                                entry.get("field").asText(),
+                                mapper.treeToValue(entry.get("value"), Object.class)
                         ));
                     }
                 }
-                
+
                 return new SerializableIndexMutation(isNew, isDeleted, additions, deletions);
             }
         });
         mapper.registerModule(module);
         return mapper;
     }
+
     private volatile KafkaConsumer<String, String> consumer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private final AtomicInteger processedCount = new AtomicInteger(0);
@@ -141,43 +142,44 @@ public class DLQReplayService {
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"); // Start from beginning
-        // Use reasonable batch size and timeouts
-        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "5");
-        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "300000"); // 5 minutes
-        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "30000"); // 30 seconds
-        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "3000"); // 3 seconds
+
+        // Optimized settings for long-running message processing with pause/resume pattern
+        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "1"); // Process one at a time
+        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "600000"); // 10 minutes - safety net
+        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "90000"); // 90 seconds
+        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "30000"); // 30 seconds
 
         consumer = new KafkaConsumer<>(consumerProps);
         consumer.subscribe(Collections.singletonList(dlqTopic), new ConsumerRebalanceListener() {
             @Override
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-                log.warn("Consumer group partitions revoked. This might indicate processing is too slow. Partitions: {}", partitions);
+                log.warn("Consumer group partitions revoked. Partitions: {}", partitions);
             }
 
-                @Override
-                public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-                    log.info("Consumer group partitions assigned: {}", partitions);
-                    
-                    // Log offset information for each partition
-                    for (TopicPartition partition : partitions) {
-                        try {
-                            long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
-                            long committedOffset = -1;
-                            OffsetAndMetadata committed = consumer.committed(Collections.singleton(partition)).get(partition);
-                            if (committed != null) {
-                                committedOffset = committed.offset();
-                            }
-                            long position = consumer.position(partition);
-                            
-                            log.info("Partition {} - End offset: {}, Committed offset: {}, Current position: {}, " +
-                                   "Messages available: {}", 
-                                   partition, endOffset, committedOffset, position,
-                                   endOffset - position);
-                        } catch (Exception e) {
-                            log.error("Error checking offsets for partition: " + partition, e);
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                log.info("Consumer group partitions assigned: {}", partitions);
+
+                // Log offset information for each partition
+                for (TopicPartition partition : partitions) {
+                    try {
+                        long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
+                        long committedOffset = -1;
+                        OffsetAndMetadata committed = consumer.committed(Collections.singleton(partition)).get(partition);
+                        if (committed != null) {
+                            committedOffset = committed.offset();
                         }
+                        long position = consumer.position(partition);
+
+                        log.info("Partition {} - End offset: {}, Committed offset: {}, Current position: {}, " +
+                                        "Messages available: {}",
+                                partition, endOffset, committedOffset, position,
+                                endOffset - position);
+                    } catch (Exception e) {
+                        log.error("Error checking offsets for partition: " + partition, e);
                     }
                 }
+            }
         });
 
         isRunning.set(true);
@@ -212,36 +214,13 @@ public class DLQReplayService {
     }
 
     /**
-     * Process messages from the DLQ topic
+     * Process messages from the DLQ topic using pause/resume pattern
      */
     private void processMessages() {
         log.info("DLQ replay thread started, polling for messages...");
-        long lastPollTime = System.currentTimeMillis();
-        long lastCommitTime = System.currentTimeMillis();
-        int processedInBatch = 0;
 
         while (isRunning.get()) {
             try {
-                long now = System.currentTimeMillis();
-                long timeSinceLastPoll = now - lastPollTime;
-                
-                // If we're taking too long between polls, log a warning
-                if (timeSinceLastPoll > 60000) { // 1 minute
-                    log.warn("Long delay between polls: {}ms. This could lead to consumer group removal.", 
-                            timeSinceLastPoll);
-                }
-                
-                // Commit any pending offsets if we haven't in a while
-                if (now - lastCommitTime > 30000) { // 30 seconds
-                    try {
-                        consumer.commitSync();
-                        lastCommitTime = now;
-                        log.debug("Committed offsets after timeout");
-                    } catch (Exception e) {
-                        log.error("Failed to commit offsets", e);
-                    }
-                }
-
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(5));
 
                 if (records.isEmpty()) {
@@ -251,10 +230,10 @@ public class DLQReplayService {
                             long currentPosition = consumer.position(partition);
                             long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
                             if (currentPosition >= endOffset) {
-                                log.info("No messages available - Partition {} at end (Position: {}, End: {})", 
+                                log.debug("No messages available - Partition {} at end (Position: {}, End: {})",
                                         partition, currentPosition, endOffset);
                             } else {
-                                log.info("No messages returned despite availability - Partition {} (Position: {}, End: {}, Available: {})", 
+                                log.info("No messages returned despite availability - Partition {} (Position: {}, End: {}, Available: {})",
                                         partition, currentPosition, endOffset, endOffset - currentPosition);
                             }
                         } catch (Exception e) {
@@ -266,56 +245,63 @@ public class DLQReplayService {
 
                 log.info("Received {} DLQ messages to replay", records.count());
 
-                for (ConsumerRecord<String, String> record : records) {
-                    try {
-                        replayDLQEntry(record.value());
-                        
-                        // Track processing time and commit more frequently
-                        processedInBatch++;
-                        processedCount.incrementAndGet();
-                        
-                        // Commit every 2 messages or if it's been too long
-                        if (processedInBatch >= 2 || (now - lastCommitTime > 30000)) {
-                            consumer.commitSync();
-                            lastCommitTime = now;
-                            processedInBatch = 0;
-                            log.debug("Committed offset after batch or timeout");
+                // PAUSE consumption immediately to prevent timeout during processing
+                Set<TopicPartition> pausedPartitions = consumer.assignment();
+                consumer.pause(pausedPartitions);
+                log.info("Paused consumption on partitions: {} to process messages", pausedPartitions);
+
+                try {
+                    // Now process without time pressure - heartbeats continue automatically
+                    for (ConsumerRecord<String, String> record : records) {
+                        try {
+                            log.info("Processing DLQ entry at offset: {} from partition: {}",
+                                    record.offset(), record.partition());
+
+                            long processingStartTime = System.currentTimeMillis();
+                            replayDLQEntry(record.value());
+                            long processingTime = System.currentTimeMillis() - processingStartTime;
+
+                            processedCount.incrementAndGet();
+
+                            // Commit after each successful message
+                            Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
+                                    new TopicPartition(record.topic(), record.partition()),
+                                    new OffsetAndMetadata(record.offset() + 1)
+                            );
+                            consumer.commitSync(offsets);
+
+                            log.info("Successfully replayed DLQ entry (offset: {}, partition: {}) in {}ms",
+                                    record.offset(), record.partition(), processingTime);
+
+                        } catch (Exception e) {
+                            errorCount.incrementAndGet();
+                            log.error("Failed to replay DLQ entry (offset: {}, partition: {}). Stopping batch processing.",
+                                    record.offset(), record.partition(), e);
+                            // Don't commit - message will be reprocessed next time
+                            break; // Stop processing this batch to retry later
                         }
-                        
-                        lastPollTime = System.currentTimeMillis(); // Reset poll timer after successful processing
-                        log.info("Successfully replayed DLQ entry (offset: {})", record.offset());
-
-                    } catch (Exception e) {
-                        errorCount.incrementAndGet();
-                        log.error("Failed to replay DLQ entry (offset: {}), will retry later",
-                                record.offset(), e);
-
-                        // Don't commit - message will be reprocessed
-                        break; // Stop processing this batch to retry later
                     }
+                } finally {
+                    // RESUME consumption - always do this even if processing failed
+                    consumer.resume(pausedPartitions);
+                    log.info("Resumed consumption on partitions: {}", pausedPartitions);
                 }
 
             } catch (Exception e) {
-                log.error("Error in DLQ replay processing. Consumer might be removed from group due to slow processing", e);
+                log.error("Error in DLQ replay processing loop", e);
                 try {
-                    // Give more time for recovery
-                    Thread.sleep(30000); // 30 seconds before retrying
-                    
-                    // Try to rejoin the consumer group
-                    consumer.enforceRebalance();
-                    log.info("Enforced consumer group rebalance after error");
+                    // Back off before retry
+                    Thread.sleep(10000); // 10 seconds
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception re) {
-                    log.error("Failed to recover consumer after error", re);
-                    stopReplay(); // Stop processing if we can't recover
+                    log.warn("DLQ replay thread interrupted during error recovery");
                     break;
                 }
             }
         }
 
-        log.info("DLQ replay thread finished");
+        log.info("DLQ replay thread finished. Total processed: {}, Total errors: {}",
+                processedCount.get(), errorCount.get());
     }
 
     /**
@@ -324,7 +310,7 @@ public class DLQReplayService {
     private void replayDLQEntry(String dlqJson) throws Exception {
         long startTime = System.currentTimeMillis();
         long memoryBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-        
+
         try {
             DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
             log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
@@ -366,7 +352,11 @@ public class DLQReplayService {
             } catch (Exception e) {
                 log.warn("Error replaying mutation for index: {}, rolling back transaction",
                         entry.getIndexName(), e);
-                replayTx.rollback();
+                try {
+                    replayTx.rollback();
+                } catch (Exception rollbackException) {
+                    log.error("Failed to rollback transaction for index: {}", entry.getIndexName(), rollbackException);
+                }
                 throw new Exception("Failed to replay mutation for index: " + entry.getIndexName(), e);
             }
         } catch (IOException e) {
