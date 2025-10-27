@@ -20,6 +20,18 @@ public class DLQAdminController {
     @Autowired
     private DLQReplayService dlqReplayService;
 
+    @POST
+    @Path("/replay/start")
+    public void startReplay() {
+        dlqReplayService.startReplay();
+    }
+
+    @POST
+    @Path("/replay/stop")
+    public void stopReplay() {
+        dlqReplayService.stopReplay();
+    }
+
     @GET
     @Path("/replay/status")
     public Map<String, Object> getStatus() {

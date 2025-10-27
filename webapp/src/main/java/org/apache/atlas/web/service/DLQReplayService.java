@@ -8,6 +8,8 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.janusgraph.diskstorage.Backend;
 import org.janusgraph.diskstorage.BackendException;
@@ -33,10 +35,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import java.time.Duration;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.Map;
-import java.util.Properties;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -92,10 +91,25 @@ public class DLQReplayService {
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"); // Start from beginning
-        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, 10); // Process in small batches
+        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "5"); // Process in smaller batches
+        
+        // Increase timeouts to handle slower processing
+        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "300000"); // 5 minutes
+        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "60000"); // 1 minute
+        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "10000"); // 10 seconds
 
         consumer = new KafkaConsumer<>(consumerProps);
-        consumer.subscribe(Collections.singletonList(dlqTopic));
+        consumer.subscribe(Collections.singletonList(dlqTopic), new ConsumerRebalanceListener() {
+            @Override
+            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+                log.warn("Consumer group partitions revoked. This might indicate processing is too slow. Partitions: {}", partitions);
+            }
+
+            @Override
+            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                log.info("Consumer group partitions assigned: {}", partitions);
+            }
+        });
 
         isRunning.set(true);
 
@@ -163,11 +177,20 @@ public class DLQReplayService {
                 }
 
             } catch (Exception e) {
-                log.error("Error in DLQ replay processing", e);
+                log.error("Error in DLQ replay processing. Consumer might be removed from group due to slow processing", e);
                 try {
-                    Thread.sleep(5000); // Wait before retrying
+                    // Give more time for recovery
+                    Thread.sleep(30000); // 30 seconds before retrying
+                    
+                    // Try to rejoin the consumer group
+                    consumer.enforceRebalance();
+                    log.info("Enforced consumer group rebalance after error");
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
+                    break;
+                } catch (Exception re) {
+                    log.error("Failed to recover consumer after error", re);
+                    stopReplay(); // Stop processing if we can't recover
                     break;
                 }
             }
