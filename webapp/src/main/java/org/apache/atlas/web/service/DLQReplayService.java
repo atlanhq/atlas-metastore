@@ -1,6 +1,8 @@
 package org.apache.atlas.web.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasException;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -47,11 +49,12 @@ public class DLQReplayService {
 
     private static final Logger log = LoggerFactory.getLogger(DLQReplayService.class);
 
-    @Value("${atlas.kafka.bootstrap.servers:localhost:9092}")
-    private final String bootstrapServers = "localhost:9092";
+    private String bootstrapServers;
     @Value("${atlas.kafka.dlq.topic:ATLAS_ES_DLQ}")
+
     private final String dlqTopic="ATLAS_ES_DLQ";
     @Value("${atlas.kafka.dlq.consumerGroupId:atlas_dq_replay_group}")
+
     private final String consumerGroupId= "atlas_dq_replay_group";
     private final ElasticSearchIndex esIndex;
     private final ObjectMapper mapper = new ObjectMapper();
@@ -60,9 +63,10 @@ public class DLQReplayService {
     private final AtomicInteger processedCount = new AtomicInteger(0);
     private final AtomicInteger errorCount = new AtomicInteger(0);
 
-    public DLQReplayService(AtlasJanusGraph graph) throws BackendException {
+    public DLQReplayService(AtlasJanusGraph graph) throws BackendException, AtlasException {
         // Extract ES configuration from existing graph
         GraphDatabaseConfiguration graphConfig = ((StandardJanusGraph)graph.getGraph()).getConfiguration();
+        this.bootstrapServers = ApplicationProperties.get().getString("atlas.graph.kafka.bootstrap.servers");
         Configuration fullConfig = graphConfig.getConfiguration();
         IndexProvider indexProvider = Backend.getImplementationClass(fullConfig.restrictTo("search"), fullConfig.get(GraphDatabaseConfiguration.INDEX_BACKEND,"search"),
                 StandardIndexProvider.getAllProviderClasses());
