@@ -141,16 +141,11 @@ public class DLQReplayService {
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"); // Start from beginning
-        // Process only 2 records at a time since processing is slow
-        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "2");
-        
-        // Significantly increase timeouts to handle very slow processing
-        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "900000"); // 15 minutes
-        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "300000"); // 5 minutes
-        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "10000"); // 10 seconds
-        
-        // Add backoff between polls to give more processing time
-        consumerProps.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "5000"); // Wait up to 5 seconds for messages
+        // Use reasonable batch size and timeouts
+        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "5");
+        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "300000"); // 5 minutes
+        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "30000"); // 30 seconds
+        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "3000"); // 3 seconds
 
         consumer = new KafkaConsumer<>(consumerProps);
         consumer.subscribe(Collections.singletonList(dlqTopic), new ConsumerRebalanceListener() {
@@ -221,22 +216,33 @@ public class DLQReplayService {
      */
     private void processMessages() {
         log.info("DLQ replay thread started, polling for messages...");
+        long lastPollTime = System.currentTimeMillis();
+        long lastCommitTime = System.currentTimeMillis();
+        int processedInBatch = 0;
 
         while (isRunning.get()) {
             try {
-                // Log current position before poll
-                for (TopicPartition partition : consumer.assignment()) {
+                long now = System.currentTimeMillis();
+                long timeSinceLastPoll = now - lastPollTime;
+                
+                // If we're taking too long between polls, log a warning
+                if (timeSinceLastPoll > 60000) { // 1 minute
+                    log.warn("Long delay between polls: {}ms. This could lead to consumer group removal.", 
+                            timeSinceLastPoll);
+                }
+                
+                // Commit any pending offsets if we haven't in a while
+                if (now - lastCommitTime > 30000) { // 30 seconds
                     try {
-                        long currentPosition = consumer.position(partition);
-                        long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
-                        log.debug("Before poll - Partition: {}, Position: {}, End Offset: {}, Available: {}", 
-                                partition, currentPosition, endOffset, endOffset - currentPosition);
+                        consumer.commitSync();
+                        lastCommitTime = now;
+                        log.debug("Committed offsets after timeout");
                     } catch (Exception e) {
-                        log.error("Error checking position before poll", e);
+                        log.error("Failed to commit offsets", e);
                     }
                 }
 
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(30));
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(5));
 
                 if (records.isEmpty()) {
                     // Log why we got no records
@@ -263,9 +269,20 @@ public class DLQReplayService {
                 for (ConsumerRecord<String, String> record : records) {
                     try {
                         replayDLQEntry(record.value());
-                        consumer.commitSync(); // Commit only after successful replay
+                        
+                        // Track processing time and commit more frequently
+                        processedInBatch++;
                         processedCount.incrementAndGet();
-
+                        
+                        // Commit every 2 messages or if it's been too long
+                        if (processedInBatch >= 2 || (now - lastCommitTime > 30000)) {
+                            consumer.commitSync();
+                            lastCommitTime = now;
+                            processedInBatch = 0;
+                            log.debug("Committed offset after batch or timeout");
+                        }
+                        
+                        lastPollTime = System.currentTimeMillis(); // Reset poll timer after successful processing
                         log.info("Successfully replayed DLQ entry (offset: {})", record.offset());
 
                     } catch (Exception e) {
@@ -306,43 +323,55 @@ public class DLQReplayService {
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
         long startTime = System.currentTimeMillis();
-        DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
-        log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
-
-        // Reconstruct mutations from serialized form
-        log.info("Starting mutation reconstruction for index: {}", entry.getIndexName());
-        Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry);
-        log.info("Completed mutation reconstruction in {}ms", System.currentTimeMillis() - startTime);
-
-        // Create key information retriever
-        log.info("Creating key information retriever for index: {}", entry.getIndexName());
-        KeyInformation.IndexRetriever keyInfo = createKeyInfoRetriever(entry);
-
-        // Create a new transaction for replay
-        log.info("Beginning transaction for index: {}", entry.getIndexName());
-        BaseTransaction replayTx = esIndex.beginTransaction(
-                new StandardBaseTransactionConfig.Builder().commitTime(Instant.now()).build()
-        );
-
+        long memoryBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+        
         try {
-            // This is the same method that originally failed - now we're replaying it!
-            log.info("Starting ES mutation for index: {}", entry.getIndexName());
-            long mutateStartTime = System.currentTimeMillis();
-            esIndex.mutate(mutations, keyInfo, replayTx);
-            log.info("ES mutation completed in {}ms, committing transaction", System.currentTimeMillis() - mutateStartTime);
-            
-            long commitStartTime = System.currentTimeMillis();
-            replayTx.commit();
-            log.info("Transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
+            DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
+            log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
 
-            log.info("Successfully replayed mutation for index: {}. Total time: {}ms", 
-                    entry.getIndexName(), System.currentTimeMillis() - startTime);
+            // Reconstruct mutations from serialized form
+            log.info("Starting mutation reconstruction for index: {}", entry.getIndexName());
+            Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry);
+            log.info("Completed mutation reconstruction in {}ms", System.currentTimeMillis() - startTime);
 
-        } catch (Exception e) {
-            log.warn("Error replaying mutation for index: {}, rolling back transaction",
-                    entry.getIndexName(), e);
-            replayTx.rollback();
-            throw new Exception("Failed to replay mutation for index: " + entry.getIndexName(), e);
+            // Create key information retriever
+            log.info("Creating key information retriever for index: {}", entry.getIndexName());
+            KeyInformation.IndexRetriever keyInfo = createKeyInfoRetriever(entry);
+
+            // Create a new transaction for replay
+            log.info("Beginning transaction for index: {}", entry.getIndexName());
+            BaseTransaction replayTx = esIndex.beginTransaction(
+                    new StandardBaseTransactionConfig.Builder().commitTime(Instant.now()).build()
+            );
+
+            try {
+                // This is the same method that originally failed - now we're replaying it!
+                log.info("Starting ES mutation for index: {}", entry.getIndexName());
+                long mutateStartTime = System.currentTimeMillis();
+                esIndex.mutate(mutations, keyInfo, replayTx);
+                log.info("ES mutation completed in {}ms, committing transaction", System.currentTimeMillis() - mutateStartTime);
+
+                long commitStartTime = System.currentTimeMillis();
+                replayTx.commit();
+                log.info("Transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
+
+                long memoryAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
+                long memoryUsed = memoryAfter - memoryBefore;
+                long totalTime = System.currentTimeMillis() - startTime;
+
+                log.info("Successfully replayed mutation for index: {}. Total time: {}ms, Memory used: {}MB, Current heap usage: {}MB",
+                        entry.getIndexName(), totalTime, memoryUsed / (1024 * 1024),
+                        (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024));
+
+            } catch (Exception e) {
+                log.warn("Error replaying mutation for index: {}, rolling back transaction",
+                        entry.getIndexName(), e);
+                replayTx.rollback();
+                throw new Exception("Failed to replay mutation for index: " + entry.getIndexName(), e);
+            }
+        } catch (IOException e) {
+            log.error("Failed to deserialize DLQ entry JSON", e);
+            throw e;
         }
     }
 
