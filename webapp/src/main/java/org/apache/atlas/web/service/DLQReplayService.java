@@ -49,23 +49,34 @@ public class DLQReplayService {
     private final String dlqTopic="ATLAS_ES_DLQ";
     @Value("${atlas.kafka.dlq.consumerGroupId:atlas_dq_replay_group}")
     private final String consumerGroupId= "atlas_dq_replay_group";
-    private ElasticSearchIndex esIndex;
-    private final ObjectMapper mapper;
+    private volatile ElasticSearchIndex esIndex;
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final Configuration elasticsearchConfig;
 
     private volatile KafkaConsumer<String, String> consumer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private final AtomicInteger processedCount = new AtomicInteger(0);
     private final AtomicInteger errorCount = new AtomicInteger(0);
 
-    public DLQReplayService(AtlasJanusGraph graph) throws BackendException {
+    public DLQReplayService(AtlasJanusGraph graph) {
         // Extract ES configuration from existing graph
         GraphDatabaseConfiguration graphConfig = ((StandardJanusGraph)graph.getGraph()).getConfiguration();
         Configuration fullConfig = graphConfig.getConfiguration();
 
-        // Restrict to the index namespace
-        Configuration indexConfig = fullConfig.restrictTo("elasticsearch");
-        this.esIndex = new ElasticSearchIndex(indexConfig);
-        this.mapper = new ObjectMapper();
+        // Store the config for lazy initialization
+        this.elasticsearchConfig = fullConfig.restrictTo("elasticsearch");
+    }
+
+    private synchronized void initializeElasticsearch() throws BackendException {
+        if (esIndex == null) {
+            try {
+                this.esIndex = new ElasticSearchIndex(elasticsearchConfig);
+                log.info("Successfully initialized Elasticsearch connection");
+            } catch (Exception e) {
+                log.error("Failed to initialize Elasticsearch connection", e);
+                throw e;
+            }
+        }
     }
 
     /**
@@ -174,6 +185,11 @@ public class DLQReplayService {
      * Replay a single DLQ entry
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
+        // Initialize Elasticsearch if not already done
+        if (esIndex == null) {
+            initializeElasticsearch();
+        }
+
         DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
 
         log.debug("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
