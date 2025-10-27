@@ -22,8 +22,11 @@ spec:
     spec:
       template:
         spec:
-          {{- if or (and .Values.multiarch (eq .Values.multiarch.enabled true)) .Values.atlas.tolerations }}
           tolerations:
+          - key: "kubernetes.azure.com/scalesetpriority"
+            operator: "Equal"
+            value: "spot"
+            effect: "NoSchedule"
           {{- if and .Values.multiarch (eq .Values.multiarch.enabled true) }}
           - key: "archtype"
             operator: "Equal"
@@ -32,7 +35,6 @@ spec:
           {{- end }}
           {{- if .Values.atlas.tolerations }}
           {{ toYaml .Values.atlas.tolerations | nindent 10 }}
-          {{- end }}
           {{- end }}
           {{- with .Values.atlas.nodeSelector }}
           nodeSelector:

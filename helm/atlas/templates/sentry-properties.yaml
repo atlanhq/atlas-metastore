@@ -1,0 +1,25 @@
+{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sentry-dsn-config
+  namespace: atlas
+  labels:
+    app: {{ template "name" . }}
+    chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+data:
+  sentry.properties: |
+    {{- if .Values.multitenant }}
+    {{- if eq .Values.atlas.Deployment_Type "Development" }}
+    dsn={{ .Values.atlas.secrets.SENTRY_DSN_DEV }}
+    {{- else }}
+    dsn={{ .Values.atlas.secrets.SENTRY_DSN_PROD }}
+    {{- end }}
+    {{- else }}
+    dsn={{ .Values.atlas.secrets.SENTRY_DSN_SECRET }}
+    {{- end }}
+    tags=Instance:{{ .Values.atlas.secrets.INSTANCE_NAME }}
+    sample_rate={{ .Values.atlas.sentry.sampleRate }}
+{{- end }}

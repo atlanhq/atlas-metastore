@@ -9,9 +9,15 @@ metadata:
     chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
+{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
+    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
+{{- else }}
   annotations:
     configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,rate-limit-nginx-config"
     secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
+{{- end }}
 spec:
   selector:
     matchLabels:
@@ -75,13 +81,13 @@ spec:
       containers:
         - name: {{ .Chart.Name }}-main
           command: [
-                    "/bin/bash",
-                    "-c",
-                    "/create-atlas-keycloak-config.sh;
-                      /env_change.sh;
-                      /opt/apache-atlas/bin/atlas_start.py;
-                      tail -F /opt/apache-atlas/logs/*.log;"
-                    ]
+            "/bin/bash",
+            "-c",
+            "/create-atlas-keycloak-config.sh;
+            /env_change.sh;
+            /opt/apache-atlas/bin/atlas_start.py;
+            tail -F /opt/apache-atlas/logs/*.log;"
+          ]
           image: "{{ .Values.atlas.image.repository }}:{{ .Values.atlas.image.tag }}"
           imagePullPolicy: {{ .Values.atlas.image.pullPolicy }}
           ports:
@@ -117,22 +123,22 @@ spec:
               value: http://$(HOST_IP):4317
             - name: OTEL_RESOURCE_ATTRIBUTES
               value: >-
-                k8s.pod.name=$(K8S_POD_NAME),k8s.container.image={{ .Values.atlas.image.repository }}:{{ .Values.atlas.image.tag }},k8s.pod.uid=$(POD_UID),k8s.node.name=$(K8S_NODE_NAME),k8s.namespace.name=$(Namespace),k8s.log.type=service-logs
+                k8s.pod.name=$(K8S_POD_NAME),k8s.pod.uid=$(POD_UID),k8s.node.name=$(K8S_NODE_NAME),k8s.namespace.name=$(Namespace),k8s.log.type=service-logs
           {{- toYaml .Values.atlas.env | nindent 12 }}
           {{- if eq .Values.albTenant true }}
             - name: ALB_ENABLED
               value: "true"
           {{- end }}
           envFrom:
-          - secretRef:
-              name: atlas-keycloak-config
+            - secretRef:
+                name: atlas-keycloak-config
           {{- if .Values.multitenant }}
-          - secretRef:
-              name: atlas-secret-manager
-          - secretRef:
-              name: atlas-secret-parameter-store
-          - secretRef:
-              name: instance-domain-name
+            - secretRef:
+                name: atlas-secret-manager
+            - secretRef:
+                name: atlas-secret-parameter-store
+            - secretRef:
+                name: instance-domain-name
           {{- end }}
           resources:
           {{- $tierType := .Values.global.Tier_Type | default "" }}
@@ -155,6 +161,11 @@ spec:
             - name: create-atlas-keycloak-config
               mountPath: /create-atlas-keycloak-config.sh
               subPath: create-atlas-keycloak-config.sh
+          {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+            - name: sentry-dsn-config
+              mountPath: /opt/apache-atlas/conf/sentry.properties
+              subPath: sentry.properties
+          {{- end}}
             - name: atlas-logs
               mountPath: /opt/apache-atlas/logs
           {{- if .Values.atlas.lifecycle }}
@@ -224,6 +235,11 @@ spec:
           configMap:
             name: create-atlas-keycloak-config-cm
             defaultMode: 0755
+      {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+        - name: sentry-dsn-config
+          configMap:
+            name: sentry-dsn-config
+      {{- end }}
         - name: atlas-init-script
           configMap:
             name: atlas-init-script
