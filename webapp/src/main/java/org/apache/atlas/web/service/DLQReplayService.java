@@ -1,15 +1,18 @@
 package org.apache.atlas.web.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import com.fasterxml.jackson.databind.JsonDeserializer;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.core.JsonParser;
+import java.io.IOException;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
-import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.janusgraph.diskstorage.Backend;
 import org.janusgraph.diskstorage.BackendException;
@@ -35,6 +38,7 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -56,13 +60,59 @@ public class DLQReplayService {
 
     private final String consumerGroupId= "atlas_dq_replay_group";
     private final ElasticSearchIndex esIndex;
-    private final ObjectMapper mapper = new ObjectMapper();
+    private final ObjectMapper mapper;
+    
+    private ObjectMapper configureMapper() {
+        ObjectMapper mapper = new ObjectMapper();
+        // Configure to handle property name differences
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+        // Add custom deserializer for SerializableIndexMutation
+        SimpleModule module = new SimpleModule();
+        module.addDeserializer(SerializableIndexMutation.class, new JsonDeserializer<SerializableIndexMutation>() {
+            @Override
+            public SerializableIndexMutation deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+                JsonNode node = p.getCodec().readTree(p);
+                
+                // Handle both "new" and "isNew" fields
+                boolean isNew = node.has("new") ? node.get("new").asBoolean() : 
+                              node.has("isNew") ? node.get("isNew").asBoolean() : false;
+                
+                boolean isDeleted = node.has("isDeleted") ? node.get("isDeleted").asBoolean() : false;
+                
+                List<SerializableIndexMutation.SerializableIndexEntry> additions = new ArrayList<>();
+                List<SerializableIndexMutation.SerializableIndexEntry> deletions = new ArrayList<>();
+                
+                if (node.has("additions") && node.get("additions").isArray()) {
+                    for (JsonNode entry : node.get("additions")) {
+                        additions.add(new SerializableIndexMutation.SerializableIndexEntry(
+                            entry.get("field").asText(),
+                            mapper.treeToValue(entry.get("value"), Object.class)
+                        ));
+                    }
+                }
+                
+                if (node.has("deletions") && node.get("deletions").isArray()) {
+                    for (JsonNode entry : node.get("deletions")) {
+                        deletions.add(new SerializableIndexMutation.SerializableIndexEntry(
+                            entry.get("field").asText(),
+                            mapper.treeToValue(entry.get("value"), Object.class)
+                        ));
+                    }
+                }
+                
+                return new SerializableIndexMutation(isNew, isDeleted, additions, deletions);
+            }
+        });
+        mapper.registerModule(module);
+        return mapper;
+    }
     private volatile KafkaConsumer<String, String> consumer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
     private final AtomicInteger processedCount = new AtomicInteger(0);
     private final AtomicInteger errorCount = new AtomicInteger(0);
 
     public DLQReplayService(AtlasJanusGraph graph) throws BackendException, AtlasException {
+        this.mapper = configureMapper();
         // Extract ES configuration from existing graph
         GraphDatabaseConfiguration graphConfig = ((StandardJanusGraph)graph.getGraph()).getConfiguration();
         this.bootstrapServers = ApplicationProperties.get().getString("atlas.graph.kafka.bootstrap.servers");
@@ -91,12 +141,16 @@ public class DLQReplayService {
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest"); // Start from beginning
-        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "5"); // Process in smaller batches
+        // Process only 2 records at a time since processing is slow
+        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, "2");
         
-        // Increase timeouts to handle slower processing
-        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "300000"); // 5 minutes
-        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "60000"); // 1 minute
+        // Significantly increase timeouts to handle very slow processing
+        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, "900000"); // 15 minutes
+        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, "300000"); // 5 minutes
         consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, "10000"); // 10 seconds
+        
+        // Add backoff between polls to give more processing time
+        consumerProps.put(ConsumerConfig.FETCH_MAX_WAIT_MS_CONFIG, "5000"); // Wait up to 5 seconds for messages
 
         consumer = new KafkaConsumer<>(consumerProps);
         consumer.subscribe(Collections.singletonList(dlqTopic), new ConsumerRebalanceListener() {
@@ -105,10 +159,30 @@ public class DLQReplayService {
                 log.warn("Consumer group partitions revoked. This might indicate processing is too slow. Partitions: {}", partitions);
             }
 
-            @Override
-            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-                log.info("Consumer group partitions assigned: {}", partitions);
-            }
+                @Override
+                public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+                    log.info("Consumer group partitions assigned: {}", partitions);
+                    
+                    // Log offset information for each partition
+                    for (TopicPartition partition : partitions) {
+                        try {
+                            long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
+                            long committedOffset = -1;
+                            OffsetAndMetadata committed = consumer.committed(Collections.singleton(partition)).get(partition);
+                            if (committed != null) {
+                                committedOffset = committed.offset();
+                            }
+                            long position = consumer.position(partition);
+                            
+                            log.info("Partition {} - End offset: {}, Committed offset: {}, Current position: {}, " +
+                                   "Messages available: {}", 
+                                   partition, endOffset, committedOffset, position,
+                                   endOffset - position);
+                        } catch (Exception e) {
+                            log.error("Error checking offsets for partition: " + partition, e);
+                        }
+                    }
+                }
         });
 
         isRunning.set(true);
@@ -150,10 +224,38 @@ public class DLQReplayService {
 
         while (isRunning.get()) {
             try {
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(5));
+                // Log current position before poll
+                for (TopicPartition partition : consumer.assignment()) {
+                    try {
+                        long currentPosition = consumer.position(partition);
+                        long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
+                        log.debug("Before poll - Partition: {}, Position: {}, End Offset: {}, Available: {}", 
+                                partition, currentPosition, endOffset, endOffset - currentPosition);
+                    } catch (Exception e) {
+                        log.error("Error checking position before poll", e);
+                    }
+                }
+
+                ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(30));
 
                 if (records.isEmpty()) {
-                    continue; // No messages, continue polling
+                    // Log why we got no records
+                    for (TopicPartition partition : consumer.assignment()) {
+                        try {
+                            long currentPosition = consumer.position(partition);
+                            long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
+                            if (currentPosition >= endOffset) {
+                                log.info("No messages available - Partition {} at end (Position: {}, End: {})", 
+                                        partition, currentPosition, endOffset);
+                            } else {
+                                log.info("No messages returned despite availability - Partition {} (Position: {}, End: {}, Available: {})", 
+                                        partition, currentPosition, endOffset, endOffset - currentPosition);
+                            }
+                        } catch (Exception e) {
+                            log.error("Error checking position after empty poll", e);
+                        }
+                    }
+                    continue;
                 }
 
                 log.info("Received {} DLQ messages to replay", records.count());
@@ -203,29 +305,42 @@ public class DLQReplayService {
      * Replay a single DLQ entry
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
+        long startTime = System.currentTimeMillis();
         DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
-
-        log.debug("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
+        log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
 
         // Reconstruct mutations from serialized form
+        log.info("Starting mutation reconstruction for index: {}", entry.getIndexName());
         Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry);
+        log.info("Completed mutation reconstruction in {}ms", System.currentTimeMillis() - startTime);
 
         // Create key information retriever
+        log.info("Creating key information retriever for index: {}", entry.getIndexName());
         KeyInformation.IndexRetriever keyInfo = createKeyInfoRetriever(entry);
 
         // Create a new transaction for replay
+        log.info("Beginning transaction for index: {}", entry.getIndexName());
         BaseTransaction replayTx = esIndex.beginTransaction(
-                new StandardBaseTransactionConfig.Builder().build()
+                new StandardBaseTransactionConfig.Builder().commitTime(Instant.now()).build()
         );
 
         try {
             // This is the same method that originally failed - now we're replaying it!
+            log.info("Starting ES mutation for index: {}", entry.getIndexName());
+            long mutateStartTime = System.currentTimeMillis();
             esIndex.mutate(mutations, keyInfo, replayTx);
+            log.info("ES mutation completed in {}ms, committing transaction", System.currentTimeMillis() - mutateStartTime);
+            
+            long commitStartTime = System.currentTimeMillis();
             replayTx.commit();
+            log.info("Transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
 
-            log.debug("Successfully replayed mutation for index: {}", entry.getIndexName());
+            log.info("Successfully replayed mutation for index: {}. Total time: {}ms", 
+                    entry.getIndexName(), System.currentTimeMillis() - startTime);
 
         } catch (Exception e) {
+            log.warn("Error replaying mutation for index: {}, rolling back transaction",
+                    entry.getIndexName(), e);
             replayTx.rollback();
             throw new Exception("Failed to replay mutation for index: " + entry.getIndexName(), e);
         }
