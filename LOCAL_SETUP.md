@@ -9,6 +9,8 @@ This guide will help you set up Atlas for local development.
 - Maven 3.8+ 
 - Docker (via Colima for macOS)
 - Git
+- Get the source code from the AtlanHQ repository (An override of Apache Atlas)
+- Download the zip and configuration artifacts from https://atlanhq.atlassian.net/wiki/spaces/c873aeb606dd4834a95d9909a757bfa6/pages/800424446/How+to+run+Atlas+on+the+local+machine
 
 ### Java Setup
 1. Install Java 17:
@@ -148,3 +150,4 @@ For more detailed information, refer to:
 - The build command skips tests and various checks for faster development builds
 - For production builds, remove the skip flags
 - Keep your GitHub PAT token secure and never commit it to version control
+- Adjust memory and CPU settings in Colima based on your machine's capabilities
