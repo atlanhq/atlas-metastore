@@ -1,0 +1,1128 @@
+---
+description: Atlas type management and typeregistry implementation
+globs: 
+alwaysApply: false
+---
+# Atlas Metastore Type System Implementation
+
+## Table of Contents
+1. [Overview](#overview)
+2. [Type System Architecture](#type-system-architecture)
+3. [Type Categories](#type-categories)
+4. [Type Registry Implementation](#type-registry-implementation)
+5. [Type Resolution Process](#type-resolution-process)
+6. [Type Persistence Mechanism](#type-persistence-mechanism)
+7. [REST API Endpoints](#rest-api-endpoints)
+8. [Base Type Implementation](#base-type-implementation)
+9. [Entity Type Implementation](#entity-type-implementation)
+10. [Classification Type Implementation](#classification-type-implementation)
+11. [Relationship Type Implementation](#relationship-type-implementation)
+12. [Business Metadata Type Implementation](#business-metadata-type-implementation)
+13. [Type Validation and Normalization](#type-validation-and-normalization)
+14. [Type Update and Locking Mechanism](#type-update-and-locking-mechanism)
+
+## Overview
+
+The Atlas Metastore type system provides a flexible and extensible framework for defining, managing, and validating metadata types. It supports a rich type hierarchy with inheritance, complex attributes, relationships, and classifications. The type system is the foundation of Atlas's metadata management capabilities, enabling the definition of domain-specific models and ensuring data integrity through validation.
+
+The type system implementation consists of several key components:
+
+- **AtlasType**: Base class for all types
+- **AtlasTypeRegistry**: Central registry for all type definitions
+- **AtlasTypeDefGraphStore**: Persistence layer for type definitions
+- **TypesREST**: REST API endpoints for type operations
+
+## Type System Architecture
+
+The Atlas type system follows a hierarchical architecture with a base `AtlasType` class at the root. The type system supports multiple type categories, each with its own implementation class:
+
+```
+AtlasType (abstract base class)
+├── AtlasBuiltInTypes (primitive types)
+│   ├── AtlasStringType
+│   ├── AtlasIntType
+│   ├── AtlasBooleanType
+│   ├── ...
+├── AtlasEnumType
+├── AtlasStructType
+│   ├── AtlasClassificationType
+│   ├── AtlasEntityType
+│   ├── AtlasBusinessMetadataType
+├── AtlasArrayType
+├── AtlasMapType
+├── AtlasObjectIdType
+└── AtlasRelationshipType
+```
+
+The type system uses a registry pattern to manage type definitions, with the `AtlasTypeRegistry` serving as the central repository for all types. Type definitions are persisted in the graph database through the `AtlasTypeDefGraphStore`, which handles CRUD operations for type definitions.
+
+## Type Categories
+
+Atlas supports several type categories, each serving a specific purpose in the metadata model:
+
+### Primitive Types
+
+Primitive types represent basic data types like strings, integers, booleans, etc. These are implemented in the `AtlasBuiltInTypes` class:
+
+```java
+public class AtlasBuiltInTypes {
+    public static final AtlasStringType STRING = new AtlasStringType();
+    public static final AtlasIntType INT = new AtlasIntType();
+    public static final AtlasBooleanType BOOLEAN = new AtlasBooleanType();
+    public static final AtlasDateType DATE = new AtlasDateType();
+    // ...
+}
+```
+
+### Enum Types
+
+Enum types represent a fixed set of values. They are defined using `AtlasEnumDef` and implemented by `AtlasEnumType`:
+
+```java
+public class AtlasEnumType extends AtlasType {
+    private final AtlasEnumDef enumDef;
+    private final Map<String, Integer> valueToIndexMap;
+    
+    // Implementation details...
+}
+```
+
+### Struct Types
+
+Struct types represent complex structures with attributes. They are defined using `AtlasStructDef` and implemented by `AtlasStructType`:
+
+```java
+public class AtlasStructType extends AtlasType {
+    private final AtlasStructDef structDef;
+    protected Map<String, AtlasAttribute> allAttributes;
+    protected Map<String, AtlasAttribute> uniqAttributes;
+    
+    // Implementation details...
+}
+```
+
+### Entity Types
+
+Entity types represent metadata objects that can be uniquely identified and have relationships with other entities. They are defined using `AtlasEntityDef` and implemented by `AtlasEntityType`:
+
+```java
+public class AtlasEntityType extends AtlasStructType {
+    private final AtlasEntityDef entityDef;
+    private List<AtlasEntityType> superTypes;
+    private Set<String> allSuperTypes;
+    private Set<String> subTypes;
+    private Set<String> allSubTypes;
+    private Map<String, Map<String, AtlasAttribute>> relationshipAttributes;
+    
+    // Implementation details...
+}
+```
+
+### Classification Types
+
+Classification types represent tags that can be applied to entities. They are defined using `AtlasClassificationDef` and implemented by `AtlasClassificationType`:
+
+```java
+public class AtlasClassificationType extends AtlasStructType {
+    private final AtlasClassificationDef classificationDef;
+    private List<AtlasClassificationType> superTypes;
+    private Set<String> allSuperTypes;
+    private Set<String> subTypes;
+    private Set<String> allSubTypes;
+    private Set<String> entityTypes; // Restrictions on which entities can be classified
+    
+    // Implementation details...
+}
+```
+
+### Relationship Types
+
+Relationship types represent connections between entities. They are defined using `AtlasRelationshipDef` and implemented by `AtlasRelationshipType`:
+
+```java
+public class AtlasRelationshipType extends AtlasStructType {
+    private final AtlasRelationshipDef relationshipDef;
+    private AtlasEntityType end1Type;
+    private AtlasEntityType end2Type;
+    
+    // Implementation details...
+}
+```
+
+### Business Metadata Types
+
+Business metadata types represent additional business attributes that can be associated with entities. They are defined using `AtlasBusinessMetadataDef` and implemented by `AtlasBusinessMetadataType`:
+
+```java
+public class AtlasBusinessMetadataType extends AtlasStructType {
+    private final AtlasBusinessMetadataDef businessMetadataDef;
+    
+    // Implementation details...
+}
+```
+
+## Type Registry Implementation
+
+The `AtlasTypeRegistry` is the central component for managing type definitions in Atlas. It maintains mappings between type names/GUIDs and their implementations, and provides methods for type lookup and validation.
+
+### Registry Structure
+
+The registry uses a `TypeCache` to store different type categories:
+
+```java
+public class AtlasTypeRegistry {
+    private final TypeCache typeCache;
+    
+    private class TypeCache {
+        private final Map<String, AtlasType> typeNameToTypeMap;
+        private final Map<String, AtlasType> typeGuidToTypeMap;
+        
+        private final Map<String, AtlasEnumType> enumNameToTypeMap;
+        private final Map<String, AtlasStructType> structNameToTypeMap;
+        private final Map<String, AtlasClassificationType> classificationNameToTypeMap;
+        private final Map<String, AtlasEntityType> entityNameToTypeMap;
+        private final Map<String, AtlasRelationshipType> relationshipNameToTypeMap;
+        private final Map<String, AtlasBusinessMetadataType> businessMetadataNameToTypeMap;
+        
+        // Implementation details...
+    }
+    
+    // Implementation details...
+}
+```
+
+### Type Registration
+
+Types are registered in the registry through the `addType` and `addTypes` methods:
+
+```java
+public void addType(AtlasType type) {
+    if (type != null) {
+        typeCache.put(type);
+    }
+}
+
+public void addTypes(Collection<? extends AtlasType> types) {
+    if (CollectionUtils.isNotEmpty(types)) {
+        for (AtlasType type : types) {
+            addType(type);
+        }
+    }
+}
+```
+
+### Type Lookup
+
+The registry provides methods for looking up types by name or GUID:
+
+```java
+public AtlasType getType(String typeName) {
+    return typeCache.getTypeByName(typeName);
+}
+
+public AtlasType getTypeByGuid(String guid) {
+    return typeCache.getTypeByGuid(guid);
+}
+
+public AtlasEnumType getEnumTypeByName(String name) {
+    return typeCache.getEnumTypeByName(name);
+}
+
+public AtlasEntityType getEntityTypeByName(String name) {
+    return typeCache.getEntityTypeByName(name);
+}
+
+// Additional lookup methods for other type categories...
+```
+
+### Transient Type Registry
+
+For type definition updates, Atlas uses a transient type registry to validate changes before committing them to the main registry:
+
+```java
+public class AtlasTransientTypeRegistry extends AtlasTypeRegistry {
+    private final AtlasTypeRegistry parent;
+    private final Set<String> updatedTypes = new HashSet<>();
+    
+    // Implementation details...
+}
+```
+
+The transient registry is used in a lock-based mechanism to ensure thread-safe updates:
+
+```java
+public AtlasTransientTypeRegistry lockTypeRegistryForUpdate(int lockMaxWaitTimeInSeconds) throws AtlasBaseException {
+    AtlasTransientTypeRegistry ret = new AtlasTransientTypeRegistry(this);
+    
+    registryLock.writeLock().lock();
+    
+    return ret;
+}
+
+public void releaseTypeRegistryForUpdate(AtlasTransientTypeRegistry transientTypeRegistry, boolean commitUpdates) {
+    try {
+        if (commitUpdates && transientTypeRegistry != null) {
+            // Commit changes from transient registry to main registry
+            addTypes(transientTypeRegistry.getAddedTypes());
+            updateTypes(transientTypeRegistry.getUpdatedTypes());
+        }
+    } finally {
+        registryLock.writeLock().unlock();
+    }
+}
+```
+
+## Type Resolution Process
+
+Type resolution is a multi-phase process that handles complex dependencies between types. It's implemented in the `resolveReferences` methods of the various type classes.
+
+### Phase 1: Basic Reference Resolution
+
+In the first phase, each type resolves its basic references, such as attribute types and super types:
+
+```java
+void resolveReferences(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+    // Resolve attribute types
+    for (AtlasAttributeDef attributeDef : getStructDef().getAttributeDefs()) {
+        AtlasType attrType = typeRegistry.getType(attributeDef.getTypeName());
+        
+        if (attrType == null) {
+            throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, attributeDef.getTypeName());
+        }
+        
+        AtlasAttribute attribute = new AtlasAttribute(this, attributeDef, attrType);
+        allAttributes.put(attributeDef.getName(), attribute);
+    }
+    
+    // For entity and classification types, resolve super types
+    // For relationship types, resolve end entity types
+    // ...
+}
+```
+
+### Phase 2: Hierarchy Resolution
+
+In the second phase, type hierarchies are established, with subtypes registering themselves with their supertypes:
+
+```java
+void resolveReferencesPhase2(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+    // For entity and classification types
+    for (AtlasEntityType superType : superTypes) {
+        superType.addSubType(this);
+    }
+    
+    for (String superTypeName : allSuperTypes) {
+        AtlasEntityType superType = typeRegistry.getEntityTypeByName(superTypeName);
+        superType.addToAllSubTypes(this);
+    }
+    
+    // Additional type-specific resolution...
+}
+```
+
+### Phase 3: Complex Reference Resolution
+
+In the third phase, more complex references are resolved, such as relationship attributes and business metadata:
+
+```java
+void resolveReferencesPhase3(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+    // For entity types, resolve relationship attributes
+    for (AtlasAttributeDef attributeDef : getStructDef().getAttributeDefs()) {
+        String attributeName = attributeDef.getName();
+        AtlasType attributeType = typeRegistry.getType(attributeDef.getTypeName());
+        AtlasEntityType attributeEntityType = getReferencedEntityType(attributeType);
+        
+        if (attributeEntityType != null && !hasRelationshipAttribute(attributeName)) {
+            typeRegistry.reportMissingRelationshipDef(getTypeName(), attributeEntityType.getTypeName(), attributeName);
+        }
+    }
+    
+    // For classification types, resolve entity type restrictions
+    // For relationship types, validate end entity types
+    // ...
+}
+```
+
+## Type Persistence Mechanism
+
+Type definitions are persisted in the graph database through the `AtlasTypeDefGraphStore` class, which implements the `AtlasTypeDefStore` interface.
+
+### Type Definition Stores
+
+The `AtlasTypeDefGraphStore` uses separate stores for each type category:
+
+```java
+public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
+    protected abstract AtlasDefStore<AtlasEnumDef> getEnumDefStore(AtlasTypeRegistry typeRegistry);
+    protected abstract AtlasDefStore<AtlasStructDef> getStructDefStore(AtlasTypeRegistry typeRegistry);
+    protected abstract AtlasDefStore<AtlasClassificationDef> getClassificationDefStore(AtlasTypeRegistry typeRegistry);
+    protected abstract AtlasDefStore<AtlasEntityDef> getEntityDefStore(AtlasTypeRegistry typeRegistry);
+    protected abstract AtlasDefStore<AtlasRelationshipDef> getRelationshipDefStore(AtlasTypeRegistry typeRegistry);
+    protected abstract AtlasDefStore<AtlasBusinessMetadataDef> getBusinessMetadataDefStore(AtlasTypeRegistry typeRegistry);
+    
+    // Implementation details...
+}
+```
+
+### Type Creation
+
+Types are created in the graph store through the `createTypesDef` method:
+
+```java
+@GraphTransaction
+public AtlasTypesDef createTypesDef(AtlasTypesDef typesDef) throws AtlasBaseException {
+    AtlasTransientTypeRegistry ttr = lockTypeRegistryAndReleasePostCommit();
+    tryTypeCreation(typesDef, ttr);
+    
+    AtlasTypesDef ret = addToGraphStore(typesDef, ttr);
+    
+    try {
+        ttr.updateTypes(ret);
+    } catch (AtlasBaseException e) {
+        LOG.error("failed to update the registry after updating the store", e);
+    }
+    
+    return ret;
+}
+```
+
+The `addToGraphStore` method creates vertices in the graph database for each type definition:
+
+```java
+private AtlasTypesDef addToGraphStore(AtlasTypesDef typesDef, AtlasTransientTypeRegistry ttr) throws AtlasBaseException {
+    AtlasTypesDef ret = new AtlasTypesDef();
+    
+    AtlasDefStore<AtlasEnumDef> enumDefStore = getEnumDefStore(ttr);
+    AtlasDefStore<AtlasStructDef> structDefStore = getStructDefStore(ttr);
+    AtlasDefStore<AtlasClassificationDef> classifiDefStore = getClassificationDefStore(ttr);
+    AtlasDefStore<AtlasEntityDef> entityDefStore = getEntityDefStore(ttr);
+    AtlasDefStore<AtlasRelationshipDef> relationshipDefStore = getRelationshipDefStore(ttr);
+    AtlasDefStore<AtlasBusinessMetadataDef> businessMetadataDefStore = getBusinessMetadataDefStore(ttr);
+    
+    // Create vertices for each type definition
+    // ...
+    
+    return ret;
+}
+```
+
+### Type Updates
+
+Types are updated through the `updateTypesDef` method:
+
+```java
+@GraphTransaction
+public AtlasTypesDef updateTypesDef(AtlasTypesDef typesDef) throws AtlasBaseException {
+    AtlasTransientTypeRegistry ttr = lockTypeRegistryAndReleasePostCommit();
+    
+    try {
+        ttr.updateTypes(typesDef);
+    } catch (AtlasBaseException e) {
+        if (AtlasErrorCode.TYPE_NAME_NOT_FOUND == e.getAtlasErrorCode()) {
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, e.getMessage());
+        } else {
+            throw e;
+        }
+    }
+    
+    AtlasTypesDef ret = updateGraphStore(typesDef, ttr);
+    
+    try {
+        ttr.updateTypes(ret);
+    } catch (AtlasBaseException e) {
+        LOG.error("failed to update the registry after updating the store", e);
+    }
+    
+    return ret;
+}
+```
+
+### Type Deletion
+
+Types are deleted through the `deleteTypesDef` method:
+
+```java
+@GraphTransaction
+public void deleteTypesDef(AtlasTypesDef typesDef) throws AtlasBaseException {
+    AtlasTransientTypeRegistry ttr = lockTypeRegistryAndReleasePostCommit();
+    
+    AtlasDefStore<AtlasEnumDef> enumDefStore = getEnumDefStore(ttr);
+    AtlasDefStore<AtlasStructDef> structDefStore = getStructDefStore(ttr);
+    AtlasDefStore<AtlasClassificationDef> classifiDefStore = getClassificationDefStore(ttr);
+    AtlasDefStore<AtlasEntityDef> entityDefStore = getEntityDefStore(ttr);
+    AtlasDefStore<AtlasRelationshipDef> relationshipDefStore = getRelationshipDefStore(ttr);
+    AtlasDefStore<AtlasBusinessMetadataDef> businessMetadataDefStore = getBusinessMetadataDefStore(ttr);
+    
+    // Delete vertices for each type definition
+    // ...
+    
+    ttr.removeTypesDef(typesDef);
+}
+```
+
+## REST API Endpoints
+
+The `TypesREST` class provides REST API endpoints for type definition operations. It's annotated with JAX-RS annotations to define the REST endpoints:
+
+```java
+@Path("types")
+@Singleton
+@Service
+@Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
+@Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
+public class TypesREST {
+    private final AtlasTypeDefStore typeDefStore;
+    private final RedisService redisService;
+    private final TypeCacheRefresher typeCacheRefresher;
+    
+    // Implementation details...
+}
+```
+
+### Type Lookup Endpoints
+
+The class provides endpoints for looking up types by name or GUID:
+
+```java
+@GET
+@Path("/typedef/name/{name}")
+@Timed
+public AtlasBaseTypeDef getTypeDefByName(@PathParam("name") String name) throws AtlasBaseException {
+    Servlets.validateQueryParamLength("name", name);
+    
+    AtlasBaseTypeDef ret = typeDefStore.getByName(name);
+    
+    return ret;
+}
+
+@GET
+@Path("/typedef/guid/{guid}")
+@Timed
+public AtlasBaseTypeDef getTypeDefByGuid(@PathParam("guid") String guid) throws AtlasBaseException {
+    Servlets.validateQueryParamLength("guid", guid);
+    
+    AtlasBaseTypeDef ret = typeDefStore.getByGuid(guid);
+    
+    return ret;
+}
+```
+
+### Type Creation Endpoint
+
+The class provides an endpoint for creating new types:
+
+```java
+@POST
+@Path("/typedefs")
+@Timed
+public AtlasTypesDef createAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
+    validateTypeCreateOrUpdate(typesDef);
+    RequestContext.get().setTraceId(UUID.randomUUID().toString());
+    
+    try {
+        typeCacheRefresher.verifyCacheRefresherHealth();
+        attemptAcquiringLock();
+        RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
+        typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
+        typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
+        AtlasTypesDef atlasTypesDef = typeDefStore.createTypesDef(typesDef);
+        typeCacheRefresher.refreshAllHostCache();
+        return atlasTypesDef;
+    } catch (AtlasBaseException atlasBaseException) {
+        LOG.error("TypesREST.createAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
+        throw atlasBaseException;
+    } catch (Exception e) {
+        LOG.error("TypesREST.createAtlasTypeDefs:: " + e.getMessage(), e);
+        throw new AtlasBaseException("Error while creating a type definition");
+    }
+    finally {
+        redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
+    }
+}
+```
+
+### Type Update Endpoint
+
+The class provides an endpoint for updating existing types:
+
+```java
+@PUT
+@Path("/typedefs")
+@Timed
+public AtlasTypesDef updateAtlasTypeDefs(final AtlasTypesDef typesDef, @QueryParam("allowDuplicateDisplayName") @DefaultValue("false") boolean allowDuplicateDisplayName) throws AtlasBaseException {
+    validateTypeCreateOrUpdate(typesDef);
+    RequestContext.get().setTraceId(UUID.randomUUID().toString());
+    
+    try {
+        typeCacheRefresher.verifyCacheRefresherHealth();
+        attemptAcquiringLock();
+        RequestContext.get().setAllowDuplicateDisplayName(allowDuplicateDisplayName);
+        typesDef.getBusinessMetadataDefs().forEach(AtlasBusinessMetadataDef::setRandomNameForEntityAndAttributeDefs);
+        typesDef.getClassificationDefs().forEach(AtlasClassificationDef::setRandomNameForEntityAndAttributeDefs);
+        AtlasTypesDef atlasTypesDef = typeDefStore.updateTypesDef(typesDef);
+        typeCacheRefresher.refreshAllHostCache();
+        return atlasTypesDef;
+    } catch (AtlasBaseException atlasBaseException) {
+        LOG.error("TypesREST.updateAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
+        throw atlasBaseException;
+    } catch (Exception e) {
+        LOG.error("TypesREST.updateAtlasTypeDefs:: " + e.getMessage(), e);
+        throw new AtlasBaseException("Error while updating a type definition");
+    }
+    finally {
+        redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
+    }
+}
+```
+
+### Type Deletion Endpoint
+
+The class provides an endpoint for deleting types:
+
+```java
+@DELETE
+@Path("/typedefs")
+@Timed
+public void deleteAtlasTypeDefs(final AtlasTypesDef typesDef) throws AtlasBaseException {
+    RequestContext.get().setTraceId(UUID.randomUUID().toString());
+    
+    try {
+        typeCacheRefresher.verifyCacheRefresherHealth();
+        attemptAcquiringLock();
+        typeDefStore.deleteTypesDef(typesDef);
+        typeCacheRefresher.refreshAllHostCache();
+    } catch (AtlasBaseException atlasBaseException) {
+        LOG.error("TypesREST.deleteAtlasTypeDefs:: " + atlasBaseException.getMessage(), atlasBaseException);
+        throw atlasBaseException;
+    } catch (Exception e) {
+        LOG.error("TypesREST.deleteAtlasTypeDefs:: " + e.getMessage(), e);
+        throw new AtlasBaseException("Error while deleting a type definition");
+    }
+    finally {
+        redisService.releaseDistributedLock(ATLAS_TYPEDEF_LOCK);
+    }
+}
+```
+
+## Base Type Implementation
+
+The `AtlasType` class is the base class for all types in the Atlas type system. It provides common functionality for type validation, normalization, and serialization.
+
+### Type Properties
+
+The class defines basic properties for all types:
+
+```java
+public abstract class AtlasType {
+    private final String typeName;
+    private final TypeCategory typeCategory;
+    private final String serviceType;
+    
+    // Implementation details...
+}
+```
+
+### Type Validation
+
+The class provides methods for validating values against the type:
+
+```java
+public boolean isValidValue(Object obj) {
+    return true;
+}
+
+public boolean isValidValueForUpdate(Object obj) {
+    return true;
+}
+
+public Object getNormalizedValue(Object obj) {
+    return obj;
+}
+
+public Object getNormalizedValueForUpdate(Object obj) {
+    return obj;
+}
+
+public boolean validateValue(Object obj, String objName, List<String> messages) {
+    return true;
+}
+
+public boolean validateValueForUpdate(Object obj, String objName, List<String> messages) {
+    return true;
+}
+```
+
+These methods are overridden by concrete type implementations to provide type-specific validation.
+
+### JSON Serialization
+
+The class provides static methods for JSON serialization and deserialization:
+
+```java
+public static String toJson(Object obj) {
+    return toJson(obj, false);
+}
+
+public static String toJson(Object obj, boolean pretty) {
+    if (obj == null) {
+        return null;
+    }
+    
+    try {
+        ObjectMapper mapper = new ObjectMapper();
+        
+        if (pretty) {
+            return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(obj);
+        } else {
+            return mapper.writeValueAsString(obj);
+        }
+    } catch (Exception e) {
+        throw new AtlasBaseException(e);
+    }
+}
+
+public static <T> T fromJson(String jsonStr, Class<T> type) {
+    if (StringUtils.isEmpty(jsonStr)) {
+        return null;
+    }
+    
+    try {
+        ObjectMapper mapper = new ObjectMapper();
+        
+        return mapper.readValue(jsonStr, type);
+    } catch (Exception e) {
+        throw new AtlasBaseException(e);
+    }
+}
+```
+
+## Entity Type Implementation
+
+The `AtlasEntityType` class extends `AtlasStructType` and implements the behavior of an entity type. It manages entity type hierarchies, relationship attributes, and business metadata.
+
+### Type Hierarchy Management
+
+The class maintains lists of super types and sub types:
+
+```java
+public class AtlasEntityType extends AtlasStructType {
+    private List<AtlasEntityType> superTypes = Collections.emptyList();
+    private Set<String> allSuperTypes = Collections.emptySet();
+    private Set<String> subTypes = Collections.emptySet();
+    private Set<String> allSubTypes = Collections.emptySet();
+    private Set<String> typeAndAllSubTypes = Collections.emptySet();
+    private Set<String> typeAndAllSuperTypes = Collections.emptySet();
+    
+    // Implementation details...
+}
+```
+
+### Relationship Attribute Management
+
+The class manages relationship attributes, which define connections between entities:
+
+```java
+private Map<String, Map<String, AtlasAttribute>> relationshipAttributes = Collections.emptyMap();
+private List<AtlasAttribute> ownedRefAttributes = Collections.emptyList();
+
+public Map<String, Map<String, AtlasAttribute>> getRelationshipAttributes() {
+    return relationshipAttributes;
+}
+
+public List<AtlasAttribute> getOwnedRefAttributes() {
+    return ownedRefAttributes;
+}
+
+public AtlasAttribute getRelationshipAttribute(String attributeName, String relationshipType) {
+    AtlasAttribute ret = null;
+    
+    if (relationshipAttributes.containsKey(attributeName)) {
+        Map<String, AtlasAttribute> relationshipAttributesMap = relationshipAttributes.get(attributeName);
+        
+        if (relationshipAttributesMap != null) {
+            if (StringUtils.isNotEmpty(relationshipType)) {
+                ret = relationshipAttributesMap.get(relationshipType);
+            } else if (MapUtils.isNotEmpty(relationshipAttributesMap)) {
+                ret = relationshipAttributesMap.values().iterator().next();
+            }
+        }
+    }
+    
+    return ret;
+}
+
+public void addRelationshipAttribute(String attributeName, String relationshipTypeName, AtlasAttribute attribute) {
+    Map<String, AtlasAttribute> relationshipAttributesMap = relationshipAttributes.get(attributeName);
+    
+    if (relationshipAttributesMap == null) {
+        relationshipAttributesMap = new HashMap<>();
+        
+        relationshipAttributes.put(attributeName, relationshipAttributesMap);
+    }
+    
+    relationshipAttributesMap.put(relationshipTypeName, attribute);
+}
+```
+
+### Business Metadata Management
+
+The class manages business metadata attributes:
+
+```java
+private Map<String, Map<String, AtlasBusinessAttribute>> businessAttributes = Collections.emptyMap();
+
+public Map<String, Map<String, AtlasBusinessAttribute>> getBusinessAttributes() {
+    return businessAttributes;
+}
+
+public Map<String, AtlasBusinessAttribute> getBusinessAttributes(String bmName) {
+    return businessAttributes.get(bmName);
+}
+
+public AtlasBusinessAttribute getBusinessAttribute(String bmName, String bmAttrName) {
+    AtlasBusinessAttribute ret = null;
+    
+    Map<String, AtlasBusinessAttribute> bmAttrs = businessAttributes.get(bmName);
+    
+    if (bmAttrs != null) {
+        ret = bmAttrs.get(bmAttrName);
+    }
+    
+    return ret;
+}
+```
+
+## Classification Type Implementation
+
+The `AtlasClassificationType` class extends `AtlasStructType` and implements the behavior of a classification type. It manages classification type hierarchies and entity type restrictions.
+
+### Type Hierarchy Management
+
+Similar to entity types, the class maintains lists of super types and sub types:
+
+```java
+public class AtlasClassificationType extends AtlasStructType {
+    private List<AtlasClassificationType> superTypes = Collections.emptyList();
+    private Set<String> allSuperTypes = Collections.emptySet();
+    private Set<String> subTypes = Collections.emptySet();
+    private Set<String> allSubTypes = Collections.emptySet();
+    private Set<String> typeAndAllSubTypes = Collections.emptySet();
+    private Set<String> typeAndAllSuperTypes = Collections.emptySet();
+    
+    // Implementation details...
+}
+```
+
+### Entity Type Restrictions
+
+The class manages restrictions on which entity types can be classified:
+
+```java
+private Set<String> entityTypes = Collections.emptySet();
+
+public Set<String> getEntityTypes() {
+    return entityTypes;
+}
+
+public boolean canApplyToEntityType(AtlasEntityType entityType) {
+    return CollectionUtils.isEmpty(this.entityTypes) || this.entityTypes.contains(entityType.getTypeName());
+}
+```
+
+### Time Boundary Validation
+
+The class provides validation for time boundaries in classifications:
+
+```java
+private boolean validateTimeBoundaries(Object obj, List<String> messages) {
+    boolean ret = true;
+    
+    if (obj instanceof AtlasClassification) {
+        AtlasClassification classification = (AtlasClassification) obj;
+        
+        if (classification.getValidityPeriods() != null) {
+            for (TimeBoundary timeBoundary : classification.getValidityPeriods()) {
+                ret = validateTimeBoundry(timeBoundary, messages) && ret;
+            }
+        }
+    } else if (obj instanceof Map) {
+        Map map = (Map) obj;
+        
+        if (map.containsKey("validityPeriods")) {
+            Object validityPeriods = map.get("validityPeriods");
+            
+            if (validityPeriods instanceof List) {
+                for (Object timeBoundary : (List) validityPeriods) {
+                    if (timeBoundary instanceof Map) {
+                        ret = validateTimeBoundry((Map) timeBoundary, messages) && ret;
+                    }
+                }
+            }
+        }
+    }
+    
+    return ret;
+}
+```
+
+## Relationship Type Implementation
+
+The `AtlasRelationshipType` class extends `AtlasStructType` and implements the behavior of a relationship type. It manages the end entity types and relationship properties.
+
+### End Entity Types
+
+The class maintains references to the entity types at both ends of the relationship:
+
+```java
+public class AtlasRelationshipType extends AtlasStructType {
+    private final AtlasRelationshipDef relationshipDef;
+    private AtlasEntityType end1Type;
+    private AtlasEntityType end2Type;
+    
+    // Implementation details...
+}
+```
+
+### Relationship Properties
+
+The class manages relationship properties like propagation rules:
+
+```java
+public PropagateTags getRelationshipDef_PropagateTag() {
+    return relationshipDef.getPropagateTag();
+}
+
+public AtlasRelationshipEndDef getRelationshipDef_EndDef1() {
+    return relationshipDef.getEndDef1();
+}
+
+public AtlasRelationshipEndDef getRelationshipDef_EndDef2() {
+    return relationshipDef.getEndDef2();
+}
+
+public String getRelationshipDef_End1Type() {
+    return getRelationshipDef_EndDef1().getType();
+}
+
+public String getRelationshipDef_End2Type() {
+    return getRelationshipDef_EndDef2().getType();
+}
+```
+
+## Business Metadata Type Implementation
+
+The `AtlasBusinessMetadataType` class extends `AtlasStructType` and implements the behavior of a business metadata type. It manages business attributes and their application to entity types.
+
+### Business Attributes
+
+The class maintains a map of business attributes:
+
+```java
+public class AtlasBusinessMetadataType extends AtlasStructType {
+    private final AtlasBusinessMetadataDef businessMetadataDef;
+    private final Map<String, AtlasBusinessAttribute> allBusinessAttributes = new HashMap<>();
+    
+    // Implementation details...
+}
+```
+
+### Entity Type Applicability
+
+The class manages which entity types the business metadata can be applied to:
+
+```java
+public Set<String> getApplicableEntityTypes() {
+    return businessMetadataDef.getApplicableEntityTypes();
+}
+
+public boolean isApplicableToEntityType(AtlasEntityType entityType) {
+    Set<String> applicableEntityTypes = getApplicableEntityTypes();
+    
+    return CollectionUtils.isEmpty(applicableEntityTypes) || applicableEntityTypes.contains(entityType.getTypeName());
+}
+```
+
+## Type Validation and Normalization
+
+The type system provides comprehensive validation and normalization of values through the `isValidValue`, `validateValue`, and `getNormalizedValue` methods in each type implementation.
+
+### Primitive Type Validation
+
+Primitive types validate values based on their specific constraints:
+
+```java
+public class AtlasStringType extends AtlasPrimitiveType {
+    @Override
+    public boolean isValidValue(Object obj) {
+        return obj == null || obj instanceof String;
+    }
+    
+    @Override
+    public String getNormalizedValue(Object obj) {
+        if (obj == null) {
+            return null;
+        }
+        
+        if (obj instanceof String) {
+            return (String) obj;
+        }
+        
+        return obj.toString();
+    }
+}
+```
+
+### Struct Type Validation
+
+Struct types validate values by checking that all attributes are valid:
+
+```java
+public class AtlasStructType extends AtlasType {
+    @Override
+    public boolean isValidValue(Object obj) {
+        if (obj == null) {
+            return true;
+        }
+        
+        if (obj instanceof Map) {
+            Map map = (Map) obj;
+            
+            for (Map.Entry entry : (Set<Map.Entry>) map.entrySet()) {
+                String attrName = entry.getKey().toString();
+                Object attrValue = entry.getValue();
+                
+                AtlasAttribute attribute = allAttributes.get(attrName);
+                
+                if (attribute != null) {
+                    if (!attribute.getAttributeType().isValidValue(attrValue)) {
+                        return false;
+                    }
+                }
+            }
+            
+            return true;
+        }
+        
+        return false;
+    }
+}
+```
+
+### Entity Type Validation
+
+Entity types validate values by checking that all attributes, including relationship attributes, are valid:
+
+```java
+public class AtlasEntityType extends AtlasStructType {
+    @Override
+    public boolean isValidValue(Object obj) {
+        if (obj == null) {
+            return true;
+        }
+        
+        // Validate regular attributes
+        if (!super.isValidValue(obj)) {
+            return false;
+        }
+        
+        // Validate relationship attributes
+        if (obj instanceof AtlasEntity) {
+            AtlasEntity entity = (AtlasEntity) obj;
+            
+            if (entity.getRelationshipAttributes() != null) {
+                return validateRelationshipAttributes(entity.getRelationshipAttributes());
+            }
+        } else if (obj instanceof Map) {
+            Map map = (Map) obj;
+            
+            if (map.containsKey("relationshipAttributes")) {
+                Object relationshipAttributes = map.get("relationshipAttributes");
+                
+                if (relationshipAttributes instanceof Map) {
+                    return validateRelationshipAttributes((Map) relationshipAttributes);
+                }
+            }
+        }
+        
+        return true;
+    }
+}
+```
+
+## Type Update and Locking Mechanism
+
+The type system uses a locking mechanism to ensure thread-safe updates to type definitions.
+
+### Type Registry Locking
+
+The `AtlasTypeRegistry` uses a read-write lock to control access to the type registry:
+
+```java
+public class AtlasTypeRegistry {
+    private final ReentrantReadWriteLock registryLock = new ReentrantReadWriteLock();
+    
+    public AtlasTransientTypeRegistry lockTypeRegistryForUpdate(int lockMaxWaitTimeInSeconds) throws AtlasBaseException {
+        AtlasTransientTypeRegistry ret = new AtlasTransientTypeRegistry(this);
+        
+        registryLock.writeLock().lock();
+        
+        return ret;
+    }
+    
+    public void releaseTypeRegistryForUpdate(AtlasTransientTypeRegistry transientTypeRegistry, boolean commitUpdates) {
+        try {
+            if (commitUpdates && transientTypeRegistry != null) {
+                // Commit changes from transient registry to main registry
+                addTypes(transientTypeRegistry.getAddedTypes());
+                updateTypes(transientTypeRegistry.getUpdatedTypes());
+            }
+        } finally {
+            registryLock.writeLock().unlock();
+        }
+    }
+}
+```
+
+### Distributed Locking
+
+For distributed deployments, the `TypesREST` class uses Redis-based distributed locking to ensure that only one instance can update types at a time:
+
+```java
+private void attemptAcquiringLock() throws AtlasBaseException {
+    final String traceId = RequestContext.get().getTraceId();
+    try {
+        if (!redisService.acquireDistributedLock(ATLAS_TYPEDEF_LOCK)) {
+            LOG.info("Lock is already acquired. Returning now :: traceId {}", traceId);
+            throw new AtlasBaseException(AtlasErrorCode.FAILED_TO_OBTAIN_TYPE_UPDATE_LOCK);
+        }
+        LOG.info("successfully acquired lock :: traceId {}", traceId);
+    } catch (AtlasBaseException e) {
+        throw e;
+    } catch (Exception e) {
+        LOG.error("Error while acquiring lock on type-defs :: traceId " + traceId + " ." + e.getMessage(), e);
+        throw new AtlasBaseException("Error while acquiring a lock on type-defs");
+    }
+}
+```
+
+### Type Update Notification
+
+After type updates, the system notifies all instances to refresh their type caches:
+
+```java
+public void refreshAllHostCache() {
+    try {
+        cacheRefreshExecutor.submit(() -> {
+            try {
+                typeCacheRefresher.refreshAllHostCache();
+            } catch (Exception e) {
+                LOG.error("Error while refreshing cache", e);
+            }
+        });
+    } catch (Exception e) {
+        LOG.error("Error while submitting cache refresh task", e);
+    }
+}
+```
+
+This ensures that all instances have the latest type definitions, maintaining consistency across the cluster.
