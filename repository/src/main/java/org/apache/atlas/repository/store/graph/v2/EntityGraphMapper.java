@@ -6198,6 +6198,9 @@ public class EntityGraphMapper {
 
     public void addHasLineage(Set<AtlasEdge> inputOutputEdges, boolean isRestoreEntity) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("addHasLineage");
+        
+        // Timing: Lineage calculation
+        long lineageCalcStart = System.currentTimeMillis();
 
         for (AtlasEdge atlasEdge : inputOutputEdges) {
 
@@ -6234,6 +6237,11 @@ public class EntityGraphMapper {
                 }
             }
         }
+        
+        // Record lineage calculation time
+        long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
+        RequestContext.get().addLineageCalcTime(lineageCalcTime);
+        
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
