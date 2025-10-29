@@ -149,6 +149,14 @@ logstashPipeline:
             end
           end
 
+          # Skip UPDATE if no attributes to prevent empty document overwrites
+          if operation_type == 'ENTITY_UPDATE'
+            if attrs.nil? || attrs.empty?
+              event.cancel
+              return
+            end
+          end
+
           # Build document based on operation type
           if operation_type == 'ENTITY_UPDATE'
             # For UPDATE: Build minimal document with only changed fields + essential metadata
