@@ -26,6 +26,7 @@ on:
       - master
       - staging
       - mlh-1477-staging
+      - atlas_ci_cd_updates
 
 jobs:
   build:
