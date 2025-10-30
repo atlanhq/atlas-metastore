@@ -200,9 +200,6 @@ jobs:
           echo "Cleaning up test environment..."
           docker ps -a -q | xargs -r docker rm -f || true
           docker system prune -af || true
-          fi
-          
-          # Remove test containers and images
           echo ""
           echo "Removing other test containers and images..."
           docker system prune -af --volumes || true
