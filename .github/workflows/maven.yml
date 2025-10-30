@@ -168,6 +168,7 @@ jobs:
           # Configure Testcontainers for GitHub Actions
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
+          TESTCONTAINERS_REUSE_ENABLE: true  # Enable container reuse for atlan-java SDK tests
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
