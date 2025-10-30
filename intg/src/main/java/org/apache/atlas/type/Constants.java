@@ -91,6 +91,7 @@ public final class Constants {
     public static final HashMap<String, Object> ES_ATLAN_KEYWORD_ANALYZER_CONFIG = new HashMap<>();
     static {
         ES_ATLAN_KEYWORD_ANALYZER_CONFIG.put("normalizer", "atlan_normalizer");
+        ES_ATLAN_KEYWORD_ANALYZER_CONFIG.put("ignore_above", 5000);
     }
 
     private Constants() {}
