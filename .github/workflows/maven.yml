@@ -170,7 +170,8 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
+          # Keep containers running for atlan-java SDK tests
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh --keep-containers
       
       - name: Upload container logs as artifact
         if: always()  # Upload logs even if tests pass (for debugging)
@@ -192,14 +193,138 @@ jobs:
         if: steps.integration_tests.outcome == 'failure'
         run: exit 1
 
+      # ============================================================
+      # Extended Integration Tests (atlan-java SDK)
+      # Run additional SDK tests against the same testcontainers
+      # ============================================================
+      
+      - name: Verify testcontainers are still running
+        run: |
+          echo "=========================================="
+          echo "VERIFYING TESTCONTAINERS STATUS"
+          echo "=========================================="
+          
+          # List running testcontainers (they have org.testcontainers label)
+          echo "Running testcontainers:"
+          docker ps --filter "label=org.testcontainers" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" || true
+          
+          # Count testcontainers
+          CONTAINER_COUNT=$(docker ps --filter "label=org.testcontainers" -q | wc -l | tr -d ' ')
+          echo ""
+          echo "Found $CONTAINER_COUNT testcontainers running"
+          
+          if [ "$CONTAINER_COUNT" -lt 5 ]; then
+            echo "⚠️  Expected at least 5 containers (zookeeper, kafka, cassandra, elasticsearch, redis, atlas)"
+            echo "Attempting to list all containers:"
+            docker ps -a
+          fi
+          
+          # Check if Atlas is accessible
+          echo ""
+          echo "Checking Atlas availability..."
+          for i in {1..30}; do
+            if curl -f -s -u admin:admin http://localhost:21000/api/atlas/admin/version > /dev/null 2>&1; then
+              echo "✓ Atlas is accessible on port 21000"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Atlas is not accessible after 30 attempts"
+              echo "Listing all containers for debugging:"
+              docker ps -a
+              exit 1
+            fi
+            echo "Waiting for Atlas... ($i/30)"
+            sleep 2
+          done
+          
+          echo "✓ Testcontainers are ready for atlan-java SDK tests"
+      
+      - name: Clone atlan-java repository
+        run: |
+          echo "=========================================="
+          echo "CLONING ATLAN-JAVA REPOSITORY"
+          echo "=========================================="
+          git clone --depth 1 https://github.com/atlanhq/atlan-java.git /tmp/atlan-java
+          echo "✓ Repository cloned to /tmp/atlan-java"
+      
+      - name: Set up JDK 21 for atlan-java tests
+        uses: actions/setup-java@v1
+        with:
+          java-version: 21
+      
+      - name: Print Java version for atlan-java
+        run: |
+          echo "Java version for atlan-java tests:"
+          java -version
+      
+      - name: Run atlan-java SDK integration test
+        id: atlan_java_tests
+        continue-on-error: true
+        working-directory: /tmp/atlan-java
+        env:
+          # Use LOCAL mode - SDK will connect to http://localhost:21000
+          ATLAN_BASE_URL: "LOCAL"
+          # Basic Auth credentials (same as our integration tests)
+          ATLAN_API_KEY: "admin:admin"
+          # Disable checks that might interfere with testcontainers
+          TESTCONTAINERS_RYUK_DISABLED: true
+        run: |
+          echo "=========================================="
+          echo "RUNNING ATLAN-JAVA SDK TESTS"
+          echo "=========================================="
+          echo "Base URL: LOCAL (http://localhost:21000)"
+          echo "Auth: Basic authentication (admin:admin)"
+          echo ""
+          
+          # Run a single fundamental test - ConnectionTest
+          echo "Running ConnectionTest..."
+          ./gradlew test -PintegrationTests \
+            --tests "com.atlan.java.sdk.ConnectionTest" \
+            --info \
+            --no-daemon
+          
+          echo "✓ atlan-java SDK test completed"
+      
+      - name: Upload atlan-java test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlan-java-test-results-${{ github.run_id }}
+          path: |
+            /tmp/atlan-java/integration-tests/build/reports/tests/
+            /tmp/atlan-java/integration-tests/build/test-results/
+            /tmp/atlan-java/integration-tests/*.log
+          retention-days: 5
+      
+      - name: Check atlan-java test results
+        if: steps.atlan_java_tests.outcome == 'failure'
+        run: |
+          echo "❌ atlan-java SDK tests failed"
+          echo "Check the uploaded artifacts for detailed test reports"
+          exit 1
+
       - name: Clean up after integration tests
+        if: always()  # Always clean up, even if atlan-java tests fail
         run: |
           echo "=========================================="
           echo "CLEANING UP AFTER INTEGRATION TESTS"
           echo "=========================================="
           
+          # Remove testcontainers that we kept running
+          echo "Removing testcontainers..."
+          TESTCONTAINER_IDS=$(docker ps -a --filter "label=org.testcontainers" -q)
+          if [ -n "$TESTCONTAINER_IDS" ]; then
+            echo "Found testcontainers to remove:"
+            docker ps -a --filter "label=org.testcontainers" --format "table {{.Names}}\t{{.Status}}"
+            docker rm -f $TESTCONTAINER_IDS || true
+            echo "✓ Testcontainers removed"
+          else
+            echo "No testcontainers found to clean up"
+          fi
+          
           # Remove test containers and images
-          echo "Removing test containers and images..."
+          echo ""
+          echo "Removing other test containers and images..."
           docker system prune -af --volumes || true
           
           # Clean Maven artifacts to free up space
