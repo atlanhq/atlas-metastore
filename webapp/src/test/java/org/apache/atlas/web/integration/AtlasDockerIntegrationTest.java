@@ -53,14 +53,16 @@ public class AtlasDockerIntegrationTest {
             .withNetwork(network)
             .withNetworkAliases("zookeeper")
             .withExposedPorts(2181)
-            .withEnv("ZOO_MY_ID", "1");
+            .withEnv("ZOO_MY_ID", "1")
+            .withReuse(true);  // Keep container running for atlan-java SDK tests
 
     @Container
     static KafkaContainer kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"))
             .withNetwork(network)
             .withNetworkAliases("kafka")
             .withExternalZookeeper("zookeeper:2181")
-            .dependsOn(zookeeper);
+            .dependsOn(zookeeper)
+            .withReuse(true);  // Keep container running for atlan-java SDK tests
 
     @Container
     static CassandraContainer<?> cassandra = new CassandraContainer<>("cassandra:2.1")
@@ -68,7 +70,8 @@ public class AtlasDockerIntegrationTest {
             .withNetworkAliases("cassandra")
             .withStartupTimeout(Duration.ofMinutes(3))
             .withEnv("CASSANDRA_CLUSTER_NAME", "atlas-cluster")
-            .withEnv("CASSANDRA_DC", "datacenter1");
+            .withEnv("CASSANDRA_DC", "datacenter1")
+            .withReuse(true);  // Keep container running for atlan-java SDK tests
 
     @Container
     static ElasticsearchContainer elasticsearch = new ElasticsearchContainer(
@@ -77,14 +80,16 @@ public class AtlasDockerIntegrationTest {
             .withNetworkAliases("elasticsearch")
             .withEnv("discovery.type", "single-node")
             .withEnv("xpack.security.enabled", "false")
-            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
+            .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m")
+            .withReuse(true);  // Keep container running for atlan-java SDK tests
 
     @Container
     static GenericContainer<?> redis = new GenericContainer<>("redis:6.2.14")
             .withNetwork(network)
             .withNetworkAliases("redis")
             .withCommand("redis-server", "--requirepass", "", "--protected-mode", "no")
-            .withExposedPorts(6379);
+            .withExposedPorts(6379)
+            .withReuse(true);  // Keep container running for atlan-java SDK tests
 
     // Atlas container with volume mount
     @Container
@@ -135,7 +140,8 @@ public class AtlasDockerIntegrationTest {
                                 .withStartupTimeout(Duration.ofMinutes(2))
                 )
                 .withLogConsumer(new Slf4jLogConsumer(LOG).withPrefix("ATLAS"))
-                .dependsOn(kafka, cassandra, elasticsearch, redis, zookeeper);
+                .dependsOn(kafka, cassandra, elasticsearch, redis, zookeeper)
+                .withReuse(true);  // Keep container running for atlan-java SDK tests
     }
 
     private static String getDeployDirectoryPath() {
