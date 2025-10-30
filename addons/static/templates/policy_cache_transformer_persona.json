@@ -1043,7 +1043,7 @@
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
-      "description": "Create/delete process to update linked assets for this AIApplication",
+      "description": "CRUD on process to update linked assets for this AIApplication",
       "resources": [
         "entity:*",
         "entity-type:Process",
@@ -1261,7 +1261,7 @@
     {
       "policyResourceCategory": "ENTITY",
       "policyType": "ACCESS",
-      "description": "Create/delete process to update datasets for this AIModel",
+      "description": "CRUD on process to update datasets for this AIModel",
       "resources": [
         "entity:*",
         "entity-type:Process",
