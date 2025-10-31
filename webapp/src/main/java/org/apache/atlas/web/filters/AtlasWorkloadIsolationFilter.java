@@ -60,6 +60,9 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
     
     // System resource capacity
     private SystemCapacity systemCapacity;
+    
+    // Feature flags
+    private boolean rateLimitingEnabled;
 
     @Autowired
     private Environment environment;
@@ -92,30 +95,42 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
 
     static class WorkloadLimiter {
         final Bulkhead concurrencyLimit;    // Max concurrent requests
-        final RateLimiter sustainedRate;     // Sustained throughput
+        final RateLimiter sustainedRate;     // Sustained throughput (can be null if disabled)
         final String clientType;
+        final boolean rateLimitingEnabled;
 
-        WorkloadLimiter(String clientType, int maxConcurrent, int ratePerSec) {
+        WorkloadLimiter(String clientType, int maxConcurrent, int ratePerSec, boolean rateLimitingEnabled) {
             this.clientType = clientType;
+            this.rateLimitingEnabled = rateLimitingEnabled;
+            
+            // Always create bulkhead (concurrency limiting)
             this.concurrencyLimit = Bulkhead.of(clientType + "-concurrent",
                     BulkheadConfig.custom()
                             .maxConcurrentCalls(maxConcurrent)
                             .maxWaitDuration(Duration.ofSeconds(30))
                             .build()
             );
-            this.sustainedRate = RateLimiter.of(clientType + "-rate",
-                    RateLimiterConfig.custom()
-                            .limitRefreshPeriod(Duration.ofSeconds(1))
-                            .limitForPeriod(ratePerSec)
-                            .timeoutDuration(Duration.ofSeconds(30))
-                            .build());
+            
+            // Only create rate limiter if enabled
+            if (rateLimitingEnabled) {
+                this.sustainedRate = RateLimiter.of(clientType + "-rate",
+                        RateLimiterConfig.custom()
+                                .limitRefreshPeriod(Duration.ofSeconds(1))
+                                .limitForPeriod(ratePerSec)
+                                .timeoutDuration(Duration.ofSeconds(30))
+                                .build());
+            } else {
+                this.sustainedRate = null;
+            }
         }
 
         void acquire() throws Throwable {
-            // First: Check sustained rate
-            boolean acquired = sustainedRate.acquirePermission();
-            if (!acquired) {
-                throw RequestNotPermitted.createRequestNotPermitted(sustainedRate);
+            // First: Check sustained rate (if enabled)
+            if (rateLimitingEnabled && sustainedRate != null) {
+                boolean acquired = sustainedRate.acquirePermission();
+                if (!acquired) {
+                    throw RequestNotPermitted.createRequestNotPermitted(sustainedRate);
+                }
             }
 
             // Second: Check concurrency (blocks if needed)
@@ -133,7 +148,13 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
         systemCapacity = detectSystemCapacity();
         LOG.info("Detected system capacity: {}", systemCapacity);
         
-        // Step 2: Check if using hierarchical ratio system
+        // Step 2: Check if rate limiting is enabled
+        // Default: FALSE (nginx already does rate limiting)
+        rateLimitingEnabled = environment.getProperty("atlas.throttle.rateLimiting.enabled", Boolean.class, false);
+        LOG.info("Rate limiting: {} (nginx handles rate limiting, bulkhead handles concurrency)", 
+                rateLimitingEnabled ? "ENABLED" : "DISABLED (default)");
+        
+        // Step 3: Check if using hierarchical ratio system
         // Two-level ratio: webapp vs. rest, then divide rest by priority
         double restCapacityRatioConcurrent = getDoubleProperty("atlas.throttle.rest.concurrentRatio", -1.0);
         double restCapacityRatioRate = getDoubleProperty("atlas.throttle.rest.rateRatio", -1.0);
@@ -167,22 +188,22 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
         // workflow throttling - TOP PRIORITY (highest ratios)
         int workflowConcurrent = calculateLimit("workflow", "concurrent", 0.30, 20);
         int workflowRate = calculateLimit("workflow", "rate", 0.35, 80);
-        clientLimiters.put(ORIGIN_WORKFLOW, new WorkloadLimiter(ORIGIN_WORKFLOW, workflowConcurrent, workflowRate));
+        clientLimiters.put(ORIGIN_WORKFLOW, new WorkloadLimiter(ORIGIN_WORKFLOW, workflowConcurrent, workflowRate, rateLimitingEnabled));
         
         // product_sdk throttling - SECOND PRIORITY
         int sdkConcurrent = calculateLimit("product_sdk", "concurrent", 0.20, 15);
         int sdkRate = calculateLimit("product_sdk", "rate", 0.25, 60);
-        clientLimiters.put(ORIGIN_PRODUCT_SDK, new WorkloadLimiter(ORIGIN_PRODUCT_SDK, sdkConcurrent, sdkRate));
+        clientLimiters.put(ORIGIN_PRODUCT_SDK, new WorkloadLimiter(ORIGIN_PRODUCT_SDK, sdkConcurrent, sdkRate, rateLimitingEnabled));
         
         // Default numaflow - THIRD PRIORITY (if pipeline-specific config not found)
         int numaflowDefaultConcurrent = calculateLimit("numaflow.default", "concurrent", 0.15, 12);
         int numaflowDefaultRate = calculateLimit("numaflow.default", "rate", 0.20, 25);
-        clientLimiters.put(ORIGIN_NUMAFLOW + ":default", new WorkloadLimiter(ORIGIN_NUMAFLOW + ":default", numaflowDefaultConcurrent, numaflowDefaultRate));
+        clientLimiters.put(ORIGIN_NUMAFLOW + ":default", new WorkloadLimiter(ORIGIN_NUMAFLOW + ":default", numaflowDefaultConcurrent, numaflowDefaultRate, rateLimitingEnabled));
         
         // unknown/missing origin - LOWEST PRIORITY (most restrictive)
         int unknownConcurrent = calculateLimit("unknown", "concurrent", 0.05, 3);
         int unknownRate = calculateLimit("unknown", "rate", 0.05, 5);
-        clientLimiters.put(ORIGIN_UNKNOWN, new WorkloadLimiter(ORIGIN_UNKNOWN, unknownConcurrent, unknownRate));
+        clientLimiters.put(ORIGIN_UNKNOWN, new WorkloadLimiter(ORIGIN_UNKNOWN, unknownConcurrent, unknownRate, rateLimitingEnabled));
         
         LOG.info("Atlas workload isolation filter initialized (priority order):");
         LOG.info("  1. product_webapp: NO THROTTLING (unlimited)");
@@ -235,19 +256,19 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
         // Calculate limits for each client based on their weight of REST capacity
         int workflowConcurrent = (int) Math.ceil(restBaselineConcurrent * workflowWeight);
         int workflowRate = (int) Math.ceil(restBaselineRate * workflowWeight);
-        clientLimiters.put(ORIGIN_WORKFLOW, new WorkloadLimiter(ORIGIN_WORKFLOW, workflowConcurrent, workflowRate));
+        clientLimiters.put(ORIGIN_WORKFLOW, new WorkloadLimiter(ORIGIN_WORKFLOW, workflowConcurrent, workflowRate, rateLimitingEnabled));
         
         int sdkConcurrent = (int) Math.ceil(restBaselineConcurrent * sdkWeight);
         int sdkRate = (int) Math.ceil(restBaselineRate * sdkWeight);
-        clientLimiters.put(ORIGIN_PRODUCT_SDK, new WorkloadLimiter(ORIGIN_PRODUCT_SDK, sdkConcurrent, sdkRate));
+        clientLimiters.put(ORIGIN_PRODUCT_SDK, new WorkloadLimiter(ORIGIN_PRODUCT_SDK, sdkConcurrent, sdkRate, rateLimitingEnabled));
         
         int numaflowDefaultConcurrent = (int) Math.ceil(restBaselineConcurrent * numaflowWeight);
         int numaflowDefaultRate = (int) Math.ceil(restBaselineRate * numaflowWeight);
-        clientLimiters.put(ORIGIN_NUMAFLOW + ":default", new WorkloadLimiter(ORIGIN_NUMAFLOW + ":default", numaflowDefaultConcurrent, numaflowDefaultRate));
+        clientLimiters.put(ORIGIN_NUMAFLOW + ":default", new WorkloadLimiter(ORIGIN_NUMAFLOW + ":default", numaflowDefaultConcurrent, numaflowDefaultRate, rateLimitingEnabled));
         
         int unknownConcurrent = (int) Math.ceil(restBaselineConcurrent * unknownWeight);
         int unknownRate = (int) Math.ceil(restBaselineRate * unknownWeight);
-        clientLimiters.put(ORIGIN_UNKNOWN, new WorkloadLimiter(ORIGIN_UNKNOWN, unknownConcurrent, unknownRate));
+        clientLimiters.put(ORIGIN_UNKNOWN, new WorkloadLimiter(ORIGIN_UNKNOWN, unknownConcurrent, unknownRate, rateLimitingEnabled));
         
         LOG.info("Atlas workload isolation filter initialized (HIERARCHICAL priority order):");
         LOG.info("  Total system capacity: {} concurrent, {} req/sec", systemCapacity.baselineConcurrency, systemCapacity.baselineRatePerSec);
@@ -432,7 +453,12 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
             if (concurrent == -1 || rate == -1) {
                 WorkloadLimiter defaultLimiter = clientLimiters.get(ORIGIN_NUMAFLOW + ":default");
                 concurrent = concurrent == -1 ? defaultLimiter.concurrencyLimit.getBulkheadConfig().getMaxConcurrentCalls() : concurrent;
-                rate = rate == -1 ? defaultLimiter.sustainedRate.getRateLimiterConfig().getLimitForPeriod() : rate;
+                if (rate == -1) {
+                    // If rate limiting is disabled, sustainedRate will be null, use a dummy value
+                    rate = (defaultLimiter.sustainedRate != null) ? 
+                            defaultLimiter.sustainedRate.getRateLimiterConfig().getLimitForPeriod() : 
+                            30; // Dummy value if rate limiting disabled
+                }
             }
             
             // Check map size to prevent memory issues
@@ -442,7 +468,7 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
             }
             
             LOG.info("Created limiter for numaflow pipeline '{}': {} concurrent, {} req/sec", pipelineId, concurrent, rate);
-            return new WorkloadLimiter(clientKey, concurrent, rate);
+            return new WorkloadLimiter(clientKey, concurrent, rate, rateLimitingEnabled);
         });
     }
     
