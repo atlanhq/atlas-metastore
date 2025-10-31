@@ -26,13 +26,13 @@ on:
       - beta
       - development
       - master
-      - staging
+      - mlh-1521
+      - refactorlineage
       - tagscanary
       - tagscanarymerge
       - fixlabels
       - interceptapis
       - mlh-1240-improve-cm-refresh-master
-      - mlh1432
       - refactorlineage
 
 jobs:

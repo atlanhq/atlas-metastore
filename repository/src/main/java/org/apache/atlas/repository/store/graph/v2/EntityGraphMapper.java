@@ -351,6 +351,10 @@ public class EntityGraphMapper {
         EntityMutationResponse resp = new EntityMutationResponse();
         RequestContext reqContext = RequestContext.get();
 
+        boolean distributedHasLineageCalculationEnabled = AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()
+                && AtlasConfiguration.ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean();
+
+
         if (CollectionUtils.isNotEmpty(context.getEntitiesToRestore())) {
             restoreHandlerV1.restoreEntities(context.getEntitiesToRestore());
             for (AtlasEntityHeader restoredEntity : reqContext.getRestoredEntities()) {
@@ -420,8 +424,7 @@ public class EntityGraphMapper {
 
                     Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
 
-                    if (removedEdges != null && removedEdges.size() > 0) {
-
+                    if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
                         deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
                     }
 
@@ -518,7 +521,7 @@ public class EntityGraphMapper {
 
                     Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
 
-                    if (removedEdges != null && removedEdges.size() > 0) {
+                    if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
                         deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
                     }
 
@@ -581,7 +584,7 @@ public class EntityGraphMapper {
 
                 // Update __hasLineage for edges impacted during remove operation
                 Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
-                if (CollectionUtils.isNotEmpty(removedEdges)) {
+                if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
                     deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
                 }
             }
