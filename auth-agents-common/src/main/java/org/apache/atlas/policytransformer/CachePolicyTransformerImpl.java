@@ -418,6 +418,10 @@ public class CachePolicyTransformerImpl {
         Map<String, EntityAuditActionV2> policyChanges = new HashMap<>();
         for (EntityAuditEventV2 event : events) {
             if (POLICY_ENTITY_TYPE.equals(event.getTypeName()) && !policyChanges.containsKey(event.getEntityId())) {
+                if (auditEventToDeltaChangeType.get(event.getAction()) == null) {
+                    LOG.warn("PolicyDelta: {}: No delta type found for audit_event={} guid={}", serviceName, event.getAction(), event.getEntityId());
+                    continue;
+                }
                 policyChanges.put(event.getEntityId(), event.getAction());
             }
         }
@@ -548,7 +552,12 @@ public class CachePolicyTransformerImpl {
         List<RangerPolicyItemAccess> accesses = new ArrayList<>();
         List<String> actions = (List<String>) atlasPolicy.getAttribute("policyActions");
 
-        actions.forEach(action -> accesses.add(new RangerPolicyItemAccess(action)));
+        if (actions != null) {
+            actions.forEach(action -> accesses.add(new RangerPolicyItemAccess(action)));
+        } else {
+            // Handle the null case - either throw an exception or use an empty list
+            LOG.warn("Policy actions is null for policy: {}", atlasPolicy.getGuid());
+        }
 
 
         if ("allow".equals(policyType)) {
