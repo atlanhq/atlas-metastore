@@ -26,12 +26,8 @@ on:
       - beta
       - development
       - master
+      - mlh-1521
       - staging
-      - tagscanary
-      - tagscanarymerge
-      - fixlabels
-      - interceptapis
-      - mlh-1240-improve-cm-refresh-master
 
 jobs:
   helm-lint:
