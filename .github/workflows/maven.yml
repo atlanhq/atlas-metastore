@@ -71,6 +71,14 @@ jobs:
         with:
           version: '3.12.0'
       
+      - name: Update helm dependencies
+        run: |
+          cd ${{ matrix.path }}
+          helm dependency update
+          
+          echo "Chart dependencies:"
+          ls -la charts/ || echo "No dependencies directory"
+      
       - name: Lint helm chart
         run: |
           helm lint ${{ matrix.path }}/
@@ -585,6 +593,14 @@ jobs:
           
           echo "Image configuration in ${{ matrix.chart }}/values.yaml:"
           grep -A 3 "image:" ${{ matrix.path }}/values.yaml | head -10
+      
+      - name: Update helm dependencies
+        run: |
+          cd ${{ matrix.path }}
+          helm dependency update
+          
+          echo "Chart dependencies:"
+          ls -la charts/ || echo "No dependencies directory"
       
       - name: Package helm chart
         run: |
