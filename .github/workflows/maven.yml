@@ -367,6 +367,9 @@ jobs:
     name: Multi-Cloud Smoke Test
     needs: build
     runs-on: ubuntu-latest
+    # Only run smoke tests on protected branches (beta, staging, master)
+    # Feature branches skip smoke tests but can still publish OCI charts for manual testing
+    if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
@@ -510,8 +513,10 @@ jobs:
           path: smoke-test-logs/
 
   helm-publish:
-    needs: smoke-test  # Only publish if smoke tests pass in all clouds
+    needs: [build, smoke-test]
     runs-on: ubuntu-latest
+    # Run if smoke-test passed (protected branches) OR was skipped (feature branches)
+    if: always() && needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')
     strategy:
       matrix:
         include:
