@@ -358,6 +358,12 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     
+    # Concurrency control: Only one smoke test at a time across all branches
+    # Shared vClusters cannot handle concurrent deployments
+    concurrency:
+      group: smoke-test-shared-vclusters
+      cancel-in-progress: false  # Don't cancel running tests, queue instead
+    
     env:
       VCLUSTER_AWS_NAME: ${{ vars.VCLUSTER_AWS_NAME }}
       VCLUSTER_AZURE_NAME: ${{ vars.VCLUSTER_AZURE_NAME }}
