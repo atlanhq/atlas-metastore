@@ -26,7 +26,7 @@ This document describes the migration of Atlas Helm charts from a local subchart
 - ✅ **Single source of truth** (charts live with code in atlas-metastore)
 - ✅ **Unified workflow** (no more separate flows for images vs chart templates)
 - ✅ **Complete automation** (chart templates now automated, not just image tags)
-- ✅ **Quality gate** (helm-publish only runs if smoke tests pass - prevents buggy charts)
+- ✅ **Quality gate** (helm-publish only runs if tests pass)
 - ✅ **Independent versioning** and publishing of Atlas charts via OCI
 - ✅ **Automated chart distribution** via GitHub Container Registry (GHCR)
 - ✅ **Enhanced `repository_dispatch`** (now includes chart versions, not just trigger)
@@ -428,11 +428,11 @@ dependencies:
     repository: "oci://ghcr.io/atlanhq/helm-charts"
     
   - name: elasticsearch
-    version: "7.17.3-staging.abc123"      # ✅ Independent OCI artifact
+    version: "7.6.1-staging.abc123"       # ✅ Independent OCI artifact
     repository: "oci://ghcr.io/atlanhq/helm-charts"
     
   - name: logstash
-    version: "9.0.0-staging.abc123"       # ✅ Independent OCI artifact
+    version: "9.1.2-staging.abc123"       # ✅ Independent OCI artifact
     repository: "oci://ghcr.io/atlanhq/helm-charts"
   
   # Atlas-Read infrastructure charts (peers, not nested)
@@ -441,7 +441,7 @@ dependencies:
     repository: "oci://ghcr.io/atlanhq/helm-charts"
     
   - name: elasticsearch-read
-    version: "7.17.3-staging.abc123"      # ✅ Independent OCI artifact
+    version: "7.6.1-staging.abc123"       # ✅ Independent OCI artifact
     repository: "oci://ghcr.io/atlanhq/helm-charts"
     
   - name: elasticsearch-exporter-read
@@ -470,11 +470,25 @@ atlas:
     limits:
       memory: "8Gi"
       cpu: "4"
+  # Disable infrastructure subcharts - consumed as peer OCI dependencies instead
+  cassandra:
+    enabled: false
+  elasticsearch:
+    enabled: false
+  logstash:
+    enabled: false
   # ... more atlas overrides
   
 atlas-read:
   enabled: true
   replicaCount: 1
+  # Disable infrastructure subcharts - consumed as peer OCI dependencies instead
+  cassandra-online-dc:
+    enabled: false
+  elasticsearch-read:
+    enabled: false
+  elasticsearch-exporter-read:
+    enabled: false
   # ... atlas-read overrides
 
 # Atlas infrastructure overrides (root level as peers, NOT nested under atlas.*)
@@ -516,7 +530,15 @@ kong:
   # ...
 ```
 
-**Key:** All overrides remain at **root level** as peer dependencies. This is why separate OCI artifacts are critical - maintaining backward compatibility with existing `values.yaml` structure.
+**Key Points:**
+
+1. **Root-level overrides preserved:** All infrastructure overrides (`cassandra.*`, `elasticsearch.*`, etc.) remain at root level as peer dependencies, maintaining backward compatibility.
+
+2. **Disable flags prevent duplicates:** The `atlas.cassandra.enabled: false` flags explicitly disable infrastructure subcharts within the atlas/atlas-read OCI artifacts. Without these flags, infrastructure charts would render twice:
+   - Once from the atlas subchart's bundled dependencies
+   - Once from the peer OCI dependencies in atlan's Chart.yaml
+   
+   This dual-inclusion would create duplicate StatefulSets and cause deployment failures. The disable flags ensure each infrastructure chart renders only once (as a peer).
 
 **Chart Version Format:**
 ```
@@ -535,7 +557,22 @@ name: atlas
 description: Apache Atlas Metadata Management and Governance Platform
 version: 1.0.0                            # ✅ Updated to 1.0.0-{branch}.{commit} by CI
 appVersion: "abc123"                      # ✅ Updated to commit SHA by CI
-# NO dependencies - infrastructure charts published separately
+dependencies:
+  # Infrastructure charts - disabled by default (published separately as OCI)
+  # Charts exist in charts/ subdirectory for individual OCI publishing
+  # Consumed as peers in parent atlan chart, not as subcharts here
+  - name: cassandra
+    repository: file://./charts/cassandra
+    version: 0.x.x
+    condition: cassandra.enabled  # Disabled in values.yaml
+  - name: elasticsearch
+    repository: file://./charts/elasticsearch
+    version: 7.x.x
+    condition: elasticsearch.enabled  # Disabled in values.yaml
+  - name: logstash
+    repository: file://./charts/logstash
+    version: 9.x.x
+    condition: logstash.enabled  # Disabled in values.yaml
 ```
 
 **atlas-metastore/helm/atlas-read/Chart.yaml:**
@@ -545,7 +582,22 @@ name: atlas-read
 description: Apache Atlas Read Replica for Metadata Management
 version: 1.0.0                            # ✅ Updated to 1.0.0-{branch}.{commit} by CI
 appVersion: "abc123"                      # ✅ Updated to commit SHA by CI
-# NO dependencies - infrastructure charts published separately
+dependencies:
+  # Infrastructure charts - disabled by default (published separately as OCI)
+  # Charts exist in charts/ subdirectory for individual OCI publishing
+  # Consumed as peers in parent atlan chart, not as subcharts here
+  - name: cassandra-online-dc
+    repository: file://./charts/cassandra-online-dc
+    version: 0.x.x
+    condition: cassandra-online-dc.enabled  # Disabled in values.yaml
+  - name: elasticsearch-read
+    repository: file://./charts/elasticsearch-read
+    version: 7.x.x
+    condition: elasticsearch-read.enabled  # Disabled in values.yaml
+  - name: elasticsearch-exporter-read
+    repository: file://./charts/elasticsearch-exporter-read
+    version: 3.3.0
+    condition: elasticsearch-exporter-read.enabled  # Disabled in values.yaml
 ```
 
 **Infrastructure Chart Examples (helm/atlas/charts/):**
@@ -558,15 +610,56 @@ version: 0.14.4                           # ✅ Updated to 0.14.4-{branch}.{comm
 # elasticsearch/Chart.yaml
 apiVersion: v2
 name: elasticsearch
-version: 7.17.3                           # ✅ Updated to 7.17.3-{branch}.{commit} by CI
+version: 7.6.1                            # ✅ Updated to 7.6.1-{branch}.{commit} by CI
 
 # logstash/Chart.yaml
 apiVersion: v2
 name: logstash
-version: 9.0.0                            # ✅ Updated to 9.0.0-{branch}.{commit} by CI
+version: 9.1.2                            # ✅ Updated to 9.1.2-{branch}.{commit} by CI
 ```
 
-**Key Change:** Charts have NO dependencies. Each is published independently as an OCI artifact. The atlan parent chart assembles them as peers.
+**atlas-metastore/helm/atlas/values.yaml (partial):**
+```yaml
+# Infrastructure charts disabled - published separately as OCI artifacts
+cassandra:
+  enabled: false
+elasticsearch:
+  enabled: false
+logstash:
+  enabled: false
+
+# Default values for atlas application
+global:
+  Tier_Type: ""
+  cloud: ""
+  # ... other global values
+```
+
+**atlas-metastore/helm/atlas-read/values.yaml (partial):**
+```yaml
+# Infrastructure charts disabled - published separately as OCI artifacts
+cassandra-online-dc:
+  enabled: false
+elasticsearch-read:
+  enabled: false
+elasticsearch-exporter-read:
+  enabled: false
+
+# Default values for atlas-read application
+global:
+  Tier_Type: ""
+  # ... other global values
+```
+
+**Key Changes:**
+
+1. **Dependencies declared but disabled:** Infrastructure charts are listed in Chart.yaml with `condition: *.enabled` flags. This satisfies Helm linting requirements (charts physically exist in the `charts/` subdirectory) while preventing them from being bundled as subcharts.
+
+2. **Disabled in values.yaml:** Each infrastructure chart has `enabled: false` in the chart's own values.yaml, ensuring they won't render when the atlas/atlas-read chart is deployed standalone.
+
+3. **Parent chart re-disables:** The atlan repo's values.yaml also sets `atlas.cassandra.enabled: false` (and similar for all infrastructure charts) to ensure they remain disabled when consumed as OCI dependencies.
+
+4. **Published independently:** Despite being declared as dependencies, each chart is packaged and published separately as an OCI artifact. The atlan parent chart then consumes all 8 as peer dependencies.
 
 ---
 
@@ -590,16 +683,8 @@ jobs:
       - Build Docker image
       - Push Docker image: atlas-metastore-{branch}:{commit}
       
-  smoke-test:
-    needs: build
-    steps:
-      - Deploy to test environments
-      - Validate functionality
-      - Run health checks
-      # (See separate smoke test documentation)
-      
   helm-publish:
-    needs: smoke-test  # 🛡️ QUALITY GATE - Only runs if smoke tests pass
+    needs: build  # 🛡️ QUALITY GATE - Only runs if build and tests pass
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -608,29 +693,37 @@ jobs:
           - chart: atlas
             path: helm/atlas
             base_version: "1.0.0"
+            requires_app_version: true
           - chart: atlas-read
             path: helm/atlas-read
             base_version: "1.0.0"
+            requires_app_version: true
           # Atlas infrastructure charts
           - chart: cassandra
             path: helm/atlas/charts/cassandra
             base_version: "0.14.4"
+            requires_app_version: false
           - chart: elasticsearch
             path: helm/atlas/charts/elasticsearch
-            base_version: "7.17.3"
+            base_version: "7.6.1"
+            requires_app_version: false
           - chart: logstash
             path: helm/atlas/charts/logstash
-            base_version: "9.0.0"
+            base_version: "9.1.2"
+            requires_app_version: false
           # Atlas-Read infrastructure charts
           - chart: cassandra-online-dc
             path: helm/atlas-read/charts/cassandra-online-dc
             base_version: "0.14.4"
+            requires_app_version: false
           - chart: elasticsearch-read
             path: helm/atlas-read/charts/elasticsearch-read
-            base_version: "7.17.3"
+            base_version: "7.6.1"
+            requires_app_version: false
           - chart: elasticsearch-exporter-read
             path: helm/atlas-read/charts/elasticsearch-exporter-read
             base_version: "3.3.0"
+            requires_app_version: false
       max-parallel: 1  # Publish sequentially
     
     steps:
@@ -650,10 +743,17 @@ jobs:
         run: |
           sed -i "s/^version: .*/version: ${{ steps.version.outputs.chart }}/" ${{ matrix.path }}/Chart.yaml
           
-          # Only update appVersion for application charts
-          if [[ "${{ matrix.chart }}" == "atlas" ]] || [[ "${{ matrix.chart }}" == "atlas-read" ]]; then
+          # Only update appVersion for application charts (not infrastructure)
+          if [[ "${{ matrix.requires_app_version }}" == "true" ]]; then
             sed -i "s/^appVersion: .*/appVersion: \"${{ steps.commit.outputs.id }}\"/" ${{ matrix.path }}/Chart.yaml
           fi
+      
+      # ✅ Update values.yaml with image tags (application charts only)
+      - name: Update values.yaml with image tags
+        if: matrix.requires_app_version == true
+        run: |
+          # Update atlas/atlas-read application image tags
+          yq eval -i '.atlas.image.tag = "${{ steps.commit.outputs.id }}"' ${{ matrix.path }}/values.yaml
       
       # ✅ Package chart
       - name: Package helm chart
@@ -788,7 +888,7 @@ jobs:
             **Version:** ${{ github.event.client_payload.atlas_version }}
             **Source:** ${{ github.event.client_payload.source_repo }}/${{ github.event.client_payload.source_branch }}
             
-            ✅ Quality gate passed (smoke tests validated)" \
+            ✅ Quality gate passed (build and tests validated)" \
             --base main
 ```
 
@@ -796,25 +896,63 @@ jobs:
 ```bash
 # ATLAS CHART VERSION UPDATE
 ATLAS_BRANCH=`echo ${GITHUB_BRANCH_NAME} | tr '-' '_'`
-# ... determine branch logic ...
+eval FILE=$`echo ${ATLAS_BRANCH}"_atlas_metastore"`
+if [ -z $FILE ]
+then
+    ATLAS_BRANCH=$GITHUB_BRANCH_NAME
+    echo $ATLAS_BRANCH-atlas-branch-coming-from-github-current-workflow-branch
+else
+    ATLAS_BRANCH=$FILE
+    echo $ATLAS_BRANCH-atlas-branch-coming-from-instancemap
+fi
 
-# ✅ Update Chart.yaml with OCI chart version (not just image tag)
+# ✅ Update Chart.yaml with ALL 8 OCI chart versions (not just image tags)
 if [[ "$MICROSERVICE_NAME" == "atlas-metastore" ]]; then
     TAG=$(get_latest_tag "atlas-metastore" "$ATLAS_BRANCH")
     echo "[Info] The atlas-metastore image tag is: $TAG"
     
-    # ✅ Construct chart version: 1.0.0-{branch}.{commit}
+    # ✅ Construct chart versions: {base_version}-{branch}.{commit}
     ATLAS_BRANCH_NORMALIZED=`echo ${ATLAS_BRANCH} | tr '_' '-'`
-    ATLAS_CHART_VERSION="1.0.0-${ATLAS_BRANCH_NORMALIZED}.${TAG}"
-    echo "[Info] Atlas chart version: $ATLAS_CHART_VERSION"
     
-    # ✅ Update Chart.yaml: find atlas and atlas-read dependencies and update versions
-    yq eval -i '(.dependencies[] | select(.name == "atlas") | .version) = "'"$ATLAS_CHART_VERSION"'"' charts/Chart.yaml
-    yq eval -i '(.dependencies[] | select(.name == "atlas-read") | .version) = "'"$ATLAS_CHART_VERSION"'"' charts/Chart.yaml
+    # Application charts (atlas, atlas-read): base version 1.0.0
+    APP_CHART_VERSION="1.0.0-${ATLAS_BRANCH_NORMALIZED}.${TAG}"
+    echo "[Info] Application chart version (atlas, atlas-read): $APP_CHART_VERSION"
     
-    echo "[Info] Chart.yaml updated with atlas chart version: $ATLAS_CHART_VERSION"
+    # Infrastructure chart versions with their respective base versions
+    CASSANDRA_VERSION="0.14.4-${ATLAS_BRANCH_NORMALIZED}.${TAG}"
+    ELASTICSEARCH_VERSION="7.6.1-${ATLAS_BRANCH_NORMALIZED}.${TAG}"
+    LOGSTASH_VERSION="9.1.2-${ATLAS_BRANCH_NORMALIZED}.${TAG}"
+    ES_EXPORTER_READ_VERSION="3.3.0-${ATLAS_BRANCH_NORMALIZED}.${TAG}"
+    
+    echo "[Info] Infrastructure chart versions:"
+    echo "  - cassandra: $CASSANDRA_VERSION (base: 0.14.4)"
+    echo "  - elasticsearch: $ELASTICSEARCH_VERSION (base: 7.6.1)"
+    echo "  - logstash: $LOGSTASH_VERSION (base: 9.1.2)"
+    echo "  - cassandra-online-dc: $CASSANDRA_VERSION (base: 0.14.4)"
+    echo "  - elasticsearch-read: $ELASTICSEARCH_VERSION (base: 7.6.1)"
+    echo "  - elasticsearch-exporter-read: $ES_EXPORTER_READ_VERSION (base: 3.3.0)"
+    
+    # ✅ Update Chart.yaml: update all 8 chart versions using yq
+    echo "[Info] Updating Chart.yaml with all chart versions..."
+    
+    # Application charts
+    yq eval -i '(.dependencies[] | select(.name == "atlas") | .version) = "'"$APP_CHART_VERSION"'"' charts/Chart.yaml
+    yq eval -i '(.dependencies[] | select(.name == "atlas-read") | .version) = "'"$APP_CHART_VERSION"'"' charts/Chart.yaml
+    
+    # Atlas infrastructure charts
+    yq eval -i '(.dependencies[] | select(.name == "cassandra") | .version) = "'"$CASSANDRA_VERSION"'"' charts/Chart.yaml
+    yq eval -i '(.dependencies[] | select(.name == "elasticsearch") | .version) = "'"$ELASTICSEARCH_VERSION"'"' charts/Chart.yaml
+    yq eval -i '(.dependencies[] | select(.name == "logstash") | .version) = "'"$LOGSTASH_VERSION"'"' charts/Chart.yaml
+    
+    # Atlas-Read infrastructure charts (same versions, different names)
+    yq eval -i '(.dependencies[] | select(.name == "cassandra-online-dc") | .version) = "'"$CASSANDRA_VERSION"'"' charts/Chart.yaml
+    yq eval -i '(.dependencies[] | select(.name == "elasticsearch-read") | .version) = "'"$ELASTICSEARCH_VERSION"'"' charts/Chart.yaml
+    yq eval -i '(.dependencies[] | select(.name == "elasticsearch-exporter-read") | .version) = "'"$ES_EXPORTER_READ_VERSION"'"' charts/Chart.yaml
+    
+    echo "[Info] ✓ Chart.yaml updated with all atlas chart versions"
 else
-    # ✅ If triggered by other microservices, keep existing atlas chart version
+    # ✅ If triggered by other microservices, keep existing atlas chart versions
+    # This is critical for preprod/master to prevent unintended updates
     echo "[Info] Not triggered by atlas-metastore - keeping existing atlas chart versions"
 fi
 ```
@@ -901,30 +1039,7 @@ chmod -R 777 ~/.docker/
 - No need to clone entire repository
 - Better caching and performance
 
-### 6. ✅ **Quality Gate with Smoke Tests**
-
-**Before:** No validation before chart usage
-- Charts updated in `atlan` repo
-- Deployed directly to environments
-- Issues discovered in production
-
-**After:** Smoke test quality gate
-- Charts published ONLY if smoke tests pass
-- Validated across test environments
-- Issues caught before charts reach production
-
-**Quality Gate Behavior:**
-```
-✅ All smoke tests pass → helm-publish runs → Charts available in GHCR
-❌ Any smoke test fails  → helm-publish skipped → No charts published
-```
-
-- Prevents buggy charts from reaching production
-- Validates deployments work before distribution
-- Catches environment-specific issues early
-- Provides confidence in chart quality
-
-### 7. ✅ **Complete Cross-Repository Automation**
+### 6. ✅ **Complete Cross-Repository Automation**
 
 **Before:** Image tags automated, chart templates manual
 ```
@@ -953,6 +1068,21 @@ ANY changes (image + chart templates):
 - Charts always in sync with code (same repo, same commit)
 - Complete audit trail via git history
 
+### 7. ✅ **No Duplicate Manifests**
+
+**Challenge:** When publishing atlas as an OCI artifact that declares infrastructure dependencies, and also consuming those same infrastructure charts as peer dependencies in the parent atlan chart, Helm would render each infrastructure chart twice, creating duplicate StatefulSets and causing deployment failures.
+
+**Solution:** Multi-layer disable flags
+1. **atlas-metastore charts:** Infrastructure dependencies declared in `Chart.yaml` with `condition: *.enabled` flags, and disabled in chart's own `values.yaml` (`cassandra.enabled: false`)
+2. **atlan values:** Parent chart explicitly re-disables these via `atlas.cassandra.enabled: false` to ensure they remain disabled when OCI chart is consumed
+3. **Result:** Infrastructure charts render only once (as peers in atlan), never as nested subcharts
+
+**Benefits:**
+- ✅ No duplicate Kubernetes resources (StatefulSets, Services, ConfigMaps)
+- ✅ Correct resource naming (e.g., `atlas-cassandra` not `release-name-cassandra`)
+- ✅ Proper namespace assignment from parent values
+- ✅ Reduced manifest size (~2,000 lines removed from rendered output)
+
 ---
 
 ## Migration Checklist
@@ -962,36 +1092,43 @@ ANY changes (image + chart templates):
 - [x] **Create `helm/` directory** (didn't exist before!)
 - [x] **Move charts from `atlan/subcharts/atlas/`** to `atlas-metastore/helm/`
 - [x] Include all dependencies in `helm/charts/` (cassandra, elasticsearch, kafka, logstash, redis, zookeeper)
+- [x] **Add infrastructure dependencies to Chart.yaml** with `condition: *.enabled` flags
+- [x] **Add disable flags to values.yaml** for infrastructure charts (`cassandra.enabled: false`, etc.)
 - [x] Update `.github/workflows/maven.yml`:
-  - [x] Add `helm-lint` job (validates charts before build)
-  - [x] Add `smoke-test` job (validates deployments)
-  - [x] Add `helm-publish` job with quality gate (only runs if smoke tests pass)
+  - [x] Add `helm-lint` job (validates all 8 charts, with conditional logic for appVersion and parent values)
+  - [x] Add `helm-publish` job with quality gate (only runs if build and tests pass, publishes all 8 charts)
   - [x] Add GHCR authentication
-  - [x] Dynamic chart version generation
-  - [x] GitHub Release creation
+  - [x] Dynamic chart version generation for each chart with correct base versions
+  - [x] GitHub Release creation for each chart
   - [x] Update integration tests to use Testcontainers (local Redis, no Sentinel)
 - [x] Add `.github/workflows/chart-release-dispatcher.yaml`
   - [x] Triggers on maven.yml completion
-  - [x] Extracts chart versions from GitHub releases
-  - [x] Sends `repository_dispatch` to atlan repo with chart versions
+  - [x] Sends `repository_dispatch` to atlan repo (chart versions extracted from GitHub releases)
 
 ### atlan Repository
 
 - [x] Update `charts/Chart.yaml`:
   - [x] Change atlas dependency from `file://../subcharts/atlas` to `oci://ghcr.io/atlanhq/helm-charts`
   - [x] Change atlas-read dependency from `file://../subcharts/atlas` to `oci://ghcr.io/atlanhq/helm-charts`
-  - [x] Set initial version (e.g., `1.0.0-staging.PLACEHOLDER`)
+  - [x] Add all 8 Atlas-related charts as peer OCI dependencies (atlas, atlas-read, cassandra, elasticsearch, logstash, cassandra-online-dc, elasticsearch-read, elasticsearch-exporter-read)
+  - [x] Set initial versions with correct base versions (e.g., `1.0.0-staging.PLACEHOLDER`, `0.14.4-staging.PLACEHOLDER`, etc.)
 - [x] **Remove only:** `subcharts/atlas/` and `subcharts/atlas-read/` directories
 - [x] **Keep:** `charts/Chart.yaml`, `charts/values.yaml`, `charts/values-template.yaml`
-- [x] **Keep:** Atlas overrides in values files (atlas.*, atlas-read.*)
+- [x] **Keep:** Atlas overrides in values files (atlas.*, atlas-read.*, cassandra.*, elasticsearch.*, etc.)
 - [x] **Keep:** Other subcharts (heka, kong, ranger, etc.)
 - [x] Update `charts/values-template.yaml` and `charts/values.yaml`:
-  - [x] Keep all atlas-specific configuration overrides
-  - [x] No structural changes to values - just removed nested dependency conditions from Chart.yaml
+  - [x] Keep all atlas-specific configuration overrides (root level, unchanged structure)
+  - [x] **Add disable flags** under atlas.* and atlas-read.* to prevent duplicate manifests:
+    - `atlas.cassandra.enabled: false`
+    - `atlas.elasticsearch.enabled: false`
+    - `atlas.logstash.enabled: false`
+    - `atlas-read.cassandra-online-dc.enabled: false`
+    - `atlas-read.elasticsearch-read.enabled: false`
+    - `atlas-read.elasticsearch-exporter-read.enabled: false`
 - [x] Update `scripts/image.sh`:
-  - [x] Change from image tag seeding to Chart.yaml version updates
-  - [x] Use `yq` to update OCI chart versions
-  - [x] Add `MICROSERVICE_NAME` conditional logic (preprod only)
+  - [x] Change from image tag seeding to Chart.yaml version updates (all 8 charts)
+  - [x] Use `yq` to update OCI chart versions for each chart with correct base versions
+  - [x] Add `MICROSERVICE_NAME` conditional logic (preprod/master only)
 - [x] Update `.github/workflows/charts-values.yaml`:
   - [x] Add GHCR login step
   - [x] Add `charts/Chart.yaml` to commit step
@@ -1118,25 +1255,40 @@ If issues arise, rollback is straightforward:
 ### atlas-metastore
 
 1. **`.github/workflows/maven.yml`**
-   - Added: `helm-lint`, `helm-publish`, `notify-downstream` jobs
+   - Added: `helm-lint` job (lints all 8 charts with conditional logic)
+   - Added: `helm-publish` job (publishes all 8 charts individually as OCI artifacts)
+   - Matrix strategy for 8 charts with correct base versions
+   - Quality gate: helm-publish only runs if build and tests pass
 
 2. **`.github/workflows/chart-release-dispatcher.yaml`** (new)
-   - Sends `repository_dispatch` to atlan repo
+   - Sends `repository_dispatch` to atlan repo after successful maven.yml completion
 
-3. **`helm/Chart.yaml`**
-   - Version now dynamic (set by CI)
+3. **`helm/atlas/Chart.yaml`**
+   - Version now dynamic (set by CI to `1.0.0-{branch}.{commit}`)
+   - Dependencies declared with `condition: *.enabled` flags (cassandra, elasticsearch, logstash)
+
+4. **`helm/atlas-read/Chart.yaml`**
+   - Version now dynamic (set by CI to `1.0.0-{branch}.{commit}`)
+   - Dependencies declared with `condition: *.enabled` flags (cassandra-online-dc, elasticsearch-read, elasticsearch-exporter-read)
+
+5. **`helm/atlas/values.yaml`** (new)
+   - Disable flags for infrastructure charts (`cassandra.enabled: false`, etc.)
+
+6. **`helm/atlas-read/values.yaml`** (new)
+   - Disable flags for infrastructure charts (`cassandra-online-dc.enabled: false`, etc.)
 
 ### atlan
 
 1. **`charts/Chart.yaml`**
    - Changed atlas/atlas-read dependencies from `file://../subcharts/atlas` to `oci://ghcr.io/atlanhq/helm-charts`
-   - Updated version references to dynamic OCI versions (e.g., `1.0.0-staging.abc123`)
-   - Removed nested dependency conditions (cassandra, elasticsearch, etc. now bundled in OCI chart)
+   - Added all 8 Atlas-related charts as peer OCI dependencies (atlas, atlas-read, cassandra, elasticsearch, logstash, cassandra-online-dc, elasticsearch-read, elasticsearch-exporter-read)
+   - Updated version references to dynamic OCI versions with correct base versions (e.g., `1.0.0-staging.abc123`, `0.14.4-staging.abc123`, `7.6.1-staging.abc123`, etc.)
 
 2. **`scripts/image.sh`**
-   - Atlas section now updates `Chart.yaml` version instead of seeding image tags into values
-   - Uses `yq` for YAML manipulation
-   - Adds `MICROSERVICE_NAME` conditional logic (preprod only)
+   - Atlas section now updates `Chart.yaml` versions for ALL 8 charts (not just image tags in values)
+   - Uses `yq` for YAML manipulation with separate version variables for each chart
+   - Adds `MICROSERVICE_NAME` conditional logic (preprod/master only) to prevent unintended updates
+   - Includes instance map logic for branch name resolution
 
 3. **`.github/workflows/charts-values.yaml`**
    - Added GHCR login step
@@ -1147,8 +1299,15 @@ If issues arise, rollback is straightforward:
    - Added GHCR login step
 
 5. **`charts/values-template.yaml`** & **`charts/values.yaml`**
-   - **Kept:** All atlas-specific configuration overrides (atlas.*, atlas-read.*)
-   - **No major changes:** Values structure remains the same
+   - **Kept:** All atlas-specific configuration overrides at root level (atlas.*, atlas-read.*, cassandra.*, elasticsearch.*, etc.)
+   - **Added:** Disable flags under atlas.* and atlas-read.* to prevent duplicate manifests:
+     - `atlas.cassandra.enabled: false`
+     - `atlas.elasticsearch.enabled: false`
+     - `atlas.logstash.enabled: false`
+     - `atlas-read.cassandra-online-dc.enabled: false`
+     - `atlas-read.elasticsearch-read.enabled: false`
+     - `atlas-read.elasticsearch-exporter-read.enabled: false`
+   - **No structural changes:** Values override structure remains the same (backward compatible)
    - These files still define atlas replicaCount, resources, environment variables, etc.
 
 6. **Deleted:**

@@ -35,7 +35,15 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chart: ['atlas', 'atlas-read']
+        include:
+          - chart: atlas
+          - chart: atlas-read
+          - chart: cassandra
+          - chart: elasticsearch
+          - chart: logstash
+          - chart: cassandra-online-dc
+          - chart: elasticsearch-read
+          - chart: elasticsearch-exporter-read
     steps: [...]
   
   build:
@@ -53,7 +61,24 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        chart: ['atlas', 'atlas-read']
+        include:
+          - chart: atlas
+            base_version: "1.0.0"
+          - chart: atlas-read
+            base_version: "1.0.0"
+          - chart: cassandra
+            base_version: "0.14.4"
+          - chart: elasticsearch
+            base_version: "7.6.1"
+          - chart: logstash
+            base_version: "9.1.2"
+          - chart: cassandra-online-dc
+            base_version: "0.14.4"
+          - chart: elasticsearch-read
+            base_version: "7.6.1"
+          - chart: elasticsearch-exporter-read
+            base_version: "3.3.0"
+      max-parallel: 1  # Publish sequentially
     steps: [...]
 ```
 
@@ -233,7 +258,7 @@ Developer Push
 │                                                                     │
 │  ✅ RUNNING - All smoke tests passed!                               │
 │                                                                     │
-│  Matrix: ['atlas', 'atlas-read']                                    │
+│  Matrix: 8 charts (atlas, atlas-read, + 6 infrastructure)          │
 │                                                                     │
 │  🛡️  QUALITY GATE PASSED: All clouds passed smoke tests             │
 │                                                                     │
@@ -248,9 +273,12 @@ Developer Push
 │  9. Push chart to GHCR (OCI Registry)                               │
 │     ✓ atlas published: oci://ghcr.io/atlanhq/helm-charts/atlas      │
 │     ✓ atlas-read published: oci://ghcr.io/.../atlas-read            │
+│     ✓ cassandra, elasticsearch, logstash published                  │
+│     ✓ cassandra-online-dc, elasticsearch-read, exporter published   │
 │ 10. Create GitHub Release with artifacts                            │
-│     ✓ Release helm-atlas-v1.0.0-branch.commitid created             │
-│     ✓ Release helm-atlas-read-v1.0.0-branch.commitid created        │
+│     ✓ Releases created for all 8 charts with base versions          │
+│     ✓ Example: helm-atlas-v1.0.0-branch.commitid                    │
+│     ✓ Example: helm-cassandra-v0.14.4-branch.commitid               │
 │ 11. Publish summary                                                 │
 │                                                                     │
 │  ✓ Job Complete (Helm charts published successfully!)               │
@@ -374,7 +402,7 @@ on:
 
 ### Job 1: helm-lint
 
-**Purpose:** Validate Helm chart structure and configuration for both atlas and atlas-read charts
+**Purpose:** Validate Helm chart structure and configuration for all 8 Atlas-related charts
 
 **Runner:** `ubuntu-latest` (GitHub-hosted, 2-core, 7GB RAM)
 
@@ -382,7 +410,10 @@ on:
 
 **Dependencies:** None (runs immediately)
 
-**Matrix Strategy:** Runs in parallel for `['atlas', 'atlas-read']`
+**Matrix Strategy:** Runs in parallel for 8 charts:
+- Application charts: `atlas`, `atlas-read`
+- Atlas infrastructure: `cassandra`, `elasticsearch`, `logstash`
+- Atlas-Read infrastructure: `cassandra-online-dc`, `elasticsearch-read`, `elasticsearch-exporter-read`
 
 #### Step-by-Step Breakdown
 
@@ -1581,11 +1612,20 @@ KUBECONFIG=kubeconfig-azure.yaml kubectl cluster-info
 
 **Runner:** `ubuntu-latest` (GitHub-hosted)
 
-**Duration:** ~3-5 minutes
+**Duration:** ~3-5 minutes per chart (~30 minutes total with max-parallel: 1)
 
 **Dependencies:** `needs: smoke-test` - **🛡️ QUALITY GATE!** Only runs if ALL smoke tests pass
 
-**Matrix Strategy:** Runs in parallel for `['atlas', 'atlas-read']`
+**Matrix Strategy:** Publishes all 8 charts sequentially (max-parallel: 1):
+- **Application charts (base: 1.0.0):** `atlas`, `atlas-read`
+- **Atlas infrastructure charts:**
+  - `cassandra` (base: 0.14.4)
+  - `elasticsearch` (base: 7.6.1)
+  - `logstash` (base: 9.1.2)
+- **Atlas-Read infrastructure charts:**
+  - `cassandra-online-dc` (base: 0.14.4)
+  - `elasticsearch-read` (base: 7.6.1)
+  - `elasticsearch-exporter-read` (base: 3.3.0)
 
 #### Step-by-Step Breakdown
 
@@ -1638,21 +1678,25 @@ KUBECONFIG=kubeconfig-azure.yaml kubectl cluster-info
 - name: Generate chart version
   id: version
   run: |
-    # Semantic version: 1.0.0-branch.commitid
+    # Semantic version: {base_version}-branch.commitid
     # Replace underscores with hyphens for semver compliance
     BRANCH_NAME_NORMALIZED=$(echo "${{ steps.branch.outputs.name }}" | tr '_' '-')
-    CHART_VERSION="1.0.0-${BRANCH_NAME_NORMALIZED}.${{ steps.commit.outputs.id }}"
+    CHART_VERSION="${{ matrix.base_version }}-${BRANCH_NAME_NORMALIZED}.${{ steps.commit.outputs.id }}"
     echo "chart=${CHART_VERSION}" >> $GITHUB_OUTPUT
     echo "Generated chart version: ${CHART_VERSION}"
 ```
 
 **Chart Versioning Strategy:**
-- Format: `1.0.0-{branch}.{commitid}`
-- Example: `1.0.0-prove-ci-blind-fresh.064f482abcd`
+- Format: `{base_version}-{branch}.{commitid}`
+- Examples:
+  - `atlas`: `1.0.0-prove-ci-blind-fresh.064f482abcd`
+  - `cassandra`: `0.14.4-prove-ci-blind-fresh.064f482abcd`
+  - `elasticsearch`: `7.6.1-prove-ci-blind-fresh.064f482abcd`
 - Normalization: Replace underscores with hyphens (semver compliance)
 
 **Why This Format:**
 - Semver compliant
+- Preserves original chart base version
 - Includes branch for traceability
 - Includes commit for exact source identification
 - Pre-release format (hyphenated suffix)
@@ -1678,21 +1722,33 @@ KUBECONFIG=kubeconfig-azure.yaml kubectl cluster-info
 - name: Update Chart.yaml with version
   run: |
     sed -i "s/^version: .*/version: ${{ steps.version.outputs.chart }}/" helm/${{ matrix.chart }}/Chart.yaml
-    sed -i "s/^appVersion: .*/appVersion: \"${{ steps.commit.outputs.id }}\"/" helm/${{ matrix.chart }}/Chart.yaml
+    
+    # Only update appVersion for application charts (not infrastructure)
+    if [[ "${{ matrix.chart }}" == "atlas" ]] || [[ "${{ matrix.chart }}" == "atlas-read" ]]; then
+      sed -i "s/^appVersion: .*/appVersion: \"${{ steps.commit.outputs.id }}\"/" helm/${{ matrix.chart }}/Chart.yaml
+    fi
     
     echo "Updated ${{ matrix.chart }}/Chart.yaml:"
     cat helm/${{ matrix.chart }}/Chart.yaml | grep -E "^(version|appVersion):"
 ```
 
 **What it does:**
-- Updates `version` field with generated chart version
-- Updates `appVersion` field with commit ID
+- Updates `version` field with generated chart version (all charts)
+- Updates `appVersion` field with commit ID (application charts only)
 - Validates changes by displaying updated fields
 
-**Example Result:**
+**Example Results:**
+
+*Application chart (atlas):*
 ```yaml
 version: 1.0.0-prove-ci-blind-fresh.064f482abcd
 appVersion: "064f482abcd"
+```
+
+*Infrastructure chart (cassandra):*
+```yaml
+version: 0.14.4-prove-ci-blind-fresh.064f482abcd
+# No appVersion field (infrastructure)
 ```
 
 ---
@@ -1701,6 +1757,7 @@ appVersion: "064f482abcd"
 
 ```yaml
 - name: Update values.yaml with image tags
+  if: matrix.chart == 'atlas' || matrix.chart == 'atlas-read'
   run: |
     # Replace placeholders with actual values
     sed -i "s/ATLAS_LATEST_IMAGE_TAG/${{ steps.commit.outputs.id }}/g" helm/${{ matrix.chart }}/values.yaml
@@ -1709,6 +1766,10 @@ appVersion: "064f482abcd"
     echo "Image configuration in ${{ matrix.chart }}/values.yaml:"
     grep -A 3 "image:" helm/${{ matrix.chart }}/values.yaml | head -5
 ```
+
+**Conditional Execution:**
+- Only runs for application charts (`atlas`, `atlas-read`)
+- Skipped for infrastructure charts (they don't have application images)
 
 **What it replaces:**
 - `ATLAS_LATEST_IMAGE_TAG` → `064f482abcd`
@@ -1794,14 +1855,25 @@ appVersion: "064f482abcd"
 
 **Command:** `helm push {chart}.tgz oci://ghcr.io/atlanhq/helm-charts`
 
-**Result:**
-- Chart available at: `oci://ghcr.io/atlanhq/helm-charts/atlas`
-- Chart available at: `oci://ghcr.io/atlanhq/helm-charts/atlas-read`
+**Result:** All 8 charts available at OCI registry:
+- `oci://ghcr.io/atlanhq/helm-charts/atlas`
+- `oci://ghcr.io/atlanhq/helm-charts/atlas-read`
+- `oci://ghcr.io/atlanhq/helm-charts/cassandra`
+- `oci://ghcr.io/atlanhq/helm-charts/elasticsearch`
+- `oci://ghcr.io/atlanhq/helm-charts/logstash`
+- `oci://ghcr.io/atlanhq/helm-charts/cassandra-online-dc`
+- `oci://ghcr.io/atlanhq/helm-charts/elasticsearch-read`
+- `oci://ghcr.io/atlanhq/helm-charts/elasticsearch-exporter-read`
 
-**Installation:**
+**Installation Examples:**
 ```bash
+# Application chart
 helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
   --version 1.0.0-prove-ci-blind-fresh.064f482abcd
+
+# Infrastructure chart
+helm install cassandra oci://ghcr.io/atlanhq/helm-charts/cassandra \
+  --version 0.14.4-prove-ci-blind-fresh.064f482abcd
 ```
 
 ---
@@ -1920,13 +1992,18 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
 
 2. **Extract Chart Versions**
    ```bash
-   # Get latest releases
+   # Get latest releases for all 8 charts
    ATLAS_VERSION=$(gh release list --limit 1 | grep "helm-atlas-v" | awk '{print $1}')
    ATLAS_READ_VERSION=$(gh release list --limit 1 | grep "helm-atlas-read-v" | awk '{print $1}')
+   CASSANDRA_VERSION=$(gh release list --limit 1 | grep "helm-cassandra-v" | awk '{print $1}')
+   # ... and 5 more infrastructure charts
    ```
-   - Fetches latest GitHub releases
+   - Fetches latest GitHub releases for all charts
    - Extracts version numbers
-   - Example: `1.0.0-atlas_ci_cd_updates.b208324abcd`
+   - Examples:
+     - `atlas`: `1.0.0-atlas_ci_cd_updates.b208324abcd`
+     - `cassandra`: `0.14.4-atlas_ci_cd_updates.b208324abcd`
+     - `elasticsearch`: `7.6.1-atlas_ci_cd_updates.b208324abcd`
 
 3. **Send Repository Dispatch**
    ```bash
@@ -1939,6 +2016,12 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
        "client_payload": {
          "atlas_version": "1.0.0-branch.commitid",
          "atlas_read_version": "1.0.0-branch.commitid",
+         "cassandra_version": "0.14.4-branch.commitid",
+         "elasticsearch_version": "7.6.1-branch.commitid",
+         "logstash_version": "9.1.2-branch.commitid",
+         "cassandra_online_dc_version": "0.14.4-branch.commitid",
+         "elasticsearch_read_version": "7.6.1-branch.commitid",
+         "elasticsearch_exporter_read_version": "3.3.0-branch.commitid",
          "source_repo": "atlas-metastore",
          "source_branch": "atlas_ci_cd_updates",
          "source_commit": "b208324abcd"
@@ -1946,7 +2029,7 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
      }'
    ```
    - Uses GitHub API to send custom event
-   - Includes chart versions in payload
+   - Includes all 8 chart versions in payload
    - Triggers receiver in atlan repository
 
 **Why This Approach:**
@@ -1990,35 +2073,49 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
 
 3. **Update Chart.yaml**
    ```bash
-   # Update atlas chart version
-   sed -i "s/version: \".*atlas.*\"/version: \"${{ github.event.client_payload.atlas_version }}\"/" \
-     charts/Chart.yaml
-   
-   # Update atlas-read chart version
-   sed -i "s/version: \".*atlas-read.*\"/version: \"${{ github.event.client_payload.atlas_read_version }}\"/" \
-     charts/Chart.yaml
+   # Update all 8 chart versions using yq
+   yq eval -i '(.dependencies[] | select(.name == "atlas") | .version) = "${{ github.event.client_payload.atlas_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "atlas-read") | .version) = "${{ github.event.client_payload.atlas_read_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "cassandra") | .version) = "${{ github.event.client_payload.cassandra_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "elasticsearch") | .version) = "${{ github.event.client_payload.elasticsearch_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "logstash") | .version) = "${{ github.event.client_payload.logstash_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "cassandra-online-dc") | .version) = "${{ github.event.client_payload.cassandra_online_dc_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "elasticsearch-read") | .version) = "${{ github.event.client_payload.elasticsearch_read_version }}"' charts/Chart.yaml
+   yq eval -i '(.dependencies[] | select(.name == "elasticsearch-exporter-read") | .version) = "${{ github.event.client_payload.elasticsearch_exporter_read_version }}"' charts/Chart.yaml
    ```
    
    **Before:**
    ```yaml
    dependencies:
+     # Application charts
      - name: atlas
        version: "1.0.0-atlas-ci-cd-updates.f716f52abcd"
        repository: oci://ghcr.io/atlanhq/helm-charts
      - name: atlas-read
        version: "1.0.0-atlas-ci-cd-updates.f716f52abcd"
        repository: oci://ghcr.io/atlanhq/helm-charts
+     # Infrastructure charts
+     - name: cassandra
+       version: "0.14.4-atlas-ci-cd-updates.f716f52abcd"
+       repository: oci://ghcr.io/atlanhq/helm-charts
+     # ... 5 more infrastructure charts ...
    ```
    
    **After:**
    ```yaml
    dependencies:
+     # Application charts
      - name: atlas
        version: "1.0.0-atlas-ci-cd-updates.b208324abcd"
        repository: oci://ghcr.io/atlanhq/helm-charts
      - name: atlas-read
        version: "1.0.0-atlas-ci-cd-updates.b208324abcd"
        repository: oci://ghcr.io/atlanhq/helm-charts
+     # Infrastructure charts (all 6 updated)
+     - name: cassandra
+       version: "0.14.4-atlas-ci-cd-updates.b208324abcd"
+       repository: oci://ghcr.io/atlanhq/helm-charts
+     # ... 5 more infrastructure charts with updated versions ...
    ```
 
 4. **Commit Changes**
@@ -2041,9 +2138,19 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
      --title "Update Atlas charts to ${{ github.event.client_payload.atlas_version }}" \
      --body "Automated chart version update from atlas-metastore
      
-     **Charts Updated:**
+     **Charts Updated (8 total):**
+     
+     *Application Charts:*
      - atlas: ${{ github.event.client_payload.atlas_version }}
      - atlas-read: ${{ github.event.client_payload.atlas_read_version }}
+     
+     *Infrastructure Charts:*
+     - cassandra: ${{ github.event.client_payload.cassandra_version }}
+     - elasticsearch: ${{ github.event.client_payload.elasticsearch_version }}
+     - logstash: ${{ github.event.client_payload.logstash_version }}
+     - cassandra-online-dc: ${{ github.event.client_payload.cassandra_online_dc_version }}
+     - elasticsearch-read: ${{ github.event.client_payload.elasticsearch_read_version }}
+     - elasticsearch-exporter-read: ${{ github.event.client_payload.elasticsearch_exporter_read_version }}
      
      **Source:**
      - Repository: atlas-metastore
@@ -2051,17 +2158,19 @@ helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \
      - Commit: ${{ github.event.client_payload.source_commit }}
      
      **Registry:**
-     - oci://ghcr.io/atlanhq/helm-charts/atlas
-     - oci://ghcr.io/atlanhq/helm-charts/atlas-read
+     - All charts: oci://ghcr.io/atlanhq/helm-charts/{chart-name}
      
      **Installation:**
      \`\`\`bash
+     # Application chart
      helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas \\
        --version ${{ github.event.client_payload.atlas_version }}
+     
+     # Infrastructure charts are consumed as peer dependencies in Chart.yaml
      \`\`\`
      
      **Validation:**
-     ✅ Helm charts published
+     ✅ All 8 Helm charts published
      ✅ Multi-cloud smoke tests passed (AWS, Azure, GCP)
      ✅ Ready for review and merge" \
      --base main \
@@ -3168,17 +3277,28 @@ kubectl run -it --rm debug --image=curlimages/curl --restart=Never -- \
 ## Related Documentation
 
 - **Helm Migration Guide:** `ATLAS_HELM_MIGRATION.md`
+  - Detailed guide on migrating from local subcharts to OCI registry
+  - Architecture decisions (8 separate OCI artifacts)
+  - "Before" vs "After" comparison
+  - Migration checklist and troubleshooting
 - **Atlas Integration & Smoke Tests Guide:** `INTEGRATION_SMOKE_TESTS_GUIDE.md`
+  - Two-tier testing strategy (integration + smoke tests)
+  - Quality gate implementation
+  - Multi-cloud smoke test architecture
 - **Scripts:**
   - Integration Test Runner: `run-integration-tests.sh`
   - Smoke Test Script: `scripts/multi-cloud-smoke-test.sh`
 - **Integration Tests:** `webapp/src/test/java/org/apache/atlas/web/integration/`
+  - `BasicServiceAvailabilityTest.java` - Health checks, API validation
+  - `BasicSanityForAttributesTypesTest.java` - Type and attribute tests
+  - `AtlasDockerIntegrationTest.java` - Testcontainers base class
 - **Redis Implementations:**
   - Production: `common/src/main/java/org/apache/atlas/service/redis/RedisServiceImpl.java`
-  - Test: `common/src/main/java/org/apache/atlas/service/redis/RedisServiceLocalImpl.java`
+  - Test (local profile): `common/src/main/java/org/apache/atlas/service/redis/RedisServiceLocalImpl.java`
 - **Workflows:**
-  - Main CI/CD: `.github/workflows/maven.yml`
+  - Main CI/CD: `.github/workflows/maven.yml` (consolidated: lint, build, smoke-test, helm-publish)
   - Chart Release Dispatcher: `.github/workflows/chart-release-dispatcher.yaml`
+  - Atlan Receiver: `atlanhq/atlan/.github/workflows/chart-values-dispatch-receiver.yaml`
 
 ---
 
@@ -3280,12 +3400,18 @@ Blocking the pipeline would:
 
 **Answer:** If all smoke tests pass (AWS ✓, Azure ✓, GCP ✓):
 1. Smoke-test job completes successfully
-2. Helm-publish job runs automatically
-3. Charts are published to:
-   - `oci://ghcr.io/atlanhq/helm-charts/atlas`
-   - `oci://ghcr.io/atlanhq/helm-charts/atlas-read`
-4. GitHub releases created with `.tgz` artifacts
-5. Teams can install: `helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas --version {version}`
+2. Helm-publish job runs automatically for all 8 charts
+3. Charts are published to OCI registry:
+   - Application charts: `atlas`, `atlas-read`
+   - Infrastructure charts: `cassandra`, `elasticsearch`, `logstash`, `cassandra-online-dc`, `elasticsearch-read`, `elasticsearch-exporter-read`
+4. GitHub releases created with `.tgz` artifacts for each chart
+5. Teams can install:
+   ```bash
+   # Application chart
+   helm install atlas oci://ghcr.io/atlanhq/helm-charts/atlas --version {version}
+   
+   # Infrastructure charts are consumed as peer dependencies in Chart.yaml
+   ```
 
 ### What happens when ANY smoke test fails?
 
