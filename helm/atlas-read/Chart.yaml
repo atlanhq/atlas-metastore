@@ -20,9 +20,12 @@ dependencies:
   - name: cassandra-online-dc
     repository: file://./charts/cassandra-online-dc
     version: 0.x.x  
+    condition: _disabled.cassandra_online_dc  # Always false - published separately as OCI
   - name: elasticsearch-read
     repository: file://./charts/elasticsearch-read
     version: 7.x.x
+    condition: _disabled.elasticsearch_read  # Always false - published separately as OCI
   - name: elasticsearch-exporter-read
     repository: file://./charts/elasticsearch-exporter-read
     version: 3.3.0
+    condition: _disabled.elasticsearch_exporter_read  # Always false - published separately as OCI

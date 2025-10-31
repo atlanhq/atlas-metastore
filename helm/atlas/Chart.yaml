@@ -20,9 +20,12 @@ dependencies:
   - name: cassandra
     repository: file://./charts/cassandra
     version: 0.x.x
+    condition: _disabled.cassandra  # Always false - published separately as OCI
   - name: elasticsearch
     repository: file://./charts/elasticsearch
     version: 7.x.x
+    condition: _disabled.elasticsearch  # Always false - published separately as OCI
   - name: logstash
     repository: file://./charts/logstash
     version: 9.x.x
+    condition: _disabled.logstash  # Always false - published separately as OCI

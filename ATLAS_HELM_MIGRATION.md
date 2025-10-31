@@ -283,6 +283,58 @@ sed -i -e "s/ATLAS_BRANCH_NAME/$ATLAS_BRANCH/g" charts/values-template.yaml
 
 ## After: OCI Registry Architecture
 
+### 🔑 Critical Architectural Decision: Separate OCI Artifacts
+
+**Why Not Nested Subcharts?**
+
+Initially, we attempted to publish atlas as a single OCI artifact that bundled its infrastructure dependencies (cassandra, elasticsearch, logstash) as subcharts. **This approach failed** due to a fundamental Helm limitation:
+
+**Problem:** Helm's Value Override Path Requirements
+
+When a chart has nested subcharts, parent charts must use the full path to override subchart values:
+
+```yaml
+# If atlas bundles cassandra as a subchart, parent chart (atlan) must use:
+atlas:
+  cassandra:
+    replicas: 3  # ✅ Correct nested path
+
+# But our existing values.yaml has:
+cassandra:
+  replicas: 3  # ❌ Ignored! Not nested under atlas.*
+```
+
+**Impact:**
+- All existing `cassandra.*`, `elasticsearch.*`, `logstash.*` overrides in `atlan/charts/values.yaml` would be ignored
+- Manifests would have empty namespaces, default names like `release-name-cassandra` instead of `atlas-cassandra`
+- Deployments would fail or create incorrectly configured resources
+- **Breaking change** for ALL environments (staging, beta, preprod, production)
+- Would require restructuring every ArgoCD application manifest
+
+**Solution:** Publish Each Chart as a Separate OCI Artifact
+
+Instead of nesting, we publish 8 independent OCI artifacts:
+
+1. `atlas` (application chart)
+2. `atlas-read` (read replica chart)
+3. `cassandra` (infrastructure)
+4. `elasticsearch` (infrastructure)
+5. `logstash` (infrastructure)
+6. `cassandra-online-dc` (atlas-read infrastructure)
+7. `elasticsearch-read` (atlas-read infrastructure)
+8. `elasticsearch-exporter-read` (atlas-read infrastructure)
+
+All are consumed as **peer dependencies** in the atlan chart, maintaining the exact same value override structure as before.
+
+**Benefits:**
+- ✅ **Zero breaking changes** - existing `values.yaml` structure preserved
+- ✅ **No ArgoCD manifest updates** required
+- ✅ **All charts versioned together** - same commit traceability
+- ✅ **Backward compatible** - existing configurations work unchanged
+- ✅ **Clean architecture** - each chart is independently addressable
+
+---
+
 ### Repository Structure
 
 #### **atlan Repository**
@@ -321,26 +373,30 @@ atlan/
 
 ```
 atlas-metastore/
-├── helm/                       # ✅ NEW: Complete helm chart now lives here!
-│   ├── Chart.yaml              # ✅ Source of truth for Atlas deployment
-│   ├── templates/              # ✅ Deployment, Service, ConfigMap, etc.
-│   │   ├── deployment.yaml
-│   │   ├── service.yaml
-│   │   ├── configmap.yaml
-│   │   └── ...
-│   └── charts/                 # ✅ All dependencies bundled
-│       ├── cassandra/
-│       ├── elasticsearch/
-│       ├── kafka/
-│       ├── logstash/
-│       ├── redis/
-│       └── zookeeper/
+├── helm/                       # ✅ NEW: All helm charts now live here!
+│   ├── atlas/                  # ✅ Application chart
+│   │   ├── Chart.yaml          # No dependencies!
+│   │   ├── templates/
+│   │   └── charts/             # Infrastructure published separately
+│   │       ├── cassandra/
+│   │       ├── elasticsearch/
+│   │       └── logstash/
+│   └── atlas-read/             # ✅ Read replica chart
+│       ├── Chart.yaml          # No dependencies!
+│       ├── templates/
+│       └── charts/             # Infrastructure published separately
+│           ├── cassandra-online-dc/
+│           ├── elasticsearch-read/
+│           └── elasticsearch-exporter-read/
 └── .github/workflows/
-    ├── maven.yml                         # ✅ Builds, tests, publishes charts & Docker
+    ├── maven.yml                         # ✅ Builds, tests, publishes Docker & all 8 Helm charts
     └── chart-release-dispatcher.yaml     # ✅ Notifies atlan repo via repository_dispatch
 ```
 
-**Key Change:** Helm charts moved FROM `atlan/subcharts/atlas/` TO `atlas-metastore/helm/` - single source of truth!
+**Key Changes:** 
+- Helm charts moved FROM `atlan/subcharts/atlas/` TO `atlas-metastore/helm/` - single source of truth!
+- Each chart published separately as OCI artifact (8 total)
+- No nested dependencies in Chart.yaml files
 
 ---
 
@@ -352,6 +408,12 @@ apiVersion: v2
 name: atlan
 version: 1.0.0
 dependencies:
+  # ============================================================
+  # Atlas Charts (OCI Registry) - Published from atlas-metastore
+  # All 8 charts are separate OCI artifacts (peer dependencies)
+  # ============================================================
+  
+  # Application charts
   - name: atlas
     version: "1.0.0-staging.abc123"       # ✅ Semantic version with commit
     repository: "oci://ghcr.io/atlanhq/helm-charts"  # ✅ OCI registry
@@ -359,7 +421,34 @@ dependencies:
   - name: atlas-read
     version: "1.0.0-staging.abc123"       # ✅ Same version, separate deployment
     repository: "oci://ghcr.io/atlanhq/helm-charts"  # ✅ OCI registry
+  
+  # Atlas infrastructure charts (peers, not nested)
+  - name: cassandra
+    version: "0.14.4-staging.abc123"      # ✅ Independent OCI artifact
+    repository: "oci://ghcr.io/atlanhq/helm-charts"
     
+  - name: elasticsearch
+    version: "7.17.3-staging.abc123"      # ✅ Independent OCI artifact
+    repository: "oci://ghcr.io/atlanhq/helm-charts"
+    
+  - name: logstash
+    version: "9.0.0-staging.abc123"       # ✅ Independent OCI artifact
+    repository: "oci://ghcr.io/atlanhq/helm-charts"
+  
+  # Atlas-Read infrastructure charts (peers, not nested)
+  - name: cassandra-online-dc
+    version: "0.14.4-staging.abc123"      # ✅ Independent OCI artifact
+    repository: "oci://ghcr.io/atlanhq/helm-charts"
+    
+  - name: elasticsearch-read
+    version: "7.17.3-staging.abc123"      # ✅ Independent OCI artifact
+    repository: "oci://ghcr.io/atlanhq/helm-charts"
+    
+  - name: elasticsearch-exporter-read
+    version: "3.3.0-staging.abc123"       # ✅ Independent OCI artifact
+    repository: "oci://ghcr.io/atlanhq/helm-charts"
+  
+  # Other platform services (unchanged - still local subcharts)
   - name: heka
     version: "1.0.0"
     repository: "file://../subcharts/heka"
@@ -373,7 +462,7 @@ dependencies:
 
 **atlan/charts/values.yaml (partial):**
 ```yaml
-# Atlas-specific overrides
+# Atlas application overrides (root level, NOT nested)
 atlas:
   enabled: true
   replicaCount: 2
@@ -388,7 +477,36 @@ atlas-read:
   replicaCount: 1
   # ... atlas-read overrides
 
-# Other service configs
+# Atlas infrastructure overrides (root level as peers, NOT nested under atlas.*)
+cassandra:
+  Namespace: atlas
+  fullnameOverride: atlas-cassandra
+  replicas: 3
+  # ... cassandra overrides
+
+elasticsearch:
+  custom_deployment:
+    enabled: false
+  # ... elasticsearch overrides
+
+logstash:
+  replicas: 1
+  fullnameOverride: atlas-logstash
+  # ... logstash overrides
+
+# Atlas-Read infrastructure overrides  
+cassandra-online-dc:
+  Namespace: atlas
+  fullnameOverride: atlas-cassandra-online-dc
+  # ... cassandra-online-dc overrides
+
+elasticsearch-read:
+  # ... elasticsearch-read overrides
+
+elasticsearch-exporter-read:
+  # ... exporter overrides
+
+# Other platform services (unchanged)
 heka:
   enabled: true
   # ...
@@ -398,7 +516,7 @@ kong:
   # ...
 ```
 
-**Key:** The `atlan` repo still maintains all atlas configuration overrides in `values.yaml`, just references the chart from OCI instead of local files.
+**Key:** All overrides remain at **root level** as peer dependencies. This is why separate OCI artifacts are critical - maintaining backward compatibility with existing `values.yaml` structure.
 
 **Chart Version Format:**
 ```
@@ -410,24 +528,45 @@ Examples:
 - 1.0.0-master.789defabc
 ```
 
-**atlas-metastore/helm/Chart.yaml:**
+**atlas-metastore/helm/atlas/Chart.yaml:**
 ```yaml
 apiVersion: v2
 name: atlas
-version: 1.0.0-staging.abc123             # ✅ Dynamic version set by CI
-dependencies:
-  - name: cassandra
-    version: "0.15.3"
-    repository: "file://charts/cassandra"  # Bundled in OCI artifact
-    condition: cassandra.enabled
-    
-  - name: elasticsearch
-    version: "7.17.3"
-    repository: "file://charts/elasticsearch"
-    condition: elasticsearch.enabled
-    
-  # ... kafka, logstash, redis, zookeeper (all bundled)
+description: Apache Atlas Metadata Management and Governance Platform
+version: 1.0.0                            # ✅ Updated to 1.0.0-{branch}.{commit} by CI
+appVersion: "abc123"                      # ✅ Updated to commit SHA by CI
+# NO dependencies - infrastructure charts published separately
 ```
+
+**atlas-metastore/helm/atlas-read/Chart.yaml:**
+```yaml
+apiVersion: v2
+name: atlas-read
+description: Apache Atlas Read Replica for Metadata Management
+version: 1.0.0                            # ✅ Updated to 1.0.0-{branch}.{commit} by CI
+appVersion: "abc123"                      # ✅ Updated to commit SHA by CI
+# NO dependencies - infrastructure charts published separately
+```
+
+**Infrastructure Chart Examples (helm/atlas/charts/):**
+```yaml
+# cassandra/Chart.yaml
+apiVersion: v2
+name: cassandra
+version: 0.14.4                           # ✅ Updated to 0.14.4-{branch}.{commit} by CI
+
+# elasticsearch/Chart.yaml
+apiVersion: v2
+name: elasticsearch
+version: 7.17.3                           # ✅ Updated to 7.17.3-{branch}.{commit} by CI
+
+# logstash/Chart.yaml
+apiVersion: v2
+name: logstash
+version: 9.0.0                            # ✅ Updated to 9.0.0-{branch}.{commit} by CI
+```
+
+**Key Change:** Charts have NO dependencies. Each is published independently as an OCI artifact. The atlan parent chart assembles them as peers.
 
 ---
 
@@ -461,76 +600,127 @@ jobs:
       
   helm-publish:
     needs: smoke-test  # 🛡️ QUALITY GATE - Only runs if smoke tests pass
-    if: github.ref == 'refs/heads/staging' || 'refs/heads/beta' || 'refs/heads/master'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # Application charts
+          - chart: atlas
+            path: helm/atlas
+            base_version: "1.0.0"
+          - chart: atlas-read
+            path: helm/atlas-read
+            base_version: "1.0.0"
+          # Atlas infrastructure charts
+          - chart: cassandra
+            path: helm/atlas/charts/cassandra
+            base_version: "0.14.4"
+          - chart: elasticsearch
+            path: helm/atlas/charts/elasticsearch
+            base_version: "7.17.3"
+          - chart: logstash
+            path: helm/atlas/charts/logstash
+            base_version: "9.0.0"
+          # Atlas-Read infrastructure charts
+          - chart: cassandra-online-dc
+            path: helm/atlas-read/charts/cassandra-online-dc
+            base_version: "0.14.4"
+          - chart: elasticsearch-read
+            path: helm/atlas-read/charts/elasticsearch-read
+            base_version: "7.17.3"
+          - chart: elasticsearch-exporter-read
+            path: helm/atlas-read/charts/elasticsearch-exporter-read
+            base_version: "3.3.0"
+      max-parallel: 1  # Publish sequentially
+    
     steps:
-      # ✅ Update Chart.yaml with dynamic version
-      - name: Set Chart Version
+      # ✅ Calculate version for this specific chart
+      - name: Generate chart version
         run: |
-          BRANCH=$(echo ${GITHUB_REF#refs/heads/} | tr '_' '-')
-          COMMIT_SHORT=${GITHUB_SHA:0:7}
-          CHART_VERSION="1.0.0-${BRANCH}.${COMMIT_SHORT}"
-          yq eval -i '.version = "'$CHART_VERSION'"' helm/Chart.yaml
+          BRANCH_NAME_NORMALIZED=$(echo "${{ steps.branch.outputs.name }}" | tr '_' '-')
+          CHART_VERSION="${{ matrix.base_version }}-${BRANCH_NAME_NORMALIZED}.${{ steps.commit.outputs.id }}"
+          
+          # Version format: {base}-{branch}.{commit}
+          # Examples:
+          #   - atlas: 1.0.0-staging.abc123abcd
+          #   - cassandra: 0.14.4-staging.abc123abcd
       
-      # ✅ Build Helm dependencies (cassandra, elasticsearch, etc.)
-      - name: Build Dependencies
+      # ✅ Update Chart.yaml version
+      - name: Update Chart.yaml with version
         run: |
-          cd helm
-          helm dependency build
+          sed -i "s/^version: .*/version: ${{ steps.version.outputs.chart }}/" ${{ matrix.path }}/Chart.yaml
+          
+          # Only update appVersion for application charts
+          if [[ "${{ matrix.chart }}" == "atlas" ]] || [[ "${{ matrix.chart }}" == "atlas-read" ]]; then
+            sed -i "s/^appVersion: .*/appVersion: \"${{ steps.commit.outputs.id }}\"/" ${{ matrix.path }}/Chart.yaml
+          fi
+      
+      # ✅ Package chart
+      - name: Package helm chart
+        run: |
+          helm package ${{ matrix.path }}/ --destination ./helm-packages/
       
       # ✅ Login to GHCR
-      - name: Login to GHCR
-        run: |
-          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u ${{ github.actor }} --password-stdin
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: $GITHUB_ACTOR
+          password: ${{ secrets.ORG_PAT_GITHUB }}
       
-      # ✅ Package and push to OCI registry
-      - name: Package and Push Chart
+      # ✅ Push to OCI registry
+      - name: Push chart to GHCR (OCI Registry)
         run: |
-          cd helm
-          helm package .
-          helm push atlas-${CHART_VERSION}.tgz oci://ghcr.io/atlanhq/helm-charts
+          CHART_FILE=$(ls helm-packages/${{ matrix.chart }}-*.tgz)
+          helm push ${CHART_FILE} oci://ghcr.io/atlanhq/helm-charts
+          
+          echo "✅ Published: oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }}:${CHART_VERSION}"
       
       # ✅ Create GitHub Release
-      - name: Create Release
-        uses: actions/create-release@v1
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@v1
         with:
-          tag_name: ${{ env.CHART_VERSION }}
-          release_name: Atlas Helm Chart ${{ env.CHART_VERSION }}
-          body: |
-            Atlas Helm Chart published to GHCR
-            - Docker Image: atlas-metastore-${BRANCH}:${COMMIT_SHORT}
-            - Chart: oci://ghcr.io/atlanhq/helm-charts/atlas:${CHART_VERSION}
-  
+          tag: helm-${{ matrix.chart }}-v${{ steps.version.outputs.chart }}
+          name: "${{ matrix.chart }} Helm Chart v${{ steps.version.outputs.chart }}"
 ```
+
+**Key:** ALL 8 charts published individually using matrix strategy in the SAME workflow!
+
+---
 
 **`.github/workflows/chart-release-dispatcher.yaml`:** (Separate workflow file)
 ```yaml
-# Triggers automatically after maven.yml completes successfully
+name: Charts Values Seed Trigger Dispatcher
 on:
   workflow_run:
-    workflows: ["Maven CI/CD"]
+    workflows: ["Java CI with Maven"]  # ✅ Triggers after maven.yml completes
     types: [completed]
+    branches: [staging, beta, preprod, atlas_ci_cd_updates]
 
 jobs:
-  dispatch:
+  charts-release-dispatcher:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
     steps:
-      # ✅ Extract chart versions from GitHub releases
-      - name: Get chart versions
+      # ✅ Extract branch and commit info
+      - name: Get branch name
         run: |
-          ATLAS_VERSION=$(gh release list --limit 1 | grep "helm-atlas-v" | awk '{print $1}')
-          ATLAS_READ_VERSION=$(gh release list --limit 1 | grep "helm-atlas-read-v" | awk '{print $1}')
+          BRANCH="${{ github.event.workflow_run.head_branch }}"
+          SHA="${{ github.event.workflow_run.head_sha }}"
+          echo "Branch: ${BRANCH}, Commit: ${SHA}"
       
-      # ✅ Trigger atlan repo to update
-      - name: Dispatch to atlan repo
-        run: |
-          curl -X POST https://api.github.com/repos/atlanhq/atlan/dispatches \
-            -H "Authorization: token ${{ secrets.PAT }}" \
-            -d '{
-              "event_type": "atlas-chart-release",
-              "client_payload": {
-                "atlas_version": "'$ATLAS_VERSION'",
-                "atlas_read_version": "'$ATLAS_READ_VERSION'",
-                "source_repo": "atlas-metastore",
+      # ✅ Trigger atlan repo to update Chart.yaml
+      - name: Repository Dispatch
+        uses: peter-evans/repository-dispatch@v2
+        with:
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+          repository: atlanhq/atlan
+          event-type: dispatch_chart_release_workflow
+          client-payload: |
+            {
+              "repo": {
+                "name": "atlas-metastore",
+                "branch": "${{ github.event.workflow_run.head_branch }}",
                 "source_branch": "'${GITHUB_REF#refs/heads/}'",
                 "source_commit": "'${GITHUB_SHA:0:7}'"
               }
