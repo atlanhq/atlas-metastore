@@ -1841,6 +1841,7 @@ public abstract class DeleteHandlerV1 {
         }
 
     }
+
     private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
 
