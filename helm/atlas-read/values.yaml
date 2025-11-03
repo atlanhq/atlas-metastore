@@ -25,6 +25,7 @@ global:
     enabled: false
   esIsolation:
     enabled: false
+
 hpa:
   enabled: false
   name: atlas-read
