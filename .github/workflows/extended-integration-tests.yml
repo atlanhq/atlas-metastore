@@ -41,7 +41,7 @@ jobs:
       
       - name: Run extended integration tests
         env:
-          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
         run: |
           chmod +x ./run-extended-integration-tests.sh
           

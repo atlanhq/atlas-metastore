@@ -17,7 +17,22 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Set Java 17
-export JAVA_HOME=`/usr/libexec/java_home -v 17`
+# Handle both macOS (/usr/libexec/java_home) and Linux (JAVA_HOME already set)
+if [ -x "/usr/libexec/java_home" ]; then
+    # macOS
+    export JAVA_HOME=$(/usr/libexec/java_home -v 17)
+elif [ -z "$JAVA_HOME" ]; then
+    # Linux - try to find Java 17
+    if [ -d "/usr/lib/jvm/java-17-openjdk-amd64" ]; then
+        export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64"
+    elif [ -d "/usr/lib/jvm/temurin-17-jdk-amd64" ]; then
+        export JAVA_HOME="/usr/lib/jvm/temurin-17-jdk-amd64"
+    else
+        # Use whatever Java is in PATH
+        export JAVA_HOME=$(dirname $(dirname $(readlink -f $(which java) 2>/dev/null || which java)))
+    fi
+fi
+echo "Using JAVA_HOME: $JAVA_HOME"
 
 # Check if Docker is running
 if ! docker info > /dev/null 2>&1; then

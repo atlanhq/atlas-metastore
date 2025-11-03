@@ -26,12 +26,14 @@ fi
 
 # Test 2: Check Java
 echo -n "2. Java available... "
-# Try to find Java 17
-if /usr/libexec/java_home -v 17 > /dev/null 2>&1; then
+# Try to find Java 17 (handle both macOS and Linux)
+if [ -x "/usr/libexec/java_home" ] && /usr/libexec/java_home -v 17 > /dev/null 2>&1; then
+    # macOS
     export JAVA_HOME=$(/usr/libexec/java_home -v 17)
     export PATH=$JAVA_HOME/bin:$PATH
-    echo -e "${GREEN}✓${NC} (Java 17 found and set)"
+    echo -e "${GREEN}✓${NC} (Java 17 found via java_home)"
 elif java -version 2>&1 | grep -q "version"; then
+    # Linux or Java already in PATH
     java_version=$(java -version 2>&1 | head -1 | cut -d'"' -f2 | cut -d'.' -f1)
     if [ "$java_version" -ge 17 ] 2>/dev/null; then
         echo -e "${GREEN}✓${NC} (Java $java_version)"
@@ -40,7 +42,8 @@ elif java -version 2>&1 | grep -q "version"; then
     fi
 else
     echo -e "${RED}✗${NC}"
-    echo -e "   ${YELLOW}Install Java 17: brew install openjdk@17${NC}"
+    echo -e "   ${YELLOW}macOS: brew install openjdk@17${NC}"
+    echo -e "   ${YELLOW}Linux: apt install openjdk-17-jdk${NC}"
     ((fail_count++))
 fi
 
