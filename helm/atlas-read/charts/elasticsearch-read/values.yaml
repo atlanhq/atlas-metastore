@@ -11,6 +11,10 @@ nodeGroup: "master"
 # This should be set to clusterName + "-" + nodeGroup for your master group
 global:
   Tier_Type: ""
+  esIsolation:
+    enabled: false
+  globalSvcIsolation:
+    enabled: false
 masterService: ""
 
 # Elasticsearch roles that will be applied to this nodeGroup
