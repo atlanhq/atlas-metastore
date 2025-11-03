@@ -43,9 +43,10 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
         run: |
-          chmod +x ./run-extended-integration-tests.sh
+          chmod +x ./run-extended-integration-tests.sh ./build.sh
           
-          # Build command based on inputs
+          # Build command - just run the script directly
+          # It will call build.sh internally (same as maven.yml)
           CMD="./run-extended-integration-tests.sh"
           
           if [ "${{ github.event.inputs.skip-atlas-tests }}" = "true" ]; then

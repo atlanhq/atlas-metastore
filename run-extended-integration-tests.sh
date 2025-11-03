@@ -147,26 +147,10 @@ trap cleanup EXIT
 if [ "$SKIP_BUILD" = false ]; then
     echo -e "${YELLOW}Building Atlas WAR package...${NC}"
     
-    # Download Keycloak artifacts (required by build.sh)
-    echo -e "${BLUE}Downloading Keycloak artifacts...${NC}"
-    mkdir -p ~/.m2/repository/org/keycloak
-    wget -q https://atlan-public.s3.eu-west-1.amazonaws.com/artifact/keycloak-15.0.2.1.zip
-    unzip -q -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
-    rm keycloak-15.0.2.1.zip
-    echo -e "${GREEN}✓ Keycloak artifacts downloaded${NC}"
-    
-    # Detect OS classifier
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        OS_CLASSIFIER="osx-x86_64"
-    else
-        OS_CLASSIFIER="linux-x86_64"
-    fi
-    echo -e "${BLUE}Detected OS classifier: $OS_CLASSIFIER${NC}"
-    
-    # Build exactly like build.sh does
-    # Match maven.yml's build.sh command exactly
-    echo -e "${BLUE}Building with Maven (matching build.sh)...${NC}"
-    mvn clean -B -U -Dos.detected.classifier=$OS_CLASSIFIER -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
+    # Just use build.sh like maven.yml does - it handles everything!
+    echo -e "${BLUE}Running build.sh (same as maven.yml)...${NC}"
+    chmod +x ./build.sh
+    ./build.sh
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to build Atlas WAR${NC}"
@@ -183,27 +167,8 @@ if [ "$SKIP_BUILD" = false ]; then
     fi
     echo -e "${GREEN}✓ Docker image built successfully${NC}"
 else
-    echo -e "${YELLOW}Skipping Atlas WAR and Docker build (--skip-build flag set)${NC}"
-    echo -e "${YELLOW}But we still need to install Maven modules for dependencies...${NC}"
-    
-    # Download Keycloak artifacts (required by build)
-    echo -e "${BLUE}Downloading Keycloak artifacts...${NC}"
-    mkdir -p ~/.m2/repository/org/keycloak
-    wget -q https://atlan-public.s3.eu-west-1.amazonaws.com/artifact/keycloak-15.0.2.1.zip
-    unzip -q -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
-    rm keycloak-15.0.2.1.zip
-    echo -e "${GREEN}✓ Keycloak artifacts downloaded${NC}"
-    
-    # Even with --skip-build, we need to install modules to local Maven repo
-    # so webapp tests can find dependencies like auth-plugin-atlas
-    echo -e "${BLUE}Installing Maven modules (without tests)...${NC}"
-    mvn install -B -Dmaven.test.skip -DskipTests -Drat.skip=true
-    
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to install Maven modules${NC}"
-        exit 1
-    fi
-    echo -e "${GREEN}✓ Maven modules installed to local repository${NC}"
+    echo -e "${YELLOW}Skipping Atlas build (--skip-build flag set)${NC}"
+    echo -e "${YELLOW}Assuming pre-built Docker image 'atlanhq/atlas:test' exists${NC}"
 fi
 
 # Step 2: Configure testcontainers for reuse
