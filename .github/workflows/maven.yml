@@ -38,10 +38,15 @@ jobs:
       helm: ${{ steps.filter.outputs.helm }}
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for accurate comparisons
       
       - uses: dorny/paths-filter@v2
         id: filter
         with:
+          # Compare against the previous commit on this branch (not master)
+          # This way we only detect changes in the current push
+          base: ${{ github.event.before }}
           filters: |
             code:
               - '**/*.java'
@@ -60,13 +65,15 @@ jobs:
   # WORKFLOW EXECUTION PATHS:
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   #
-  # 📦 HELM-ONLY CHANGES (values.yaml, templates, Chart.yaml):
+  # 📦 HELM-ONLY CHANGES (exclusively helm/** files):
   #    changes ✅ → helm-lint ✅ → build ⏭️ → smoke-test ⏭️ → helm-publish ✅
-  #    Time: ~5 minutes (vs 25+ minutes)
+  #    ⏱️  Time: ~5 minutes (80% faster!)
   #
-  # 💻 CODE CHANGES (*.java, pom.xml, etc.):
+  # 💻 ANYTHING ELSE (code, maven.yml, Dockerfile, scripts, etc.):
   #    changes ✅ → helm-lint ✅ → build ✅ → smoke-test ✅/⏭️ → helm-publish ✅
-  #    Time: ~25 minutes (full pipeline)
+  #    ⏱️  Time: ~25 minutes (full pipeline)
+  #
+  # Logic: Skip build ONLY if changes are exclusively in helm/**
   #
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -146,8 +153,9 @@ jobs:
 
   build:
     needs: [helm-lint, changes]
-    # Only run build if code changes detected (skip for helm-only changes)
-    if: needs.changes.outputs.code == 'true'
+    # Skip build ONLY if changes are exclusively in helm/**
+    # Run build for: code changes, workflow changes, Dockerfile, scripts, or anything else
+    if: needs.changes.outputs.helm != 'true' || needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -409,10 +417,9 @@ jobs:
     name: Multi-Cloud Smoke Test
     needs: [build, changes]
     runs-on: ubuntu-latest
-    # Only run smoke tests on protected branches AND if code changed (not helm-only changes)
-    # Feature branches skip smoke tests but can still publish OCI charts for manual testing
+    # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
     if: |
-      needs.changes.outputs.code == 'true' && 
+      needs.build.result == 'success' &&
       (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
     
     # Concurrency control: Only one smoke test at a time across all branches
@@ -560,8 +567,8 @@ jobs:
     needs: [build, smoke-test, changes]
     runs-on: ubuntu-latest
     # Run helm-publish if:
-    # 1. Code changed: build succeeded AND (smoke-test passed OR skipped)
-    # 2. Helm-only changed: build was skipped (no code changes)
+    # 1. Build succeeded AND smoke-test passed/skipped: publish (code/workflow changes)
+    # 2. Build skipped AND helm changed: publish (helm-only changes)
     if: |
       always() && (
         (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
