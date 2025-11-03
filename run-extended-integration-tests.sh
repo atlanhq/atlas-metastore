@@ -147,15 +147,23 @@ trap cleanup EXIT
 if [ "$SKIP_BUILD" = false ]; then
     echo -e "${YELLOW}Building Atlas WAR package...${NC}"
     
+    # Detect OS classifier
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        OS_CLASSIFIER="osx-x86_64"
+    else
+        OS_CLASSIFIER="linux-x86_64"
+    fi
+    echo -e "${BLUE}Detected OS classifier: $OS_CLASSIFIER${NC}"
+    
     # Try clean first, but don't fail if it errors (file locks on macOS)
     echo -e "${BLUE}Attempting mvn clean... (may fail on macOS, that's OK)${NC}"
-    mvn clean -Dos.detected.classifier=osx-x86_64 2>&1 | tee /tmp/maven-clean.log || {
+    mvn clean -B -Dos.detected.classifier=$OS_CLASSIFIER 2>&1 | tee /tmp/maven-clean.log || {
         echo -e "${YELLOW}⚠ Clean failed (likely file locks). Continuing with incremental build...${NC}"
     }
     
     # Now do the actual build
     echo -e "${BLUE}Building package...${NC}"
-    mvn -Dos.detected.classifier=osx-x86_64 -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+    mvn -B -Dos.detected.classifier=$OS_CLASSIFIER -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to build Atlas WAR${NC}"
@@ -224,10 +232,10 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${YELLOW}Starting atlas-metastore integration tests...${NC}"
     
     if [ "$DEBUG" = true ]; then
-        mvn test -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
+        mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
                  -Dorg.slf4j.simpleLogger.defaultLogLevel=debug -Dsurefire.useFile=false &
     else
-        mvn test -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
+        mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
                  -Dsurefire.useFile=false &
     fi
     
@@ -307,7 +315,7 @@ else
     echo -e "${YELLOW}Starting containers only...${NC}"
     
     # Start a minimal test just to spin up containers
-    mvn test -pl webapp -Dtest=BasicServiceAvailabilityTest &
+    mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest &
     MAVEN_PID=$!
     
     sleep 30
