@@ -120,24 +120,13 @@ done
 cleanup() {
     echo -e "${YELLOW}Cleaning up...${NC}"
     
-    # Kill background processes
+    # Kill background Maven process if still running
     if [ -n "$MAVEN_PID" ]; then
         kill $MAVEN_PID 2>/dev/null || true
+        echo "Stopped Maven process (PID: $MAVEN_PID)"
     fi
     
-    # Stop log capture
-    if [ -n "$MONITOR_PID" ]; then
-        kill $MONITOR_PID 2>/dev/null || true
-    fi
-    
-    if [ -f /tmp/log-capture-pids.txt ]; then
-        while read pid; do
-            kill "$pid" 2>/dev/null || true
-        done < /tmp/log-capture-pids.txt
-        rm -f /tmp/log-capture-pids.txt
-    fi
-    
-    # Let testcontainers Ryuk handle container cleanup
+    # Testcontainers Ryuk handles container cleanup automatically
     echo -e "${YELLOW}Containers will be cleaned up by testcontainers Ryuk${NC}"
 }
 
@@ -190,34 +179,19 @@ docker rm -f $(docker ps -a --filter "name=testcontainers" --format "{{.Names}}"
 # Step 4: Run atlas-metastore tests (or just start containers)
 mkdir -p target/test-logs
 
+# Initialize test result variables
+ATLAS_TEST_RESULT=0
+ATLAN_JAVA_RESULT=0
+
 if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${BLUE}======================================${NC}"
     echo -e "${BLUE}STAGE 1: Atlas-metastore tests${NC}"
     echo -e "${BLUE}======================================${NC}"
+    echo ""
     
-    # Start container log capture
-    echo "Starting container log monitor..."
-    bash -c '
-        while true; do
-            for container_id in $(docker ps -q 2>/dev/null); do
-                container_name=$(docker inspect --format="{{.Name}}" "$container_id" 2>/dev/null | sed "s/^\///")
-                if [[ "$container_name" == testcontainers-* ]] || [[ "$container_name" == *atlas* ]]; then
-                    log_file="target/test-logs/${container_name}.log"
-                    if [ ! -f "${log_file}.capturing" ]; then
-                        echo "Capturing logs from: $container_name"
-                        touch "${log_file}.capturing"
-                        docker logs -f "$container_id" > "$log_file" 2>&1 &
-                        echo "$!" >> /tmp/log-capture-pids.txt
-                    fi
-                fi
-            done
-            sleep 5
-        done
-    ' &
-    MONITOR_PID=$!
-    
-    # Run atlas-metastore tests in background
-    echo -e "${YELLOW}Starting atlas-metastore integration tests...${NC}"
+    # CRITICAL: Run tests in BACKGROUND to keep JVM alive!
+    # This keeps containers running for Stage 2
+    echo -e "${YELLOW}Starting atlas-metastore integration tests (background)...${NC}"
     
     if [ "$DEBUG" = true ]; then
         mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
@@ -230,17 +204,19 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     MAVEN_PID=$!
     echo -e "${YELLOW}Atlas-metastore tests running in background (PID: $MAVEN_PID)${NC}"
     
-    # Wait for containers to start and Atlas to be ready
-    echo -e "${YELLOW}Waiting for Atlas containers to start...${NC}"
+    # Wait for containers to start
+    echo -e "${YELLOW}Waiting for containers to start...${NC}"
     sleep 30
     
-    # Find Atlas container and extract connection info
+    # Find Atlas container by IMAGE (not by name!)
+    echo -e "${YELLOW}Finding Atlas container...${NC}"
     MAX_RETRIES=30
     RETRY_COUNT=0
     ATLAS_CONTAINER=""
     
     while [ -z "$ATLAS_CONTAINER" ] && [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        ATLAS_CONTAINER=$(docker ps --filter "name=atlas" --filter "status=running" --format "{{.Names}}" | grep -v "ryuk" | head -1)
+        # Search by image, not name!
+        ATLAS_CONTAINER=$(docker ps --filter "ancestor=atlanhq/atlas:test" --format "{{.Names}}" | head -1)
         if [ -z "$ATLAS_CONTAINER" ]; then
             echo "Waiting for Atlas container... ($RETRY_COUNT/$MAX_RETRIES)"
             sleep 2
@@ -250,6 +226,7 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     
     if [ -z "$ATLAS_CONTAINER" ]; then
         echo -e "${RED}Failed to find Atlas container after $MAX_RETRIES retries${NC}"
+        kill $MAVEN_PID 2>/dev/null || true
         exit 1
     fi
     
@@ -259,62 +236,45 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     ATLAS_PORT=$(docker port $ATLAS_CONTAINER 21000 2>/dev/null | cut -d: -f2)
     if [ -z "$ATLAS_PORT" ]; then
         echo -e "${RED}Failed to get Atlas port mapping${NC}"
+        kill $MAVEN_PID 2>/dev/null || true
         exit 1
     fi
     
-    ATLAS_URL="http://localhost:${ATLAS_PORT}"
-    echo -e "${GREEN}✓ Atlas URL: $ATLAS_URL${NC}"
+    echo -e "${GREEN}✓ Atlas is on port: $ATLAS_PORT${NC}"
     
-    # Wait for Atlas to be fully ready
+    # Wait for Atlas to be fully ready (DON'T wait for Maven to exit!)
     echo -e "${YELLOW}Waiting for Atlas to be ready...${NC}"
-    RETRY_COUNT=0
     MAX_RETRIES=60
+    RETRY_COUNT=0
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        if curl -s -f "${ATLAS_URL}/api/atlas/admin/version" > /dev/null 2>&1; then
+        if curl -s -f "http://localhost:${ATLAS_PORT}/api/atlas/admin/version" > /dev/null 2>&1; then
             echo -e "${GREEN}✓ Atlas is ready!${NC}"
             break
         fi
-        echo "Atlas not ready yet... ($RETRY_COUNT/$MAX_RETRIES)"
         sleep 5
         RETRY_COUNT=$((RETRY_COUNT + 1))
     done
     
     if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
         echo -e "${RED}Atlas did not become ready in time${NC}"
+        kill $MAVEN_PID 2>/dev/null || true
         exit 1
     fi
     
-    # Wait for atlas-metastore tests to complete
-    echo -e "${YELLOW}Waiting for atlas-metastore tests to complete...${NC}"
-    wait $MAVEN_PID
-    ATLAS_TEST_RESULT=$?
-    
-    if [ $ATLAS_TEST_RESULT -ne 0 ]; then
-        echo -e "${RED}Atlas-metastore tests failed!${NC}"
-        echo -e "${YELLOW}Check target/test-logs for details${NC}"
-        exit 1
-    fi
-    
-    echo -e "${GREEN}✓ Atlas-metastore tests passed!${NC}"
-    
+    echo -e "${GREEN}✓ Atlas container is ready (Maven tests still running in background)${NC}"
+    echo ""
 else
-    echo -e "${YELLOW}Skipping atlas-metastore tests (--skip-atlas-tests flag set)${NC}"
-    echo -e "${YELLOW}Starting containers only...${NC}"
-    
-    # Start a minimal test just to spin up containers
-    mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest &
-    MAVEN_PID=$!
-    
-    sleep 30
-    
-    # Find Atlas container
-    ATLAS_CONTAINER=$(docker ps --filter "name=atlas" --filter "status=running" --format "{{.Names}}" | grep -v "ryuk" | head -1)
-    ATLAS_PORT=$(docker port $ATLAS_CONTAINER 21000 2>/dev/null | cut -d: -f2)
-    ATLAS_URL="http://localhost:${ATLAS_PORT}"
-    
-    # Wait for Maven to finish
-    wait $MAVEN_PID
+    echo -e "${YELLOW}Skipping atlas-metastore tests${NC}"
+    # Try to find existing Atlas container
+    ATLAS_CONTAINER=$(docker ps --filter "ancestor=atlanhq/atlas:test" --format "{{.Names}}" | head -1)
+    if [ -n "$ATLAS_CONTAINER" ]; then
+        ATLAS_PORT=$(docker port $ATLAS_CONTAINER 21000 2>/dev/null | cut -d: -f2)
+        echo -e "${GREEN}✓ Found existing Atlas on port: $ATLAS_PORT${NC}"
+    else
+        echo -e "${RED}No existing Atlas container found!${NC}"
+        exit 1
+    fi
 fi
 
 # Step 5: Run atlan-java tests
@@ -350,37 +310,18 @@ echo -e "${YELLOW}Configuring atlan-java test environment...${NC}"
 # 2. Uses LocalTokenManager with Basic Authentication (same as atlas-metastore)
 # 3. Sends "Authorization: Basic <base64>" headers instead of "Bearer"
 
-# Use "LOCAL" mode which defaults to localhost:21000
-# This matches the Atlas container's internal port (which testcontainers should map to host)
-export ATLAN_BASE_URL="LOCAL"
-
-# Set Basic Auth credentials for LocalTokenManager
-# The SDK will automatically:
-# - Connect to localhost:21000
-# - Use LocalTokenManager for authentication
-# - Base64 encode these credentials  
-# - Send as "Authorization: Basic <base64>" (same as atlas-metastore tests)
+# Use the actual port we discovered from the running container
+export ATLAN_BASE_URL="http://localhost:${ATLAS_PORT}"
 export ATLAN_API_KEY="admin:admin"
 
-echo "ATLAN_BASE_URL=LOCAL (localhost:21000)"
+echo "ATLAN_BASE_URL=http://localhost:${ATLAS_PORT}"
 echo "ATLAN_API_KEY=admin:admin (Basic Auth)"
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${YELLOW}⚠  Port Mapping Note:${NC}"
-echo -e "   Atlas container is mapped to: http://localhost:${ATLAS_PORT:-unknown}"
-echo -e "   Atlan-java SDK will connect to: http://localhost:21000"
-echo -e ""
-if [ "$ATLAS_PORT" != "21000" ]; then
-    echo -e "${YELLOW}   ⚠  PORT MISMATCH DETECTED!${NC}"
-    echo -e "   The Atlas container is NOT on port 21000."
-    echo -e "   Atlan-java tests will likely fail unless you either:"
-    echo -e "   1. Use fixed port mapping in AtlasDockerIntegrationTest:"
-    echo -e "      .withFixedExposedPort(21000, 21000)"
-    echo -e "   2. Or skip atlan-java tests for now (--skip-atlas-tests)"
-    echo -e ""
-else
-    echo -e "${GREEN}   ✓ Port mapping is correct (21000 → 21000)${NC}"
-fi
+echo -e "${GREEN}ℹ  Atlan-java SDK Configuration:${NC}"
+echo -e "   • SDK will connect to: http://localhost:${ATLAS_PORT}"
+echo -e "   • Using Basic Auth with admin:admin credentials"
+echo -e "   • Maven tests running in background keep containers alive"
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -399,8 +340,6 @@ echo -e "${GREEN}✓ Test classes built${NC}"
 echo -e "${YELLOW}Running atlan-java integration tests...${NC}"
 echo -e "${YELLOW}Tests: $ATLAN_JAVA_TESTS${NC}"
 
-ATLAN_JAVA_RESULT=0
-
 for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}Running: $test${NC}"
     
@@ -415,6 +354,34 @@ for test in $ATLAN_JAVA_TESTS; do
         echo -e "${GREEN}✓ $test passed${NC}"
     fi
 done
+
+echo ""
+
+# Check atlas-metastore test results (only if we ran them)
+if [ "$SKIP_ATLAS_TESTS" = false ]; then
+    echo -e "${YELLOW}Checking atlas-metastore test results...${NC}"
+    
+    # Check if Maven process is still running (tests may have finished)
+    if [ -n "$MAVEN_PID" ] && ps -p $MAVEN_PID > /dev/null 2>&1; then
+        echo "Maven tests still running, waiting for completion..."
+        wait $MAVEN_PID
+        ATLAS_TEST_RESULT=$?
+    else
+        # Process already exited, check exit status from surefire reports
+        echo "Maven tests already completed"
+        if grep -q "Failures: 0, Errors: 0" target/surefire-reports/*.txt 2>/dev/null; then
+            ATLAS_TEST_RESULT=0
+        else
+            ATLAS_TEST_RESULT=1
+        fi
+    fi
+    
+    if [ $ATLAS_TEST_RESULT -eq 0 ]; then
+        echo -e "${GREEN}✓ Atlas-metastore tests passed${NC}"
+    else
+        echo -e "${RED}✗ Atlas-metastore tests failed${NC}"
+    fi
+fi
 
 # Step 6: Report results
 echo ""
