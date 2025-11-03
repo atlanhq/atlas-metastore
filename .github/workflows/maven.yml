@@ -26,8 +26,8 @@ on:
       - beta
       - development
       - master
-      - mlh-1521
       - staging
+      - atlas_ci_cd_updates
 
 jobs:
   # Detect what changed to optimize workflow execution
