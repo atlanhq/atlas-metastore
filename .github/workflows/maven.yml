@@ -80,8 +80,13 @@ jobs:
   #        • Infrastructure charts (6): As-is
   #        • Application charts (2): With NEW image tag from build
   #
+  # 🛡️  QUALITY GATES:
+  #    • helm-lint must pass (syntax validation)
+  #    • build must pass (for code changes)
+  #    • smoke-test must pass (on protected branches)
+  #    • atlas/atlas-read always reference valid images
+  #
   # Logic: Skip build ONLY if changes are exclusively in helm/**
-  # Safety: atlas/atlas-read always reference valid images (new or latest existing)
   #
   # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -572,13 +577,15 @@ jobs:
           path: smoke-test-logs/
 
   helm-publish:
-    needs: [build, smoke-test, changes]
+    needs: [helm-lint, build, smoke-test, changes]
     runs-on: ubuntu-latest
     # Run helm-publish if:
-    # 1. Build succeeded AND smoke-test passed/skipped: publish (code/workflow changes)
-    # 2. Build skipped AND helm changed: publish (helm-only changes)
+    # 1. Helm-lint passed (quality gate)
+    # 2. Build succeeded AND smoke-test passed/skipped: publish (code/workflow changes)
+    # 3. Build skipped AND helm changed: publish (helm-only changes)
     if: |
-      always() && (
+      always() && 
+      needs.helm-lint.result == 'success' && (
         (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
         (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')
       )
@@ -656,19 +663,40 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
         run: |
-          # Fetch the latest existing image tag from GHCR
-          BRANCH_NAME_NORMALIZED=$(echo "${{ steps.branch.outputs.name }}" | tr '_' '-')
+          # Fetch the latest existing image tag from GHCR (excluding arm64/amd64 variants)
           IMAGE_NAME="atlas-metastore-${{ steps.branch.outputs.name }}"
           
           echo "🔍 Fetching latest image tag for ${IMAGE_NAME}..."
           
-          # Use GitHub API to get tags
-          LATEST_TAG=$(curl -s -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            "https://ghcr.io/v2/atlanhq/${IMAGE_NAME}/tags/list?n=1" | \
-            jq -r '.tags[0] // "latest"')
+          # Fetch all tags and filter
+          all_tags=()
+          link="n=200"
           
-          echo "📌 Latest image tag: ${LATEST_TAG}"
-          echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          while [[ $link != "" ]]; do
+            response=$(curl -s -X GET "https://ghcr.io/v2/atlanhq/${IMAGE_NAME}/tags/list?${link}" \
+              -H "Authorization: Bearer $(echo ${GITHUB_TOKEN} | base64)")
+            
+            # Filter out arm64/amd64 variants and "latest" tag
+            tags=$(echo "$response" | jq -r '.tags[]' 2>/dev/null | grep -vE '(-arm64|-amd64|^latest)$' || true)
+            all_tags+=($tags)
+            
+            # Check for next page
+            link=$(curl -s -I -X GET "https://ghcr.io/v2/atlanhq/${IMAGE_NAME}/tags/list?${link}" \
+              -H "Authorization: Bearer $(echo ${GITHUB_TOKEN} | base64)" | \
+              grep -i link | cut -f 2 -d '<' | cut -f 1 -d '>' | cut -f 2 -d '?' || true)
+            sleep 1
+          done
+          
+          # Get the last valid tag (most recent)
+          if [[ ${#all_tags[@]} -eq 0 ]]; then
+            echo "❌ No valid tags found for ${IMAGE_NAME}"
+            echo "💡 This might be the first commit on this branch"
+            exit 1
+          else
+            LATEST_TAG="${all_tags[-1]}"
+            echo "📌 Latest image tag: ${LATEST_TAG}"
+            echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          fi
       
       - name: Generate chart version
         if: steps.can_publish.outputs.should_publish == 'true'
