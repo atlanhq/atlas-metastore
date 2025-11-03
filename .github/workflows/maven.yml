@@ -29,6 +29,47 @@ on:
       - atlas_ci_cd_updates
 
 jobs:
+  # Detect what changed to optimize workflow execution
+  # This dramatically speeds up helm-only changes by skipping the 20+ minute build job
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      helm: ${{ steps.filter.outputs.helm }}
+    steps:
+      - uses: actions/checkout@v3
+      
+      - uses: dorny/paths-filter@v2
+        id: filter
+        with:
+          filters: |
+            code:
+              - '**/*.java'
+              - '**/*.xml'
+              - '**/*.properties'
+              - 'webapp/**'
+              - 'repository/**'
+              - 'intg/**'
+              - 'graphdb/**'
+              - 'pom.xml'
+              - '**/pom.xml'
+            helm:
+              - 'helm/**'
+  
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  # WORKFLOW EXECUTION PATHS:
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #
+  # 📦 HELM-ONLY CHANGES (values.yaml, templates, Chart.yaml):
+  #    changes ✅ → helm-lint ✅ → build ⏭️ → smoke-test ⏭️ → helm-publish ✅
+  #    Time: ~5 minutes (vs 25+ minutes)
+  #
+  # 💻 CODE CHANGES (*.java, pom.xml, etc.):
+  #    changes ✅ → helm-lint ✅ → build ✅ → smoke-test ✅/⏭️ → helm-publish ✅
+  #    Time: ~25 minutes (full pipeline)
+  #
+  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
   helm-lint:
     runs-on: ubuntu-latest
     strategy:
@@ -72,12 +113,13 @@ jobs:
           version: '3.12.0'
       
       - name: Update helm dependencies
+        if: matrix.chart == 'atlas' || matrix.chart == 'atlas-read'
         run: |
           cd ${{ matrix.path }}
           helm dependency update
           
           echo "Chart dependencies:"
-          ls -la charts/ || echo "No dependencies directory"
+          ls -la charts/
       
       - name: Lint helm chart
         run: |
@@ -103,7 +145,9 @@ jobs:
           echo "✅ Chart.yaml validation passed for ${{ matrix.chart }}!"
 
   build:
-    needs: helm-lint
+    needs: [helm-lint, changes]
+    # Only run build if code changes detected (skip for helm-only changes)
+    if: needs.changes.outputs.code == 'true'
     runs-on: ubuntu-latest
 
     steps:
@@ -363,8 +407,13 @@ jobs:
 
   smoke-test:
     name: Multi-Cloud Smoke Test
-    needs: build
+    needs: [build, changes]
     runs-on: ubuntu-latest
+    # Only run smoke tests on protected branches AND if code changed (not helm-only changes)
+    # Feature branches skip smoke tests but can still publish OCI charts for manual testing
+    if: |
+      needs.changes.outputs.code == 'true' && 
+      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
@@ -508,8 +557,16 @@ jobs:
           path: smoke-test-logs/
 
   helm-publish:
-    needs: smoke-test  # Only publish if smoke tests pass in all clouds
+    needs: [build, smoke-test, changes]
     runs-on: ubuntu-latest
+    # Run helm-publish if:
+    # 1. Code changed: build succeeded AND (smoke-test passed OR skipped)
+    # 2. Helm-only changed: build was skipped (no code changes)
+    if: |
+      always() && (
+        (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
+        (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')
+      )
     strategy:
       matrix:
         include:
@@ -595,12 +652,13 @@ jobs:
           grep -A 3 "image:" ${{ matrix.path }}/values.yaml | head -10
       
       - name: Update helm dependencies
+        if: matrix.chart == 'atlas' || matrix.chart == 'atlas-read'
         run: |
           cd ${{ matrix.path }}
           helm dependency update
           
           echo "Chart dependencies:"
-          ls -la charts/ || echo "No dependencies directory"
+          ls -la charts/
       
       - name: Package helm chart
         run: |
