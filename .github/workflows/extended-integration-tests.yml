@@ -61,23 +61,25 @@ jobs:
       
       - name: Upload test logs
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: test-logs
           path: |
             target/test-logs/
             /tmp/atlan-java-*/integration-tests/build/reports/
           retention-days: 7
+          if-no-files-found: warn
       
       - name: Upload test results
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: test-results
           path: |
             target/surefire-reports/
             /tmp/atlan-java-*/integration-tests/build/test-results/
           retention-days: 7
+          if-no-files-found: warn
       
       - name: Publish Test Report
         uses: mikepenz/action-junit-report@v3
