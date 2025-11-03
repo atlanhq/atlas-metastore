@@ -99,7 +99,7 @@ while [[ "$#" -gt 0 ]]; do
         -h|--help)
             echo "Usage: $0 [options]"
             echo "Options:"
-            echo "  --skip-build         Skip building Atlas WAR and Docker image"
+            echo "  --skip-build         Skip building Atlas WAR and Docker image (still installs Maven modules)"
             echo "  --skip-atlas-tests   Skip atlas-metastore tests, only run atlan-java"
             echo "  --debug             Enable debug logging"
             echo "  --tests <tests>     Specify atlan-java tests to run (default: ConnectionTest SearchTest)"
@@ -180,7 +180,19 @@ if [ "$SKIP_BUILD" = false ]; then
     fi
     echo -e "${GREEN}✓ Docker image built successfully${NC}"
 else
-    echo -e "${YELLOW}Skipping Atlas build (--skip-build flag set)${NC}"
+    echo -e "${YELLOW}Skipping Atlas WAR and Docker build (--skip-build flag set)${NC}"
+    echo -e "${YELLOW}But we still need to install Maven modules for dependencies...${NC}"
+    
+    # Even with --skip-build, we need to install modules to local Maven repo
+    # so webapp tests can find dependencies like auth-plugin-atlas
+    echo -e "${BLUE}Installing Maven modules (without tests)...${NC}"
+    mvn install -B -DskipTests -Drat.skip=true
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to install Maven modules${NC}"
+        exit 1
+    fi
+    echo -e "${GREEN}✓ Maven modules installed to local repository${NC}"
 fi
 
 # Step 2: Configure testcontainers for reuse

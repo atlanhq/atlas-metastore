@@ -45,13 +45,8 @@ jobs:
         run: |
           chmod +x ./run-extended-integration-tests.sh
           
-          # Pull pre-built image instead of building (beta branch has compilation issues)
-          echo "Pulling pre-built Atlas image..."
-          docker pull ghcr.io/atlanhq/atlas-metastore-beta:latest || true
-          docker tag ghcr.io/atlanhq/atlas-metastore-beta:latest atlanhq/atlas:test || true
-          
           # Build command based on inputs
-          CMD="./run-extended-integration-tests.sh --skip-build"
+          CMD="./run-extended-integration-tests.sh"
           
           if [ "${{ github.event.inputs.skip-atlas-tests }}" = "true" ]; then
             CMD="$CMD --skip-atlas-tests"
