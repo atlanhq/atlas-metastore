@@ -1,4 +1,8 @@
 ---
+global:
+  atlasLogstash:
+    enabled: false
+
 replicas: 1
 
 # Namespace for Logstash deployment
