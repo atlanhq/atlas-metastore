@@ -162,8 +162,10 @@ if [ "$SKIP_BUILD" = false ]; then
     }
     
     # Now do the actual build
-    echo -e "${BLUE}Building package...${NC}"
-    mvn -B -Dos.detected.classifier=$OS_CLASSIFIER -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+    # Use 'install' instead of 'package' to install modules to local Maven repo
+    # This makes them available when we later run 'mvn test -pl webapp'
+    echo -e "${BLUE}Building and installing to local Maven repo...${NC}"
+    mvn -B -Dos.detected.classifier=$OS_CLASSIFIER -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install -Pdist
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to build Atlas WAR${NC}"
