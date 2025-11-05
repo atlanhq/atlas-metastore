@@ -473,7 +473,7 @@ echo -e "${GREEN}✓ Test classes already built in Stage 1${NC}"
 if [ "$RUN_ALL_TESTS" = true ]; then
     echo -e "${YELLOW}Auto-discovering all atlan-java test classes...${NC}"
     echo -e "${YELLOW}⚠️  WARNING: Many tests require cloud resources (ADLS, S3, GCS, etc.)${NC}"
-    echo -e "${YELLOW}   These will timeout after 10 minutes each if resources don't exist.${NC}"
+        echo -e "${YELLOW}   These will timeout after 5 minutes each if resources don't exist.${NC}"
     echo -e "${YELLOW}   Consider using specific test list instead of 'all'.${NC}"
     
     # Exclude cloud-specific tests that will hang without actual cloud resources
@@ -537,11 +537,11 @@ for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}Test $CURRENT_TEST/$TOTAL_TESTS: $test${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⏳ Running test... (max 10 minutes)${NC}"
+    echo -e "${YELLOW}⏳ Running test... (max 5 minutes)${NC}"
     
-    # Add timeout to prevent indefinite hangs (10 min per test)
-    # Show all output - filtering was causing tests to appear stuck
-    timeout 600 ./gradlew -PintegrationTests integration-tests:test \
+    # Add timeout to prevent indefinite hangs (5 min per test)
+    # Note: Tests seem to wait for full timeout period, so shorter = faster
+    timeout 300 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
               -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
     
@@ -550,7 +550,7 @@ for test in $ATLAN_JAVA_TESTS; do
     TEST_DURATION=$((TEST_END - TEST_START))
     
     if [ $TEST_EXIT_CODE -eq 124 ]; then
-        echo -e "${RED}✗ $test TIMEOUT (exceeded 10 minutes)${NC}"
+        echo -e "${RED}✗ $test TIMEOUT (exceeded 5 minutes)${NC}"
         FAILED_TESTS+=("$test (TIMEOUT)")
         ATLAN_JAVA_RESULT=1
     elif [ $TEST_EXIT_CODE -ne 0 ]; then

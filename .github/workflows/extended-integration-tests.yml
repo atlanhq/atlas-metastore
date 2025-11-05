@@ -11,7 +11,7 @@ on:
 jobs:
   extended-integration-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 40  # 2 verified tests (~20-30 min total)
+    timeout-minutes: 30  # 2 tests × 5min each + build time (~15-20 min total)
     
     steps:
       - name: Checkout atlas-metastore
