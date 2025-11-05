@@ -120,8 +120,14 @@ done
 cleanup() {
     echo -e "${YELLOW}Cleaning up...${NC}"
     
-    # Kill background Maven process if still running
-    if [ -n "$MAVEN_PID" ]; then
+    # Resume and kill Maven process if still running
+    if [ -n "$MAVEN_PID" ] && ps -p $MAVEN_PID > /dev/null 2>&1; then
+        # Resume if paused (SIGCONT is safe even if not paused)
+        echo "Resuming Maven process (PID: $MAVEN_PID) before stopping..."
+        kill -CONT $MAVEN_PID 2>/dev/null || true
+        sleep 1
+        
+        # Kill the process
         kill $MAVEN_PID 2>/dev/null || true
         echo "Stopped Maven process (PID: $MAVEN_PID)"
     fi
@@ -189,21 +195,24 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${BLUE}======================================${NC}"
     echo ""
     
-    # CRITICAL: Run tests in BACKGROUND while we detect container and run Stage 2
-    # With testcontainers.reuse=true, containers persist even after Maven exits
-    echo -e "${YELLOW}Starting atlas-metastore integration tests (background)...${NC}"
+    # CRITICAL: We use SIGSTOP/SIGCONT to pause Maven JVM while atlan-java runs!
+    # This keeps the JVM process alive, preventing Testcontainers Ryuk from cleanup
+    # Flow: Maven starts → Atlas ready → PAUSE Maven → Run atlan-java → RESUME Maven
+    echo -e "${YELLOW}Starting atlas-metastore integration tests...${NC}"
     
     if [ "$DEBUG" = true ]; then
-        mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
+        mvn test -B -pl webapp \
+                 -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
                  -Dorg.slf4j.simpleLogger.defaultLogLevel=debug -Dsurefire.useFile=false &
     else
-        mvn test -B -pl webapp -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
+        mvn test -B -pl webapp \
+                 -Dtest=BasicServiceAvailabilityTest,BasicSanityForAttributesTypesTest \
                  -Dsurefire.useFile=false &
     fi
     
     MAVEN_PID=$!
-    echo -e "${YELLOW}Atlas-metastore tests running in background (PID: $MAVEN_PID)${NC}"
-    echo -e "${YELLOW}Note: With reuse enabled, containers will persist after Maven completes${NC}"
+    echo -e "${YELLOW}Atlas-metastore tests started (PID: $MAVEN_PID)${NC}"
+    echo -e "${YELLOW}Will pause Maven JVM once Atlas is ready to keep containers alive${NC}"
     
     # Wait for containers to start
     echo -e "${YELLOW}Waiting for containers to start...${NC}"
@@ -282,7 +291,20 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
         exit 1
     fi
     
-    echo -e "${GREEN}✓ Atlas container is ready (Maven tests may still be running in background)${NC}"
+    echo -e "${GREEN}✓ Atlas container is ready!${NC}"
+    
+    # BRILLIANT IDEA: Pause Maven JVM to keep it alive while atlan-java tests run!
+    echo -e "${YELLOW}Pausing Maven process to keep containers alive...${NC}"
+    if [ -n "$MAVEN_PID" ] && ps -p $MAVEN_PID > /dev/null 2>&1; then
+        kill -STOP $MAVEN_PID
+        echo -e "${GREEN}✓ Maven JVM paused (PID: $MAVEN_PID) - containers will persist${NC}"
+    else
+        echo -e "${YELLOW}Maven tests already completed, checking containers...${NC}"
+        if ! docker ps --filter "ancestor=atlanhq/atlas:test" | grep -q atlas; then
+            echo -e "${RED}Containers already cleaned up${NC}"
+            exit 1
+        fi
+    fi
     echo ""
 else
     echo -e "${YELLOW}Skipping atlas-metastore tests${NC}"
@@ -297,10 +319,12 @@ else
     fi
 fi
 
-# Step 5: Run atlan-java tests
+# Step 5: Run atlan-java tests (Maven JVM is paused to keep containers alive)
 echo -e "${BLUE}======================================${NC}"
 echo -e "${BLUE}STAGE 2: Atlan-java tests${NC}"
 echo -e "${BLUE}======================================${NC}"
+echo -e "${YELLOW}Maven JVM is paused - containers are preserved${NC}"
+echo ""
 
 # Clone atlan-java if not already present
 ATLAN_JAVA_DIR="/tmp/atlan-java-$(date +%s)"
@@ -338,10 +362,11 @@ echo "ATLAN_BASE_URL=http://localhost:${ATLAS_PORT}"
 echo "ATLAN_API_KEY=admin:admin (Basic Auth)"
 echo ""
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${GREEN}ℹ  Atlan-java SDK Configuration:${NC}"
-echo -e "   • SDK will connect to: http://localhost:${ATLAS_PORT}"
+echo -e "${GREEN}ℹ  Extended Integration Test Architecture:${NC}"
+echo -e "   • SDK connects to: http://localhost:${ATLAS_PORT}"
 echo -e "   • Using Basic Auth with admin:admin credentials"
-echo -e "   • Maven tests running in background keep containers alive"
+echo -e "   • Maven JVM is PAUSED (SIGSTOP) to keep containers alive"
+echo -e "   • After atlan-java tests, Maven will RESUME (SIGCONT)"
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 
@@ -379,27 +404,36 @@ echo ""
 
 # Check atlas-metastore test results (only if we ran them)
 if [ "$SKIP_ATLAS_TESTS" = false ]; then
-    echo -e "${YELLOW}Checking atlas-metastore test results...${NC}"
+    echo -e "${BLUE}======================================${NC}"
+    echo -e "${BLUE}Resuming Maven tests to completion${NC}"
+    echo -e "${BLUE}======================================${NC}"
     
-    # Check if Maven process is still running (tests may have finished)
+    # Resume the paused Maven process
     if [ -n "$MAVEN_PID" ] && ps -p $MAVEN_PID > /dev/null 2>&1; then
-        echo "Maven tests still running, waiting for completion..."
+        echo -e "${YELLOW}Resuming Maven JVM (PID: $MAVEN_PID)...${NC}"
+        kill -CONT $MAVEN_PID
+        echo -e "${GREEN}✓ Maven JVM resumed${NC}"
+        echo ""
+        
+        echo -e "${YELLOW}Waiting for Maven tests to complete...${NC}"
         wait $MAVEN_PID
         ATLAS_TEST_RESULT=$?
+        
+        if [ $ATLAS_TEST_RESULT -eq 0 ]; then
+            echo -e "${GREEN}✓ Atlas-metastore tests passed${NC}"
+        else
+            echo -e "${RED}✗ Atlas-metastore tests failed${NC}"
+        fi
     else
-        # Process already exited, check exit status from surefire reports
-        echo "Maven tests already completed"
+        # Process already exited (shouldn't happen since we paused it)
+        echo -e "${YELLOW}Maven tests already completed (unexpected)${NC}"
         if grep -q "Failures: 0, Errors: 0" target/surefire-reports/*.txt 2>/dev/null; then
             ATLAS_TEST_RESULT=0
+            echo -e "${GREEN}✓ Atlas-metastore tests passed${NC}"
         else
             ATLAS_TEST_RESULT=1
+            echo -e "${RED}✗ Atlas-metastore tests failed${NC}"
         fi
-    fi
-    
-    if [ $ATLAS_TEST_RESULT -eq 0 ]; then
-        echo -e "${GREEN}✓ Atlas-metastore tests passed${NC}"
-    else
-        echo -e "${RED}✗ Atlas-metastore tests failed${NC}"
     fi
 fi
 
