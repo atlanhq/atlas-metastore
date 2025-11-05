@@ -214,13 +214,14 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${YELLOW}Atlas-metastore tests started (PID: $MAVEN_PID)${NC}"
     echo -e "${YELLOW}Will pause Maven JVM once Atlas is ready to keep containers alive${NC}"
     
-    # Wait briefly for Testcontainers to start
-    echo -e "${YELLOW}Waiting for Testcontainers to initialize...${NC}"
-    sleep 15  # Reduced from 30s - start checking sooner!
+    # Wait for Maven to compile tests and Testcontainers to start
+    # Testcontainers doesn't create containers until TEST EXECUTION starts (not during compilation)
+    echo -e "${YELLOW}Waiting for test compilation and Testcontainers initialization...${NC}"
+    sleep 60  # Give Maven time to compile tests and start test execution
     
     # Find Atlas container by IMAGE (not by name!)
     echo -e "${YELLOW}Finding Atlas container...${NC}"
-    MAX_RETRIES=30
+    MAX_RETRIES=60  # 60 retries × 3 seconds = 3 minutes to find container
     RETRY_COUNT=0
     ATLAS_CONTAINER=""
     
