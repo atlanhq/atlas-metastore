@@ -141,7 +141,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
     }
 
     private void processCreatePersona(AtlasStruct entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePersona");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("PersonaPreProcessor.processCreatePersona.segment0");
 
         validateNoPoliciesAttached((AtlasEntity) entity);
 
@@ -162,7 +162,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
     }
 
     private void processUpdatePersona(EntityMutationContext context, AtlasStruct entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdatePersona");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("PersonaPreProcessor.processUpdatePersona.segment0");
 
         AtlasEntity persona = (AtlasEntity) entity;
         validateNoPoliciesAttached(persona);
