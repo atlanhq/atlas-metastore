@@ -537,17 +537,11 @@ for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}Test $CURRENT_TEST/$TOTAL_TESTS: $test${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⏳ Running test...${NC}"
+    echo -e "${YELLOW}⏳ Running test... (5 minute timeout)${NC}"
     
-    # Match atlan-java's own test command EXACTLY (from their .github/workflows/test.yml:73)
-    # Key differences from our previous attempts:
-    #   1. -x assemble -x testClasses (skip rebuild, use Stage 1 compiled classes)
-    #   2. NO --no-daemon (let Gradle daemon run naturally)
-    #   3. NO --info (less verbose, normal output only)
-    #   4. NO timeout (let test complete naturally)
-    #
-    # Expected: Should complete in ~1 minute like atlan-java's own workflow
-    ./gradlew -PintegrationTests integration-tests:test \
+    # Use atlan-java's command with 5min timeout to capture logs
+    # Timeout allows test to complete so we can analyze what's happening
+    timeout 300 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
               -x assemble \
               -x testClasses 2>&1 | tee "/tmp/atlan-test-${test}.log"
@@ -556,7 +550,14 @@ for test in $ATLAN_JAVA_TESTS; do
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
     
-    if [ $TEST_EXIT_CODE -ne 0 ]; then
+    if [ $TEST_EXIT_CODE -eq 124 ]; then
+        echo -e "${RED}✗ $test TIMEOUT (${TEST_DURATION}s)${NC}"
+        echo -e "${YELLOW}Test timed out after 5 minutes${NC}"
+        echo -e "${YELLOW}Last 100 lines of log:${NC}"
+        tail -100 "/tmp/atlan-test-${test}.log"
+        FAILED_TESTS+=("$test (TIMEOUT)")
+        ATLAN_JAVA_RESULT=1
+    elif [ $TEST_EXIT_CODE -ne 0 ]; then
         echo -e "${RED}✗ $test FAILED (${TEST_DURATION}s)${NC}"
         echo -e "${YELLOW}Last 50 lines of log:${NC}"
         tail -50 "/tmp/atlan-test-${test}.log"
@@ -564,6 +565,9 @@ for test in $ATLAN_JAVA_TESTS; do
         ATLAN_JAVA_RESULT=1
     else
         echo -e "${GREEN}✓ $test PASSED (${TEST_DURATION}s)${NC}"
+        # Show last 50 lines even on success to see what actually happened
+        echo -e "${YELLOW}Last 50 lines of log:${NC}"
+        tail -50 "/tmp/atlan-test-${test}.log"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     fi
 done
