@@ -537,28 +537,29 @@ for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}Test $CURRENT_TEST/$TOTAL_TESTS: $test${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⏳ Running test... (max 5 minutes)${NC}"
+    echo -e "${YELLOW}⏳ Running test... (no timeout to measure actual duration)${NC}"
     
-    # Add timeout to prevent indefinite hangs (5 min per test)
-    # Note: Tests seem to wait for full timeout period, so shorter = faster
-    timeout 300 ./gradlew -PintegrationTests integration-tests:test \
+    # Run without timeout first to see actual duration
+    # Add --no-daemon to prevent Gradle daemon from hanging around
+    ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
+              --no-daemon \
               -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
     
     TEST_EXIT_CODE=$?
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
     
-    if [ $TEST_EXIT_CODE -eq 124 ]; then
-        echo -e "${RED}✗ $test TIMEOUT (exceeded 5 minutes)${NC}"
-        FAILED_TESTS+=("$test (TIMEOUT)")
-        ATLAN_JAVA_RESULT=1
-    elif [ $TEST_EXIT_CODE -ne 0 ]; then
-        echo -e "${RED}✗ $test FAILED (${TEST_DURATION}s)${NC}"
+    if [ $TEST_EXIT_CODE -ne 0 ]; then
+        echo -e "${RED}✗ $test FAILED (${TEST_DURATION}s Gradle total time)${NC}"
         FAILED_TESTS+=("$test")
         ATLAN_JAVA_RESULT=1
     else
-        echo -e "${GREEN}✓ $test PASSED (${TEST_DURATION}s)${NC}"
+        # Try to extract actual test execution time from Gradle output
+        ACTUAL_TEST_TIME=$(grep -E "Tests run:|Time elapsed:" "/tmp/atlan-test-${test}.log" | tail -1 | grep -oE "[0-9.]+ s" | head -1 || echo "unknown")
+        echo -e "${GREEN}✓ $test PASSED${NC}"
+        echo -e "${YELLOW}  - Gradle total time: ${TEST_DURATION}s${NC}"
+        echo -e "${YELLOW}  - Actual test time: ${ACTUAL_TEST_TIME}${NC}"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     fi
 done
