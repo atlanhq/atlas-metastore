@@ -433,15 +433,35 @@ echo -e "${GREEN}✓ Test classes built${NC}"
 echo -e "${YELLOW}Running atlan-java integration tests...${NC}"
 echo -e "${YELLOW}Tests: $ATLAN_JAVA_TESTS${NC}"
 
+# First, verify Atlas is still reachable
+echo -e "${YELLOW}Pre-flight check: Testing Atlas connectivity...${NC}"
+if timeout 5 curl -s -u admin:admin "http://localhost:${ATLAS_PORT}/api/atlas/v2/types" > /dev/null 2>&1; then
+    echo -e "${GREEN}✓ Atlas is reachable from host${NC}"
+else
+    echo -e "${RED}✗ Atlas is NOT reachable! Tests will fail.${NC}"
+    HTTP_TEST=$(timeout 5 curl -s -o /dev/null -w "HTTP %{http_code}" "http://localhost:${ATLAS_PORT}/api/atlas/v2/types" 2>&1)
+    echo "  Response: $HTTP_TEST"
+fi
+echo ""
+
 for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}Running: $test${NC}"
     
-    ./gradlew -PintegrationTests integration-tests:test \
+    # Add timeout to prevent indefinite hangs (5 min per test)
+    timeout 300 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
-              -x spotlessCheck
+              --info \
+              -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
     
-    if [ $? -ne 0 ]; then
-        echo -e "${RED}✗ $test failed${NC}"
+    TEST_EXIT_CODE=$?
+    
+    if [ $TEST_EXIT_CODE -eq 124 ]; then
+        echo -e "${RED}✗ $test TIMEOUT (exceeded 5 minutes)${NC}"
+        echo -e "${YELLOW}Last 50 lines of test output:${NC}"
+        tail -50 "/tmp/atlan-test-${test}.log"
+        ATLAN_JAVA_RESULT=1
+    elif [ $TEST_EXIT_CODE -ne 0 ]; then
+        echo -e "${RED}✗ $test failed (exit code: $TEST_EXIT_CODE)${NC}"
         ATLAN_JAVA_RESULT=1
     else
         echo -e "${GREEN}✓ $test passed${NC}"
