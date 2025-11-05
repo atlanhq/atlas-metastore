@@ -436,12 +436,27 @@ echo -e "${YELLOW}Tests: $ATLAN_JAVA_TESTS${NC}"
 
 # First, verify Atlas is still reachable
 echo -e "${YELLOW}Pre-flight check: Testing Atlas connectivity...${NC}"
-if timeout 5 curl -s -u admin:admin "http://localhost:${ATLAS_PORT}/api/atlas/v2/types" > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Atlas is reachable from host${NC}"
+echo "  Checking http://localhost:${ATLAS_PORT}/api/atlas/v2/types"
+
+# Check HTTP code (accept 200 or 401 as "reachable")
+HTTP_CODE=$(timeout 5 curl -s -o /dev/null -w "%{http_code}" "http://localhost:${ATLAS_PORT}/api/atlas/v2/types" 2>/dev/null || echo "000")
+
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
+    echo -e "${GREEN}✓ Atlas is reachable (HTTP $HTTP_CODE)${NC}"
 else
-    echo -e "${RED}✗ Atlas is NOT reachable! Tests will fail.${NC}"
-    HTTP_TEST=$(timeout 5 curl -s -o /dev/null -w "HTTP %{http_code}" "http://localhost:${ATLAS_PORT}/api/atlas/v2/types" 2>&1)
-    echo "  Response: $HTTP_TEST"
+    echo -e "${RED}✗ Atlas is NOT reachable! (HTTP $HTTP_CODE)${NC}"
+    echo -e "${YELLOW}Debugging:${NC}"
+    echo "  1. Container status:"
+    docker ps --filter "ancestor=atlanhq/atlas:test" --format "  {{.Names}} - {{.Status}}" || echo "  No containers"
+    echo "  2. Port mapping:"
+    docker port $ATLAS_CONTAINER 2>&1 | sed 's/^/  /' || echo "  Failed to get ports"
+    echo "  3. Maven process:"
+    if ps -p $MAVEN_PID > /dev/null 2>&1; then
+        echo "  Maven still running (paused)"
+    else
+        echo "  Maven has exited (containers may be cleaned up)"
+    fi
+    echo -e "${YELLOW}Continuing anyway - tests will determine if Atlas is truly unavailable${NC}"
 fi
 echo ""
 
