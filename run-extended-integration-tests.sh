@@ -539,14 +539,12 @@ for test in $ATLAN_JAVA_TESTS; do
     echo -e "${YELLOW}⏳ Running test... (max 10 minutes)${NC}"
     
     # Add timeout to prevent indefinite hangs (10 min per test)
-    # Show filtered output but also save full log
+    # Show all output - filtering was causing tests to appear stuck
     timeout 600 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
-              -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}-full.log" | \
-              grep --line-buffered -E "(BUILD|Test|PASSED|FAILED|ERROR|com\.atlan\.java\.sdk|SUCCESS|Executed|Running|atlan\.AtlanClient)" | \
-              tee "/tmp/atlan-test-${test}.log" || true
+              -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
     
-    TEST_EXIT_CODE=${PIPESTATUS[0]}
+    TEST_EXIT_CODE=$?
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
     
