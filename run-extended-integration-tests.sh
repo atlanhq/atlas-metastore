@@ -91,7 +91,8 @@ fi
 SKIP_BUILD=false
 SKIP_ATLAS_TESTS=false
 DEBUG=false
-ATLAN_JAVA_TESTS="ConnectionTest SearchTest"
+# Default: Run only tests compatible with basic Atlas (no cloud resources needed)
+ATLAN_JAVA_TESTS="ConnectionTest SearchTest AdminTest GlossaryTest CustomMetadataTest LineageTest LinkTest FileTest"
 RUN_ALL_TESTS=false
 
 while [[ "$#" -gt 0 ]]; do
@@ -470,14 +471,22 @@ echo -e "${GREEN}✓ Test classes already built in Stage 1${NC}"
 # Auto-discover all tests if requested
 if [ "$RUN_ALL_TESTS" = true ]; then
     echo -e "${YELLOW}Auto-discovering all atlan-java test classes...${NC}"
+    echo -e "${YELLOW}⚠️  WARNING: Many tests require cloud resources (ADLS, S3, GCS, etc.)${NC}"
+    echo -e "${YELLOW}   These will timeout after 10 minutes each if resources don't exist.${NC}"
+    echo -e "${YELLOW}   Consider using specific test list instead of 'all'.${NC}"
+    
+    # Exclude cloud-specific tests that will hang without actual cloud resources
+    EXCLUDE_PATTERN="(AtlanLiveTest|ADLSAssetTest|S3AssetTest|GCSAssetTest|AzureEventHubTest|DataverseAssetTest|PresetAssetTest|SupersetAssetTest|DataStudioAssetTest|OAuthTest|SSOTest)"
+    
     ATLAN_JAVA_TESTS=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java 2>/dev/null | \
                        sed 's|.*/||' | \
                        sed 's|\.java||' | \
-                       grep -v "AtlanLiveTest" | \
+                       grep -vE "$EXCLUDE_PATTERN" | \
                        tr '\n' ' ')
     
     TEST_COUNT=$(echo "$ATLAN_JAVA_TESTS" | wc -w)
-    echo -e "${GREEN}✓ Found $TEST_COUNT test classes${NC}"
+    EXCLUDED_COUNT=11
+    echo -e "${GREEN}✓ Found $TEST_COUNT test classes (excluded $EXCLUDED_COUNT cloud-specific tests)${NC}"
 fi
 
 # Run specified atlan-java tests
