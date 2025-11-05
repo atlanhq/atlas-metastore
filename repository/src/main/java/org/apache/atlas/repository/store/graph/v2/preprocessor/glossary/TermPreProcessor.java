@@ -105,7 +105,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
             isValidLexoRank(lexicographicalSortOrder, glossaryQName, parentQname, this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+        entity.setAttribute(QUALIFIED_NAME, getUUID(entity));
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
                 "create entity: type=", entity.getTypeName());
 

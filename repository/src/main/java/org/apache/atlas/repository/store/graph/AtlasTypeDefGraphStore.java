@@ -708,7 +708,6 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
         typeRegistry.releaseTypeRegistryForUpdate(ttr, true);
     }
 
-
     @Override
     @GraphTransaction
     public AtlasTypesDef deleteTypeByName(String typeName) throws AtlasBaseException {

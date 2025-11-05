@@ -104,7 +104,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
         entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(entity, parentDomainQualifiedName));
 
         productExists(productName, parentDomainQualifiedName, null);
 
@@ -237,7 +237,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
             String updatedQualifiedName;
             if(StringUtils.isEmpty(sourceDomainQualifiedName)){
-                updatedQualifiedName = createQualifiedName(targetDomainQualifiedName);
+                updatedQualifiedName = createQualifiedName(product, targetDomainQualifiedName);
             } else {
                 updatedQualifiedName = currentDataProductQualifiedName.replace(sourceDomainQualifiedName, targetDomainQualifiedName);
             }
@@ -293,11 +293,11 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         }
     }
 
-    private static String createQualifiedName(String parentDomainQualifiedName) throws AtlasBaseException {
+    private static String createQualifiedName(AtlasEntity entity, String parentDomainQualifiedName) throws AtlasBaseException {
         if (StringUtils.isEmpty(parentDomainQualifiedName)) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Parent Domain Qualified Name cannot be empty or null");
         }
-        return parentDomainQualifiedName + "/product/" + PreProcessorUtils.getUUID();
+        return parentDomainQualifiedName + "/product/" + PreProcessorUtils.getUUID(entity);
 
     }
 

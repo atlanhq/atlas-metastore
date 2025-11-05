@@ -32,8 +32,6 @@ public class IndexRepairService {
     public IndexRepairService(AtlasGraph graph) {
         this.graph = graph;
     }
-
-
     /**
      * Find corrupted vertex using single index (qualifiedName only)
      */

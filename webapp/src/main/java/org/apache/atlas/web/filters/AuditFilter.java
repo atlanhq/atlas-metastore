@@ -91,10 +91,17 @@ public class AuditFilter implements Filter {
         final Set<String>         userGroups         = AtlasAuthorizationUtils.getCurrentUserGroups();
         final String              deleteType         = httpRequest.getParameter("deleteType");
         final boolean             skipFailedEntities = Boolean.parseBoolean(httpRequest.getParameter("skipFailedEntities"));
-
+        String requestUri = httpRequest.getRequestURI();
+        String xAtlanRequestId = httpRequest.getHeader(X_ATLAN_REQUEST_ID);
         try {
+            if (LOG.isInfoEnabled() && (requestUri.contains("/search") || requestUri.contains("/entity"))) {
+                LOG.info("REQ_START: {} {} - X-Atlan-Request-Id: {} at {}",
+                        httpRequest.getMethod(),
+                        requestUri,
+                        xAtlanRequestId,
+                        startTime);
+            }
             currentThread.setName(formatName(oldName, internalRequestId));
-
             RequestContext.clear();
             RequestContext requestContext = RequestContext.get();
             requestContext.setUri(MetricUtils.matchCanonicalPattern(httpRequest.getRequestURI()).orElse(EMPTY));
@@ -127,7 +134,14 @@ public class AuditFilter implements Filter {
             filterChain.doFilter(request, responseWrapper);
         } finally {
             long timeTaken = System.currentTimeMillis() - startTime;
-
+            if (LOG.isInfoEnabled() && (httpRequest.getRequestURI().contains("/search") || httpRequest.getRequestURI().contains("/entity"))) {
+                LOG.info("REQ_COMPLETE: {} {} - X-Atlan-Request-Id: {} status: {} time: {}ms",
+                        httpRequest.getMethod(),
+                        httpRequest.getRequestURI(),
+                        xAtlanRequestId,
+                        httpResponse.getStatus(),
+                        timeTaken);
+            }
             recordAudit(httpRequest, requestTime, user, httpResponse.getStatus(), timeTaken);
 
             // put the request id into the response so users can trace logs for this request

@@ -44,7 +44,6 @@ public class TypeDefRefreshConfig {
         executor.setAwaitTerminationSeconds(60); // Wait up to 1 minute during shutdown
         executor.setThreadNamePrefix("typedef-refresh-");
         executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy()); // Handle queue overflow
-
         // Add error handling for async tasks
         executor.setTaskDecorator(runnable -> () -> {
             try {
@@ -53,7 +52,6 @@ public class TypeDefRefreshConfig {
                 LOG.error("Error in async typedef refresh", e);
             }
         });
-
         executor.initialize();
         return executor;
     }

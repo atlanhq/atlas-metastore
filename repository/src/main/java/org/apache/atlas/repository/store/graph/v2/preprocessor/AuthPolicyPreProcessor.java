@@ -144,7 +144,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                     validateAndReduce(policy);
                 }
 
-                policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID(policy)));
 
                 //extract role
                 String roleName = getPersonaRoleName(parentEntity);
@@ -167,7 +167,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
             AtlasPerfMetrics.MetricRecorder purposeSegment = RequestContext.get().startMetricRecord("AuthPolicyPreProcessor.processCreatePolicy.segment4");
             try {
-                policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+                policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID(policy)));
 
                 validator.validate(policy, null, parentEntity, CREATE);
 
