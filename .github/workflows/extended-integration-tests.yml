@@ -6,11 +6,6 @@ name: Extended Integration Tests
 on:
   push:
     branches:
-      - alpha
-      - beta
-      - development
-      - master
-      - staging
       - atlas_ci_cd_updates
 
 jobs:
@@ -42,23 +37,13 @@ jobs:
       - name: Run extended integration tests
         env:
           GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
+          GITHUB_USERNAME: ${{ github.actor }}
         run: |
           chmod +x ./run-extended-integration-tests.sh ./build.sh
           
-          # Build command - just run the script directly
-          # It will call build.sh internally (same as maven.yml)
-          CMD="./run-extended-integration-tests.sh"
-          
-          if [ "${{ github.event.inputs.skip-atlas-tests }}" = "true" ]; then
-            CMD="$CMD --skip-atlas-tests"
-          fi
-          
-          if [ -n "${{ github.event.inputs.tests }}" ]; then
-            CMD="$CMD --tests '${{ github.event.inputs.tests }}'"
-          fi
-          
-          echo "Running: $CMD"
-          eval $CMD
+          # Run extended integration tests with default settings
+          # This runs both atlas-metastore and atlan-java test suites
+          ./run-extended-integration-tests.sh
       
       - name: Upload test logs
         if: always()

@@ -189,8 +189,8 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${BLUE}======================================${NC}"
     echo ""
     
-    # CRITICAL: Run tests in BACKGROUND to keep JVM alive!
-    # This keeps containers running for Stage 2
+    # CRITICAL: Run tests in BACKGROUND while we detect container and run Stage 2
+    # With testcontainers.reuse=true, containers persist even after Maven exits
     echo -e "${YELLOW}Starting atlas-metastore integration tests (background)...${NC}"
     
     if [ "$DEBUG" = true ]; then
@@ -203,6 +203,7 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     
     MAVEN_PID=$!
     echo -e "${YELLOW}Atlas-metastore tests running in background (PID: $MAVEN_PID)${NC}"
+    echo -e "${YELLOW}Note: With reuse enabled, containers will persist after Maven completes${NC}"
     
     # Wait for containers to start
     echo -e "${YELLOW}Waiting for containers to start...${NC}"
@@ -242,27 +243,46 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     
     echo -e "${GREEN}✓ Atlas is on port: $ATLAS_PORT${NC}"
     
-    # Wait for Atlas to be fully ready (DON'T wait for Maven to exit!)
+    # Wait for Atlas to be fully ready with aggressive polling
+    # CRITICAL: Check quickly before Maven tests finish and kill containers!
     echo -e "${YELLOW}Waiting for Atlas to be ready...${NC}"
-    MAX_RETRIES=60
+    MAX_RETRIES=120  # 120 retries × 3 seconds = 6 minutes max
     RETRY_COUNT=0
+    ATLAS_READY=false
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+        # Check if Maven process is still alive
+        if [ -n "$MAVEN_PID" ] && ! ps -p $MAVEN_PID > /dev/null 2>&1; then
+            echo -e "${YELLOW}Maven tests completed, checking if Atlas is still available...${NC}"
+        fi
+        
+        # Try to reach Atlas API
         if curl -s -f "http://localhost:${ATLAS_PORT}/api/atlas/admin/version" > /dev/null 2>&1; then
             echo -e "${GREEN}✓ Atlas is ready!${NC}"
+            ATLAS_READY=true
             break
         fi
-        sleep 5
+        
+        # Show progress every 10 attempts
+        if [ $((RETRY_COUNT % 10)) -eq 0 ]; then
+            echo "Still waiting for Atlas... ($RETRY_COUNT/$MAX_RETRIES)"
+        fi
+        
+        sleep 3  # Shorter interval for faster detection
         RETRY_COUNT=$((RETRY_COUNT + 1))
     done
     
-    if [ $RETRY_COUNT -eq $MAX_RETRIES ]; then
+    if [ "$ATLAS_READY" = false ]; then
         echo -e "${RED}Atlas did not become ready in time${NC}"
+        echo -e "${YELLOW}Checking container status...${NC}"
+        docker ps --filter "ancestor=atlanhq/atlas:test" || true
+        echo -e "${YELLOW}Last few lines of Maven output:${NC}"
+        tail -20 target/surefire-reports/*.txt 2>/dev/null || echo "No surefire reports found"
         kill $MAVEN_PID 2>/dev/null || true
         exit 1
     fi
     
-    echo -e "${GREEN}✓ Atlas container is ready (Maven tests still running in background)${NC}"
+    echo -e "${GREEN}✓ Atlas container is ready (Maven tests may still be running in background)${NC}"
     echo ""
 else
     echo -e "${YELLOW}Skipping atlas-metastore tests${NC}"
