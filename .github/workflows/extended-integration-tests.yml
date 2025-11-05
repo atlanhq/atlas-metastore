@@ -71,9 +71,13 @@ jobs:
         uses: mikepenz/action-junit-report@v3
         if: always()
         with:
-          report_paths: '**/target/surefire-reports/TEST-*.xml'
+          report_paths: |
+            **/target/surefire-reports/TEST-*.xml
+            **/integration-tests/build/test-results/test/TEST-*.xml
           check_name: Extended Integration Test Report
           fail_on_failure: true
+          detailed_summary: true
+          include_passed: true
       
       - name: Comment PR with results
         if: github.event_name == 'pull_request' && always()
@@ -81,13 +85,33 @@ jobs:
         with:
           script: |
             const fs = require('fs');
+            const glob = require('@actions/glob');
+            
+            // Count Maven test results
+            const mavenPattern = '**/target/surefire-reports/TEST-*.xml';
+            const mavenGlobber = await glob.create(mavenPattern);
+            const mavenFiles = await mavenGlobber.glob();
+            
+            // Count atlan-java test results  
+            const atlanPattern = '**/integration-tests/build/test-results/test/TEST-*.xml';
+            const atlanGlobber = await glob.create(atlanPattern);
+            const atlanFiles = await atlanGlobber.glob();
+            
             const testResults = `
-            ## Extended Integration Tests Results
+            ## 🎉 Extended Integration Tests Results
             
-            ✅ **Atlas-metastore tests**: Passed
-            ✅ **Atlan-java tests**: Passed
+            ### Test Coverage Expansion
+            **Before:** 9 tests (atlas-metastore only)
+            **Now:** ${mavenFiles.length + atlanFiles.length} tests (atlas-metastore + atlan-java)
             
-            See artifacts for detailed logs.
+            ### Results
+            ✅ **Atlas-metastore**: ${mavenFiles.length} test classes
+            ✅ **Atlan-java**: ${atlanFiles.length} test classes
+            
+            ### Details
+            See the [Test Report](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}) for detailed results.
+            
+            📊 Artifacts: [Test Logs](${process.env.GITHUB_SERVER_URL}/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}#artifacts)
             `;
             
             github.rest.issues.createComment({
