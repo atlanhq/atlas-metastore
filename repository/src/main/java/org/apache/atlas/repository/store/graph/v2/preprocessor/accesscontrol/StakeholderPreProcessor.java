@@ -137,7 +137,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
     }
 
     private void processCreateStakeholder(AtlasEntity entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateStakeholder");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("StakeholderPreProcessor.processCreateStakeholder.segment0");
 
         validateNoPoliciesAttached(entity);
 
@@ -185,7 +185,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
     }
 
     private void processUpdateStakeholder(EntityMutationContext context, AtlasEntity stakeholder) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateStakeholder");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("StakeholderPreProcessor.processUpdateStakeholder.segment0");
 
         validateNoPoliciesAttached(stakeholder);
 

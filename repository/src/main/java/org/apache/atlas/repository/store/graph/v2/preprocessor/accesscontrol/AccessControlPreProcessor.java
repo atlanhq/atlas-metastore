@@ -43,7 +43,7 @@ public class AccessControlPreProcessor implements PreProcessor {
     }
 
     private void processCreateAccessControlAsset(AtlasEntity entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateAccessControlAsset");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("AccessControlPreProcessor.processCreateAccessControlAsset.segment0");
 
         validateChannelLink(entity);
 
@@ -51,7 +51,7 @@ public class AccessControlPreProcessor implements PreProcessor {
     }
 
     private void processUpdateAccessControlAsset(EntityMutationContext context, AtlasEntity entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateAccessControlAsset");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("AccessControlPreProcessor.processUpdateAccessControlAsset.segment0");
 
         validateChannelLink(entity);
 
@@ -59,7 +59,7 @@ public class AccessControlPreProcessor implements PreProcessor {
     }
 
     private void validateChannelLink(AtlasEntity entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("validateChannelLink");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("AccessControlPreProcessor.validateChannelLink.segment0");
 
         if (entity.hasAttribute(ATTR_CHANNEL_LINK)) {
             String channelLink = (String) entity.getAttribute(ATTR_CHANNEL_LINK);
