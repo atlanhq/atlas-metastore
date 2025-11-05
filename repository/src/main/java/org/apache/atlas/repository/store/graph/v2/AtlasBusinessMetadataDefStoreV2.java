@@ -55,6 +55,7 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
     private static final int DEFAULT_RICH_TEXT_ATTRIBUTE_LIMIT = 50;
     private static final String RICH_TEXT_ATTRIBUTE_LIMIT_PROPERTY = "atlas.business.metadata.richtext.limit";
+    private static final String ATTR_OPTION_PRIMITIVE_TYPE = "primitiveType";
 
     @Inject
     public AtlasBusinessMetadataDefStoreV2(AtlasTypeDefGraphStoreV2 typeDefStore, AtlasTypeRegistry typeRegistry, EntityDiscoveryService entityDiscoveryService) {
@@ -131,6 +132,11 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
             for (AtlasStructDef.AtlasAttributeDef attributeDef : businessMetadataDef.getAttributeDefs()) {
                 if (!isValidName(attributeDef.getName())) {
                     throw new AtlasBaseException(AtlasErrorCode.ATTRIBUTE_NAME_INVALID_CHARS, attributeDef.getName());
+                }
+
+                Map<String, String> options = attributeDef.getOptions();
+                if (options == null || !options.containsKey(ATTR_OPTION_PRIMITIVE_TYPE)) {
+                    throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, attributeDef.getName(), "options.primitiveType");
                 }
             }
         }
