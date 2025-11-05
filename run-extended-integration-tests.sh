@@ -341,20 +341,25 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     fi
     
     echo -e "${GREEN}✓ Atlas container is ready!${NC}"
+    echo ""  # Flush output
     
     # BRILLIANT IDEA: Pause Maven JVM to keep it alive while atlan-java tests run!
-    echo -e "${YELLOW}Pausing Maven process to keep containers alive...${NC}"
+    echo -e "${YELLOW}Pausing Maven process to keep containers alive...${NC}" >&2  # Force to stderr
+    echo "DEBUG: About to pause Maven PID: $MAVEN_PID" >&2
+    
     if [ -n "$MAVEN_PID" ] && ps -p $MAVEN_PID > /dev/null 2>&1; then
+        echo "DEBUG: Maven process is running, sending SIGSTOP..." >&2
         kill -STOP $MAVEN_PID
-        echo -e "${GREEN}✓ Maven JVM paused (PID: $MAVEN_PID) - containers will persist${NC}"
+        sleep 1  # Give it a moment
+        echo -e "${GREEN}✓ Maven JVM paused (PID: $MAVEN_PID) - containers will persist${NC}" >&2
     else
-        echo -e "${YELLOW}Maven tests already completed, checking containers...${NC}"
+        echo -e "${YELLOW}Maven tests already completed, checking containers...${NC}" >&2
         if ! docker ps --filter "ancestor=atlanhq/atlas:test" | grep -q atlas; then
-            echo -e "${RED}Containers already cleaned up${NC}"
+            echo -e "${RED}Containers already cleaned up${NC}" >&2
             exit 1
         fi
     fi
-    echo ""
+    echo "" >&2
 else
     echo -e "${YELLOW}Skipping atlas-metastore tests${NC}"
     # Try to find existing Atlas container
@@ -369,10 +374,15 @@ else
 fi
 
 # Step 5: Run atlan-java tests (Maven JVM is paused to keep containers alive)
+echo "========================================" >&2
+echo "STAGE 2: Atlan-java tests" >&2
+echo "========================================" >&2
 echo -e "${BLUE}======================================${NC}"
 echo -e "${BLUE}STAGE 2: Atlan-java tests${NC}"
 echo -e "${BLUE}======================================${NC}"
 echo -e "${YELLOW}Maven JVM is paused - containers are preserved${NC}"
+echo "DEBUG: Maven PID $MAVEN_PID should be in stopped state" >&2
+ps -p $MAVEN_PID -o pid,state,command 2>&1 | head -2 >&2
 echo ""
 
 # Clone atlan-java if not already present
