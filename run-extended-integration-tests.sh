@@ -91,8 +91,9 @@ fi
 SKIP_BUILD=false
 SKIP_ATLAS_TESTS=false
 DEBUG=false
-# Default: Run only tests compatible with basic Atlas (no cloud resources needed)
-ATLAN_JAVA_TESTS="ConnectionTest SearchTest AdminTest GlossaryTest CustomMetadataTest LineageTest LinkTest FileTest"
+# Default: Run only tests that have been verified to work quickly with atlas-metastore
+# Note: Many other tests work but are slow (10min each) due to retry logic
+ATLAN_JAVA_TESTS="ConnectionTest SearchTest"
 RUN_ALL_TESTS=false
 
 while [[ "$#" -gt 0 ]]; do

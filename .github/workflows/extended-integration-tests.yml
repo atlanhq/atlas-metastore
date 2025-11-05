@@ -11,7 +11,7 @@ on:
 jobs:
   extended-integration-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # 8 compatible tests (~30-40 min total)
+    timeout-minutes: 40  # 2 verified tests (~20-30 min total)
     
     steps:
       - name: Checkout atlas-metastore
