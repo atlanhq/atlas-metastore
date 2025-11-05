@@ -182,7 +182,39 @@ echo -e "${GREEN}✓ Testcontainers configured for reuse${NC}"
 echo -e "${YELLOW}Cleaning up existing test containers...${NC}"
 docker rm -f $(docker ps -a --filter "name=testcontainers" --format "{{.Names}}") 2>/dev/null || true
 
-# Step 4: Run atlas-metastore tests (or just start containers)
+# Step 4: Pre-build atlan-java FIRST to avoid long pause
+echo -e "${BLUE}======================================${NC}"
+echo -e "${BLUE}STAGE 1: Prepare atlan-java${NC}"
+echo -e "${BLUE}======================================${NC}"
+echo -e "${YELLOW}Building atlan-java BEFORE starting Atlas containers${NC}"
+echo -e "${YELLOW}This avoids keeping containers paused during 6-minute compilation${NC}"
+echo ""
+
+ATLAN_JAVA_DIR="/tmp/atlan-java-$(date +%s)"
+echo -e "${YELLOW}Cloning atlan-java repository...${NC}"
+git clone --depth 1 https://github.com/atlanhq/atlan-java.git "$ATLAN_JAVA_DIR"
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to clone atlan-java repository${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Atlan-java cloned to $ATLAN_JAVA_DIR${NC}"
+
+cd "$ATLAN_JAVA_DIR"
+echo -e "${YELLOW}Building atlan-java test classes (takes ~6 minutes)...${NC}"
+./gradlew testClasses -x spotlessCheck
+
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Failed to build atlan-java test classes${NC}"
+    exit 1
+fi
+echo -e "${GREEN}✓ Atlan-java test classes built!${NC}"
+echo ""
+
+# Return to project root
+cd "$PROJECT_ROOT"
+
+# Step 5: Run atlas-metastore tests (or just start containers)
 mkdir -p target/test-logs
 
 # Initialize test result variables
@@ -191,7 +223,7 @@ ATLAN_JAVA_RESULT=0
 
 if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${BLUE}======================================${NC}"
-    echo -e "${BLUE}STAGE 1: Atlas-metastore tests${NC}"
+    echo -e "${BLUE}STAGE 2: Atlas-metastore tests${NC}"
     echo -e "${BLUE}======================================${NC}"
     echo ""
     
@@ -373,37 +405,27 @@ else
     fi
 fi
 
-# Step 5: Run atlan-java tests (Maven JVM is paused to keep containers alive)
+# Step 6: Run atlan-java tests (Maven JVM is paused to keep containers alive)
 echo "========================================" >&2
-echo "STAGE 2: Atlan-java tests" >&2
+echo "STAGE 3: Run atlan-java tests" >&2
 echo "========================================" >&2
 echo -e "${BLUE}======================================${NC}"
-echo -e "${BLUE}STAGE 2: Atlan-java tests${NC}"
+echo -e "${BLUE}STAGE 3: Run atlan-java tests${NC}"
 echo -e "${BLUE}======================================${NC}"
 echo -e "${YELLOW}Maven JVM is paused - containers are preserved${NC}"
 echo "DEBUG: Maven PID $MAVEN_PID should be in stopped state" >&2
 ps -p $MAVEN_PID -o pid,state,command 2>&1 | head -2 >&2
 echo ""
 
-# Clone atlan-java if not already present
-ATLAN_JAVA_DIR="/tmp/atlan-java-$(date +%s)"
-if [ -d "$ATLAN_JAVA_DIR" ]; then
-    echo -e "${YELLOW}Cleaning existing atlan-java directory...${NC}"
-    rm -rf "$ATLAN_JAVA_DIR"
-fi
-
-echo -e "${YELLOW}Cloning atlan-java repository...${NC}"
-git clone --depth 1 https://github.com/atlanhq/atlan-java.git "$ATLAN_JAVA_DIR"
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to clone atlan-java repository${NC}"
+# Use the pre-built atlan-java directory
+if [ ! -d "$ATLAN_JAVA_DIR" ]; then
+    echo -e "${RED}ERROR: atlan-java directory not found: $ATLAN_JAVA_DIR${NC}"
+    echo -e "${RED}This should have been built in Stage 1${NC}"
     exit 1
 fi
 
-echo -e "${GREEN}✓ Atlan-java cloned to $ATLAN_JAVA_DIR${NC}"
-
-# Configure atlan-java tests
 cd "$ATLAN_JAVA_DIR"
+echo -e "${GREEN}✓ Using pre-built atlan-java from: $ATLAN_JAVA_DIR${NC}"
 
 echo -e "${YELLOW}Configuring atlan-java test environment...${NC}"
 
@@ -429,16 +451,8 @@ echo -e "   • After atlan-java tests, Maven will RESUME (SIGCONT)"
 echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 echo ""
 
-# Build test classes
-echo -e "${YELLOW}Building atlan-java test classes...${NC}"
-./gradlew testClasses -x spotlessCheck
-
-if [ $? -ne 0 ]; then
-    echo -e "${RED}Failed to build atlan-java test classes${NC}"
-    exit 1
-fi
-
-echo -e "${GREEN}✓ Test classes built${NC}"
+# Test classes already built in Stage 1 - skip to running tests
+echo -e "${GREEN}✓ Test classes already built in Stage 1${NC}"
 
 # Run specified atlan-java tests
 echo -e "${YELLOW}Running atlan-java integration tests...${NC}"
