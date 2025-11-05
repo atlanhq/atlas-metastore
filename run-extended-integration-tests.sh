@@ -214,9 +214,9 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     echo -e "${YELLOW}Atlas-metastore tests started (PID: $MAVEN_PID)${NC}"
     echo -e "${YELLOW}Will pause Maven JVM once Atlas is ready to keep containers alive${NC}"
     
-    # Wait for containers to start
-    echo -e "${YELLOW}Waiting for containers to start...${NC}"
-    sleep 30
+    # Wait briefly for Testcontainers to start
+    echo -e "${YELLOW}Waiting for Testcontainers to initialize...${NC}"
+    sleep 15  # Reduced from 30s - start checking sooner!
     
     # Find Atlas container by IMAGE (not by name!)
     echo -e "${YELLOW}Finding Atlas container...${NC}"
@@ -252,41 +252,89 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     
     echo -e "${GREEN}✓ Atlas is on port: $ATLAS_PORT${NC}"
     
-    # Wait for Atlas to be fully ready with aggressive polling
-    # CRITICAL: Check quickly before Maven tests finish and kill containers!
-    echo -e "${YELLOW}Waiting for Atlas to be ready...${NC}"
-    MAX_RETRIES=120  # 120 retries × 3 seconds = 6 minutes max
+    # Quick test to see if port is accessible
+    echo -e "${YELLOW}Testing port accessibility...${NC}"
+    if nc -z localhost $ATLAS_PORT 2>/dev/null; then
+        echo -e "${GREEN}✓ Port $ATLAS_PORT is accessible${NC}"
+    else
+        echo -e "${YELLOW}⚠ Port $ATLAS_PORT not yet accessible (container may still be starting)${NC}"
+    fi
+    
+    # Wait for Atlas to be fully ready with VERY aggressive polling
+    # CRITICAL: Must detect readiness BEFORE Maven tests finish (~5:45 min)!
+    echo -e "${YELLOW}Waiting for Atlas API to be ready...${NC}"
+    MAX_RETRIES=300  # 300 retries × 1 second = 5 minutes max (before tests finish)
     RETRY_COUNT=0
     ATLAS_READY=false
+    LAST_ERROR=""
     
     while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-        # Check if Maven process is still alive
+        # CRITICAL: Check if Maven exited early (shouldn't happen in first 5 min)
         if [ -n "$MAVEN_PID" ] && ! ps -p $MAVEN_PID > /dev/null 2>&1; then
-            echo -e "${YELLOW}Maven tests completed, checking if Atlas is still available...${NC}"
+            echo -e "${RED}✗ Maven process exited at $RETRY_COUNT seconds (expected ~345s)${NC}"
+            echo -e "${YELLOW}Checking if containers are still available...${NC}"
+            if ! docker ps --filter "ancestor=atlanhq/atlas:test" | grep -q .; then
+                echo -e "${RED}❌ Containers already cleaned up by Ryuk${NC}"
+                echo -e "${YELLOW}Maven finished too fast for the pause strategy to work${NC}"
+                exit 1
+            fi
         fi
         
-        # Try to reach Atlas API
-        if curl -s -f "http://localhost:${ATLAS_PORT}/api/atlas/admin/version" > /dev/null 2>&1; then
-            echo -e "${GREEN}✓ Atlas is ready!${NC}"
+        # CRITICAL: Use the SAME readiness check as the tests!
+        # Tests accept 200 OR 401 as "ready" (see AtlasDockerIntegrationTest.java:495)
+        
+        # Check /api/atlas/v2/types endpoint (what tests use)
+        HTTP_CODE=$(timeout 2 curl -s -o /dev/null -w "%{http_code}" "http://localhost:${ATLAS_PORT}/api/atlas/v2/types" 2>/dev/null || echo "000")
+        
+        if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "401" ]; then
+            echo -e "${GREEN}✓ Atlas is ready at $RETRY_COUNT seconds! (HTTP $HTTP_CODE from /api/atlas/v2/types)${NC}"
             ATLAS_READY=true
             break
         fi
         
-        # Show progress every 10 attempts
-        if [ $((RETRY_COUNT % 10)) -eq 0 ]; then
-            echo "Still waiting for Atlas... ($RETRY_COUNT/$MAX_RETRIES)"
+        # Fallback: Try other endpoints if v2/types doesn't respond
+        if [ "$HTTP_CODE" = "000" ]; then
+            # Connection refused/timeout, try simpler endpoints
+            HTTP_CODE_ALT=$(timeout 2 curl -s -o /dev/null -w "%{http_code}" "http://localhost:${ATLAS_PORT}/api/atlas/admin/version" 2>/dev/null || echo "000")
+            if [ "$HTTP_CODE_ALT" = "200" ] || [ "$HTTP_CODE_ALT" = "401" ]; then
+                echo -e "${GREEN}✓ Atlas is ready at $RETRY_COUNT seconds! (HTTP $HTTP_CODE_ALT from admin/version)${NC}"
+                ATLAS_READY=true
+                break
+            fi
         fi
         
-        sleep 3  # Shorter interval for faster detection
+        # Show progress every 30 seconds with HTTP code details
+        if [ $((RETRY_COUNT % 30)) -eq 0 ] && [ $RETRY_COUNT -gt 0 ]; then
+            echo "Still waiting for Atlas... (${RETRY_COUNT}s / ${MAX_RETRIES}s on port ${ATLAS_PORT}, last HTTP: $HTTP_CODE)"
+        fi
+        
+        sleep 1  # Check EVERY SECOND for fast detection!
         RETRY_COUNT=$((RETRY_COUNT + 1))
     done
     
     if [ "$ATLAS_READY" = false ]; then
-        echo -e "${RED}Atlas did not become ready in time${NC}"
-        echo -e "${YELLOW}Checking container status...${NC}"
-        docker ps --filter "ancestor=atlanhq/atlas:test" || true
-        echo -e "${YELLOW}Last few lines of Maven output:${NC}"
-        tail -20 target/surefire-reports/*.txt 2>/dev/null || echo "No surefire reports found"
+        echo -e "${RED}Atlas did not become ready in time (checked for ${RETRY_COUNT} seconds)${NC}"
+        echo ""
+        echo -e "${YELLOW}Debugging information:${NC}"
+        echo -e "${YELLOW}1. Container status:${NC}"
+        docker ps --filter "ancestor=atlanhq/atlas:test" || echo "No containers found"
+        echo ""
+        echo -e "${YELLOW}2. Port ${ATLAS_PORT} test:${NC}"
+        nc -zv localhost $ATLAS_PORT 2>&1 || echo "Port not accessible"
+        echo ""
+        echo -e "${YELLOW}3. Curl test with details:${NC}"
+        timeout 5 curl -v "http://localhost:${ATLAS_PORT}/api/atlas/admin/version" 2>&1 | head -20 || echo "Curl failed"
+        echo ""
+        echo -e "${YELLOW}4. Maven process status:${NC}"
+        if ps -p $MAVEN_PID > /dev/null 2>&1; then
+            echo "Maven still running (PID: $MAVEN_PID)"
+        else
+            echo "Maven exited (containers likely cleaned up by Ryuk)"
+        fi
+        echo ""
+        echo -e "${YELLOW}5. Container logs (last 30 lines):${NC}"
+        docker logs --tail 30 $ATLAS_CONTAINER 2>&1 || echo "Could not get container logs"
+        
         kill $MAVEN_PID 2>/dev/null || true
         exit 1
     fi
