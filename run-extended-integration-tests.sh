@@ -4,6 +4,9 @@
 
 set -e
 
+# Save project root directory (needed for cd back after building atlan-java)
+PROJECT_ROOT=$(pwd)
+
 echo "============================================"
 echo "Extended Integration Tests Runner"
 echo "Atlas-metastore + Atlan-java Test Suites"
