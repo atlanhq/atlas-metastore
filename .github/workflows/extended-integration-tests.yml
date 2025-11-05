@@ -53,7 +53,7 @@ jobs:
           name: test-logs
           path: |
             target/test-logs/
-            /tmp/atlan-java-*/integration-tests/build/reports/
+            target/atlan-java-reports/
           retention-days: 7
           if-no-files-found: warn
       
@@ -64,7 +64,7 @@ jobs:
           name: test-results
           path: |
             target/surefire-reports/
-            /tmp/atlan-java-*/integration-tests/build/test-results/
+            target/atlan-java-test-results/
           retention-days: 7
           if-no-files-found: warn
       
@@ -74,7 +74,7 @@ jobs:
         with:
           report_paths: |
             **/target/surefire-reports/TEST-*.xml
-            **/integration-tests/build/test-results/test/TEST-*.xml
+            **/target/atlan-java-test-results/test/TEST-*.xml
           check_name: Extended Integration Test Report
           fail_on_failure: true
           detailed_summary: true
@@ -94,7 +94,7 @@ jobs:
             const mavenFiles = await mavenGlobber.glob();
             
             // Count atlan-java test results  
-            const atlanPattern = '**/integration-tests/build/test-results/test/TEST-*.xml';
+            const atlanPattern = '**/target/atlan-java-test-results/test/TEST-*.xml';
             const atlanGlobber = await glob.create(atlanPattern);
             const atlanFiles = await atlanGlobber.glob();
             

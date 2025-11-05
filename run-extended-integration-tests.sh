@@ -537,24 +537,29 @@ for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}Test $CURRENT_TEST/$TOTAL_TESTS: $test${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
-    echo -e "${YELLOW}⏳ Running test... (max 5 minutes)${NC}"
+    echo -e "${YELLOW}⏳ Running test...${NC}"
     
-    # Add timeout to prevent indefinite hangs (5 min per test)
-    # Note: Tests seem to wait for full timeout period, so shorter = faster
-    timeout 300 ./gradlew -PintegrationTests integration-tests:test \
+    # Match atlan-java's own test command EXACTLY (from their .github/workflows/test.yml:73)
+    # Key differences from our previous attempts:
+    #   1. -x assemble -x testClasses (skip rebuild, use Stage 1 compiled classes)
+    #   2. NO --no-daemon (let Gradle daemon run naturally)
+    #   3. NO --info (less verbose, normal output only)
+    #   4. NO timeout (let test complete naturally)
+    #
+    # Expected: Should complete in ~1 minute like atlan-java's own workflow
+    ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
-              -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
+              -x assemble \
+              -x testClasses 2>&1 | tee "/tmp/atlan-test-${test}.log"
     
     TEST_EXIT_CODE=$?
     TEST_END=$(date +%s)
     TEST_DURATION=$((TEST_END - TEST_START))
     
-    if [ $TEST_EXIT_CODE -eq 124 ]; then
-        echo -e "${RED}✗ $test TIMEOUT (exceeded 5 minutes)${NC}"
-        FAILED_TESTS+=("$test (TIMEOUT)")
-        ATLAN_JAVA_RESULT=1
-    elif [ $TEST_EXIT_CODE -ne 0 ]; then
+    if [ $TEST_EXIT_CODE -ne 0 ]; then
         echo -e "${RED}✗ $test FAILED (${TEST_DURATION}s)${NC}"
+        echo -e "${YELLOW}Last 50 lines of log:${NC}"
+        tail -50 "/tmp/atlan-test-${test}.log"
         FAILED_TESTS+=("$test")
         ATLAN_JAVA_RESULT=1
     else
@@ -622,7 +627,31 @@ if [ "$SKIP_ATLAS_TESTS" = false ]; then
     fi
 fi
 
-# Step 6: Report results
+# Step 6: Collect logs for artifacts
+echo ""
+echo -e "${BLUE}Collecting test logs...${NC}"
+
+# Copy atlan-java test logs from /tmp
+if ls /tmp/atlan-test-*.log 1> /dev/null 2>&1; then
+    cp /tmp/atlan-test-*.log target/test-logs/ || true
+    echo -e "${GREEN}✓ Copied atlan-java test logs to target/test-logs/${NC}"
+fi
+
+# Copy atlan-java test reports if they exist
+if [ -d "$ATLAN_JAVA_DIR/integration-tests/build/reports" ]; then
+    mkdir -p target/atlan-java-reports
+    cp -r "$ATLAN_JAVA_DIR/integration-tests/build/reports/"* target/atlan-java-reports/ || true
+    echo -e "${GREEN}✓ Copied atlan-java test reports to target/atlan-java-reports/${NC}"
+fi
+
+# Copy atlan-java test results (XML) for JUnit reporter
+if [ -d "$ATLAN_JAVA_DIR/integration-tests/build/test-results" ]; then
+    mkdir -p target/atlan-java-test-results
+    cp -r "$ATLAN_JAVA_DIR/integration-tests/build/test-results/"* target/atlan-java-test-results/ || true
+    echo -e "${GREEN}✓ Copied atlan-java test results to target/atlan-java-test-results/${NC}"
+fi
+
+# Step 7: Report results
 echo ""
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}Test Results Summary${NC}"
@@ -643,8 +672,9 @@ else
 fi
 
 echo ""
-echo -e "${YELLOW}Container logs saved to: target/test-logs/${NC}"
-echo -e "${YELLOW}Atlan-java logs at: $ATLAN_JAVA_DIR/integration-tests/build/reports/${NC}"
+echo -e "${YELLOW}Test logs saved to:${NC}"
+echo -e "${YELLOW}  - Maven: target/surefire-reports/${NC}"
+echo -e "${YELLOW}  - Atlan-java: target/test-logs/, target/atlan-java-reports/${NC}"
 
 # Final result
 if [ $ATLAN_JAVA_RESULT -eq 0 ]; then
