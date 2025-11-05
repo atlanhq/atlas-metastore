@@ -527,14 +527,15 @@ for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     echo -e "${BLUE}Test $CURRENT_TEST/$TOTAL_TESTS: $test${NC}"
     echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${YELLOW}⏳ Running test... (max 10 minutes)${NC}"
     
     # Add timeout to prevent indefinite hangs (10 min per test)
-    # Filter out verbose gradle output, keep only test results
+    # Show filtered output but also save full log
     timeout 600 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
-              -x spotlessCheck 2>&1 | \
-              grep -E "(BUILD|Test|PASSED|FAILED|ERROR|com\.atlan\.java\.sdk|SUCCESS|Executed)" | \
-              tee "/tmp/atlan-test-${test}.log"
+              -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}-full.log" | \
+              grep --line-buffered -E "(BUILD|Test|PASSED|FAILED|ERROR|com\.atlan\.java\.sdk|SUCCESS|Executed|Running|atlan\.AtlanClient)" | \
+              tee "/tmp/atlan-test-${test}.log" || true
     
     TEST_EXIT_CODE=${PIPESTATUS[0]}
     TEST_END=$(date +%s)
