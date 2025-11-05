@@ -481,8 +481,12 @@ if [ "$RUN_ALL_TESTS" = true ]; then
 fi
 
 # Run specified atlan-java tests
+TEST_ARRAY=($ATLAN_JAVA_TESTS)
+TOTAL_TESTS=${#TEST_ARRAY[@]}
+
 echo -e "${YELLOW}Running atlan-java integration tests...${NC}"
-echo -e "${YELLOW}Tests: $ATLAN_JAVA_TESTS${NC}"
+echo -e "${YELLOW}Total tests to run: $TOTAL_TESTS${NC}"
+echo ""
 
 # First, verify Atlas is still reachable
 echo -e "${YELLOW}Pre-flight check: Testing Atlas connectivity...${NC}"
@@ -510,29 +514,67 @@ else
 fi
 echo ""
 
+CURRENT_TEST=0
+PASSED_TESTS=0
+FAILED_TESTS=()
+START_TIME=$(date +%s)
+
 for test in $ATLAN_JAVA_TESTS; do
-    echo -e "${BLUE}Running: $test${NC}"
+    CURRENT_TEST=$((CURRENT_TEST + 1))
+    TEST_START=$(date +%s)
+    
+    echo ""
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+    echo -e "${BLUE}Test $CURRENT_TEST/$TOTAL_TESTS: $test${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
     
     # Add timeout to prevent indefinite hangs (10 min per test)
+    # Filter out verbose gradle output, keep only test results
     timeout 600 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
-              --info \
-              -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
+              -x spotlessCheck 2>&1 | \
+              grep -E "(BUILD|Test|PASSED|FAILED|ERROR|com\.atlan\.java\.sdk|SUCCESS|Executed)" | \
+              tee "/tmp/atlan-test-${test}.log"
     
-    TEST_EXIT_CODE=$?
+    TEST_EXIT_CODE=${PIPESTATUS[0]}
+    TEST_END=$(date +%s)
+    TEST_DURATION=$((TEST_END - TEST_START))
     
     if [ $TEST_EXIT_CODE -eq 124 ]; then
         echo -e "${RED}✗ $test TIMEOUT (exceeded 10 minutes)${NC}"
-        echo -e "${YELLOW}Last 50 lines of test output:${NC}"
-        tail -50 "/tmp/atlan-test-${test}.log"
+        FAILED_TESTS+=("$test (TIMEOUT)")
         ATLAN_JAVA_RESULT=1
     elif [ $TEST_EXIT_CODE -ne 0 ]; then
-        echo -e "${RED}✗ $test failed (exit code: $TEST_EXIT_CODE)${NC}"
+        echo -e "${RED}✗ $test FAILED (${TEST_DURATION}s)${NC}"
+        FAILED_TESTS+=("$test")
         ATLAN_JAVA_RESULT=1
     else
-        echo -e "${GREEN}✓ $test passed${NC}"
+        echo -e "${GREEN}✓ $test PASSED (${TEST_DURATION}s)${NC}"
+        PASSED_TESTS=$((PASSED_TESTS + 1))
     fi
 done
+
+TOTAL_TIME=$(($(date +%s) - START_TIME))
+MINUTES=$((TOTAL_TIME / 60))
+SECONDS=$((TOTAL_TIME % 60))
+
+echo ""
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+echo -e "${BLUE}Atlan-Java Test Summary${NC}"
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
+echo -e "Total tests:   $TOTAL_TESTS"
+echo -e "${GREEN}Passed:        $PASSED_TESTS${NC}"
+echo -e "${RED}Failed:        ${#FAILED_TESTS[@]}${NC}"
+echo -e "Total time:    ${MINUTES}m ${SECONDS}s"
+
+if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
+    echo ""
+    echo -e "${RED}Failed tests:${NC}"
+    for failed_test in "${FAILED_TESTS[@]}"; do
+        echo -e "${RED}  ✗ $failed_test${NC}"
+    done
+fi
+echo -e "${BLUE}═══════════════════════════════════════════════════════════${NC}"
 
 echo ""
 
