@@ -92,13 +92,21 @@ SKIP_BUILD=false
 SKIP_ATLAS_TESTS=false
 DEBUG=false
 ATLAN_JAVA_TESTS="ConnectionTest SearchTest"
+RUN_ALL_TESTS=false
 
 while [[ "$#" -gt 0 ]]; do
     case $1 in
         --skip-build) SKIP_BUILD=true ;;
         --skip-atlas-tests) SKIP_ATLAS_TESTS=true ;;
         --debug) DEBUG=true ;;
-        --tests) shift; ATLAN_JAVA_TESTS="$1" ;;
+        --tests) 
+            shift
+            if [ "$1" = "all" ]; then
+                RUN_ALL_TESTS=true
+            else
+                ATLAN_JAVA_TESTS="$1"
+            fi
+            ;;
         -h|--help)
             echo "Usage: $0 [options]"
             echo "Options:"
@@ -106,11 +114,13 @@ while [[ "$#" -gt 0 ]]; do
             echo "  --skip-atlas-tests   Skip atlas-metastore tests, only run atlan-java"
             echo "  --debug             Enable debug logging"
             echo "  --tests <tests>     Specify atlan-java tests to run (default: ConnectionTest SearchTest)"
+            echo "                      Use 'all' to run all available tests"
             echo "  -h, --help          Show this help message"
             echo ""
             echo "Examples:"
-            echo "  $0                                           # Run everything"
-            echo "  $0 --skip-build                              # Skip build, run all tests"
+            echo "  $0                                           # Run default tests (ConnectionTest SearchTest)"
+            echo "  $0 --tests all                               # Run ALL 39 atlan-java tests"
+            echo "  $0 --skip-build                              # Skip build, run default tests"
             echo "  $0 --tests 'ConnectionTest GlossaryTest'     # Run specific atlan-java tests"
             exit 0
             ;;
@@ -457,6 +467,19 @@ echo ""
 # Test classes already built in Stage 1 - skip to running tests
 echo -e "${GREEN}✓ Test classes already built in Stage 1${NC}"
 
+# Auto-discover all tests if requested
+if [ "$RUN_ALL_TESTS" = true ]; then
+    echo -e "${YELLOW}Auto-discovering all atlan-java test classes...${NC}"
+    ATLAN_JAVA_TESTS=$(ls integration-tests/src/test/java/com/atlan/java/sdk/*Test.java 2>/dev/null | \
+                       sed 's|.*/||' | \
+                       sed 's|\.java||' | \
+                       grep -v "AtlanLiveTest" | \
+                       tr '\n' ' ')
+    
+    TEST_COUNT=$(echo "$ATLAN_JAVA_TESTS" | wc -w)
+    echo -e "${GREEN}✓ Found $TEST_COUNT test classes${NC}"
+fi
+
 # Run specified atlan-java tests
 echo -e "${YELLOW}Running atlan-java integration tests...${NC}"
 echo -e "${YELLOW}Tests: $ATLAN_JAVA_TESTS${NC}"
@@ -490,8 +513,8 @@ echo ""
 for test in $ATLAN_JAVA_TESTS; do
     echo -e "${BLUE}Running: $test${NC}"
     
-    # Add timeout to prevent indefinite hangs (5 min per test)
-    timeout 300 ./gradlew -PintegrationTests integration-tests:test \
+    # Add timeout to prevent indefinite hangs (10 min per test)
+    timeout 600 ./gradlew -PintegrationTests integration-tests:test \
               --tests "com.atlan.java.sdk.${test}" \
               --info \
               -x spotlessCheck 2>&1 | tee "/tmp/atlan-test-${test}.log"
@@ -499,7 +522,7 @@ for test in $ATLAN_JAVA_TESTS; do
     TEST_EXIT_CODE=$?
     
     if [ $TEST_EXIT_CODE -eq 124 ]; then
-        echo -e "${RED}✗ $test TIMEOUT (exceeded 5 minutes)${NC}"
+        echo -e "${RED}✗ $test TIMEOUT (exceeded 10 minutes)${NC}"
         echo -e "${YELLOW}Last 50 lines of test output:${NC}"
         tail -50 "/tmp/atlan-test-${test}.log"
         ATLAN_JAVA_RESULT=1

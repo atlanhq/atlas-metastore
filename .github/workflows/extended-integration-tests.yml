@@ -11,7 +11,7 @@ on:
 jobs:
   extended-integration-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180  # 3 hours for all 39 tests (was 60)
     
     steps:
       - name: Checkout atlas-metastore
@@ -41,9 +41,9 @@ jobs:
         run: |
           chmod +x ./run-extended-integration-tests.sh ./build.sh
           
-          # Run extended integration tests with default settings
-          # This runs both atlas-metastore and atlan-java test suites
-          ./run-extended-integration-tests.sh
+          # Run ALL atlan-java tests (39 test classes)
+          # This will take ~2-3 hours but provides comprehensive coverage
+          ./run-extended-integration-tests.sh --tests all
       
       - name: Upload test logs
         if: always()
