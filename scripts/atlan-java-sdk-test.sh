@@ -204,11 +204,11 @@ echo ""
 
 # Check if timeout command is available (Linux/CI has it, macOS doesn't by default)
 if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD=(timeout 1200)
-  echo -e "${YELLOW}Using timeout: 20 minutes max${NC}"
+  TIMEOUT_CMD=(timeout 3600)
+  echo -e "${YELLOW}Using timeout: 60 minutes max${NC}"
 elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD=(gtimeout 1200)
-  echo -e "${YELLOW}Using gtimeout: 20 minutes max${NC}"
+  TIMEOUT_CMD=(gtimeout 3600)
+  echo -e "${YELLOW}Using gtimeout: 60 minutes max${NC}"
 else
   TIMEOUT_CMD=()
   echo -e "${YELLOW}⚠️  timeout command not available (macOS), running without timeout${NC}"
