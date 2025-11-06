@@ -42,8 +42,10 @@ vCluster connections from earlier steps.
 1. Authenticates with Keycloak (OAuth client credentials flow)
 2. Clones `atlan-java` repository (patches `FIXED_USER` if configured)
 3. Verifies tenant connectivity
-4. Runs 5 critical path tests **in parallel** (using background jobs)
-5. Collects and reports results (informational only)
+4. **Autodiscovers all integration tests** from the repository
+5. Runs all tests in a **single Gradle invocation** (Gradle handles parallelization)
+6. Parses test results from Gradle XML reports
+7. Reports results (informational only)
 
 ### Workflow Steps: SDK Tests in `smoke-test` Job
 
@@ -71,24 +73,59 @@ env:
 
 ## Tests Run
 
-### Critical Path Tests (5 total)
+### Autodiscovered Integration Tests
 
-| Test | Purpose | Duration (Parallel) |
+**Discovery Method:** Automatically finds all `*Test.java` files in `atlan-java/integration-tests/src/test/java/com/atlan/java/sdk/`
+
+**Current Test Suite** (as of latest `atlan-java` main branch):
+
+| Test | Purpose | Category |
 |------|---------|----------|
-| `GlossaryTest` | Business glossary operations | ~2-3 min |
-| `CustomMetadataTest` | Custom attribute management | ~2-3 min |
-| `ConnectionTest` | Connection management | ~2-3 min |
-| `LineageTest` | Lineage tracking | ~2-3 min |
-| `SearchTest` | Asset search functionality | ~2-3 min |
+| `AdminTest` | User and group management | Admin/Auth |
+| `AssetTest` | Core asset operations | Core |
+| `AtlanTagTest` | Tag creation and assignment | Metadata |
+| `AuditTest` | Audit log operations | Observability |
+| `ConnectionTest` | Connection management | Core |
+| `CustomAssetTest` | Custom asset types | Extensions |
+| `CustomMetadataTest` | Custom attribute management | Metadata |
+| `DataMeshTest` | Data mesh operations | Advanced |
+| `FileTest` | File asset operations | Assets |
+| `GlossaryTest` | Business glossary operations | Metadata |
+| `GroupTest` | Group management | Admin |
+| `ImpactTest` | Impact analysis | Lineage |
+| `LineageTest` | Lineage tracking | Lineage |
+| `OAuthTest` | OAuth authentication | Auth |
+| `PersonaTest` | Persona management | Admin |
+| `PurposeTest` | Purpose management | Governance |
+| `QueryTest` | Query operations | Advanced |
+| `RelationshipTest` | Asset relationships | Core |
+| `RequestsTest` | Request management | Governance |
+| `ResourceTest` | Resource (links, READMEs) | Documentation |
+| `SearchLogTest` | Search logging | Observability |
+| `SearchTest` | Asset search functionality | Core |
+| `SQLAssetTest` | SQL asset operations | Assets |
+| `SSOTest` | SSO configuration | Auth |
+| `StructTest` | Struct operations | Core |
+| `SuggestionsTest` | Search suggestions | Search |
+| `TableSearchTest` | Table-specific search | Search |
+| `TaskTest` | Task management | Workflow |
+| `TypeDefTest` | Type definition management | Admin |
+| `UserTest` | User management | Admin |
+| `WorkflowTest` | Workflow operations | Workflow |
 
-**Total Duration:** ~3-5 minutes (tests run in parallel)
+**Total Duration:** ~5-10 minutes (Gradle runs tests in parallel)
 
-> 🚀 **Performance Note:** Tests run in parallel using background jobs, reducing total execution time from 10-15 minutes (sequential) to 3-5 minutes (parallel).
+> 🚀 **Performance Note:** Tests autodiscover and run via a single Gradle invocation with `--continue` flag. Gradle handles test parallelization internally, avoiding lock contention issues. The script dynamically finds all available tests from the `atlan-java` repository, so new tests are automatically included without manual updates.
 
-### Why These Tests?
+> 📊 **Test Count:** The number of tests may vary as `atlan-java` evolves. The script discovers and runs whatever tests exist in the cloned repository.
 
-These tests were selected because they:
-- ✅ Cover core Atlan product features
+> 🔧 **Technical Note:** We use a single `./gradlew test` command with multiple `--tests` arguments instead of parallel bash processes to avoid Gradle daemon lock contention.
+
+### Why All Tests?
+
+**Comprehensive Coverage:** Running all tests provides:
+- ✅ Complete validation of SDK compatibility with `atlas-metastore`
+- ✅ Early detection of regressions across all features
 - ✅ Work with standard Atlan deployments (no cloud-specific dependencies)
 - ✅ Exercise multiple services (Atlas, Heracles, Heka)
 - ✅ Are relatively fast and stable
@@ -279,22 +316,25 @@ Every run produces a summary in the workflow:
 
 ## Expansion Plans
 
-### Phase 1 (Current)
+### Phase 1 (Current) ✅
 - ✅ Test against AWS tenant only
-- ✅ 5 critical path tests
+- ✅ **All integration tests** (30+ tests, autodiscovered)
+- ✅ **Parallel test execution** (Gradle built-in parallelization)
+- ✅ **Configurable test user** (`ATLAN_FIXED_USER`)
+- ✅ **Zero-maintenance** (tests autodiscover from `atlan-java` repo)
 - ✅ Informational only (non-blocking)
 
 ### Phase 2 (Future)
-- 🔜 Add more tests (10-15 total)
 - 🔜 Test against multiple tenants (Azure, GCP)
-- 🔜 Parallel test execution
 - 🔜 Test result trending dashboard
+- 🔜 Flaky test detection and retry logic
+- 🔜 Test duration analytics
 
 ### Phase 3 (Future)
 - 🔮 Block releases on critical test failures
 - 🔮 Auto-bisect to find breaking commits
 - 🔮 Performance regression detection
-- 🔮 SDK compatibility matrix
+- 🔮 SDK compatibility matrix across versions
 
 ## Related Documentation
 
@@ -307,18 +347,20 @@ Every run produces a summary in the workflow:
 
 ### Updating Tests
 
-To add/remove tests, edit `scripts/atlan-java-sdk-test.sh`:
+**Tests are autodiscovered** - no manual configuration needed!
 
+The script automatically finds all `*Test.java` files in:
+```
+atlan-java/integration-tests/src/test/java/com/atlan/java/sdk/
+```
+
+**To add a test:** Just add it to the `atlan-java` repository - it will be automatically picked up on the next run.
+
+**To exclude a test:** If needed, you can add filtering logic in `scripts/atlan-java-sdk-test.sh` after the discovery step:
 ```bash
-TESTS=(
-  "GlossaryTest"
-  "CustomMetadataTest"
-  "AtlanTagTest"
-  "LineageTest"
-  "SearchTest"
-  # Add new test here:
-  # "YourNewTest"
-)
+# Example: Exclude specific tests
+TESTS=("${TESTS[@]/AdminTest/}")  # Remove AdminTest
+TESTS=("${TESTS[@]/SSOTest/}")    # Remove SSOTest
 ```
 
 ### Updating Credentials

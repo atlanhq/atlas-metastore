@@ -427,7 +427,7 @@ jobs:
   # Smoke test on vclusters (parallel with single VPN)
 
   smoke-test:
-    name: Multi-Cloud Smoke & SDK Tests
+    name: smoke & sdk tests
     needs: [build, changes]
     runs-on: ubuntu-latest
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
@@ -697,9 +697,9 @@ jobs:
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tests Run**: GlossaryTest, CustomMetadataTest, ConnectionTest, LineageTest, SearchTest" >> $GITHUB_STEP_SUMMARY
+          echo "**Tests Run**: All integration tests (autodiscovered from \`atlan-java\` repository)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "📊 [View detailed logs in artifacts](#)" >> $GITHUB_STEP_SUMMARY
+          echo "📊 [View detailed logs and test results in artifacts](#)" >> $GITHUB_STEP_SUMMARY
 
   helm-publish:
     needs: [helm-lint, build, smoke-test, changes]

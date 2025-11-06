@@ -148,17 +148,33 @@ echo "  Base URL: ${ATLAN_BASE_URL}"
 echo "  API Key: ${ATLAN_API_KEY:0:20}...${ATLAN_API_KEY: -10}"
 echo ""
 
-# Critical path tests (curated list)
-# These tests cover core functionality and work with standard Atlan deployments
-TESTS=(
-  "GlossaryTest"
-  "CustomMetadataTest"
-  "ConnectionTest"
-  "LineageTest"
-  "SearchTest"
-)
+# Autodiscover all integration test classes
+echo -e "${YELLOW}Discovering integration tests...${NC}"
 
-echo -e "${BLUE}Running ${#TESTS[@]} critical path tests in parallel:${NC}"
+TEST_DIR="integration-tests/src/test/java/com/atlan/java/sdk"
+if [ ! -d "$TEST_DIR" ]; then
+  echo -e "${RED}❌ ERROR: Integration tests directory not found${NC}"
+  exit 1
+fi
+
+# Find all *Test.java files and extract class names
+# Mimics atlan-java's test.yml autodiscovery approach
+TESTS=()
+while IFS= read -r test_file; do
+  # Extract just the class name (e.g., GlossaryTest.java -> GlossaryTest)
+  test_name=$(basename "$test_file" .java)
+  TESTS+=("$test_name")
+done < <(find "$TEST_DIR" -maxdepth 1 -name "*Test.java" -type f | sort)
+
+if [ ${#TESTS[@]} -eq 0 ]; then
+  echo -e "${RED}❌ ERROR: No test files found in $TEST_DIR${NC}"
+  exit 1
+fi
+
+echo -e "${GREEN}✓ Discovered ${#TESTS[@]} integration tests${NC}"
+echo ""
+
+echo -e "${BLUE}Running ${#TESTS[@]} tests in parallel:${NC}"
 for test in "${TESTS[@]}"; do
   echo "  • $test"
 done
@@ -168,86 +184,87 @@ FAILED_TESTS=()
 PASSED_TESTS=()
 START_TIME=$(date +%s)
 
-# Function to run a single test
-run_test() {
-  local test=$1
-  local start=$(date +%s)
-  
-  if timeout 600 ./gradlew -PintegrationTests integration-tests:test \
-    --tests "com.atlan.java.sdk.${test}" \
-    -x assemble \
-    -x testClasses \
-    --no-daemon \
-    > "../sdk-test-logs/${test}.log" 2>&1; then
-    
-    local end=$(date +%s)
-    local duration=$((end - start))
-    echo "${test}:PASSED:${duration}" > "../sdk-test-logs/${test}.result"
-  else
-    local end=$(date +%s)
-    local duration=$((end - start))
-    echo "${test}:FAILED:${duration}" > "../sdk-test-logs/${test}.result"
-  fi
-}
+# Build Gradle command with all tests
+# Run all tests in a SINGLE Gradle invocation to avoid lock contention
+echo -e "${YELLOW}Building test command...${NC}"
 
-# Export function and variables for subshells
-export -f run_test
-export ATLAN_BASE_URL
-export ATLAN_API_KEY
-
-# Start all tests in parallel
-echo -e "${YELLOW}Launching ${#TESTS[@]} tests in parallel...${NC}"
-declare -A TEST_PIDS
-
+GRADLE_TEST_ARGS=""
 for test in "${TESTS[@]}"; do
-  run_test "$test" &
-  TEST_PIDS[$test]=$!
-  echo "  Started $test (PID: ${TEST_PIDS[$test]})"
+  GRADLE_TEST_ARGS+="--tests \"com.atlan.java.sdk.${test}\" "
 done
 
-echo ""
-echo -e "${YELLOW}Waiting for all tests to complete...${NC}"
+echo -e "${GREEN}✓ Ready to run ${#TESTS[@]} tests${NC}"
 echo ""
 
-# Wait for all tests to complete and show progress
-for test in "${TESTS[@]}"; do
-  pid=${TEST_PIDS[$test]}
-  echo -n "  Waiting for $test (PID: $pid)... "
-  
-  if wait $pid; then
-    echo -e "${GREEN}done${NC}"
-  else
-    echo -e "${YELLOW}done (with errors)${NC}"
-  fi
-done
-
+# Run all tests in a single Gradle invocation
+# This avoids Gradle lock contention issues that occur with parallel processes
+echo -e "${YELLOW}Executing tests (this may take 5-10 minutes)...${NC}"
 echo ""
-echo -e "${YELLOW}Collecting results...${NC}"
 
-# Collect results
-TOTAL_DURATION=0
-for test in "${TESTS[@]}"; do
-  if [ -f "../sdk-test-logs/${test}.result" ]; then
-    RESULT=$(cat "../sdk-test-logs/${test}.result")
-    TEST_NAME=$(echo "$RESULT" | cut -d: -f1)
-    TEST_STATUS=$(echo "$RESULT" | cut -d: -f2)
-    TEST_DURATION=$(echo "$RESULT" | cut -d: -f3)
-    
-    if [ "$TEST_STATUS" = "PASSED" ]; then
-      PASSED_TESTS+=("$test")
-      echo -e "  ${GREEN}✓ $test PASSED${NC} (${TEST_DURATION}s)"
-    else
-      FAILED_TESTS+=("$test")
-      echo -e "  ${RED}✗ $test FAILED${NC} (${TEST_DURATION}s)"
-    fi
-  else
-    FAILED_TESTS+=("$test")
-    echo -e "  ${RED}✗ $test FAILED${NC} (no result file)"
-  fi
-done
+# Check if timeout command is available (Linux/CI has it, macOS doesn't by default)
+if command -v timeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="timeout 1200"
+  echo -e "${YELLOW}Using timeout: 20 minutes max${NC}"
+elif command -v gtimeout >/dev/null 2>&1; then
+  TIMEOUT_CMD="gtimeout 1200"
+  echo -e "${YELLOW}Using gtimeout: 20 minutes max${NC}"
+else
+  TIMEOUT_CMD=""
+  echo -e "${YELLOW}⚠️  timeout command not available (macOS), running without timeout${NC}"
+  echo -e "${YELLOW}   Install via: brew install coreutils (optional)${NC}"
+fi
+echo ""
+
+if $TIMEOUT_CMD ./gradlew -PintegrationTests integration-tests:test \
+  ${GRADLE_TEST_ARGS} \
+  -x assemble \
+  -x testClasses \
+  --continue \
+  --no-daemon \
+  > "../sdk-test-logs/all-tests.log" 2>&1; then
+  GRADLE_EXIT_CODE=0
+else
+  GRADLE_EXIT_CODE=$?
+fi
 
 END_TIME=$(date +%s)
 TOTAL_DURATION=$((END_TIME - START_TIME))
+
+echo -e "${GREEN}✓ Test execution completed${NC} (${TOTAL_DURATION}s)"
+echo ""
+
+# Parse Gradle test results from XML files
+echo -e "${YELLOW}Parsing test results...${NC}"
+
+TEST_RESULTS_DIR="integration-tests/build/test-results/test"
+if [ -d "$TEST_RESULTS_DIR" ]; then
+  for test in "${TESTS[@]}"; do
+    # Gradle creates TEST-com.atlan.java.sdk.TestName.xml files
+    RESULT_FILE="$TEST_RESULTS_DIR/TEST-com.atlan.java.sdk.${test}.xml"
+    
+    if [ -f "$RESULT_FILE" ]; then
+      # Check if test passed (look for failures/errors)
+      FAILURES=$(grep -o 'failures="[0-9]*"' "$RESULT_FILE" | grep -o '[0-9]*')
+      ERRORS=$(grep -o 'errors="[0-9]*"' "$RESULT_FILE" | grep -o '[0-9]*')
+      
+      if [ "$FAILURES" = "0" ] && [ "$ERRORS" = "0" ]; then
+        PASSED_TESTS+=("$test")
+        echo -e "  ${GREEN}✓ $test PASSED${NC}"
+      else
+        FAILED_TESTS+=("$test")
+        echo -e "  ${RED}✗ $test FAILED${NC} (failures: $FAILURES, errors: $ERRORS)"
+      fi
+    else
+      # Test didn't run or result file not found
+      FAILED_TESTS+=("$test")
+      echo -e "  ${RED}✗ $test FAILED${NC} (no result file)"
+    fi
+  done
+else
+  echo -e "${RED}⚠️  Test results directory not found${NC}"
+  echo "Marking all tests as failed"
+  FAILED_TESTS=("${TESTS[@]}")
+fi
 
 cd ..
 
