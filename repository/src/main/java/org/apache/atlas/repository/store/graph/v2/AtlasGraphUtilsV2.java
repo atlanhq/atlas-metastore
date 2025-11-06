@@ -303,9 +303,7 @@ public class AtlasGraphUtilsV2 {
                 propertyName = encodePropertyKey(propertyName);
             }
 
-            LOG.info("Getting property {} of type {} from {}", propertyName, returnType.getSimpleName(), toString(element));
             Object property = element.getProperty(propertyName, returnType);
-            LOG.info("Got property {} of type {} from {}", propertyName, returnType.getSimpleName(), toString(element));
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("getProperty({}, {}) ==> {}", toString(element), propertyName, returnType.cast(property));
