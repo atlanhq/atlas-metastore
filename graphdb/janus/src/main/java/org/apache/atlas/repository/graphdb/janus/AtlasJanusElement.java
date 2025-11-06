@@ -19,6 +19,7 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+import jline.internal.Log;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
@@ -66,29 +67,34 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <T> T getProperty(String propertyName, Class<T> clazz) {
-        if (excludeProperties.contains(propertyName)) {
-            return null;
-        }
-
-        //add explicit logic to return null if the property does not exist
-        //This is the behavior Atlas expects.  Janus throws an exception
-        //in this scenario.
-        Property p = getWrappedElement().property(propertyName);
-        if (p.isPresent()) {
-            Object propertyValue= p.value();
-            if (propertyValue == null) {
+        try {
+            if (excludeProperties.contains(propertyName)) {
                 return null;
             }
-            if (AtlasEdge.class == clazz) {
-                return (T)graph.getEdge(propertyValue.toString());
-            }
-            if (AtlasVertex.class == clazz) {
-                return (T)graph.getVertex(propertyValue.toString());
-            }
-            return (T)propertyValue;
 
+            //add explicit logic to return null if the property does not exist
+            //This is the behavior Atlas expects.  Janus throws an exception
+            //in this scenario.
+            Property p = getWrappedElement().property(propertyName);
+            if (p.isPresent()) {
+                Object propertyValue = p.value();
+                if (propertyValue == null) {
+                    return null;
+                }
+                if (AtlasEdge.class == clazz) {
+                    return (T) graph.getEdge(propertyValue.toString());
+                }
+                if (AtlasVertex.class == clazz) {
+                    return (T) graph.getVertex(propertyValue.toString());
+                }
+                return (T) propertyValue;
+
+            }
+            return null;
+        }catch (Throwable th) {
+            Log.warn("Failed to get property {} from element {}", propertyName, getId(), th);
+            return null;
         }
-        return null;
     }
 
 
