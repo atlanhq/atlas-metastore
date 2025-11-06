@@ -197,10 +197,20 @@ jobs:
 
       - name: Cache Maven packages
         uses: actions/cache@v3
+        id: maven-cache
         with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/build.sh') }}
-          restore-keys: ${{ runner.os }}-m2
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Check Maven cache status
+        run: |
+          if [ "${{ steps.maven-cache.outputs.cache-hit }}" == "true" ]; then
+            echo "✅ Maven cache hit - dependencies will be reused"
+          else
+            echo "ℹ️  Maven cache miss - will download dependencies"
+          fi
 
       - name: Get branch name
         run: |
