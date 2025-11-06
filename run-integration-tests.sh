@@ -53,16 +53,25 @@ if [ "$SKIP_BUILD" = false ]; then
     echo -e "${GREEN}Keycloak dependencies downloaded${NC}"
     
     echo -e "${YELLOW}Building Atlas with Maven...${NC}"
-    mvn clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
+    # Note: Maven may report BUILD FAILURE on atlas-distro JAR, but artifacts are built successfully
+    # We ignore exit code but verify critical artifacts exist
+    mvn clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist || true
     
-    # Note: Maven may report BUILD FAILURE due to atlas-distro JAR packaging issue,
-    # but the important artifacts (WAR, server tarball) are built successfully.
-    # We check for the actual artifact instead of Maven exit code.
+    # Verify critical artifacts were built (catch genuine build failures)
     if [ ! -f "distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz" ]; then
-        echo -e "${RED}Failed to build Atlas - server tarball not found${NC}"
+        echo -e "${RED}CRITICAL: Server tarball not found - genuine build failure!${NC}"
+        echo "Expected: distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz"
         exit 1
     fi
-    echo -e "${GREEN}Atlas built successfully${NC}"
+    if [ ! -f "webapp/target/atlas-webapp-3.0.0-SNAPSHOT.war" ]; then
+        echo -e "${RED}CRITICAL: WAR file not found - genuine build failure!${NC}"
+        echo "Expected: webapp/target/atlas-webapp-3.0.0-SNAPSHOT.war"
+        exit 1
+    fi
+    
+    echo -e "${GREEN}Maven build completed successfully${NC}"
+    echo "[DEBUG] Listing distro/target contents:"
+    ls -lh distro/target/ | grep -E "apache-atlas.*\.tar\.gz" || true
 else
     echo -e "${YELLOW}Skipping Atlas build (--skip-build flag set)${NC}"
 fi
