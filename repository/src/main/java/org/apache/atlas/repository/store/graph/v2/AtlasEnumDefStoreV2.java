@@ -101,7 +101,10 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
 
         Iterator<AtlasVertex> vertices = typeDefStore.findTypeVerticesByCategory(TypeCategory.ENUM);
         while (vertices.hasNext()) {
-            ret.add(toEnumDef(vertices.next()));
+            AtlasEnumDef enumDef = toEnumDef(vertices.next());
+            if (enumDef != null) {
+                ret.add(enumDef);
+            }
         }
 
         if (LOG.isDebugEnabled()) {

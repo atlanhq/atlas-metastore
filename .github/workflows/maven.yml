@@ -29,11 +29,7 @@ on:
       - staging
       - tagscanary
       - tagscanarymerge
-      - fixlabels
-      - interceptapis
-      - mlh-1240-improve-cm-refresh-master
-      - mlh1432
-      - mlh-1620
+      - nwm-canary-corruption
 
 jobs:
   build:
