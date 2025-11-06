@@ -27,6 +27,7 @@ on:
       - development
       - master
       - staging
+      - atlas_ci_cd_updates
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -432,7 +433,7 @@ jobs:
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
     if: |
       needs.build.result == 'success' &&
-      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'atlas_ci_cd_updates')
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
@@ -574,6 +575,118 @@ jobs:
         with:
           name: smoke-test-logs-${{ github.run_id }}
           path: smoke-test-logs/
+      
+      - name: Smoke test summary
+        if: always()
+        run: |
+          echo "## 🔥 Multi-Cloud Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ env.TEST_IMAGE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check results for each cloud
+          AWS_STATUS="❓ Unknown"
+          AZURE_STATUS="❓ Unknown"
+          GCP_STATUS="❓ Unknown"
+          
+          if [ -f "smoke-test-logs/AWS.log" ]; then
+            if grep -q "SMOKE TEST PASSED" smoke-test-logs/AWS.log; then
+              AWS_STATUS="✅ Passed"
+            else
+              AWS_STATUS="❌ Failed"
+            fi
+          fi
+          
+          if [ -f "smoke-test-logs/Azure.log" ]; then
+            if grep -q "SMOKE TEST PASSED" smoke-test-logs/Azure.log; then
+              AZURE_STATUS="✅ Passed"
+            else
+              AZURE_STATUS="❌ Failed"
+            fi
+          fi
+          
+          if [ -f "smoke-test-logs/GCP.log" ]; then
+            if grep -q "SMOKE TEST PASSED" smoke-test-logs/GCP.log; then
+              GCP_STATUS="✅ Passed"
+            else
+              GCP_STATUS="❌ Failed"
+            fi
+          fi
+          
+          echo "| Cloud | vCluster | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟧 AWS | \`${{ env.VCLUSTER_AWS_NAME }}\` | $AWS_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟦 Azure | \`${{ env.VCLUSTER_AZURE_NAME }}\` | $AZURE_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| 🟥 GCP | \`${{ env.VCLUSTER_GCP_NAME }}\` | $GCP_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "$AWS_STATUS" == *"Passed"* ]] && [[ "$AZURE_STATUS" == *"Passed"* ]] && [[ "$GCP_STATUS" == *"Passed"* ]]; then
+            echo "**Overall**: ✅ All smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Overall**: ⚠️ Some smoke tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tests Run**:" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment patch and rollout" >> $GITHUB_STEP_SUMMARY
+          echo "- Atlas API health check (\`/api/atlas/admin/status\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 [View detailed logs in artifacts](#)" >> $GITHUB_STEP_SUMMARY
+      
+      # SDK Integration Tests (run in same job to preserve VPN/vCluster connections)
+      - name: Run SDK tests against AWS tenant
+        id: sdk_tests
+        continue-on-error: true  # Don't block workflow on SDK test failures
+        env:
+          ATLAN_DOMAIN: ${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}
+          CLIENT_ID: ${{ secrets.VCLUSTER_AWS_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.VCLUSTER_AWS_CLIENT_SECRET }}
+        run: |
+          echo ""
+          echo "=================================================="
+          echo "🧪 SDK INTEGRATION TESTS"
+          echo "=================================================="
+          echo "Running atlan-java SDK tests against AWS tenant..."
+          ./scripts/atlan-java-sdk-test.sh "$ATLAN_DOMAIN" "$CLIENT_ID" "$CLIENT_SECRET"
+      
+      - name: Upload SDK test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-test-logs-${{ github.run_id }}
+          path: sdk-test-logs/
+          retention-days: 7
+      
+      - name: Upload SDK test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdk-test-results-${{ github.run_id }}
+          path: atlan-java-sdk-tests/integration-tests/build/test-results/
+          retention-days: 7
+      
+      - name: SDK test summary
+        if: always()
+        run: |
+          echo "## 🧪 SDK Integration Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target**: AWS Tenant (\`${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          if [ "${{ steps.sdk_tests.outcome }}" == "success" ]; then
+            echo "**Status**: ✅ All tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Status**: ⚠️ Some tests failed (informational only)" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "> **Note**: SDK test failures do not block releases." >> $GITHUB_STEP_SUMMARY
+            echo "> This is a quality signal for SDK compatibility." >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tests Run**: GlossaryTest, CustomMetadataTest, AtlanTagTest, LineageTest, SearchTest" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 [View detailed logs in artifacts](#)" >> $GITHUB_STEP_SUMMARY
 
   helm-publish:
     needs: [helm-lint, build, smoke-test, changes]
