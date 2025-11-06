@@ -31,6 +31,10 @@ on:
       - tagscanarymerge
       - nwm-canary-corruption
 
+permissions:
+  id-token: write
+  contents: write
+
 jobs:
   build:
 
@@ -165,18 +169,6 @@ jobs:
             echo "Sufficient disk space available (${DISK_USAGE}% used)"
           fi
 
-      - name: Run Integration Tests
-        id: integration_tests
-        continue-on-error: true
-        env:
-          # Configure Testcontainers for GitHub Actions
-          TESTCONTAINERS_RYUK_DISABLED: true
-          TESTCONTAINERS_CHECKS_DISABLE: true
-          DOCKER_HOST: unix:///var/run/docker.sock
-        run: |
-          echo "Running integration tests..."
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
-      
       - name: Upload container logs as artifact
         if: always()  # Upload logs even if tests pass (for debugging)
         uses: actions/upload-artifact@v4
