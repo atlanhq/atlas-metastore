@@ -217,12 +217,7 @@ jobs:
                 "password": "${{ secrets.ORG_PAT_GITHUB }}"
             }]
 
-      - name: Build with Maven
-        run: |
-          echo "build without dashboard"
-          chmod +x ./build.sh && ./build.sh
-
-      - name: Check disk space before tests
+      - name: Check disk space before build/tests
         id: check_disk
         run: |
           echo "=========================================="
@@ -300,39 +295,26 @@ jobs:
             echo "Sufficient disk space available (${DISK_USAGE}% used)"
           fi
 
-      - name: Run Integration Tests
-        id: integration_tests
-        continue-on-error: true
+      - name: Build with Maven and run integration tests
+        id: build_and_test
         env:
           # Configure Testcontainers for GitHub Actions
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
-          echo "Running integration tests..."
-          echo "Using --skip-build flag to avoid rebuilding (already built in previous step)"
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh --skip-build
+          echo "=================================================="
+          echo "BUILD AND INTEGRATION TESTS"
+          echo "=================================================="
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
       
       - name: Upload container logs as artifact
-        if: always()  # Upload logs even if tests pass (for debugging)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: container-logs-${{ github.run_id }}
           path: target/test-logs/
           retention-days: 5
-      
-      - name: Setup tmate session on test failure
-        if: steps.integration_tests.outcome == 'failure'
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        with:
-          detached: true
-          limit-access-to-actor: false
-      
-      - name: Fail the workflow if tests failed
-        if: steps.integration_tests.outcome == 'failure'
-        run: exit 1
-
 
       - name: Clean up after integration tests
         if: always()
@@ -639,7 +621,6 @@ jobs:
       # Only run on release branches to save CI time
       - name: Run SDK tests against AWS tenant
         id: sdk_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         continue-on-error: true  # Don't block workflow on SDK test failures
         env:
           ATLAN_DOMAIN: ${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}
@@ -655,7 +636,7 @@ jobs:
           ./scripts/atlan-java-sdk-test.sh "$ATLAN_DOMAIN" "$CLIENT_ID" "$CLIENT_SECRET"
       
       - name: Upload SDK test logs
-        if: always() && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sdk-test-logs-${{ github.run_id }}
@@ -663,7 +644,7 @@ jobs:
           retention-days: 7
       
       - name: Upload SDK test results
-        if: always() && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: sdk-test-results-${{ github.run_id }}
@@ -671,7 +652,7 @@ jobs:
           retention-days: 7
       
       - name: SDK test summary
-        if: always() && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+        if: always()
         env:
           ATLAN_FIXED_USER: ${{ secrets.VCLUSTER_AWS_FIXED_USER }}
         run: |
