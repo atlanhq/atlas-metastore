@@ -298,17 +298,22 @@ public class AtlasGraphUtilsV2 {
     }
 
     public static <T extends AtlasElement, O> O getProperty(T element, String propertyName, Class<O> returnType, boolean isEncoded) {
-        if (!isEncoded) {
-            propertyName = encodePropertyKey(propertyName);
+        try {
+            if (!isEncoded) {
+                propertyName = encodePropertyKey(propertyName);
+            }
+
+            Object property = element.getProperty(propertyName, returnType);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("getProperty({}, {}) ==> {}", toString(element), propertyName, returnType.cast(property));
+            }
+
+            return returnType.cast(property);
+        } catch (Exception e) {
+            LOG.warn("Absorbing the exeption for a clean start. getProperty({}, {}) failed", toString(element), propertyName, e);
+            return null;
         }
-
-        Object property = element.getProperty(propertyName, returnType);
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("getProperty({}, {}) ==> {}", toString(element), propertyName, returnType.cast(property));
-        }
-
-        return returnType.cast(property);
     }
 
     public static AtlasVertex getVertexByUniqueAttributes(AtlasEntityType entityType, Map<String, Object> attrValues) throws AtlasBaseException {
