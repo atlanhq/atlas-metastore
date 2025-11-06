@@ -45,14 +45,21 @@ done
 
 # Step 1: Build Atlas WAR if not skipping
 if [ "$SKIP_BUILD" = false ]; then
-    echo -e "${YELLOW}Building Atlas WAR package...${NC}"
-    mvn clean -Dos.detected.classifier=osx-x86_64 -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+    echo -e "${YELLOW}Downloading Keycloak dependencies...${NC}"
+    mkdir -p ~/.m2/repository/org/keycloak
+    wget -q https://atlan-public.s3.eu-west-1.amazonaws.com/artifact/keycloak-15.0.2.1.zip
+    unzip -o -q keycloak-15.0.2.1.zip -d ~/.m2/repository/org
+    rm keycloak-15.0.2.1.zip
+    echo -e "${GREEN}Keycloak dependencies downloaded${NC}"
+    
+    echo -e "${YELLOW}Building Atlas with Maven...${NC}"
+    mvn clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
 
     if [ $? -ne 0 ]; then
-        echo -e "${RED}Failed to build Atlas WAR${NC}"
+        echo -e "${RED}Failed to build Atlas${NC}"
         exit 1
     fi
-    echo -e "${GREEN}Atlas WAR built successfully${NC}"
+    echo -e "${GREEN}Atlas built successfully${NC}"
 else
     echo -e "${YELLOW}Skipping Atlas build (--skip-build flag set)${NC}"
 fi
