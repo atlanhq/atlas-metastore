@@ -40,10 +40,10 @@ vCluster connections from earlier steps.
 
 **What it does:**
 1. Authenticates with Keycloak (OAuth client credentials flow)
-2. Clones `atlan-java` repository
+2. Clones `atlan-java` repository (patches `FIXED_USER` if configured)
 3. Verifies tenant connectivity
-4. Runs 5 critical path tests
-5. Reports results (informational only)
+4. Runs 5 critical path tests **in parallel** (using background jobs)
+5. Collects and reports results (informational only)
 
 ### Workflow Steps: SDK Tests in `smoke-test` Job
 
@@ -66,21 +66,24 @@ env:
   ATLAN_DOMAIN: ${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}
   CLIENT_ID: ${{ secrets.VCLUSTER_AWS_CLIENT_ID }}
   CLIENT_SECRET: ${{ secrets.VCLUSTER_AWS_CLIENT_SECRET }}
+  ATLAN_FIXED_USER: ${{ secrets.VCLUSTER_AWS_FIXED_USER }}  # Optional: User for ownership tests
 ```
 
 ## Tests Run
 
 ### Critical Path Tests (5 total)
 
-| Test | Purpose | Duration |
+| Test | Purpose | Duration (Parallel) |
 |------|---------|----------|
 | `GlossaryTest` | Business glossary operations | ~2-3 min |
 | `CustomMetadataTest` | Custom attribute management | ~2-3 min |
-| `AtlanTagTest` | Tag creation and assignment | ~2-3 min |
+| `ConnectionTest` | Connection management | ~2-3 min |
 | `LineageTest` | Lineage tracking | ~2-3 min |
 | `SearchTest` | Asset search functionality | ~2-3 min |
 
-**Total Duration:** ~10-15 minutes
+**Total Duration:** ~3-5 minutes (tests run in parallel)
+
+> 🚀 **Performance Note:** Tests run in parallel using background jobs, reducing total execution time from 10-15 minutes (sequential) to 3-5 minutes (parallel).
 
 ### Why These Tests?
 
@@ -114,6 +117,7 @@ export ATLAN_API_KEY=${ACCESS_TOKEN}
 - `VCLUSTER_AWS_ATLAN_DOMAIN` - Tenant URL (e.g., `meta02.atlan.com`)
 - `VCLUSTER_AWS_CLIENT_ID` - OAuth client ID (e.g., `atlan-backend`)
 - `VCLUSTER_AWS_CLIENT_SECRET` - OAuth client secret
+- `VCLUSTER_AWS_FIXED_USER` - (Optional) Verified user for ownership/assignment tests (defaults to `chris`)
 
 ## Failure Handling
 
@@ -246,6 +250,33 @@ Every run produces a summary in the workflow:
 
 **Fix:** Retry workflow, check GitHub status page
 
+#### 5. User-Related Test Failures
+```
+✗ GlossaryTest FAILED
+✗ ConnectionTest FAILED  
+✗ LineageTest FAILED
+(but CustomMetadataTest PASSED)
+```
+
+**Causes:**
+- `ATLAN_FIXED_USER` secret not configured
+- Configured user doesn't exist in tenant
+- User exists but is not verified/active
+- User lacks required permissions
+
+**Fix:**
+1. Check if `VCLUSTER_AWS_FIXED_USER` secret is set in GitHub
+2. Verify the user exists in the AWS tenant
+3. Ensure user is verified and active
+4. Confirm user has permissions for asset ownership/assignment operations
+
+**To configure:**
+```bash
+# Settings → Secrets and variables → Actions → New repository secret
+# Name: VCLUSTER_AWS_FIXED_USER
+# Value: <username> (e.g., "admin" or "serviceaccount")
+```
+
 ## Expansion Plans
 
 ### Phase 1 (Current)
@@ -297,8 +328,14 @@ Credentials are stored in GitHub Secrets (Settings → Secrets → Actions):
 1. `VCLUSTER_AWS_ATLAN_DOMAIN`
 2. `VCLUSTER_AWS_CLIENT_ID`
 3. `VCLUSTER_AWS_CLIENT_SECRET`
+4. `VCLUSTER_AWS_FIXED_USER` (optional - defaults to `chris` if not set)
 
 To update: Settings → Secrets and variables → Actions → Update
+
+**Note on FIXED_USER:**
+- The SDK tests require a verified, active user for ownership/assignment operations
+- If not configured, tests will use hardcoded username `chris` (may not exist in all tenants)
+- Configure this to match a real user in your AWS tenant for better test coverage
 
 ### Changing Failure Policy
 

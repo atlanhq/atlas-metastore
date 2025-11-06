@@ -427,7 +427,7 @@ jobs:
   # Smoke test on vclusters (parallel with single VPN)
 
   smoke-test:
-    name: Multi-Cloud Smoke Test
+    name: Multi-Cloud Smoke & SDK Tests
     needs: [build, changes]
     runs-on: ubuntu-latest
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
@@ -642,6 +642,7 @@ jobs:
           ATLAN_DOMAIN: ${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}
           CLIENT_ID: ${{ secrets.VCLUSTER_AWS_CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.VCLUSTER_AWS_CLIENT_SECRET }}
+          ATLAN_FIXED_USER: ${{ secrets.VCLUSTER_AWS_FIXED_USER }}
         run: |
           echo ""
           echo "=================================================="
@@ -668,10 +669,19 @@ jobs:
       
       - name: SDK test summary
         if: always()
+        env:
+          ATLAN_FIXED_USER: ${{ secrets.VCLUSTER_AWS_FIXED_USER }}
         run: |
           echo "## 🧪 SDK Integration Tests" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Target**: AWS Tenant (\`${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}\`)" >> $GITHUB_STEP_SUMMARY
+          
+          # Show FIXED_USER if configured
+          if [ -n "$ATLAN_FIXED_USER" ]; then
+            echo "**Test User**: \`$ATLAN_FIXED_USER\`" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Test User**: \`chris\` (default)" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "" >> $GITHUB_STEP_SUMMARY
           
           if [ "${{ steps.sdk_tests.outcome }}" == "success" ]; then
@@ -681,10 +691,13 @@ jobs:
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "> **Note**: SDK test failures do not block releases." >> $GITHUB_STEP_SUMMARY
             echo "> This is a quality signal for SDK compatibility." >> $GITHUB_STEP_SUMMARY
+            if [ -z "$ATLAN_FIXED_USER" ]; then
+              echo "> Some tests may fail if user 'chris' doesn't exist in the tenant." >> $GITHUB_STEP_SUMMARY
+            fi
           fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Tests Run**: GlossaryTest, CustomMetadataTest, AtlanTagTest, LineageTest, SearchTest" >> $GITHUB_STEP_SUMMARY
+          echo "**Tests Run**: GlossaryTest, CustomMetadataTest, ConnectionTest, LineageTest, SearchTest" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "📊 [View detailed logs in artifacts](#)" >> $GITHUB_STEP_SUMMARY
 

@@ -89,6 +89,31 @@ if ! git clone --depth 1 https://github.com/atlanhq/atlan-java.git "$ATLAN_JAVA_
   exit 1
 fi
 
+# Patch AtlanLiveTest to use a configurable FIXED_USER
+# The SDK tests hardcode a user named "chris" which may not exist in all tenants
+ATLAN_LIVE_TEST_FILE="$ATLAN_JAVA_DIR/integration-tests/src/test/java/com/atlan/java/sdk/AtlanLiveTest.java"
+
+if [ -n "$ATLAN_FIXED_USER" ]; then
+  echo -e "${YELLOW}Patching FIXED_USER from 'chris' to '$ATLAN_FIXED_USER'...${NC}"
+  
+  # Backup original file
+  cp "$ATLAN_LIVE_TEST_FILE" "$ATLAN_LIVE_TEST_FILE.bak"
+  
+  # Replace the hardcoded "chris" with the configured user
+  sed -i.tmp "s/public static final String FIXED_USER = \"chris\";/public static final String FIXED_USER = \"$ATLAN_FIXED_USER\";/" "$ATLAN_LIVE_TEST_FILE"
+  rm -f "$ATLAN_LIVE_TEST_FILE.tmp"
+  
+  # Verify the patch was applied
+  if grep -q "FIXED_USER = \"$ATLAN_FIXED_USER\"" "$ATLAN_LIVE_TEST_FILE"; then
+    echo -e "${GREEN}✓ FIXED_USER patched successfully${NC}"
+  else
+    echo -e "${RED}⚠️  WARNING: Failed to patch FIXED_USER, tests may fail${NC}"
+  fi
+else
+  echo -e "${YELLOW}⚠️  ATLAN_FIXED_USER not set, using default 'chris'${NC}"
+  echo "   Tests requiring user operations may fail if 'chris' doesn't exist in tenant"
+fi
+
 echo -e "${GREEN}✓ Repository cloned${NC}"
 echo ""
 
@@ -133,7 +158,7 @@ TESTS=(
   "SearchTest"
 )
 
-echo -e "${BLUE}Running ${#TESTS[@]} critical path tests:${NC}"
+echo -e "${BLUE}Running ${#TESTS[@]} critical path tests in parallel:${NC}"
 for test in "${TESTS[@]}"; do
   echo "  • $test"
 done
@@ -141,41 +166,88 @@ echo ""
 
 FAILED_TESTS=()
 PASSED_TESTS=()
-TOTAL_DURATION=0
+START_TIME=$(date +%s)
 
-for test in "${TESTS[@]}"; do
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-  echo -e "${YELLOW}Running: ${test}${NC}"
-  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+# Function to run a single test
+run_test() {
+  local test=$1
+  local start=$(date +%s)
   
-  START_TIME=$(date +%s)
-  
-  # Run test with timeout
   if timeout 600 ./gradlew -PintegrationTests integration-tests:test \
     --tests "com.atlan.java.sdk.${test}" \
     -x assemble \
     -x testClasses \
+    --no-daemon \
     > "../sdk-test-logs/${test}.log" 2>&1; then
     
-    END_TIME=$(date +%s)
-    DURATION=$((END_TIME - START_TIME))
-    TOTAL_DURATION=$((TOTAL_DURATION + DURATION))
-    
-    echo -e "${GREEN}✓ ${test} PASSED${NC} (${DURATION}s)"
-    PASSED_TESTS+=("$test")
+    local end=$(date +%s)
+    local duration=$((end - start))
+    echo "${test}:PASSED:${duration}" > "../sdk-test-logs/${test}.result"
   else
-    END_TIME=$(date +%s)
-    DURATION=$((END_TIME - START_TIME))
-    TOTAL_DURATION=$((TOTAL_DURATION + DURATION))
-    
-    echo -e "${RED}✗ ${test} FAILED${NC} (${DURATION}s)"
-    echo "Last 20 lines of log:"
-    tail -20 "../sdk-test-logs/${test}.log"
-    FAILED_TESTS+=("$test")
+    local end=$(date +%s)
+    local duration=$((end - start))
+    echo "${test}:FAILED:${duration}" > "../sdk-test-logs/${test}.result"
   fi
-  
-  echo ""
+}
+
+# Export function and variables for subshells
+export -f run_test
+export ATLAN_BASE_URL
+export ATLAN_API_KEY
+
+# Start all tests in parallel
+echo -e "${YELLOW}Launching ${#TESTS[@]} tests in parallel...${NC}"
+declare -A TEST_PIDS
+
+for test in "${TESTS[@]}"; do
+  run_test "$test" &
+  TEST_PIDS[$test]=$!
+  echo "  Started $test (PID: ${TEST_PIDS[$test]})"
 done
+
+echo ""
+echo -e "${YELLOW}Waiting for all tests to complete...${NC}"
+echo ""
+
+# Wait for all tests to complete and show progress
+for test in "${TESTS[@]}"; do
+  pid=${TEST_PIDS[$test]}
+  echo -n "  Waiting for $test (PID: $pid)... "
+  
+  if wait $pid; then
+    echo -e "${GREEN}done${NC}"
+  else
+    echo -e "${YELLOW}done (with errors)${NC}"
+  fi
+done
+
+echo ""
+echo -e "${YELLOW}Collecting results...${NC}"
+
+# Collect results
+TOTAL_DURATION=0
+for test in "${TESTS[@]}"; do
+  if [ -f "../sdk-test-logs/${test}.result" ]; then
+    RESULT=$(cat "../sdk-test-logs/${test}.result")
+    TEST_NAME=$(echo "$RESULT" | cut -d: -f1)
+    TEST_STATUS=$(echo "$RESULT" | cut -d: -f2)
+    TEST_DURATION=$(echo "$RESULT" | cut -d: -f3)
+    
+    if [ "$TEST_STATUS" = "PASSED" ]; then
+      PASSED_TESTS+=("$test")
+      echo -e "  ${GREEN}✓ $test PASSED${NC} (${TEST_DURATION}s)"
+    else
+      FAILED_TESTS+=("$test")
+      echo -e "  ${RED}✗ $test FAILED${NC} (${TEST_DURATION}s)"
+    fi
+  else
+    FAILED_TESTS+=("$test")
+    echo -e "  ${RED}✗ $test FAILED${NC} (no result file)"
+  fi
+done
+
+END_TIME=$(date +%s)
+TOTAL_DURATION=$((END_TIME - START_TIME))
 
 cd ..
 
@@ -204,6 +276,20 @@ if [ ${#FAILED_TESTS[@]} -gt 0 ]; then
     echo "  • $test"
   done
   echo ""
+  
+  # Show last 20 lines of each failed test log
+  echo -e "${YELLOW}Failed Test Logs (last 20 lines):${NC}"
+  for test in "${FAILED_TESTS[@]}"; do
+    echo ""
+    echo "━━━ $test ━━━"
+    if [ -f "sdk-test-logs/${test}.log" ]; then
+      tail -20 "sdk-test-logs/${test}.log"
+    else
+      echo "  (log file not found)"
+    fi
+  done
+  echo ""
+  
   echo -e "${YELLOW}⚠️  SDK tests failed but workflow will continue${NC}"
   echo "This is informational only and does not block the release."
   echo ""
