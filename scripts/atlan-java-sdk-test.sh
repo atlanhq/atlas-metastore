@@ -188,9 +188,10 @@ START_TIME=$(date +%s)
 # Run all tests in a SINGLE Gradle invocation to avoid lock contention
 echo -e "${YELLOW}Building test command...${NC}"
 
-GRADLE_TEST_ARGS=""
+# Build test arguments as an array to handle spaces properly
+GRADLE_TEST_ARGS=()
 for test in "${TESTS[@]}"; do
-  GRADLE_TEST_ARGS+="--tests \"com.atlan.java.sdk.${test}\" "
+  GRADLE_TEST_ARGS+=("--tests" "com.atlan.java.sdk.${test}")
 done
 
 echo -e "${GREEN}✓ Ready to run ${#TESTS[@]} tests${NC}"
@@ -203,20 +204,20 @@ echo ""
 
 # Check if timeout command is available (Linux/CI has it, macOS doesn't by default)
 if command -v timeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="timeout 1200"
+  TIMEOUT_CMD=(timeout 1200)
   echo -e "${YELLOW}Using timeout: 20 minutes max${NC}"
 elif command -v gtimeout >/dev/null 2>&1; then
-  TIMEOUT_CMD="gtimeout 1200"
+  TIMEOUT_CMD=(gtimeout 1200)
   echo -e "${YELLOW}Using gtimeout: 20 minutes max${NC}"
 else
-  TIMEOUT_CMD=""
+  TIMEOUT_CMD=()
   echo -e "${YELLOW}⚠️  timeout command not available (macOS), running without timeout${NC}"
   echo -e "${YELLOW}   Install via: brew install coreutils (optional)${NC}"
 fi
 echo ""
 
-if $TIMEOUT_CMD ./gradlew -PintegrationTests integration-tests:test \
-  ${GRADLE_TEST_ARGS} \
+if "${TIMEOUT_CMD[@]}" ./gradlew -PintegrationTests integration-tests:test \
+  "${GRADLE_TEST_ARGS[@]}" \
   -x assemble \
   -x testClasses \
   --continue \

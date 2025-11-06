@@ -310,7 +310,8 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
+          echo "Using --skip-build flag to avoid rebuilding (already built in previous step)"
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh --skip-build
       
       - name: Upload container logs as artifact
         if: always()  # Upload logs even if tests pass (for debugging)
@@ -635,8 +636,10 @@ jobs:
           echo "📊 [View detailed logs in artifacts](#)" >> $GITHUB_STEP_SUMMARY
       
       # SDK Integration Tests (run in same job to preserve VPN/vCluster connections)
+      # Only run on release branches to save CI time
       - name: Run SDK tests against AWS tenant
         id: sdk_tests
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         continue-on-error: true  # Don't block workflow on SDK test failures
         env:
           ATLAN_DOMAIN: ${{ secrets.VCLUSTER_AWS_ATLAN_DOMAIN }}
@@ -652,7 +655,7 @@ jobs:
           ./scripts/atlan-java-sdk-test.sh "$ATLAN_DOMAIN" "$CLIENT_ID" "$CLIENT_SECRET"
       
       - name: Upload SDK test logs
-        if: always()
+        if: always() && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
         uses: actions/upload-artifact@v4
         with:
           name: sdk-test-logs-${{ github.run_id }}
@@ -660,7 +663,7 @@ jobs:
           retention-days: 7
       
       - name: Upload SDK test results
-        if: always()
+        if: always() && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
         uses: actions/upload-artifact@v4
         with:
           name: sdk-test-results-${{ github.run_id }}
@@ -668,7 +671,7 @@ jobs:
           retention-days: 7
       
       - name: SDK test summary
-        if: always()
+        if: always() && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
         env:
           ATLAN_FIXED_USER: ${{ secrets.VCLUSTER_AWS_FIXED_USER }}
         run: |
