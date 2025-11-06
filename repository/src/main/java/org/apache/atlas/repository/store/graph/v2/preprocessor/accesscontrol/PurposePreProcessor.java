@@ -105,7 +105,7 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
     }
 
     private void processCreatePurpose(AtlasStruct entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePurpose");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("PurposePreProcessor.processCreatePurpose.segment0");
 
         validatePurpose(graph, (AtlasEntity) entity);
 
@@ -123,7 +123,7 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
     private void processUpdatePurpose(EntityMutationContext context,
                                       AtlasStruct entity,
                                       AtlasVertex vertex) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdatePurpose");
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("PurposePreProcessor.processUpdatePurpose.segment0");
 
         AtlasEntity purpose = (AtlasEntity) entity;
         AtlasEntity.AtlasEntityWithExtInfo existingPurposeExtInfo = entityRetriever.toAtlasEntityWithExtInfo(vertex);

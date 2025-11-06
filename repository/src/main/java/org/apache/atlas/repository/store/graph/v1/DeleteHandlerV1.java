@@ -37,7 +37,6 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
-import org.apache.atlas.model.typedef.AtlasRelationshipEndDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -1738,7 +1737,7 @@ public abstract class DeleteHandlerV1 {
 
                 if (!activeEdgeFound) {
                     AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE, false);
-                    AtlasEntity diffEntity = getOrInitializeDiffEntity(processVertex);
+                    AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(processVertex);
                     diffEntity.setAttribute(HAS_LINEAGE, false);
                     // Add removed relationship attribute for notification
                     addRemovedProcessRelationshipToDiffEntity(diffEntity, atlasEdge, removedEdges);
@@ -1890,7 +1889,7 @@ public abstract class DeleteHandlerV1 {
 
         if (processHasLineageCount == 0) {
             AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
-            AtlasEntity diffEntity = getOrInitializeDiffEntity(assetVertex);
+            AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(assetVertex);
             diffEntity.setAttribute(HAS_LINEAGE, false);
             // Add removed relationship attribute for notification
             addRemovedProcessRelationshipToDiffEntity(diffEntity, currentEdge, removedEdges);
@@ -1899,17 +1898,6 @@ public abstract class DeleteHandlerV1 {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    private AtlasEntity getOrInitializeDiffEntity(AtlasVertex vertex) {
-        AtlasEntity diffEntity = RequestContext.get().getDifferentialEntity(GraphHelper.getGuid(vertex));
-        if (diffEntity == null) {
-            diffEntity = new AtlasEntity();
-            diffEntity.setTypeName(GraphHelper.getTypeName(vertex));
-            diffEntity.setGuid(GraphHelper.getGuid(vertex));
-            diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
-            RequestContext.get().cacheDifferentialEntity(diffEntity);
-        }
-        return diffEntity;
-    }
 
     /**
      * Helper method to add removed process relationship to diff entity's removedRelationshipAttributes
@@ -1944,19 +1932,6 @@ public abstract class DeleteHandlerV1 {
             // Get vertices from the edge
             AtlasVertex vertexA = removedEdge.getOutVertex();
             AtlasVertex vertexB = removedEdge.getInVertex();
-            AtlasVertex otherVertex;
-            if (diffEntity.getGuid().equals(GraphHelper.getGuid(vertexA))) {
-                otherVertex = vertexB;
-            } else {
-                otherVertex = vertexA;
-            }
-
-            if (otherVertex == null) {
-                LOG.warn("Cannot add removed process relationship: processVertex is null");
-                return;
-            }
-
-
             String edgeLabel = removedEdge.getLabel();
 
             if (edgeLabel == null) {
@@ -1964,9 +1939,56 @@ public abstract class DeleteHandlerV1 {
                 return;
             }
 
-            String attributeName = typeRegistry.getRelationshipDefByLabel(edgeLabel).getEndDef1().getName();
-            // Add to removedRelationshipAttributes
-            diffEntity.setRemovedRelationshipAttribute(attributeName, new AtlasObjectId(getGuid(otherVertex), getTypeName(otherVertex)));
+            // Determine which end the diffEntity corresponds to
+            // vertexA (OutVertex) corresponds to EndDef1, vertexB (InVertex) corresponds to EndDef2
+            AtlasRelationshipDef relationshipDef = typeRegistry.getRelationshipDefByLabel(edgeLabel);
+            if (relationshipDef == null) {
+                LOG.warn("Cannot add removed process relationship: relationshipDef not found for edgeLabel: {}", edgeLabel);
+                return;
+            }
+
+            AtlasVertex otherVertex;
+            AtlasVertex diffVertex;
+            String attributeName;
+            if (diffEntity.getGuid().equals(GraphHelper.getGuid(vertexA))) {
+                otherVertex = vertexB;
+                diffVertex = vertexA;
+                // diffEntity is EndDef1 (OutVertex)
+                attributeName = relationshipDef.getEndDef1().getName();
+            } else {
+                otherVertex = vertexA;
+                diffVertex = vertexB;
+                // diffEntity is EndDef2 (InVertex)
+                attributeName = relationshipDef.getEndDef2().getName();
+            }
+
+            if (otherVertex == null) {
+                LOG.warn("Cannot add removed process relationship: otherVertex is null");
+                return;
+            }
+
+            if (diffVertex == null) {
+                LOG.warn("Cannot add removed process relationship: diffVertex is null");
+                return;
+            }
+
+
+
+            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(getTypeName(diffVertex));
+            AtlasAttribute relationshipAttribute = entityType != null ?
+                entityType.getRelationshipAttribute(attributeName, relationshipDef.getName()) : null;
+
+            TypeCategory typeCategory = relationshipAttribute != null && relationshipAttribute.getAttributeType() != null ?
+                relationshipAttribute.getAttributeType().getTypeCategory() : null;
+
+            AtlasObjectId objectId = new AtlasObjectId(getGuid(otherVertex), getTypeName(otherVertex));
+
+            // If attribute is an array type, pass as a list; otherwise pass as a single object
+            if (typeCategory == TypeCategory.ARRAY) {
+                diffEntity.setRemovedRelationshipAttribute(attributeName, Collections.singletonList(objectId));
+            } else {
+                diffEntity.setRemovedRelationshipAttribute(attributeName, objectId);
+            }
         } catch (Exception e) {
             LOG.warn("Failed to add removed process relationship to diff entity for notification: {}", e.getMessage(), e);
         }
@@ -1989,7 +2011,7 @@ public abstract class DeleteHandlerV1 {
         // Only update if no active lineage found
         if (!hasActiveLineage) {
             AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
-            AtlasEntity diffEntity = getOrInitializeDiffEntity(assetVertex);
+            AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(assetVertex);
             diffEntity.setAttribute(HAS_LINEAGE, false);
             // Add removed relationship attribute for notification
             addRemovedProcessRelationshipToDiffEntity(diffEntity, currentEdge, removedEdges);
