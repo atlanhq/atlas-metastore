@@ -336,7 +336,7 @@ jobs:
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
     if: |
       needs.build.result == 'success' &&
-      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'atlas_ci_cd_updates')
+      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
