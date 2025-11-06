@@ -52,11 +52,11 @@ if [ "$SKIP_BUILD" = false ]; then
     rm keycloak-15.0.2.1.zip
     echo -e "${GREEN}Keycloak dependencies downloaded${NC}"
     
-    echo -e "${YELLOW}Building Atlas with Maven (parallel builds enabled)...${NC}"
+    echo -e "${YELLOW}Building Atlas with Maven...${NC}"
     # Note: Maven may report BUILD FAILURE on atlas-distro JAR, but artifacts are built successfully
     # We ignore exit code but verify critical artifacts exist
-    # -T 1C enables parallel builds (1 thread per CPU core)
-    mvn clean -U -T 1C -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist || true
+    # Note: -T (parallel builds) was tested but caused module dependency issues - keeping sequential
+    mvn clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist || true
     
     # Verify critical artifacts were built (catch genuine build failures)
     if [ ! -f "distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz" ]; then
