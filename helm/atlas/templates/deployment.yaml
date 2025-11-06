@@ -9,22 +9,13 @@ metadata:
     chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
-{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
-  annotations:
-    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
-    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
-{{- else }}
-  annotations:
-    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,rate-limit-nginx-config"
-    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
-{{- end }}
 spec:
   selector:
     matchLabels:
       app: {{ template "name" . }}
       release: {{ .Release.Name }}
   {{- if not (and (.Values.hpa) (.Values.hpa.enabled)) }}
-  replicas: {{ .Values.atlas.replicaCount }}
+  replicas: 1
   {{- end }}
   template:
     metadata:
