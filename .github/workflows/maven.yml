@@ -227,8 +227,14 @@ jobs:
                 "password": "${{ secrets.ORG_PAT_GITHUB }}"
             }]
 
-      - name: Check disk space before build/tests
+      - name: Build with Maven
+        run: |
+          echo "build without dashboard"
+          chmod +x ./build.sh && ./build.sh
+
+      - name: Check disk space before tests
         id: check_disk
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK"
@@ -248,7 +254,7 @@ jobs:
           fi
 
       - name: Free up disk space for tests
-        if: steps.check_disk.outputs.disk_usage > 70
+        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
         run: |
           echo "=========================================="
           echo "CLEANING UP DISK SPACE"
@@ -284,6 +290,7 @@ jobs:
           df -h / | grep -E '^/dev/' || df -h / | tail -1
 
       - name: Verify sufficient disk space
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         run: |
           echo "=========================================="
           echo "VERIFYING DISK SPACE"
@@ -305,33 +312,44 @@ jobs:
             echo "Sufficient disk space available (${DISK_USAGE}% used)"
           fi
 
-      - name: Build with Maven and run integration tests
-        id: build_and_test
+      - name: Run Integration Tests
+        id: integration_tests
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
-          echo "=================================================="
-          echo "BUILD AND INTEGRATION TESTS"
-          echo "=================================================="
+          echo "Running integration tests..."
           chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
-      
+
       - name: Upload container logs as artifact
-        if: always()
+        if: always() && steps.integration_tests.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: container-logs-${{ github.run_id }}
           path: target/test-logs/
           retention-days: 5
 
+      - name: Fail the workflow if tests failed
+        if: steps.integration_tests.outcome == 'failure'
+        run: exit 1
+
       - name: Clean up after integration tests
-        if: always()
+        if: always() && steps.integration_tests.outcome != 'skipped'
         run: |
           echo "Cleaning up test environment..."
           docker ps -a -q | xargs -r docker rm -f || true
+          docker system prune -af || true
+          echo ""
+          echo "Removing other test containers and images..."
           docker system prune -af --volumes || true
+          
+          # Clean Maven artifacts to free up space
+          echo "Cleaning Maven artifacts..."
+          rm -rf ~/.m2/repository/org/apache/atlas/ || true
           
           # Clean test artifacts
           echo "Cleaning test artifacts..."
