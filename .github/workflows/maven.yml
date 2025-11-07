@@ -34,7 +34,7 @@ jobs:
   changes:
     runs-on: ubuntu-latest
     outputs:
-      code: ${{ steps.filter.outputs.code }}
+      non_helm: ${{ steps.filter.outputs.non_helm }}
       helm: ${{ steps.filter.outputs.helm }}
     steps:
       - uses: actions/checkout@v3
@@ -48,18 +48,11 @@ jobs:
           # This way we only detect changes in the current push
           base: ${{ github.event.before }}
           filters: |
-            code:
-              - '**/*.java'
-              - '**/*.xml'
-              - '**/*.properties'
-              - 'webapp/**'
-              - 'repository/**'
-              - 'intg/**'
-              - 'graphdb/**'
-              - 'pom.xml'
-              - '**/pom.xml'
             helm:
               - 'helm/**'
+            non_helm:
+              - '**'
+              - '!helm/**'
 
   helm-lint:
     runs-on: ubuntu-latest
@@ -138,8 +131,8 @@ jobs:
   build:
     needs: [helm-lint, changes]
     # Skip build ONLY if changes are exclusively in helm/**
-    # Run build for: code changes, workflow changes, Dockerfile, scripts, or anything else
-    if: needs.changes.outputs.helm != 'true' || needs.changes.outputs.code == 'true'
+    # Run build for: any changes outside helm/ (future-proof)
+    if: needs.changes.outputs.non_helm == 'true'
     runs-on: ubuntu-latest
 
     steps:
