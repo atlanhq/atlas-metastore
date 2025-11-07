@@ -116,12 +116,12 @@ if [ "$DEBUG" = true ]; then
              -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
              -Dorg.testcontainers.log.level=DEBUG -Dsurefire.useFile=false
 else
-    # Run tests in parallel for faster execution
-    # -Dparallel=classes: Run test classes in parallel
-    # -DthreadCount=2: Use 2 threads (one per test class)
+    # Run tests in parallel using fork
+    # -DforkCount=2: Fork 2 JVMs to run tests in parallel
+    # -DreuseForks=false: Don't reuse JVMs (cleaner isolation)
     mvn test -pl webapp -Dsurefire.useFile=false \
-             -Dparallel=classes \
-             -DthreadCount=2
+             -DforkCount=2 \
+             -DreuseForks=false
 fi
 
 TEST_RESULT=$?
