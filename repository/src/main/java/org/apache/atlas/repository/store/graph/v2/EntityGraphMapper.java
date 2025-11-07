@@ -20,6 +20,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import com.google.common.annotations.VisibleForTesting;
 
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -205,6 +206,14 @@ public class EntityGraphMapper {
     private final TagAttributeMapper        tagAttributeMapper;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
 
+    private static final String LOG_PREFIX = "[AtlasEntityGraphProfiler]";
+    private static final ThreadLocal<Deque<String>> ATTRIBUTE_PATH = ThreadLocal.withInitial(ArrayDeque::new);
+    private static final ThreadLocal<String> ROOT_ENTITY_TYPE = new ThreadLocal<>();
+    private static final ThreadLocal<Integer> MAX_PATH_DEPTH = ThreadLocal.withInitial(() -> 0);
+    private static final Set<String> DETAILED_LOG_ENTITY_TYPES =
+            Collections.unmodifiableSet(new HashSet<>(Arrays.asList("AuthPolicy", "Persona", "Purpose")));
+    private static final int COLLECTION_SAMPLE_LIMIT = 5;
+
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
@@ -226,6 +235,126 @@ public class EntityGraphMapper {
         this.transactionInterceptHelper = transactionInterceptHelper;
         this.tagDAO = TagDAOCassandraImpl.getInstance();
         this.tagAttributeMapper = tagAttributeMapper;
+    }
+
+    private boolean shouldLogDetailedForType(String typeName) {
+        return typeName != null && DETAILED_LOG_ENTITY_TYPES.contains(typeName);
+    }
+
+    private boolean shouldLogDetailedMapping() {
+        String root = ROOT_ENTITY_TYPE.get();
+
+        return root != null && shouldLogDetailedForType(root);
+    }
+
+    private void resetPathTracking() {
+        ATTRIBUTE_PATH.get().clear();
+        MAX_PATH_DEPTH.set(0);
+    }
+
+    private void clearPathTracking() {
+        ATTRIBUTE_PATH.get().clear();
+        MAX_PATH_DEPTH.remove();
+    }
+
+    private void pushPathSegment(String segment) {
+        if (!shouldLogDetailedMapping()) {
+            return;
+        }
+
+        Deque<String> stack = ATTRIBUTE_PATH.get();
+        stack.addLast(segment);
+
+        Integer maxDepth = MAX_PATH_DEPTH.get();
+        int currentDepth = stack.size();
+        if (maxDepth == null || currentDepth > maxDepth) {
+            MAX_PATH_DEPTH.set(currentDepth);
+        }
+    }
+
+    private void popPathSegment() {
+        if (!shouldLogDetailedMapping()) {
+            return;
+        }
+
+        Deque<String> stack = ATTRIBUTE_PATH.get();
+        if (!stack.isEmpty()) {
+            stack.removeLast();
+        }
+    }
+
+    private String currentAttributePath() {
+        if (!shouldLogDetailedMapping()) {
+            return "";
+        }
+
+        Deque<String> stack = ATTRIBUTE_PATH.get();
+        if (stack.isEmpty()) {
+            String root = ROOT_ENTITY_TYPE.get();
+            return root != null ? root : "";
+        }
+
+        return String.join(".", stack);
+    }
+
+    private int currentMaxDepth() {
+        Integer val = MAX_PATH_DEPTH.get();
+        return val != null ? val : 0;
+    }
+
+    private String sampleCollection(Collection<?> values) {
+        if (CollectionUtils.isEmpty(values)) {
+            return "[]";
+        }
+
+        StringBuilder sb = new StringBuilder("[");
+        int count = 0;
+
+        for (Object value : values) {
+            if (count >= COLLECTION_SAMPLE_LIMIT) {
+                sb.append("...");
+                break;
+            }
+
+            if (count > 0) {
+                sb.append(", ");
+            }
+
+            sb.append(String.valueOf(value));
+            count++;
+        }
+
+        sb.append(']');
+
+        return sb.toString();
+    }
+
+    private String summarizeValue(Object value) {
+        if (value == null) {
+            return "null";
+        }
+
+        if (value instanceof Collection) {
+            Collection<?> collection = (Collection<?>) value;
+            return "collection(size=" + collection.size() + ", sample=" + sampleCollection(collection) + ")";
+        }
+
+        if (value instanceof Map) {
+            Map<?, ?> map = (Map<?, ?>) value;
+            return "map(size=" + map.size() + ", keys=" + sampleCollection(map.keySet()) + ")";
+        }
+
+        if (value instanceof AtlasStruct) {
+            AtlasStruct struct = (AtlasStruct) value;
+            return "struct(type=" + struct.getTypeName() + ")";
+        }
+
+        if (value instanceof AtlasObjectId) {
+            AtlasObjectId objectId = (AtlasObjectId) value;
+            return "objectId(type=" + objectId.getTypeName() + ", guid=" + objectId.getGuid() + ")";
+        }
+
+        return value.getClass().getSimpleName();
     }
 
     @VisibleForTesting
@@ -379,13 +508,22 @@ public class EntityGraphMapper {
             AtlasPerfMetrics.MetricRecorder createdSegment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributesAndClassifications.segment1");
             try {
                 for (AtlasEntity createdEntity : createdEntities) {
+                    reqContext.getDeletedEdgesIds().clear();
+
+                    String guid = createdEntity.getGuid();
+                    AtlasVertex vertex = context.getVertex(guid);
+                    AtlasEntityType entityType = context.getType(guid);
+                    String rootType = entityType != null ? entityType.getTypeName() : null;
+                    boolean detailed = shouldLogDetailedForType(rootType);
+                    long entityStartNs = detailed ? System.nanoTime() : 0L;
+
+                    if (detailed) {
+                        ROOT_ENTITY_TYPE.set(rootType);
+                        resetPathTracking();
+                        pushPathSegment(rootType);
+                    }
+
                     try {
-                        reqContext.getDeletedEdgesIds().clear();
-
-                        String guid = createdEntity.getGuid();
-                        AtlasVertex vertex = context.getVertex(guid);
-                        AtlasEntityType entityType = context.getType(guid);
-
                         mapAttributes(createdEntity, entityType, vertex, CREATE, context);
                         mapRelationshipAttributes(createdEntity, entityType, vertex, CREATE, context);
 
@@ -438,6 +576,24 @@ public class EntityGraphMapper {
                     } catch (AtlasBaseException baseException) {
                         setEntityGuidToException(createdEntity, baseException, context);
                         throw baseException;
+                    } finally {
+                        if (detailed) {
+                            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - entityStartNs);
+                            int attrCount = MapUtils.isNotEmpty(createdEntity.getAttributes()) ? createdEntity.getAttributes().size() : 0;
+                            int relAttrCount = MapUtils.isNotEmpty(createdEntity.getRelationshipAttributes()) ? createdEntity.getRelationshipAttributes().size() : 0;
+                            int businessAttrCount = MapUtils.isNotEmpty(createdEntity.getBusinessAttributes()) ? createdEntity.getBusinessAttributes().size() : 0;
+
+                            if (LOG.isInfoEnabled()) {
+                                LOG.info("{} [{}] op=CREATE guid={} attributes={} relationshipAttributes={} businessAttributes={} maxDepth={} durationMs={}",
+                                        LOG_PREFIX, rootType, guid, attrCount, relAttrCount, businessAttrCount, currentMaxDepth(), durationMs);
+                            }
+
+                            clearPathTracking();
+                            ROOT_ENTITY_TYPE.remove();
+                        } else {
+                            ATTRIBUTE_PATH.get().clear();
+                            MAX_PATH_DEPTH.set(0);
+                        }
                     }
                 }
             } finally {
@@ -451,13 +607,22 @@ public class EntityGraphMapper {
             AtlasPerfMetrics.MetricRecorder updatedSegment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributesAndClassifications.segment2");
             try {
                 for (AtlasEntity updatedEntity : updatedEntities) {
+                    reqContext.getDeletedEdgesIds().clear();
+
+                    String guid = updatedEntity.getGuid();
+                    AtlasVertex vertex = context.getVertex(guid);
+                    AtlasEntityType entityType = context.getType(guid);
+                    String rootType = entityType != null ? entityType.getTypeName() : null;
+                    boolean detailed = shouldLogDetailedForType(rootType);
+                    long entityStartNs = detailed ? System.nanoTime() : 0L;
+
+                    if (detailed) {
+                        ROOT_ENTITY_TYPE.set(rootType);
+                        resetPathTracking();
+                        pushPathSegment(rootType);
+                    }
+
                     try {
-                        reqContext.getDeletedEdgesIds().clear();
-
-                        String guid = updatedEntity.getGuid();
-                        AtlasVertex vertex = context.getVertex(guid);
-                        AtlasEntityType entityType = context.getType(guid);
-
                         mapAttributes(updatedEntity, entityType, vertex, updateType, context);
                         mapRelationshipAttributes(updatedEntity, entityType, vertex, UPDATE, context);
 
@@ -541,6 +706,24 @@ public class EntityGraphMapper {
                     } catch (AtlasBaseException baseException) {
                         setEntityGuidToException(updatedEntity, baseException, context);
                         throw baseException;
+                    } finally {
+                        if (detailed) {
+                            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - entityStartNs);
+                            int attrCount = MapUtils.isNotEmpty(updatedEntity.getAttributes()) ? updatedEntity.getAttributes().size() : 0;
+                            int relAttrCount = MapUtils.isNotEmpty(updatedEntity.getRelationshipAttributes()) ? updatedEntity.getRelationshipAttributes().size() : 0;
+                            int businessAttrCount = MapUtils.isNotEmpty(updatedEntity.getBusinessAttributes()) ? updatedEntity.getBusinessAttributes().size() : 0;
+
+                            if (LOG.isInfoEnabled()) {
+                                LOG.info("{} [{}] op={} guid={} attributes={} relationshipAttributes={} businessAttributes={} maxDepth={} durationMs={}",
+                                        LOG_PREFIX, rootType, updateType, guid, attrCount, relAttrCount, businessAttrCount, currentMaxDepth(), durationMs);
+                            }
+
+                            clearPathTracking();
+                            ROOT_ENTITY_TYPE.remove();
+                        } else {
+                            ATTRIBUTE_PATH.get().clear();
+                            MAX_PATH_DEPTH.set(0);
+                        }
                     }
                 }
             } finally {
@@ -573,12 +756,37 @@ public class EntityGraphMapper {
                     String guid = entity.getGuid();
                     AtlasVertex vertex = context.getVertex(guid);
                     AtlasEntityType entityType = context.getType(guid);
-                    mapAppendRemoveRelationshipAttributes(entity, entityType, vertex, UPDATE, context, true, false);
+                    String rootType = entityType != null ? entityType.getTypeName() : null;
+                    boolean detailed = shouldLogDetailedForType(rootType);
+                    long entityStartNs = detailed ? System.nanoTime() : 0L;
 
-                    // Update __hasLineage for edges impacted during append operation
-                    Set<AtlasEdge> newlyCreatedEdges = getNewCreatedInputOutputEdges(guid);
-                    if (CollectionUtils.isNotEmpty(newlyCreatedEdges)) {
-                        addHasLineage(newlyCreatedEdges, false);
+                    if (detailed) {
+                        ROOT_ENTITY_TYPE.set(rootType);
+                        resetPathTracking();
+                        pushPathSegment(rootType);
+                    }
+
+                    try {
+                        mapAppendRemoveRelationshipAttributes(entity, entityType, vertex, UPDATE, context, true, false);
+
+                        // Update __hasLineage for edges impacted during append operation
+                        Set<AtlasEdge> newlyCreatedEdges = getNewCreatedInputOutputEdges(guid);
+                        if (CollectionUtils.isNotEmpty(newlyCreatedEdges)) {
+                            addHasLineage(newlyCreatedEdges, false);
+                        }
+                    } finally {
+                        if (detailed) {
+                            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - entityStartNs);
+                        if (LOG.isInfoEnabled()) {
+                            LOG.info("{} [{}] op=APPEND_REL guid={} maxDepth={} durationMs={}",
+                                    LOG_PREFIX, rootType, guid, currentMaxDepth(), durationMs);
+                            }
+                            clearPathTracking();
+                            ROOT_ENTITY_TYPE.remove();
+                        } else {
+                            ATTRIBUTE_PATH.get().clear();
+                            MAX_PATH_DEPTH.set(0);
+                        }
                     }
                 }
             } finally {
@@ -593,12 +801,37 @@ public class EntityGraphMapper {
                     String guid = entity.getGuid();
                     AtlasVertex vertex = context.getVertex(guid);
                     AtlasEntityType entityType = context.getType(guid);
-                    mapAppendRemoveRelationshipAttributes(entity, entityType, vertex, UPDATE, context, false, true);
+                    String rootType = entityType != null ? entityType.getTypeName() : null;
+                    boolean detailed = shouldLogDetailedForType(rootType);
+                    long entityStartNs = detailed ? System.nanoTime() : 0L;
 
-                    // Update __hasLineage for edges impacted during remove operation
-                    Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
-                    if (CollectionUtils.isNotEmpty(removedEdges)) {
-                        deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
+                    if (detailed) {
+                        ROOT_ENTITY_TYPE.set(rootType);
+                        resetPathTracking();
+                        pushPathSegment(rootType);
+                    }
+
+                    try {
+                        mapAppendRemoveRelationshipAttributes(entity, entityType, vertex, UPDATE, context, false, true);
+
+                        // Update __hasLineage for edges impacted during remove operation
+                        Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
+                        if (CollectionUtils.isNotEmpty(removedEdges)) {
+                            deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
+                        }
+                    } finally {
+                        if (detailed) {
+                            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - entityStartNs);
+                        if (LOG.isInfoEnabled()) {
+                            LOG.info("{} [{}] op=REMOVE_REL guid={} maxDepth={} durationMs={}",
+                                    LOG_PREFIX, rootType, guid, currentMaxDepth(), durationMs);
+                            }
+                            clearPathTracking();
+                            ROOT_ENTITY_TYPE.remove();
+                        } else {
+                            ATTRIBUTE_PATH.get().clear();
+                            MAX_PATH_DEPTH.set(0);
+                        }
                     }
                 }
             } finally {
@@ -1071,6 +1304,10 @@ public class EntityGraphMapper {
 
         if (MapUtils.isNotEmpty(struct.getAttributes())) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributes.segment0");
+            boolean detailed = shouldLogDetailedMapping();
+            boolean debugEnabled = detailed && LOG.isDebugEnabled();
+            long startNs = detailed ? System.nanoTime() : 0L;
+
             try {
                 List<String> timestampAutoUpdateAttributes = new ArrayList<>();
                 List<String> userAutoUpdateAttributes = new ArrayList<>();
@@ -1152,6 +1389,13 @@ public class EntityGraphMapper {
                 updateModificationMetadata(vertex);
                 graphHelper.updateMetadataAttributes(vertex, timestampAutoUpdateAttributes, "timestamp");
                 graphHelper.updateMetadataAttributes(vertex, userAutoUpdateAttributes, "user");
+
+                if (debugEnabled) {
+                    long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+                    LOG.debug("{} [{}] mapAttributes struct={} op={} path={} attributes={} durationMs={}",
+                            LOG_PREFIX, ROOT_ENTITY_TYPE.get(), struct.getTypeName(), op, currentAttributePath(),
+                            struct.getAttributes() != null ? struct.getAttributes().size() : 0, durationMs);
+                }
             } finally {
                 RequestContext.get().endMetricRecord(metric);
             }
@@ -1265,9 +1509,16 @@ public class EntityGraphMapper {
 
     private void mapAttribute(AtlasAttribute attribute, Object attrValue, AtlasVertex vertex, EntityOperation op, EntityMutationContext context, boolean isAppendOp, boolean isRemoveOp) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttribute.segment0");
+        AtlasType attrType = attribute.getAttributeType();
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long attrStartNs = detailed ? System.nanoTime() : 0L;
+
+        if (detailed) {
+            pushPathSegment(attribute.getName());
+        }
+
         try {
             boolean isDeletedEntity = context.isDeletedEntity(vertex);
-            AtlasType         attrType     = attribute.getAttributeType();
             if (attrValue == null) {
                 AtlasAttributeDef attributeDef = attribute.getAttributeDef();
 
@@ -1303,6 +1554,15 @@ public class EntityGraphMapper {
                 }
             }
         } finally {
+            if (detailed) {
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - attrStartNs);
+                if (attrType.getTypeCategory() != TypeCategory.PRIMITIVE && attrType.getTypeCategory() != TypeCategory.ENUM) {
+                LOG.debug("{} [{}] path={} type={} summary={} durationMs={}",
+                        LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), attrType.getTypeCategory(),
+                        summarizeValue(attrValue), durationMs);
+                }
+                popPathSegment();
+            }
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
@@ -1723,6 +1983,8 @@ public class EntityGraphMapper {
             LOG.debug("==> mapStructValue({})", ctx);
         }
 
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long startNs = detailed ? System.nanoTime() : 0L;
         AtlasEdge ret = null;
 
         if (ctx.getCurrentEdge() != null) {
@@ -1753,6 +2015,13 @@ public class EntityGraphMapper {
             if (structVal != null) {
                 ret = createVertex(structVal, ctx.getReferringVertex(), edgeLabel, context);
             }
+        }
+
+        if (detailed) {
+            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            LOG.debug("{} [{}] path={} structType={} reusedExisting={} durationMs={}",
+                    LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), ctx.getAttrType().getTypeCategory(),
+                    ctx.getCurrentEdge() != null, durationMs);
         }
 
         if (LOG.isDebugEnabled()) {
@@ -1812,6 +2081,8 @@ public class EntityGraphMapper {
 
     private AtlasEdge mapObjectIdValueUsingRelationship(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapObjectIdValueUsingRelationship");
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long startNs = detailed ? System.nanoTime() : 0L;
         try {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("==> mapObjectIdValueUsingRelationship({})", ctx);
@@ -1908,6 +2179,14 @@ public class EntityGraphMapper {
             }
 
             setAssignedGuid(ctx.getValue(), context);
+
+            if (detailed) {
+                String relationshipLabel = ctx.getAttribute() != null ? ctx.getAttribute().getRelationshipEdgeLabel() : null;
+                boolean createdNew = ret != null && getCreatedTime(ret) == RequestContext.get().getRequestTime();
+                long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            LOG.debug("{} [{}] path={} relationshipLabel={} createdNew={} durationMs={}",
+                    LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), relationshipLabel, createdNew, durationMs);
+            }
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("<== mapObjectIdValueUsingRelationship({})", ctx);
@@ -2042,6 +2321,8 @@ public class EntityGraphMapper {
         Map<Object, Object> newVal      = (Map<Object, Object>) ctx.getValue();
         Map<String, Object> newMap      = new HashMap<>();
         AtlasMapType        mapType     = (AtlasMapType) ctx.getAttrType();
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long startNs = detailed ? System.nanoTime() : 0L;
         AtlasAttribute      attribute   = ctx.getAttribute();
         Map<String, Object> currentMap  = getMapElementsProperty(mapType, ctx.getReferringVertex(), AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty()), attribute);
         boolean             isReference = isReference(mapType.getValueType());
@@ -2079,7 +2360,18 @@ public class EntityGraphMapper {
                 AttributeMutationContext mapCtx =  new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), attribute, entry.getValue(),
                         propertyName, mapType.getValueType(), existingEdge);
                 // Add/Update/Remove property value
-                Object newEntry = mapCollectionElementsToVertex(mapCtx, context);
+                if (detailed) {
+                    pushPathSegment("{" + key + "}");
+                }
+
+                Object newEntry;
+                try {
+                    newEntry = mapCollectionElementsToVertex(mapCtx, context);
+                } finally {
+                    if (detailed) {
+                        popPathSegment();
+                    }
+                }
 
                 if (!isSoftReference && newEntry instanceof AtlasEdge) {
                     AtlasEdge edge = (AtlasEdge) newEntry;
@@ -2124,6 +2416,12 @@ public class EntityGraphMapper {
             }
         }
 
+        if (detailed) {
+            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            LOG.debug("{} [{}] path={} mapSize={} durationMs={}",
+                    LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), newMap.size(), durationMs);
+        }
+
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== mapMapValue({})", ctx);
         }
@@ -2138,6 +2436,8 @@ public class EntityGraphMapper {
 
         AtlasAttribute attribute           = ctx.getAttribute();
         List           newElements         = (List) ctx.getValue();
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long startNs = detailed ? System.nanoTime() : 0L;
         AtlasArrayType arrType             = (AtlasArrayType) attribute.getAttributeType();
         AtlasType      elementType         = arrType.getElementType();
         boolean        isStructType        = (TypeCategory.STRUCT == elementType.getTypeCategory()) ||
@@ -2188,7 +2488,18 @@ public class EntityGraphMapper {
                 removeExistingRelationWithOtherVertex(arrCtx, ctx, context);
             }
 
-            Object newEntry = mapCollectionElementsToVertex(arrCtx, context);
+            if (detailed) {
+                pushPathSegment("[" + index + "]");
+            }
+
+            Object newEntry;
+            try {
+                newEntry = mapCollectionElementsToVertex(arrCtx, context);
+            } finally {
+                if (detailed) {
+                    popPathSegment();
+                }
+            }
             if (isReference && newEntry != null && newEntry instanceof AtlasEdge && inverseRefAttribute != null) {
                 // Update the inverse reference value.
                 AtlasEdge newEdge = (AtlasEdge) newEntry;
@@ -2238,6 +2549,13 @@ public class EntityGraphMapper {
             setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), allArrayElements, currentElements, cardinality);
         }
 
+        if (detailed) {
+            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            LOG.debug("{} [{}] path={} arrayElementType={} newEntries={} removed={} durationMs={}",
+                    LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), elementType.getTypeCategory(),
+                    newElementsCreated.size(), removedElements.size(), durationMs);
+        }
+
         switch (ctx.getAttribute().getRelationshipEdgeLabel()) {
             case TERM_ASSIGNMENT_LABEL:
                 addMeaningsToEntity(ctx, newElementsCreated, new ArrayList<>(0), false, currentElements);
@@ -2278,6 +2596,8 @@ public class EntityGraphMapper {
         AtlasAttribute attribute           = ctx.getAttribute();
         List           newElements         = (List) ctx.getValue();
         AtlasArrayType arrType             = (AtlasArrayType) attribute.getAttributeType();
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long startNs = detailed ? System.nanoTime() : 0L;
         AtlasType      elementType         = arrType.getElementType();
         boolean        isStructType        = (TypeCategory.STRUCT == elementType.getTypeCategory()) ||
                 (TypeCategory.STRUCT == attribute.getDefinedInType().getTypeCategory());
@@ -2302,8 +2622,18 @@ public class EntityGraphMapper {
             AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
                     ctx.getVertexProperty(), elementType);
 
+            if (detailed) {
+                pushPathSegment("[" + index + "]");
+            }
 
-            Object newEntry = getEdgeUsingRelationship(arrCtx, context, true);
+            Object newEntry;
+            try {
+                newEntry = getEdgeUsingRelationship(arrCtx, context, true);
+            } finally {
+                if (detailed) {
+                    popPathSegment();
+                }
+            }
 
             if (isReference && newEntry != null && newEntry instanceof AtlasEdge && inverseRefAttribute != null) {
                 // Update the inverse reference value.
@@ -2330,6 +2660,13 @@ public class EntityGraphMapper {
             setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(),  new ArrayList<>(0),  new ArrayList<>(0), cardinality);
         } else {
             setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), newElements,  new ArrayList<>(0), cardinality);
+        }
+
+        if (detailed) {
+            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            LOG.debug("{} [{}] path={} arrayAppend elementType={} appended={} durationMs={}",
+                    LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), elementType.getTypeCategory(),
+                    newElementsCreated.size(), durationMs);
         }
 
         if (CollectionUtils.isNotEmpty(newElementsCreated)
@@ -2392,6 +2729,8 @@ public class EntityGraphMapper {
         AtlasAttribute attribute           = ctx.getAttribute();
         List           elementsDeleted         = (List) ctx.getValue();
         AtlasArrayType arrType             = (AtlasArrayType) attribute.getAttributeType();
+        boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
+        long startNs = detailed ? System.nanoTime() : 0L;
         AtlasType      elementType         = arrType.getElementType();
         boolean        isStructType        = (TypeCategory.STRUCT == elementType.getTypeCategory()) ||
                 (TypeCategory.STRUCT == attribute.getDefinedInType().getTypeCategory());
@@ -2414,7 +2753,18 @@ public class EntityGraphMapper {
             AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), elementsDeleted.get(index),
                     ctx.getVertexProperty(), elementType);
 
-            Object deleteEntry =  getEdgeUsingRelationship(arrCtx, context, false);
+            if (detailed) {
+                pushPathSegment("[" + index + "]");
+            }
+
+            Object deleteEntry;
+            try {
+                deleteEntry =  getEdgeUsingRelationship(arrCtx, context, false);
+            } finally {
+                if (detailed) {
+                    popPathSegment();
+                }
+            }
 
             // avoid throwing error if relation does not exist but requested to remove
             if (deleteEntry == null) {
@@ -2464,6 +2814,13 @@ public class EntityGraphMapper {
             case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
                 addInternalProductAttr(ctx, null , removedElements, null);
                 break;
+        }
+
+        if (detailed) {
+            long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs);
+            LOG.debug("{} [{}] path={} arrayRemove elementType={} removed={} durationMs={}",
+                    LOG_PREFIX, ROOT_ENTITY_TYPE.get(), currentAttributePath(), elementType.getTypeCategory(),
+                    removedElements.size(), durationMs);
         }
 
         if (LOG.isDebugEnabled()) {
