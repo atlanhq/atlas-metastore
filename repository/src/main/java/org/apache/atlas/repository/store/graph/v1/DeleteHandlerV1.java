@@ -1896,11 +1896,6 @@ public abstract class DeleteHandlerV1 {
 
     private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
-<<<<<<< HEAD
-
-        // Add removed edges to the context
-=======
->>>>>>> master
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
         Set<String> exclusionList = RequestContext.get().getDeletedEdgesIdsForResetHasLineage();
         exclusionList.add(currentEdge.getIdForDisplay());
