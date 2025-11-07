@@ -295,7 +295,7 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh --skip-build
 
       - name: Upload container logs as artifact
         if: always() && steps.integration_tests.outcome != 'skipped'
