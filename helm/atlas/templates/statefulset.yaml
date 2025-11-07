@@ -16,7 +16,7 @@ spec:
     matchLabels:
       app: {{ template "name" . }}
       release: {{ .Release.Name }}
-  replicas: 2
+  replicas: {{ .Values.atlas.replicaCount }}
   serviceName: "atlas-service-atlas"
   template:
     metadata:
