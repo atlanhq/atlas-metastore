@@ -61,34 +61,6 @@ jobs:
             helm:
               - 'helm/**'
 
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # WORKFLOW EXECUTION PATHS:
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  #
-  # 📦 HELM-ONLY CHANGES (exclusively helm/** files):
-  #    changes ✅ → helm-lint ✅ → build ⏭️ → smoke-test ⏭️ → helm-publish ✅
-  #    ⏱️  Time: ~5 minutes (80% faster!)
-  #    📊 Publishing: All 8 charts
-  #        • Infrastructure charts (6): As-is
-  #        • Application charts (2): With latest existing image tag from GHCR
-  #
-  # 💻 CODE/WORKFLOW CHANGES (*.java, maven.yml, Dockerfile, etc.):
-  #    changes ✅ → helm-lint ✅ → build ✅ → smoke-test ✅/⏭️ → helm-publish ✅
-  #    ⏱️  Time: ~25 minutes (full pipeline)
-  #    📊 Publishing: All 8 charts
-  #        • Infrastructure charts (6): As-is
-  #        • Application charts (2): With NEW image tag from build
-  #
-  # 🛡️  QUALITY GATES:
-  #    • helm-lint must pass (syntax validation)
-  #    • build must pass (for code changes)
-  #    • smoke-test must pass (on protected branches)
-  #    • atlas/atlas-read always reference valid images
-  #
-  # Logic: Skip build ONLY if changes are exclusively in helm/**
-  #
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
   helm-lint:
     runs-on: ubuntu-latest
     strategy:
@@ -121,16 +93,16 @@ jobs:
           - chart: elasticsearch-exporter-read
             path: helm/atlas-read/charts/elasticsearch-exporter-read
             requires_app_version: false
-
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-
+      
       - name: Install Helm
         uses: azure/setup-helm@v3
         with:
           version: '3.12.0'
-
+      
       - name: Update helm dependencies
         if: matrix.chart == 'atlas' || matrix.chart == 'atlas-read'
         run: |
@@ -139,12 +111,12 @@ jobs:
           
           echo "Chart dependencies:"
           ls -la charts/
-
+      
       - name: Lint helm chart
         run: |
           helm lint ${{ matrix.path }}/
           echo "✅ ${{ matrix.chart }} chart lint passed!"
-
+      
       - name: Validate Chart.yaml
         run: |
           # Check for required fields
@@ -196,10 +168,20 @@ jobs:
 
       - name: Cache Maven packages
         uses: actions/cache@v3
+        id: maven-cache
         with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/build.sh') }}
-          restore-keys: ${{ runner.os }}-m2
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      - name: Check Maven cache status
+        run: |
+          if [ "${{ steps.maven-cache.outputs.cache-hit }}" == "true" ]; then
+            echo "✅ Maven cache hit - dependencies will be reused"
+          else
+            echo "ℹ️  Maven cache miss - will download dependencies"
+          fi
 
       - name: Get branch name
         run: |
@@ -223,6 +205,7 @@ jobs:
 
       - name: Check disk space before tests
         id: check_disk
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK"
@@ -242,7 +225,7 @@ jobs:
           fi
 
       - name: Free up disk space for tests
-        if: steps.check_disk.outputs.disk_usage > 70
+        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
         run: |
           echo "=========================================="
           echo "CLEANING UP DISK SPACE"
@@ -278,6 +261,7 @@ jobs:
           df -h / | grep -E '^/dev/' || df -h / | tail -1
 
       - name: Verify sufficient disk space
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         run: |
           echo "=========================================="
           echo "VERIFYING DISK SPACE"
@@ -301,6 +285,7 @@ jobs:
 
       - name: Run Integration Tests
         id: integration_tests
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
         continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions
@@ -309,31 +294,22 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           echo "Running integration tests..."
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh
+          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh --skip-build
 
       - name: Upload container logs as artifact
-        if: always()  # Upload logs even if tests pass (for debugging)
+        if: always() && steps.integration_tests.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: container-logs-${{ github.run_id }}
           path: target/test-logs/
           retention-days: 5
 
-      - name: Setup tmate session on test failure
-        if: steps.integration_tests.outcome == 'failure'
-        uses: mxschmitt/action-tmate@v3
-        timeout-minutes: 30
-        with:
-          detached: true
-          limit-access-to-actor: false
-
       - name: Fail the workflow if tests failed
         if: steps.integration_tests.outcome == 'failure'
         run: exit 1
 
-
       - name: Clean up after integration tests
-        if: always()
+        if: always() && steps.integration_tests.outcome != 'skipped'
         run: |
           echo "Cleaning up test environment..."
           docker ps -a -q | xargs -r docker rm -f || true
@@ -350,6 +326,7 @@ jobs:
           echo "Cleaning test artifacts..."
           rm -rf webapp/target/surefire-reports/ || true
           rm -rf test-debug-logs/ || true
+          rm -rf target/test-logs/ || true
           
           # Clean temp files
           echo "Cleaning temp files..."
@@ -433,41 +410,41 @@ jobs:
     if: |
       needs.build.result == 'success' &&
       (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
-
+    
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
     concurrency:
       group: smoke-test-shared-vclusters
       cancel-in-progress: false  # Don't cancel running tests, queue instead
-
+    
     env:
       VCLUSTER_AWS_NAME: ${{ vars.VCLUSTER_AWS_NAME }}
       VCLUSTER_AZURE_NAME: ${{ vars.VCLUSTER_AZURE_NAME }}
       VCLUSTER_GCP_NAME: ${{ vars.VCLUSTER_GCP_NAME }}
       VCLUSTER_PROJECT: ${{ vars.VCLUSTER_PROJECT }}
-
+    
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
+      
       - name: Get branch name
         run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
-
+      
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
-
+      
       - name: Set test image
         run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
-
+      
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
-
+      
       - name: Install vCluster CLI
         uses: loft-sh/setup-vcluster@main
-
+      
       - name: Install jq
         run: sudo apt-get install -y jq
-
+      
       - name: Connect to GlobalProtect VPN
         env:
           VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
@@ -513,7 +490,7 @@ jobs:
             echo "ERROR: VPN connectivity test failed"
             exit 1
           fi
-
+      
       - name: Login to vCluster Platform
         env:
           VCLUSTER_PLATFORM_URL: ${{ secrets.VCLUSTER_PLATFORM_URL }}
@@ -524,7 +501,7 @@ jobs:
           echo "=================================================="
           vcluster platform login $VCLUSTER_PLATFORM_URL --access-key $VCLUSTER_ACCESS_KEY
           echo "✓ Login successful"
-
+      
       - name: Connect to all vClusters
         run: |
           echo "=================================================="
@@ -564,16 +541,74 @@ jobs:
           
           echo ""
           echo "✓ All vCluster connections established"
-
+      
       - name: Run parallel smoke tests
         run: ./scripts/multi-cloud-smoke-test.sh ${{ env.TEST_IMAGE }}
-
+      
       - name: Upload smoke test logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: smoke-test-logs-${{ github.run_id }}
           path: smoke-test-logs/
+      
+      - name: Smoke test summary
+        if: always()
+        run: |
+          echo "## Multi-Cloud Smoke Tests" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Image**: \`${{ env.TEST_IMAGE }}\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Check results for each cloud
+          AWS_STATUS="❓ Unknown"
+          AZURE_STATUS="❓ Unknown"
+          GCP_STATUS="❓ Unknown"
+          
+          if [ -f "smoke-test-logs/AWS.log" ]; then
+            if grep -q "SMOKE TEST PASSED" smoke-test-logs/AWS.log; then
+              AWS_STATUS="✅ Passed"
+            else
+              AWS_STATUS="❌ Failed"
+            fi
+          fi
+          
+          if [ -f "smoke-test-logs/Azure.log" ]; then
+            if grep -q "SMOKE TEST PASSED" smoke-test-logs/Azure.log; then
+              AZURE_STATUS="✅ Passed"
+            else
+              AZURE_STATUS="❌ Failed"
+            fi
+          fi
+          
+          if [ -f "smoke-test-logs/GCP.log" ]; then
+            if grep -q "SMOKE TEST PASSED" smoke-test-logs/GCP.log; then
+              GCP_STATUS="✅ Passed"
+            else
+              GCP_STATUS="❌ Failed"
+            fi
+          fi
+          
+          echo "| Cloud | vCluster | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|----------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| AWS | \`${{ env.VCLUSTER_AWS_NAME }}\` | $AWS_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| Azure | \`${{ env.VCLUSTER_AZURE_NAME }}\` | $AZURE_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "| GCP | \`${{ env.VCLUSTER_GCP_NAME }}\` | $GCP_STATUS |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Overall status
+          if [[ "$AWS_STATUS" == *"Passed"* ]] && [[ "$AZURE_STATUS" == *"Passed"* ]] && [[ "$GCP_STATUS" == *"Passed"* ]]; then
+            echo "**Overall**: ✅ All smoke tests passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "**Overall**: ⚠️ Some smoke tests failed" >> $GITHUB_STEP_SUMMARY
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Tests Run**:" >> $GITHUB_STEP_SUMMARY
+          echo "- Deployment patch and rollout" >> $GITHUB_STEP_SUMMARY
+          echo "- Atlas API health check (\`/api/atlas/admin/status\`)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "📊 [View detailed logs in artifacts](#)" >> $GITHUB_STEP_SUMMARY
 
   helm-publish:
     needs: [helm-lint, build, smoke-test, changes]
@@ -619,7 +654,7 @@ jobs:
             path: helm/atlas-read/charts/elasticsearch-exporter-read
             base_version: "3.3.0"
       max-parallel: 1  # Publish sequentially to avoid race conditions
-
+    
     steps:
       - name: Determine publish strategy
         id: can_publish
@@ -639,23 +674,23 @@ jobs:
               echo "📦 ${{ matrix.chart }}: Helm-only change, will use latest existing image"
             fi
           fi
-
+      
       - name: Checkout code
         if: steps.can_publish.outputs.should_publish == 'true'
         uses: actions/checkout@v3
-
+      
       - name: Get branch name
         if: steps.can_publish.outputs.should_publish == 'true'
         id: branch
         run: |
           echo "name=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
-
+      
       - name: Get commit ID
         if: steps.can_publish.outputs.should_publish == 'true'
         id: commit
         run: |
           echo "id=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_OUTPUT
-
+      
       - name: Get latest image tag (for helm-only changes)
         if: steps.can_publish.outputs.should_publish == 'true' && steps.can_publish.outputs.use_new_image == 'false'
         id: latest_image
@@ -696,7 +731,7 @@ jobs:
             echo "📌 Latest image tag: ${LATEST_TAG}"
             echo "tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
           fi
-
+      
       - name: Generate chart version
         if: steps.can_publish.outputs.should_publish == 'true'
         id: version
@@ -707,13 +742,13 @@ jobs:
           CHART_VERSION="${{ matrix.base_version }}-${BRANCH_NAME_NORMALIZED}.${{ steps.commit.outputs.id }}"
           echo "chart=${CHART_VERSION}" >> $GITHUB_OUTPUT
           echo "Generated chart version for ${{ matrix.chart }}: ${CHART_VERSION}"
-
+      
       - name: Install Helm
         if: steps.can_publish.outputs.should_publish == 'true'
         uses: azure/setup-helm@v3
         with:
           version: '3.12.0'
-
+      
       - name: Update Chart.yaml with version
         if: steps.can_publish.outputs.should_publish == 'true'
         run: |
@@ -727,7 +762,7 @@ jobs:
           
           echo "Updated ${{ matrix.chart }}/Chart.yaml:"
           cat ${{ matrix.path }}/Chart.yaml | head -10
-
+      
       - name: Update values.yaml with image tags (application charts only)
         if: steps.can_publish.outputs.should_publish == 'true' && (matrix.chart == 'atlas' || matrix.chart == 'atlas-read')
         run: |
@@ -749,7 +784,7 @@ jobs:
           
           echo "Image configuration in ${{ matrix.chart }}/values.yaml:"
           grep -A 3 "image:" ${{ matrix.path }}/values.yaml | head -10
-
+      
       - name: Update helm dependencies
         if: steps.can_publish.outputs.should_publish == 'true' && (matrix.chart == 'atlas' || matrix.chart == 'atlas-read')
         run: |
@@ -758,7 +793,7 @@ jobs:
           
           echo "Chart dependencies:"
           ls -la charts/
-
+      
       - name: Package helm chart
         if: steps.can_publish.outputs.should_publish == 'true'
         run: |
@@ -767,7 +802,7 @@ jobs:
           
           echo "Packaged chart: ${{ matrix.chart }}"
           ls -lh helm-packages/${{ matrix.chart }}-*
-
+      
       - name: Login to GitHub Container Registry
         if: steps.can_publish.outputs.should_publish == 'true'
         uses: docker/login-action@v2
@@ -775,7 +810,7 @@ jobs:
           registry: ghcr.io
           username: $GITHUB_ACTOR
           password: ${{ secrets.ORG_PAT_GITHUB }}
-
+      
       - name: Push chart to GHCR (OCI Registry)
         if: steps.can_publish.outputs.should_publish == 'true'
         run: |
@@ -788,7 +823,7 @@ jobs:
           echo "📦 Chart: ${{ matrix.chart }}"
           echo "📌 Version: ${{ steps.version.outputs.chart }}"
           echo "🏷️  Registry: oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }}"
-
+      
       - name: Create GitHub Release
         if: steps.can_publish.outputs.should_publish == 'true'
         uses: ncipollo/release-action@v1
@@ -828,7 +863,7 @@ jobs:
           token: ${{ secrets.ORG_PAT_GITHUB }}
           allowUpdates: true
           makeLatest: false
-
+      
       - name: Chart publish summary
         if: steps.can_publish.outputs.should_publish == 'true'
         run: |

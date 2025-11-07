@@ -1,4 +1,3 @@
-{{- if not (and (.Values.deploy) (.Values.deploy.enabled)) }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -251,4 +250,3 @@ spec:
           configMap:
             name: atlas-telegrafd
         {{- end }}
-{{- end }}
