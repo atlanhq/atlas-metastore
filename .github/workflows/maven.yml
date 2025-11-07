@@ -26,8 +26,6 @@ on:
       - beta
       - development
       - master
-      - mlh-1521
-      - staging
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -332,6 +330,7 @@ jobs:
         if: steps.integration_tests.outcome == 'failure'
         run: exit 1
 
+<<<<<<< HEAD
 
       - name: Clean up after integration tests
         if: always()
@@ -341,6 +340,16 @@ jobs:
           docker system prune -af || true
           echo ""
           echo "Removing other test containers and images..."
+=======
+      - name: Clean up after integration tests
+        run: |
+          echo "=========================================="
+          echo "CLEANING UP AFTER INTEGRATION TESTS"
+          echo "=========================================="
+          
+          # Remove test containers and images
+          echo "Removing test containers and images..."
+>>>>>>> master
           docker system prune -af --volumes || true
           
           # Clean Maven artifacts to free up space
@@ -428,6 +437,7 @@ jobs:
 
   smoke-test:
     name: Multi-Cloud Smoke Test
+<<<<<<< HEAD
     needs: [build, changes]
     runs-on: ubuntu-latest
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
@@ -440,6 +450,10 @@ jobs:
     concurrency:
       group: smoke-test-shared-vclusters
       cancel-in-progress: false  # Don't cancel running tests, queue instead
+=======
+    needs: build
+    runs-on: ubuntu-latest
+>>>>>>> master
     
     env:
       VCLUSTER_AWS_NAME: ${{ vars.VCLUSTER_AWS_NAME }}
@@ -574,6 +588,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: smoke-test-logs-${{ github.run_id }}
+<<<<<<< HEAD
           path: smoke-test-logs/
 
   helm-publish:
@@ -843,3 +858,6 @@ jobs:
           echo '```bash' >> $GITHUB_STEP_SUMMARY
           echo "helm install ${{ matrix.chart }} oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }} --version ${{ steps.version.outputs.chart }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+=======
+          path: smoke-test-logs/
+>>>>>>> master
