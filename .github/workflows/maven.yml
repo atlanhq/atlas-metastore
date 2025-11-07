@@ -61,34 +61,6 @@ jobs:
               - '**/pom.xml'
             helm:
               - 'helm/**'
-  
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  # WORKFLOW EXECUTION PATHS:
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  #
-  # 📦 HELM-ONLY CHANGES (exclusively helm/** files):
-  #    changes ✅ → helm-lint ✅ → build ⏭️ → smoke-test ⏭️ → helm-publish ✅
-  #    ⏱️  Time: ~5 minutes (80% faster!)
-  #    📊 Publishing: All 8 charts
-  #        • Infrastructure charts (6): As-is
-  #        • Application charts (2): With latest existing image tag from GHCR
-  #
-  # 💻 CODE/WORKFLOW CHANGES (*.java, maven.yml, Dockerfile, etc.):
-  #    changes ✅ → helm-lint ✅ → build ✅ → smoke-test ✅/⏭️ → helm-publish ✅
-  #    ⏱️  Time: ~25 minutes (full pipeline)
-  #    📊 Publishing: All 8 charts
-  #        • Infrastructure charts (6): As-is
-  #        • Application charts (2): With NEW image tag from build
-  #
-  # 🛡️  QUALITY GATES:
-  #    • helm-lint must pass (syntax validation)
-  #    • build must pass (for code changes)
-  #    • smoke-test must pass (on protected branches)
-  #    • atlas/atlas-read always reference valid images
-  #
-  # Logic: Skip build ONLY if changes are exclusively in helm/**
-  #
-  # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
   helm-lint:
     runs-on: ubuntu-latest
@@ -234,7 +206,7 @@ jobs:
 
       - name: Check disk space before tests
         id: check_disk
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'atlas_ci_cd_updates'
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK"
@@ -254,7 +226,7 @@ jobs:
           fi
 
       - name: Free up disk space for tests
-        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'atlas_ci_cd_updates')
         run: |
           echo "=========================================="
           echo "CLEANING UP DISK SPACE"
@@ -290,7 +262,7 @@ jobs:
           df -h / | grep -E '^/dev/' || df -h / | tail -1
 
       - name: Verify sufficient disk space
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'atlas_ci_cd_updates'
         run: |
           echo "=========================================="
           echo "VERIFYING DISK SPACE"
@@ -314,7 +286,7 @@ jobs:
 
       - name: Run Integration Tests
         id: integration_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'atlas_ci_cd_updates'
         continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions

@@ -45,34 +45,14 @@ done
 
 # Step 1: Build Atlas WAR if not skipping
 if [ "$SKIP_BUILD" = false ]; then
-    echo -e "${YELLOW}Downloading Keycloak dependencies...${NC}"
-    mkdir -p ~/.m2/repository/org/keycloak
-    wget -q https://atlan-public.s3.eu-west-1.amazonaws.com/artifact/keycloak-15.0.2.1.zip
-    unzip -o -q keycloak-15.0.2.1.zip -d ~/.m2/repository/org
-    rm keycloak-15.0.2.1.zip
-    echo -e "${GREEN}Keycloak dependencies downloaded${NC}"
-    
-    echo -e "${YELLOW}Building Atlas with Maven...${NC}"
-    # Note: Maven may report BUILD FAILURE on atlas-distro JAR, but artifacts are built successfully
-    # We ignore exit code but verify critical artifacts exist
-    # Note: -T (parallel builds) was tested but caused module dependency issues - keeping sequential
-    mvn clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist || true
-    
-    # Verify critical artifacts were built (catch genuine build failures)
-    if [ ! -f "distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz" ]; then
-        echo -e "${RED}CRITICAL: Server tarball not found - genuine build failure!${NC}"
-        echo "Expected: distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz"
+    echo -e "${YELLOW}Building Atlas WAR package...${NC}"
+    mvn clean -Dos.detected.classifier=osx-x86_64 -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to build Atlas WAR${NC}"
         exit 1
     fi
-    if [ ! -f "webapp/target/atlas-webapp-3.0.0-SNAPSHOT.war" ]; then
-        echo -e "${RED}CRITICAL: WAR file not found - genuine build failure!${NC}"
-        echo "Expected: webapp/target/atlas-webapp-3.0.0-SNAPSHOT.war"
-        exit 1
-    fi
-    
-    echo -e "${GREEN}Maven build completed successfully${NC}"
-    echo "[DEBUG] Listing distro/target contents:"
-    ls -lh distro/target/ | grep -E "apache-atlas.*\.tar\.gz" || true
+    echo -e "${GREEN}Atlas WAR built successfully${NC}"
 else
     echo -e "${YELLOW}Skipping Atlas build (--skip-build flag set)${NC}"
 fi
