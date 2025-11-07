@@ -116,15 +116,40 @@ if [ "$DEBUG" = true ]; then
              -Dorg.slf4j.simpleLogger.defaultLogLevel=debug \
              -Dorg.testcontainers.log.level=DEBUG -Dsurefire.useFile=false
 else
-    # Run tests in parallel using fork
-    # -DforkCount=2: Fork 2 JVMs to run tests in parallel
-    # -DreuseForks=false: Don't reuse JVMs (cleaner isolation)
+    # Run each test class in parallel as separate Maven processes
+    echo "Starting tests in parallel..."
+    
+    # Run first test in background
     mvn test -pl webapp -Dsurefire.useFile=false \
-             -DforkCount=2 \
-             -DreuseForks=false
+        -Dtest=BasicServiceAvailabilityTest \
+        > target/test-logs/BasicServiceAvailabilityTest.log 2>&1 &
+    PID1=$!
+    echo "Started BasicServiceAvailabilityTest (PID: $PID1)"
+    
+    # Run second test in background
+    mvn test -pl webapp -Dsurefire.useFile=false \
+        -Dtest=BasicSanityForAttributesTypesTest \
+        > target/test-logs/BasicSanityForAttributesTypesTest.log 2>&1 &
+    PID2=$!
+    echo "Started BasicSanityForAttributesTypesTest (PID: $PID2)"
+    
+    # Wait for both to complete
+    echo "Waiting for tests to complete..."
+    wait $PID1
+    RESULT1=$?
+    echo "BasicServiceAvailabilityTest completed (exit code: $RESULT1)"
+    
+    wait $PID2
+    RESULT2=$?
+    echo "BasicSanityForAttributesTypesTest completed (exit code: $RESULT2)"
+    
+    # Return failure if either test failed
+    if [ $RESULT1 -ne 0 ] || [ $RESULT2 -ne 0 ]; then
+        TEST_RESULT=1
+    else
+        TEST_RESULT=0
+    fi
 fi
-
-TEST_RESULT=$?
 
 # Stop log capture
 echo "Stopping container log monitor..."
