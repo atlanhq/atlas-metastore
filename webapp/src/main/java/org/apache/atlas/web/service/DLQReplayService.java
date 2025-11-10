@@ -302,9 +302,10 @@ public class DLQReplayService {
                             // Treat temporary backend exceptions as transient - will retry
                             errorCount.incrementAndGet();
                             log.warn("Temporary backend exception while replaying DLQ entry (offset: {}, partition: {}). " +
-                                    "Will retry on next poll. Error: {}",
+                                    "Will retry on next poll. STOPPING batch processing to prevent skipping this message. Error: {}",
                                     record.offset(), record.partition(), temporaryBackendException.getMessage());
                             Thread.sleep(errorBackoffMs);
+                            break;
                         } catch (Exception e) {
                             errorCount.incrementAndGet();
                             
@@ -332,13 +333,15 @@ public class DLQReplayService {
                                 } catch (Exception commitEx) {
                                     log.error("Failed to commit offset after skipping poison pill", commitEx);
                                 }
+                                // Continue to next record after skipping poison pill
                             } else {
                                 // Will retry this message on next poll - don't commit offset
                                 log.warn("Failed to replay DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
-                                        "Will retry on next poll. Error: {}",
+                                        "STOPPING batch processing to prevent skipping this message. Will retry on next poll. Error: {}",
                                         record.offset(), record.partition(), retryCount, maxRetries, e.getMessage());
+                                // CRITICAL: Break to prevent subsequent records from committing offsets past this failed record
+                                break;
                             }
-                            // CRITICAL: Don't break - continue processing remaining records in batch
                         }
                     }
                 } finally {
@@ -434,7 +437,7 @@ public class DLQReplayService {
                 } catch (Exception rollbackException) {
                     log.error("Failed to rollback transaction for index: {}", entry.getIndexName(), rollbackException);
                 }
-                throw new Exception("Failed to replay mutation for index: " + entry.getIndexName(), e);
+                throw new TemporaryBackendException("Failed to replay mutation for index: " + entry.getIndexName(), e);
             }
         } catch (IOException e) {
             log.error("Failed to deserialize DLQ entry JSON", e);
