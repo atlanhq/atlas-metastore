@@ -135,8 +135,10 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
                 }
 
                 Map<String, String> options = attributeDef.getOptions();
-                if (options == null || !options.containsKey(ATTR_OPTION_PRIMITIVE_TYPE)) {
-                    throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, attributeDef.getName(), "options.primitiveType");
+                if (options != null) {
+                    if (options.get(ATTR_OPTION_PRIMITIVE_TYPE) == null || String.valueOf(options.get(ATTR_OPTION_PRIMITIVE_TYPE)).isEmpty()) {
+                        throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, attributeDef.getName(), "options.primitiveType");
+                    }
                 }
             }
         }
