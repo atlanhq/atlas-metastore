@@ -50,6 +50,12 @@ spec:
         fsGroup: {{ .Values.securityContext.fsGroup }}
         runAsUser: {{ .Values.securityContext.runAsUser }}
       {{- end }}
+{{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.config.cluster_size) 1) }}
+      {{- with .Values.affinity_hard }}
+      affinity:
+{{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- else }}
 {{- $tierType := .Values.global.Tier_Type | default "" }}
 {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
       affinity:
@@ -96,6 +102,7 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             {{- toYaml .Values.affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
         {{- end }}
+{{- end }}
 {{- end }}
 {{- if .Values.tolerations }}
       tolerations:
@@ -179,7 +186,11 @@ spec:
 {{- $tierType := .Values.global.Tier_Type | default "" }}
 {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
         resources:
+        {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.config.cluster_size) 1) }}
+{{ toYaml .Values.resources_dev | indent 10 }}
+        {{- else }}
 {{ toYaml .Values.resources | indent 10 }}
+        {{- end }}
 {{- end }}
         env:
         {{- $seed_size := default 1 .Values.config.seed_size | int -}}
@@ -285,7 +296,11 @@ spec:
           runAsUser: {{.Values.securityContext.runAsUser}}
           runAsGroup: {{ .Values.securityContext.fsGroup }}
         resources:
+        {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.config.cluster_size) 1) }}
+{{ toYaml .Values.icarus.resources_dev | indent 10 }}
+        {{- else }}
 {{ toYaml .Values.icarus.resources | indent 10 }}
+        {{- end }}
         env:
           - name: JMX_HOST
             value: localhost

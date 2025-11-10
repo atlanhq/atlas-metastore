@@ -20,7 +20,11 @@ spec:
   selector:
     matchLabels:
       app: "{{ template "elasticsearch.uname" . }}"
+  {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1) }}
   replicas: {{ .Values.replicas }}
+  {{- else }}
+  replicas: {{ .Values.replicas }}
+  {{- end }}
   podManagementPolicy: {{ .Values.podManagementPolicy }}
   updateStrategy:
     type: {{ .Values.updateStrategy }}
@@ -81,10 +85,16 @@ spec:
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
+      {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1) }}
+      {{- with .Values.affinity_hard }}
       affinity:
+{{ toYaml . | indent 8 }}
       {{- end }}
+      {{- else if or (eq .Values.antiAffinity "hard") (eq .Values.antiAffinity "soft") .Values.nodeAffinity }}
+      affinity:
       {{- $tierType := .Values.global.Tier_Type | default "" }}
       {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
+      {{- if not (and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1)) }}
       {{- if eq .Values.antiAffinity "hard" }}
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -106,6 +116,9 @@ spec:
                   - "{{ template "elasticsearch.uname" . }}"
       {{- end }}
       {{- end }}
+      {{- end }}
+      {{- end }}
+      {{- if not (and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1)) }}
         nodeAffinity:
           {{- if eq .Values.custom_deployment.enabled true }}
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -133,6 +146,7 @@ spec:
           preferredDuringSchedulingIgnoredDuringExecution:
             {{- toYaml .Values.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
           {{- end }}
+      {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriod }}
       volumes:
         {{- if .Values.s3_regional_endpoint }}
@@ -287,7 +301,9 @@ spec:
         - name: transport
           containerPort: {{ .Values.transportPort }}
         resources:
-{{- if eq .Values.global.Tier_Type "Enterprise" }}
+{{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1) }}
+{{ toYaml .Values.resources_dev | indent 10 }}
+{{- else if eq .Values.global.Tier_Type "Enterprise" }}
 {{ toYaml .Values.resources | indent 10 }}
 {{- else if eq .Values.global.Tier_Type "Basic" }}
 {{ toYaml .Values.resources_basic | indent 10 }}
