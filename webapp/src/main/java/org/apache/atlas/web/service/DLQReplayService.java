@@ -91,7 +91,17 @@ public class DLQReplayService {
     private int consumerCloseTimeoutSeconds = 30;
 
     @Value("${atlas.kafka.dlq.errorBackoffMs:10000}")
-    private int errorBackoffMs = 10000; // 10 seconds
+    private int errorBackoffMs = 10000; // 10 seconds (for permanent exceptions)
+
+    // Exponential backoff configuration for temporary exceptions
+    @Value("${atlas.kafka.dlq.exponentialBackoff.baseDelayMs:1000}")
+    private int exponentialBackoffBaseDelayMs = 1000; // 1 second
+
+    @Value("${atlas.kafka.dlq.exponentialBackoff.maxDelayMs:60000}")
+    private int exponentialBackoffMaxDelayMs = 60000; // 60 seconds
+
+    @Value("${atlas.kafka.dlq.exponentialBackoff.multiplier:2.0}")
+    private double exponentialBackoffMultiplier = 2.0;
 
     private final ElasticSearchIndex esIndex;
     protected final IndexSerializer indexSerializer;
@@ -101,6 +111,9 @@ public class DLQReplayService {
 
     // Track retry attempts per partition-offset to handle poison pills (in-memory)
     private final Map<String, Integer> retryTracker = new ConcurrentHashMap<>();
+    
+    // Track exponential backoff delay per partition-offset for temporary exceptions (in-memory)
+    private final Map<String, Long> backoffTracker = new ConcurrentHashMap<>();
 
     private volatile KafkaConsumer<String, String> consumer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -161,10 +174,12 @@ public class DLQReplayService {
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
                 log.warn("Consumer group partitions revoked. Partitions: {}", partitions);
                 
-                // Clean up retry tracker for revoked partitions to prevent memory leak
+                // Clean up retry tracker and backoff tracker for revoked partitions to prevent memory leak
                 for (TopicPartition partition : partitions) {
-                    retryTracker.keySet().removeIf(key -> key.startsWith(partition.partition() + "-"));
-                    log.info("Cleaned up retry tracker for revoked partition: {}", partition);
+                    String partitionPrefix = partition.partition() + "-";
+                    retryTracker.keySet().removeIf(key -> key.startsWith(partitionPrefix));
+                    backoffTracker.keySet().removeIf(key -> key.startsWith(partitionPrefix));
+                    log.info("Cleaned up retry and backoff trackers for revoked partition: {}", partition);
                 }
             }
 
@@ -291,8 +306,9 @@ public class DLQReplayService {
 
                             processedCount.incrementAndGet();
 
-                            // Success - remove from retry tracker and commit offset
+                            // Success - remove from retry tracker, reset backoff, and commit offset
                             retryTracker.remove(retryKey);
+                            resetExponentialBackoff(retryKey);
                             
                             Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
                                     new TopicPartition(record.topic(), record.partition()),
@@ -304,17 +320,21 @@ public class DLQReplayService {
                                     record.offset(), record.partition(), processingTime);
 
                         } catch (TemporaryBackendException temporaryBackendException) {
-                            // Treat temporary backend exceptions as transient - will retry
+                            // Treat temporary backend exceptions as transient - will retry with exponential backoff
                             errorCount.incrementAndGet();
+                            
+                            // Calculate exponential backoff delay
+                            long backoffDelay = calculateExponentialBackoff(retryKey);
+                            
                             log.warn("Temporary backend exception while replaying DLQ entry (offset: {}, partition: {}). " +
-                                    "Will retry on next poll. STOPPING batch processing to prevent skipping this message. Error: {}",
-                                    record.offset(), record.partition(), temporaryBackendException.getMessage());
+                                    "Will retry on next poll after {}ms backoff (exponential). STOPPING batch processing to prevent skipping this message. Error: {}",
+                                    record.offset(), record.partition(), backoffDelay, temporaryBackendException.getMessage());
                             
                             // Mark for seek-back - consumer position has already advanced past this offset
                             failedOffset = record.offset();
                             failedPartition = new TopicPartition(record.topic(), record.partition());
                             
-                            Thread.sleep(errorBackoffMs);
+                            Thread.sleep(backoffDelay);
                             break;
                         } catch (Exception e) {
                             errorCount.incrementAndGet();
@@ -545,6 +565,32 @@ public class DLQReplayService {
     }
 
     /**
+     * Calculate exponential backoff delay for a failed message
+     * @param retryKey The partition-offset key
+     * @return The delay in milliseconds
+     */
+    private long calculateExponentialBackoff(String retryKey) {
+        long currentDelay = backoffTracker.getOrDefault(retryKey, (long) exponentialBackoffBaseDelayMs);
+        long nextDelay = (long) (currentDelay * exponentialBackoffMultiplier);
+        
+        // Cap at maximum delay
+        nextDelay = Math.min(nextDelay, exponentialBackoffMaxDelayMs);
+        
+        // Store for next time
+        backoffTracker.put(retryKey, nextDelay);
+        
+        return currentDelay; // Return current delay, store next delay for future use
+    }
+
+    /**
+     * Reset exponential backoff for a successfully processed message
+     * @param retryKey The partition-offset key
+     */
+    private void resetExponentialBackoff(String retryKey) {
+        backoffTracker.remove(retryKey);
+    }
+
+    /**
      * Health check for liveness/readiness probes
      * @return true if the replay thread is healthy and running
      */
@@ -569,6 +615,14 @@ public class DLQReplayService {
         status.put("consumerGroup", consumerGroupId);
         status.put("maxRetries", maxRetries);
         status.put("activeRetries", retryTracker.size());
+        status.put("activeBackoffs", backoffTracker.size());
+        
+        // Exponential backoff configuration
+        Map<String, Object> backoffConfig = new HashMap<>();
+        backoffConfig.put("baseDelayMs", exponentialBackoffBaseDelayMs);
+        backoffConfig.put("maxDelayMs", exponentialBackoffMaxDelayMs);
+        backoffConfig.put("multiplier", exponentialBackoffMultiplier);
+        status.put("exponentialBackoffConfig", backoffConfig);
         
         return status;
     }
