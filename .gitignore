@@ -87,3 +87,10 @@ distro/solr/*.tgz
 /deploy
 **.class
 */bin
+
+# Helm charts
+helm/**/Chart.lock
+helm/**/charts/*.tgz
+helm-packages/
+*.tgz
+*.backup
