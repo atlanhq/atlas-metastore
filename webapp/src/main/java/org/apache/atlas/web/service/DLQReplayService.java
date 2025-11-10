@@ -110,6 +110,8 @@ public class DLQReplayService {
     private final AtomicInteger errorCount = new AtomicInteger(0);
     private final AtomicInteger skippedCount = new AtomicInteger(0);
 
+    private final static String INDEX_NAME = "search";
+
     public DLQReplayService(AtlasJanusGraph graph) throws AtlasException {
         this.mapper = configureMapper();
         // Extract ES configuration from existing graph
@@ -117,7 +119,7 @@ public class DLQReplayService {
         this.standardJanusGraph = ((StandardJanusGraph)graph.getGraph());
         this.bootstrapServers = ApplicationProperties.get().getString("atlas.graph.kafka.bootstrap.servers");
         Configuration fullConfig = graphConfig.getConfiguration();
-        IndexProvider indexProvider = Backend.getImplementationClass(fullConfig.restrictTo("search"), fullConfig.get(GraphDatabaseConfiguration.INDEX_BACKEND,"search"),
+        IndexProvider indexProvider = Backend.getImplementationClass(fullConfig.restrictTo(INDEX_NAME), fullConfig.get(GraphDatabaseConfiguration.INDEX_BACKEND,INDEX_NAME),
                 StandardIndexProvider.getAllProviderClasses());
         StoreFeatures storeFeatures = graphConfig.getBackend().getStoreFeatures();
         this.indexSerializer = new IndexSerializer(fullConfig, graphConfig.getSerializer(),
@@ -271,6 +273,9 @@ public class DLQReplayService {
                 consumer.pause(pausedPartitions);
                 log.info("Paused consumption on partitions: {} to process messages", pausedPartitions);
 
+                Long failedOffset = null;  // Track if we need to seek back
+                TopicPartition failedPartition = null;
+                
                 try {
                     // Now process without time pressure - heartbeats continue automatically
                     for (ConsumerRecord<String, String> record : records) {
@@ -304,6 +309,11 @@ public class DLQReplayService {
                             log.warn("Temporary backend exception while replaying DLQ entry (offset: {}, partition: {}). " +
                                     "Will retry on next poll. STOPPING batch processing to prevent skipping this message. Error: {}",
                                     record.offset(), record.partition(), temporaryBackendException.getMessage());
+                            
+                            // Mark for seek-back - consumer position has already advanced past this offset
+                            failedOffset = record.offset();
+                            failedPartition = new TopicPartition(record.topic(), record.partition());
+                            
                             Thread.sleep(errorBackoffMs);
                             break;
                         } catch (Exception e) {
@@ -339,12 +349,30 @@ public class DLQReplayService {
                                 log.warn("Failed to replay DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
                                         "STOPPING batch processing to prevent skipping this message. Will retry on next poll. Error: {}",
                                         record.offset(), record.partition(), retryCount, maxRetries, e.getMessage());
-                                // CRITICAL: Break to prevent subsequent records from committing offsets past this failed record
+                                
+                                // Mark for seek-back - consumer position has already advanced past this offset
+                                failedOffset = record.offset();
+                                failedPartition = new TopicPartition(record.topic(), record.partition());
+                                
                                 break;
                             }
                         }
                     }
                 } finally {
+                    // CRITICAL: Seek back to failed offset before resuming
+                    // The consumer's position advances when records are polled, not when committed
+                    // We need to rewind to retry the failed message
+                    if (failedOffset != null && failedPartition != null) {
+                        try {
+                            consumer.seek(failedPartition, failedOffset);
+                            log.info("Seeked back to offset {} on partition {} to retry failed message",
+                                    failedOffset, failedPartition);
+                        } catch (Exception seekEx) {
+                            log.error("Failed to seek back to offset {} on partition {}. Message may be skipped!",
+                                    failedOffset, failedPartition, seekEx);
+                        }
+                    }
+                    
                     // RESUME consumption - always do this even if processing failed
                     consumer.resume(pausedPartitions);
                     log.info("Resumed consumption on partitions: {}", pausedPartitions);
@@ -387,61 +415,88 @@ public class DLQReplayService {
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
         long startTime = System.currentTimeMillis();
-        long memoryBefore = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-
+        StandardJanusGraphTx standardJanusGraphTx = null;
+        BaseTransaction replayTx = null;
+        
         try {
             DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
             log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
 
             // Create key information retriever
             log.info("Creating key information retriever for index: {}", entry.getIndexName());
-            StandardJanusGraphTx standardJanusGraphTx = (StandardJanusGraphTx) this.standardJanusGraph.newTransaction();
+            standardJanusGraphTx = (StandardJanusGraphTx) this.standardJanusGraph.newTransaction();
             IndexInfoRetriever keyInfo = this.indexSerializer.getIndexInfoRetriever(standardJanusGraphTx);
-
 
             // Reconstruct mutations from serialized form
             log.info("Starting mutation reconstruction for index: {}", entry.getIndexName());
-            Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry, keyInfo.get("search"));
+            Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry, keyInfo.get(INDEX_NAME));
             log.info("Completed mutation reconstruction in {}ms", System.currentTimeMillis() - startTime);
 
             // Create a new transaction for replay
             log.info("Beginning transaction for index: {}", entry.getIndexName());
-            BaseTransaction replayTx = esIndex.beginTransaction(
+            replayTx = esIndex.beginTransaction(
                     new StandardBaseTransactionConfig.Builder().commitTime(Instant.now()).build()
             );
 
-            try {
-                // This is the same method that originally failed - now we're replaying it!
-                log.info("Starting ES mutation for index: {}", entry.getIndexName());
-                long mutateStartTime = System.currentTimeMillis();
-                esIndex.mutate(mutations, keyInfo.get("search"), replayTx);
-                log.info("ES mutation completed in {}ms, committing transaction", System.currentTimeMillis() - mutateStartTime);
+            // This is the same method that originally failed - now we're replaying it!
+            log.info("Starting ES mutation for index: {}", entry.getIndexName());
+            long mutateStartTime = System.currentTimeMillis();
 
-                long commitStartTime = System.currentTimeMillis();
-                replayTx.commit();
-                log.info("Transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
+            esIndex.mutate(mutations, keyInfo.get(INDEX_NAME), replayTx);
 
-                long memoryAfter = Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory();
-                long memoryUsed = memoryAfter - memoryBefore;
-                long totalTime = System.currentTimeMillis() - startTime;
+            log.info("ES mutation completed in {}ms, committing ES transaction", System.currentTimeMillis() - mutateStartTime);
+            long commitStartTime = System.currentTimeMillis();
 
-                log.info("Successfully replayed mutation for index: {}. Total time: {}ms, Memory used: {}MB, Current heap usage: {}MB",
-                        entry.getIndexName(), totalTime, memoryUsed / (1024 * 1024),
-                        (Runtime.getRuntime().totalMemory() - Runtime.getRuntime().freeMemory()) / (1024 * 1024));
+            replayTx.commit();
+            log.info("ES transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
+            
+            // Only commit JanusGraph transaction if ES mutation succeeded
+            standardJanusGraphTx.commit();
+            log.info("JanusGraph transaction committed successfully");
+            
+            long totalTime = System.currentTimeMillis() - startTime;
+            log.info("Successfully replayed mutation for index: {}. Total time: {}ms", entry.getIndexName(), totalTime);
 
-            } catch (Exception e) {
-                log.warn("Error replaying mutation for index: {}, rolling back transaction",
-                        entry.getIndexName(), e);
-                try {
-                    replayTx.rollback();
-                } catch (Exception rollbackException) {
-                    log.error("Failed to rollback transaction for index: {}", entry.getIndexName(), rollbackException);
-                }
-                throw new TemporaryBackendException("Failed to replay mutation for index: " + entry.getIndexName(), e);
-            }
-        } catch (IOException e) {
-            log.error("Failed to deserialize DLQ entry JSON", e);
+        } catch (TemporaryBackendException e) {
+            // Already a TemporaryBackendException from JanusGraph - rethrow as-is
+            log.warn("Temporary backend exception replaying DLQ entry: {}", e.getMessage());
+            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
             throw e;
+        } catch (IOException e) {
+            // JSON deserialization error - permanent failure
+            log.error("Failed to deserialize DLQ entry JSON - permanent failure", e);
+            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
+            throw e;
+        } catch (Exception e) {
+            // Other exceptions - might be permanent (bad data, schema issues, etc.)
+            log.error("Error replaying DLQ entry - treating as permanent failure", e);
+            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
+            throw e;
+        }
+    }
+
+    /**
+     * Cleanup transactions when replay fails
+     */
+    private void cleanupFailedTransactions(BaseTransaction replayTx, StandardJanusGraphTx standardJanusGraphTx) {
+        // Rollback ES transaction
+        if (replayTx != null) {
+            try {
+                replayTx.rollback();
+                log.debug("Rolled back ES transaction");
+            } catch (Exception rollbackException) {
+                log.error("Failed to rollback ES transaction", rollbackException);
+            }
+        }
+        
+        // Rollback JanusGraph transaction (don't commit on failure!)
+        if (standardJanusGraphTx != null) {
+            try {
+                standardJanusGraphTx.rollback();
+                log.debug("Rolled back JanusGraph transaction");
+            } catch (Exception rollbackException) {
+                log.error("Failed to rollback JanusGraph transaction", rollbackException);
+            }
         }
     }
 
