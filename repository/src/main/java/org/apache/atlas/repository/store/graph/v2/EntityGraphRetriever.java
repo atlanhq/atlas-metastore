@@ -1797,6 +1797,10 @@ public class EntityGraphRetriever {
 
     private AtlasEntityHeader mapVertexToAtlasEntityHeaderWithoutPrefetch(AtlasVertex entityVertex, Set<String> attributes) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAtlasEntityHeaderWithoutPrefetch");
+        LOG.info("[PerfTrace][mapVertexToAtlasEntityHeaderWithoutPrefetch] vertexGuid={} attrCount={} attrSample={}",
+                graphHelper.getGuid(entityVertex),
+                attributes != null ? attributes.size() : 0,
+                attributes != null ? attributes.stream().limit(5).collect(Collectors.joining(",")) : "none");
         AtlasEntityHeader ret = new AtlasEntityHeader();
         try {
             String  typeName     = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
@@ -2392,6 +2396,14 @@ public class EntityGraphRetriever {
 
     private Object mapVertexToAttribute(AtlasVertex entityVertex, AtlasAttribute attribute, AtlasEntityExtInfo entityExtInfo, final boolean isMinExtInfo, boolean includeReferences, boolean ignoreInactive, VertexEdgePropertiesCache vertexEdgePropertiesCache) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("mapVertexToAttribute");
+        LOG.info("[PerfTrace][mapVertexToAttribute] vertexGuid={} type={} attr={} includeReferences={} isMinExtInfo={} ignoreInactive={} edgeDirection={}",
+                graphHelper.getGuid(entityVertex),
+                attribute.getDefinedInDef().getName(),
+                attribute.getName(),
+                includeReferences,
+                isMinExtInfo,
+                ignoreInactive,
+                attribute.getRelationshipEdgeDirection());
         try {
             Object    ret                = null;
             AtlasType attrType           = attribute.getAttributeType();

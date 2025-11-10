@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import java.lang.reflect.Array;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
@@ -124,6 +125,7 @@ import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociato
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_NOOP;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_UPDATE;
+import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_POLICY_RESOURCES;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.*;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_ENTITY_GUID;
@@ -504,6 +506,17 @@ public class EntityGraphMapper {
         Collection<AtlasEntity> appendEntities = context.getUpdatedEntitiesForAppendRelationshipAttribute();
         Collection<AtlasEntity> removeEntities = context.getEntitiesUpdatedWithRemoveRelationshipAttribute();
 
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} createdCount={} updatedCount={} appendCount={} removeCount={} restoreCount={} updatedSamples={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapAttributesAndClassifications.segment0"),
+                    sizeOf(createdEntities),
+                    sizeOf(updatedEntities),
+                    sizeOf(appendEntities),
+                    sizeOf(removeEntities),
+                    sizeOf(context.getEntitiesToRestore()),
+                    summarizeEntities(updatedEntities));
+        }
+
         if (CollectionUtils.isNotEmpty(createdEntities)) {
             AtlasPerfMetrics.MetricRecorder createdSegment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributesAndClassifications.segment1");
             try {
@@ -606,6 +619,13 @@ public class EntityGraphMapper {
         if (CollectionUtils.isNotEmpty(updatedEntities)) {
             AtlasPerfMetrics.MetricRecorder updatedSegment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributesAndClassifications.segment2");
             try {
+                if (LOG.isInfoEnabled()) {
+                    LOG.info("{} updatedCount={} policyEntities={}",
+                            buildPerfLogPrefix("EntityGraphMapper.mapAttributesAndClassifications.segment2"),
+                            updatedEntities.size(),
+                            summarizeEntities(updatedEntities));
+                }
+
                 for (AtlasEntity updatedEntity : updatedEntities) {
                     reqContext.getDeletedEdgesIds().clear();
 
@@ -615,6 +635,19 @@ public class EntityGraphMapper {
                     String rootType = entityType != null ? entityType.getTypeName() : null;
                     boolean detailed = shouldLogDetailedForType(rootType);
                     long entityStartNs = detailed ? System.nanoTime() : 0L;
+                    final long segmentStartNs = System.nanoTime();
+
+                    if (LOG.isInfoEnabled()) {
+                        LOG.info("{} start guid={} type={} attrCount={} relAttrCount={} businessAttrCount={} policyResourceCount={} classifications={}",
+                                buildPerfLogPrefix("EntityGraphMapper.mapAttributesAndClassifications.segment2"),
+                                guid,
+                                rootType,
+                                sizeOf(updatedEntity.getAttributes()),
+                                sizeOf(updatedEntity.getRelationshipAttributes()),
+                                sizeOf(updatedEntity.getBusinessAttributes()),
+                                countPolicyResources(updatedEntity),
+                                updatedEntity.getClassifications() != null ? updatedEntity.getClassifications().size() : 0);
+                    }
 
                     if (detailed) {
                         ROOT_ENTITY_TYPE.set(rootType);
@@ -707,6 +740,18 @@ public class EntityGraphMapper {
                         setEntityGuidToException(updatedEntity, baseException, context);
                         throw baseException;
                     } finally {
+                        if (LOG.isInfoEnabled()) {
+                            LOG.info("{} end guid={} type={} durationMs={} attrCount={} relAttrCount={} businessAttrCount={} policyResourceCount={}",
+                                    buildPerfLogPrefix("EntityGraphMapper.mapAttributesAndClassifications.segment2"),
+                                    guid,
+                                    rootType,
+                                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - segmentStartNs),
+                                    sizeOf(updatedEntity.getAttributes()),
+                                    sizeOf(updatedEntity.getRelationshipAttributes()),
+                                    sizeOf(updatedEntity.getBusinessAttributes()),
+                                    countPolicyResources(updatedEntity));
+                        }
+
                         if (detailed) {
                             long durationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - entityStartNs);
                             int attrCount = MapUtils.isNotEmpty(updatedEntity.getAttributes()) ? updatedEntity.getAttributes().size() : 0;
@@ -1302,6 +1347,15 @@ public class EntityGraphMapper {
             LOG.debug("==> mapAttributes({}, {})", op, struct.getTypeName());
         }
 
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} op={} structType={} attrCount={} vertexGuid={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapAttributes.segment0"),
+                    op,
+                    structType.getTypeName(),
+                    sizeOf(struct.getAttributes()),
+                    safeGuid(vertex));
+        }
+
         if (MapUtils.isNotEmpty(struct.getAttributes())) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributes.segment0");
             boolean detailed = shouldLogDetailedMapping();
@@ -1343,6 +1397,14 @@ public class EntityGraphMapper {
 
                 } else if (op.equals(UPDATE) || op.equals(PARTIAL_UPDATE)) {
                     AtlasPerfMetrics.MetricRecorder segment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributes.segment2");
+                    final long updateSegmentStartNs = System.nanoTime();
+                    if (LOG.isInfoEnabled()) {
+                        LOG.info("{} structType={} updatingAttrs={} vertexGuid={}",
+                                buildPerfLogPrefix("EntityGraphMapper.mapAttributes.segment2"),
+                                structType.getTypeName(),
+                                summarizeAttributes(struct.getAttributes().keySet()),
+                                safeGuid(vertex));
+                    }
                     try {
                         for (String attrName : struct.getAttributes().keySet()) {
                             AtlasAttribute attribute = structType.getAttribute(attrName);
@@ -1382,6 +1444,13 @@ public class EntityGraphMapper {
                             }
                         }
                     } finally {
+                        if (LOG.isInfoEnabled()) {
+                            LOG.info("{} structType={} durationMs={} vertexGuid={}",
+                                    buildPerfLogPrefix("EntityGraphMapper.mapAttributes.segment2"),
+                                    structType.getTypeName(),
+                                    TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - updateSegmentStartNs),
+                                    safeGuid(vertex));
+                        }
                         RequestContext.get().endMetricRecord(segment);
                     }
                 }
@@ -1512,6 +1581,20 @@ public class EntityGraphMapper {
         AtlasType attrType = attribute.getAttributeType();
         boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
         long attrStartNs = detailed ? System.nanoTime() : 0L;
+        AtlasPerfMetrics.MetricRecorder policyDiffMetric = null;
+        if (isAuthPolicyAttribute(attribute)) {
+            policyDiffMetric = RequestContext.get().startMetricRecord("authPolicyDiffComputation");
+        }
+
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} attr={} op={} vertexGuid={} typeCategory={} valueSummary={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapAttribute.segment0"),
+                    attribute.getName(),
+                    op,
+                    safeGuid(vertex),
+                    attrType.getTypeCategory(),
+                    summarizeValue(attrValue));
+        }
 
         if (detailed) {
             pushPathSegment(attribute.getName());
@@ -1547,6 +1630,14 @@ public class EntityGraphMapper {
             } else {
                 AttributeMutationContext ctx = new AttributeMutationContext(op, vertex, attribute, attrValue);
                 AtlasPerfMetrics.MetricRecorder complexSegment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttribute.complex");
+                if (LOG.isInfoEnabled()) {
+                    LOG.info("{} attr={} vertexGuid={} typeCategory={} valueSummary={}",
+                            buildPerfLogPrefix("EntityGraphMapper.mapAttribute.complex"),
+                            attribute.getName(),
+                            safeGuid(vertex),
+                            attrType.getTypeCategory(),
+                            summarizeValue(attrValue));
+                }
                 try {
                     mapToVertexByTypeCategory(ctx, context, isAppendOp, isRemoveOp);
                 } finally {
@@ -1563,12 +1654,25 @@ public class EntityGraphMapper {
                 }
                 popPathSegment();
             }
+            if (policyDiffMetric != null) {
+                RequestContext.get().endMetricRecord(policyDiffMetric);
+            }
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
 
     private Object mapToVertexByTypeCategory(AttributeMutationContext ctx, EntityMutationContext context, boolean isAppendOp, boolean isRemoveOp) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.mapToVertexByTypeCategory.segment0");
+
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} attr={} op={} typeCategory={} vertexGuid={} valueSummary={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapToVertexByTypeCategory.segment0"),
+                    ctx.getAttribute().getName(),
+                    ctx.getOp(),
+                    ctx.getAttrType().getTypeCategory(),
+                    safeGuid(ctx.getReferringVertex()),
+                    summarizeValue(ctx.getValue()));
+        }
 
         try {
             if (ctx.getOp() == CREATE && ctx.getValue() == null) {
@@ -1727,6 +1831,16 @@ public class EntityGraphMapper {
 
                 case ARRAY: {
                     AtlasPerfMetrics.MetricRecorder arraySegment = RequestContext.get().startMetricRecord("EntityGraphMapper.mapToVertexByTypeCategory.array");
+                    if (LOG.isInfoEnabled()) {
+                        LOG.info("{} attr={} op={} vertexGuid={} appendOp={} removeOp={} elementCount={}",
+                                buildPerfLogPrefix("EntityGraphMapper.mapToVertexByTypeCategory.array"),
+                                ctx.getAttribute().getName(),
+                                ctx.getOp(),
+                                safeGuid(ctx.getReferringVertex()),
+                                isAppendOp,
+                                isRemoveOp,
+                                safeCollectionSize(ctx.getValue()));
+                    }
                     try {
                         if (isAppendOp){
                             return appendArrayValue(ctx, context);
@@ -2430,10 +2544,15 @@ public class EntityGraphMapper {
     }
 
     public List mapArrayValue(AttributeMutationContext ctx, EntityMutationContext context) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> mapArrayValue({})", ctx);
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.segment0");
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} attr={} vertexGuid={} op={} elementType={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapArrayValue.segment0"),
+                    ctx.getAttribute().getName(),
+                    safeGuid(ctx.getReferringVertex()),
+                    ctx.getOp(),
+                    ctx.getAttrType().getTypeCategory());
         }
-
         AtlasAttribute attribute           = ctx.getAttribute();
         List           newElements         = (List) ctx.getValue();
         boolean detailed = shouldLogDetailedMapping() && LOG.isDebugEnabled();
@@ -2453,7 +2572,17 @@ public class EntityGraphMapper {
         boolean deleteExistingRelations = shouldDeleteExistingRelations(ctx, attribute);
 
         if (isReference && !isSoftReference) {
-            currentElements = (List) getCollectionElementsUsingRelationship(ctx.getReferringVertex(), attribute, isStructType);
+            AtlasPerfMetrics.MetricRecorder edgeFetchMetric = null;
+            if (isAuthPolicyResourceAttribute(ctx)) {
+                edgeFetchMetric = RequestContext.get().startMetricRecord("edgeFetchForResourceList");
+            }
+            try {
+                currentElements = (List) getCollectionElementsUsingRelationship(ctx.getReferringVertex(), attribute, isStructType);
+            } finally {
+                if (edgeFetchMetric != null) {
+                    RequestContext.get().endMetricRecord(edgeFetchMetric);
+                }
+            }
         } else {
             currentElements = (List) getArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty());
         }
@@ -2480,6 +2609,14 @@ public class EntityGraphMapper {
             newElements = (List) newElements.stream().distinct().collect(Collectors.toList());
         }
 
+        AtlasPerfMetrics.MetricRecorder iterationMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.elementLoop");
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} attr={} totalElements={} deleteExistingRelations={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapArrayValue.elementLoop"),
+                    attribute.getName(),
+                    newElements.size(),
+                    deleteExistingRelations);
+        }
         for (int index = 0; index < newElements.size(); index++) {
             AtlasEdge               existingEdge = (isSoftReference) ? null : getEdgeAt(currentElements, index, elementType);
             AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
@@ -2494,7 +2631,9 @@ public class EntityGraphMapper {
 
             Object newEntry;
             try {
+                AtlasPerfMetrics.MetricRecorder elementMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.elementProcess");
                 newEntry = mapCollectionElementsToVertex(arrCtx, context);
+                RequestContext.get().endMetricRecord(elementMetric);
             } finally {
                 if (detailed) {
                     popPathSegment();
@@ -2504,7 +2643,12 @@ public class EntityGraphMapper {
                 // Update the inverse reference value.
                 AtlasEdge newEdge = (AtlasEdge) newEntry;
 
-                addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
+                AtlasPerfMetrics.MetricRecorder inverseMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.inverseUpdate");
+                try {
+                    addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
+                } finally {
+                    RequestContext.get().endMetricRecord(inverseMetric);
+                }
             }
 
             // not null
@@ -2512,6 +2656,7 @@ public class EntityGraphMapper {
                 newElementsCreated.add(newEntry);
             }
         }
+        RequestContext.get().endMetricRecord(iterationMetric);
 
         if (isReference && !isSoftReference ) {
             boolean isAppendOnPartialUpdate = !isStructType ? getAppendOptionForRelationship(ctx.getReferringVertex(), attribute.getName()) : false;
@@ -2528,6 +2673,7 @@ public class EntityGraphMapper {
         }
 
         // add index to attributes of array type
+        AtlasPerfMetrics.MetricRecorder indexMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.indexing");
         for (int index = 0; allArrayElements != null && index < allArrayElements.size(); index++) {
             Object element = allArrayElements.get(index);
 
@@ -2541,12 +2687,23 @@ public class EntityGraphMapper {
                 }
             }
         }
+        RequestContext.get().endMetricRecord(indexMetric);
 
         if (isNewElementsNull) {
-            setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), null, null, cardinality);
+            AtlasPerfMetrics.MetricRecorder setArrayMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.persistArrayValues");
+            try {
+                setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), null, null, cardinality);
+            } finally {
+                RequestContext.get().endMetricRecord(setArrayMetric);
+            }
         } else {
             // executes
-            setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), allArrayElements, currentElements, cardinality);
+            AtlasPerfMetrics.MetricRecorder setArrayMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.persistArrayValues");
+            try {
+                setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), allArrayElements, currentElements, cardinality);
+            } finally {
+                RequestContext.get().endMetricRecord(setArrayMetric);
+            }
         }
 
         if (detailed) {
@@ -2584,6 +2741,17 @@ public class EntityGraphMapper {
             LOG.debug("<== mapArrayValue({})", ctx);
         }
 
+        if (LOG.isInfoEnabled()) {
+            LOG.info("{} attr={} vertexGuid={} newEntries={} removedEntries={}",
+                    buildPerfLogPrefix("EntityGraphMapper.mapArrayValue.segment0"),
+                    attribute.getName(),
+                    safeGuid(ctx.getReferringVertex()),
+                    newElementsCreated.size(),
+                    removedElements.size());
+        }
+
+        RequestContext.get().endMetricRecord(metricRecorder);
+
         return allArrayElements;
     }
 
@@ -2617,7 +2785,7 @@ public class EntityGraphMapper {
             newElements = (List) newElements.stream().distinct().collect(Collectors.toList());
         }
 
-
+        AtlasPerfMetrics.MetricRecorder iterationMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.elementLoop");
         for (int index = 0; index < newElements.size(); index++) {
             AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
                     ctx.getVertexProperty(), elementType);
@@ -2639,15 +2807,19 @@ public class EntityGraphMapper {
                 // Update the inverse reference value.
                 AtlasEdge newEdge = (AtlasEdge) newEntry;
 
+                AtlasPerfMetrics.MetricRecorder inverseMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.inverseUpdate");
                 addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
+                RequestContext.get().endMetricRecord(inverseMetric);
             }
 
             if(newEntry != null) {
                 newElementsCreated.add(newEntry);
             }
         }
+        RequestContext.get().endMetricRecord(iterationMetric);
 
         // add index to attributes of array type
+        AtlasPerfMetrics.MetricRecorder indexMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.indexing");
         for (int index = 0; newElements != null && index < newElements.size(); index++) {
             Object element = newElements.get(index);
 
@@ -2655,11 +2827,14 @@ public class EntityGraphMapper {
                 AtlasGraphUtilsV2.setEncodedProperty((AtlasEdge) element, ATTRIBUTE_INDEX_PROPERTY_KEY, index);
             }
         }
+        RequestContext.get().endMetricRecord(indexMetric);
 
         if (isNewElementsNull) {
             setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(),  new ArrayList<>(0),  new ArrayList<>(0), cardinality);
         } else {
+            AtlasPerfMetrics.MetricRecorder setArrayMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapArrayValue.persistArrayValues");
             setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), newElements,  new ArrayList<>(0), cardinality);
+            RequestContext.get().endMetricRecord(setArrayMetric);
         }
 
         if (detailed) {
@@ -3990,6 +4165,7 @@ public class EntityGraphMapper {
     }
 
     private List<AtlasEdge> unionCurrentAndNewElements(AtlasAttribute attribute, List<AtlasEdge> currentElements, List<AtlasEdge> newElements) {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.unionCurrentAndNewElements");
         Collection<AtlasEdge> ret              = null;
         AtlasType             arrayElementType = ((AtlasArrayType) attribute.getAttributeType()).getElementType();
 
@@ -3997,7 +4173,9 @@ public class EntityGraphMapper {
             ret = CollectionUtils.union(currentElements, newElements);
         }
 
-        return CollectionUtils.isNotEmpty(ret) ? new ArrayList<>(ret) : Collections.emptyList();
+        List<AtlasEdge> result = CollectionUtils.isNotEmpty(ret) ? new ArrayList<>(ret) : Collections.emptyList();
+        RequestContext.get().endMetricRecord(metricRecorder);
+        return result;
     }
 
     //Removes unused edges from the old collection, compared to the new collection
@@ -4045,6 +4223,7 @@ public class EntityGraphMapper {
     }
 
     private List<AtlasEdge> removeArrayEntries(AtlasAttribute attribute, List<AtlasEdge> tobeDeletedEntries, AttributeMutationContext ctx) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.removeUnusedArrayEntries");
         if (CollectionUtils.isNotEmpty(tobeDeletedEntries)) {
             AtlasType entryType = ((AtlasArrayType) attribute.getAttributeType()).getElementType();
             AtlasVertex entityVertex = ctx.getReferringVertex();
@@ -4059,22 +4238,29 @@ public class EntityGraphMapper {
                             continue;
                         }
 
+                        AtlasPerfMetrics.MetricRecorder edgeRemovalMetric = RequestContext.get().startMetricRecord("EntityGraphMapper.removeUnusedArrayEntries.edge");
                         // update both sides of relationship wen edge is deleted
-                        recordEntityUpdateForNonRelationsipAttribute(edge.getInVertex());
-                        recordEntityUpdateForNonRelationsipAttribute(edge.getOutVertex());
+                        try {
+                            recordEntityUpdateForNonRelationsipAttribute(edge.getInVertex());
+                            recordEntityUpdateForNonRelationsipAttribute(edge.getOutVertex());
 
-                        deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
-                                true, attribute.getRelationshipEdgeDirection(), entityVertex);
+                            deleteDelegate.getHandler().deleteEdgeReference(edge, entryType.getTypeCategory(), attribute.isOwnedRef(),
+                                    true, attribute.getRelationshipEdgeDirection(), entityVertex);
 
-                        additionalElements.add(edge);
+                            additionalElements.add(edge);
+                        } finally {
+                            RequestContext.get().endMetricRecord(edgeRemovalMetric);
+                        }
 
                     }
 
+                    RequestContext.get().endMetricRecord(metricRecorder);
                     return additionalElements;
                 }
             }
         }
 
+        RequestContext.get().endMetricRecord(metricRecorder);
         return Collections.emptyList();
     }
     private void setArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName, List<Object> allValues, List<Object> currentValues, Cardinality cardinality) {
@@ -7334,6 +7520,87 @@ public class EntityGraphMapper {
 
         RequestContext requestContext = RequestContext.get();
         requestContext.cacheDifferentialEntity(diffEntity);
+    }
+
+    private String buildPerfLogPrefix(String segmentName) {
+        RequestContext ctx = RequestContext.get();
+        String traceId = StringUtils.defaultIfEmpty(ctx.getTraceId(), "n/a");
+        String uri = StringUtils.defaultIfEmpty(ctx.getRequestUri(), "n/a");
+        return "[PerfTrace][" + segmentName + "] traceId=" + traceId + " uri=" + uri;
+    }
+
+    private int sizeOf(Collection<?> collection) {
+        return collection == null ? 0 : collection.size();
+    }
+
+    private int sizeOf(Map<?, ?> map) {
+        return map == null ? 0 : map.size();
+    }
+
+    private String summarizeEntities(Collection<AtlasEntity> entities) {
+        if (CollectionUtils.isEmpty(entities)) {
+            return "none";
+        }
+
+        return entities.stream()
+                .filter(Objects::nonNull)
+                .limit(3)
+                .map(entity -> entity.getTypeName() + ":" + entity.getGuid())
+                .collect(Collectors.joining(","));
+    }
+
+    private String summarizeAttributes(Collection<String> attributeNames) {
+        if (CollectionUtils.isEmpty(attributeNames)) {
+            return "none";
+        }
+
+        return attributeNames.stream()
+                .filter(Objects::nonNull)
+                .limit(5)
+                .collect(Collectors.joining(","));
+    }
+
+    private int countPolicyResources(AtlasEntity entity) {
+        if (entity == null) {
+            return 0;
+        }
+
+        Object resources = entity.getAttribute(ATTR_POLICY_RESOURCES);
+        if (resources instanceof Collection) {
+            return ((Collection<?>) resources).size();
+        }
+
+        return 0;
+    }
+
+    private int safeCollectionSize(Object value) {
+        if (value instanceof Collection) {
+            return ((Collection<?>) value).size();
+        }
+
+        if (value != null && value.getClass().isArray()) {
+            return Array.getLength(value);
+        }
+
+        return 0;
+    }
+
+    private String safeGuid(AtlasVertex vertex) {
+        return vertex != null ? graphHelper.getGuid(vertex) : "n/a";
+    }
+
+    private boolean isAuthPolicyAttribute(AtlasAttribute attribute) {
+        return attribute != null
+                && attribute.getDefinedInType() != null
+                && POLICY_ENTITY_TYPE.equals(attribute.getDefinedInType().getTypeName());
+    }
+
+    private boolean isAuthPolicyResourceAttribute(AttributeMutationContext ctx) {
+        return ctx != null
+                && ctx.getAttribute() != null
+                && ATTR_POLICY_RESOURCES.equals(ctx.getAttribute().getName())
+                && ctx.getReferringVertex() != null
+                && POLICY_ENTITY_TYPE.equals(getTypeName(ctx.getReferringVertex()));
     }
 
 }
