@@ -26,12 +26,6 @@ public class DLQAdminController {
         dlqReplayService.startReplay();
     }
 
-    @POST
-    @Path("/replay/stop")
-    public void stopReplay() {
-        dlqReplayService.stopReplay();
-    }
-
     @GET
     @Path("/replay/status")
     public Map<String, Object> getStatus() {
