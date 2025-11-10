@@ -26,6 +26,7 @@ on:
       - beta
       - development
       - master
+      - pp-fix-cassandra-rf-configurable
 
 jobs:
   # Detect what changed to optimize workflow execution
