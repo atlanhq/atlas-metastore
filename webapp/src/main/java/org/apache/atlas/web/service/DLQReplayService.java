@@ -22,9 +22,9 @@ import org.janusgraph.diskstorage.TemporaryBackendException;
 import org.janusgraph.diskstorage.configuration.Configuration;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.diskstorage.indexing.IndexProvider;
 import org.janusgraph.diskstorage.keycolumnvalue.StoreFeatures;
 import org.janusgraph.diskstorage.util.StandardBaseTransactionConfig;
+import org.janusgraph.diskstorage.indexing.IndexProvider;
 import org.janusgraph.diskstorage.indexing.IndexEntry;
 import org.janusgraph.diskstorage.indexing.IndexMutation;
 import org.janusgraph.diskstorage.indexing.KeyInformation;
@@ -44,6 +44,7 @@ import javax.annotation.PreDestroy;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.ConcurrentHashMap;
@@ -84,8 +85,8 @@ public class DLQReplayService {
     @Value("${atlas.kafka.dlq.pollTimeoutSeconds:5}")
     private int pollTimeoutSeconds = 5;
 
-    @Value("${atlas.kafka.dlq.shutdownWaitMs:1000}")
-    private int shutdownWaitMs = 1000;
+    @Value("${atlas.kafka.dlq.shutdownWaitSeconds:60}")
+    private int shutdownWaitSeconds = 60;
 
     @Value("${atlas.kafka.dlq.consumerCloseTimeoutSeconds:30}")
     private int consumerCloseTimeoutSeconds = 30;
@@ -103,17 +104,39 @@ public class DLQReplayService {
     @Value("${atlas.kafka.dlq.exponentialBackoff.multiplier:2.0}")
     private double exponentialBackoffMultiplier = 2.0;
 
+    @Value("${atlas.kafka.dlq.trackerCleanupIntervalMs:300000}")
+    private long trackerCleanupIntervalMs = 300000; // 5 minutes
+
+    @Value("${atlas.kafka.dlq.trackerMaxAgeMs:3600000}")
+    private long trackerMaxAgeMs = 3600000; // 1 hour
+
+    @Value("${atlas.kafka.dlq.retryDelayMs:5000}")
+    private int retryDelayMs = 5000; // 5 seconds
+
     private final ElasticSearchIndex esIndex;
     protected final IndexSerializer indexSerializer;
     private final ObjectMapper mapper;
     private GraphDatabaseConfiguration graphConfig;
     private StandardJanusGraph standardJanusGraph;
 
-    // Track retry attempts per partition-offset to handle poison pills (in-memory)
-    private final Map<String, Integer> retryTracker = new ConcurrentHashMap<>();
-    
+    //Track retry attempts with timestamps for cleanup
+    private static class RetryTrackerEntry {
+        int retryCount;
+        long lastAttemptTime;
+
+        RetryTrackerEntry(int retryCount) {
+            this.retryCount = retryCount;
+            this.lastAttemptTime = System.currentTimeMillis();
+        }
+    }
+
+    private final Map<String, RetryTrackerEntry> retryTracker = new ConcurrentHashMap<>();
+
     // Track exponential backoff delay per partition-offset for temporary exceptions (in-memory)
     private final Map<String, Long> backoffTracker = new ConcurrentHashMap<>();
+
+    // P1 Fix: Track last cleanup time
+    private volatile long lastTrackerCleanupTime = System.currentTimeMillis();
 
     private volatile KafkaConsumer<String, String> consumer;
     private final AtomicBoolean isRunning = new AtomicBoolean(false);
@@ -151,7 +174,7 @@ public class DLQReplayService {
         }
 
         log.info("Starting DLQ replay service for topic: {} with consumer group: {}", dlqTopic, consumerGroupId);
-        
+
         Properties consumerProps = new Properties();
         consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
@@ -171,7 +194,7 @@ public class DLQReplayService {
             @Override
             public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
                 log.warn("Consumer group partitions revoked. Partitions: {}", partitions);
-                
+
                 // Clean up retry tracker and backoff tracker for revoked partitions to prevent memory leak
                 for (TopicPartition partition : partitions) {
                     String partitionPrefix = partition.partition() + "-";
@@ -212,14 +235,14 @@ public class DLQReplayService {
 
         // Start processing in a separate thread
         replayThread = new Thread(this::processMessages, "DLQ-Replay-Thread");
-        replayThread.setDaemon(true);
+        replayThread.setDaemon(false);
         replayThread.start();
 
         log.info("DLQ replay service started successfully");
     }
 
     /**
-     * Gracefully shutdown the DLQ replay service
+     * Gracefully shutdown the DLQ replay service with proper thread join
      */
     @PreDestroy
     public synchronized void shutdown() {
@@ -231,13 +254,43 @@ public class DLQReplayService {
         log.info("Shutting down DLQ replay service...");
         isRunning.set(false);
 
-        // Close consumer - this will trigger final offset commit and leave the consumer group
+        // Step 1: Interrupt the consumer's poll() to wake it up
         if (consumer != null) {
             try {
-                consumer.wakeup(); // Interrupt any ongoing poll()
-                // Give thread time to finish current iteration
-                Thread.sleep(shutdownWaitMs);
-                consumer.close(Duration.ofSeconds(consumerCloseTimeoutSeconds)); // Graceful close with timeout
+                consumer.wakeup();
+                log.info("Sent wakeup signal to Kafka consumer");
+            } catch (Exception e) {
+                log.error("Error sending wakeup to consumer", e);
+            }
+        }
+
+        // Step 2: Wait for the replay thread to finish current work
+        if (replayThread != null && replayThread.isAlive()) {
+            try {
+                // P0 Fix: Calculate appropriate timeout (consumer close timeout + buffer for processing)
+                long shutdownTimeoutMs = TimeUnit.SECONDS.toMillis(shutdownWaitSeconds);
+                log.info("Waiting up to {}ms for replay thread to complete current work...", shutdownTimeoutMs);
+
+                replayThread.join(shutdownTimeoutMs);
+
+                if (replayThread.isAlive()) {
+                    log.error("Replay thread did not terminate within timeout of {}ms! " +
+                                    "Current message processing may be interrupted. Thread state: {}",
+                            shutdownTimeoutMs, replayThread.getState());
+                    // Thread will be forcefully terminated when JVM exits
+                } else {
+                    log.info("Replay thread terminated gracefully");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                log.warn("Interrupted while waiting for replay thread to finish");
+            }
+        }
+
+        // Step 3: Close consumer (thread should be done by now)
+        if (consumer != null) {
+            try {
+                consumer.close(Duration.ofSeconds(consumerCloseTimeoutSeconds));
                 log.info("Kafka consumer closed successfully");
             } catch (Exception e) {
                 log.error("Error closing Kafka consumer during shutdown", e);
@@ -257,144 +310,157 @@ public class DLQReplayService {
         try {
             while (isRunning.get()) {
                 try {
+                    // P1 Fix: Periodic cleanup of stale tracker entries
+                    cleanupStaleTrackersIfNeeded();
+
                     ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(pollTimeoutSeconds));
 
-                if (records.isEmpty()) {
-                    // Log why we got no records
-                    for (TopicPartition partition : consumer.assignment()) {
-                        try {
-                            long currentPosition = consumer.position(partition);
-                            long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
-                            if (currentPosition >= endOffset) {
-                                log.debug("No messages available - Partition {} at end (Position: {}, End: {})",
-                                        partition, currentPosition, endOffset);
-                            } else {
-                                log.info("No messages returned despite availability - Partition {} (Position: {}, End: {}, Available: {})",
-                                        partition, currentPosition, endOffset, endOffset - currentPosition);
+                    if (records.isEmpty()) {
+                        // Log why we got no records
+                        for (TopicPartition partition : consumer.assignment()) {
+                            try {
+                                long currentPosition = consumer.position(partition);
+                                long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
+                                if (currentPosition >= endOffset) {
+                                    log.debug("No messages available - Partition {} at end (Position: {}, End: {})",
+                                            partition, currentPosition, endOffset);
+                                } else {
+                                    log.info("No messages returned despite availability - Partition {} (Position: {}, End: {}, Available: {})",
+                                            partition, currentPosition, endOffset, endOffset - currentPosition);
+                                }
+                            } catch (Exception e) {
+                                log.error("Error checking position after empty poll", e);
                             }
-                        } catch (Exception e) {
-                            log.error("Error checking position after empty poll", e);
                         }
+                        continue;
                     }
-                    continue;
-                }
 
-                log.debug("Received {} DLQ messages to replay", records.count());
+                    log.debug("Received {} DLQ messages to replay", records.count());
 
-                // PAUSE consumption immediately to prevent timeout during processing
-                Set<TopicPartition> pausedPartitions = consumer.assignment();
-                consumer.pause(pausedPartitions);
-                log.info("Paused consumption on partitions: {} to process messages", pausedPartitions);
+                    // PAUSE consumption immediately to prevent timeout during processing
+                    Set<TopicPartition> pausedPartitions = consumer.assignment();
+                    consumer.pause(pausedPartitions);
+                    log.info("Paused consumption on partitions: {} to process messages", pausedPartitions);
 
-                Long failedOffset = null;  // Track if we need to seek back
-                TopicPartition failedPartition = null;
-                
-                try {
-                    // Now process without time pressure - heartbeats continue automatically
-                    for (ConsumerRecord<String, String> record : records) {
-                        String retryKey = record.partition() + "-" + record.offset();
-                        
-                        try {
-                            log.info("Processing DLQ entry at offset: {} from partition: {}",
-                                    record.offset(), record.partition());
+                    Long failedOffset = null;  // Track if we need to seek back
+                    TopicPartition failedPartition = null;
 
-                            long processingStartTime = System.currentTimeMillis();
-                            replayDLQEntry(record.value());
-                            long processingTime = System.currentTimeMillis() - processingStartTime;
+                    try {
+                        // Now process without time pressure - heartbeats continue automatically
+                        for (ConsumerRecord<String, String> record : records) {
+                            String retryKey = record.partition() + "-" + record.offset();
 
-                            processedCount.incrementAndGet();
+                            try {
+                                log.info("Processing DLQ entry at offset: {} from partition: {}",
+                                        record.offset(), record.partition());
 
-                            // Success - remove from retry tracker, reset backoff, and commit offset
-                            retryTracker.remove(retryKey);
-                            resetExponentialBackoff(retryKey);
-                            
-                            Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
-                                    new TopicPartition(record.topic(), record.partition()),
-                                    new OffsetAndMetadata(record.offset() + 1)
-                            );
-                            consumer.commitSync(offsets);
+                                long processingStartTime = System.currentTimeMillis();
+                                replayDLQEntry(record.value());
+                                long processingTime = System.currentTimeMillis() - processingStartTime;
 
-                            log.debug("Successfully replayed DLQ entry (offset: {}, partition: {}) in {}ms",
-                                    record.offset(), record.partition(), processingTime);
+                                processedCount.incrementAndGet();
 
-                        } catch (TemporaryBackendException temporaryBackendException) {
-                            // Treat temporary backend exceptions as transient - will retry with exponential backoff
-                            errorCount.incrementAndGet();
-                            
-                            // Calculate exponential backoff delay
-                            long backoffDelay = calculateExponentialBackoff(retryKey);
-                            
-                            log.warn("Temporary backend exception while replaying DLQ entry (offset: {}, partition: {}). " +
-                                    "Will retry on next poll after {}ms backoff (exponential). STOPPING batch processing to prevent skipping this message. Error: {}",
-                                    record.offset(), record.partition(), backoffDelay, temporaryBackendException.getMessage());
-                            
-                            // Mark for seek-back - consumer position has already advanced past this offset
-                            failedOffset = record.offset();
-                            failedPartition = new TopicPartition(record.topic(), record.partition());
-                            
-                            Thread.sleep(backoffDelay);
-                            break;
-                        } catch (Exception e) {
-                            errorCount.incrementAndGet();
-                            
-                            // Track retry attempts for this specific offset (in-memory)
-                            int retryCount = retryTracker.getOrDefault(retryKey, 0) + 1;
-                            retryTracker.put(retryKey, retryCount);
-                            
-                            if (retryCount >= maxRetries) {
-                                // Poison pill detected - skip this message to unblock the partition
-                                log.error("DLQ entry at offset {} partition {} failed {} times (max retries reached). " +
-                                        "SKIPPING this message to prevent partition blockage. Error: {}",
-                                        record.offset(), record.partition(), retryCount, e.getMessage(), e);
-                                
-                                skippedCount.incrementAndGet();
+                                // Success - remove from retry tracker, reset backoff, and commit offset
                                 retryTracker.remove(retryKey);
-                                
-                                // Commit offset to move past poison pill
+                                resetExponentialBackoff(retryKey);
+
                                 Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
                                         new TopicPartition(record.topic(), record.partition()),
                                         new OffsetAndMetadata(record.offset() + 1)
                                 );
-                                try {
-                                    consumer.commitSync(offsets);
-                                    log.warn("Committed offset {} to skip poison pill", record.offset() + 1);
-                                } catch (Exception commitEx) {
-                                    log.error("Failed to commit offset after skipping poison pill", commitEx);
-                                }
-                                // Continue to next record after skipping poison pill
-                            } else {
-                                // Will retry this message on next poll - don't commit offset
-                                log.warn("Failed to replay DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
-                                        "STOPPING batch processing to prevent skipping this message. Will retry on next poll. Error: {}",
-                                        record.offset(), record.partition(), retryCount, maxRetries, e.getMessage());
-                                
+                                consumer.commitSync(offsets);
+
+                                log.debug("Successfully replayed DLQ entry (offset: {}, partition: {}) in {}ms",
+                                        record.offset(), record.partition(), processingTime);
+
+                            } catch (TemporaryBackendException temporaryBackendException) {
+                                // Treat temporary backend exceptions as transient - will retry with exponential backoff
+                                errorCount.incrementAndGet();
+
+                                // Calculate exponential backoff delay
+                                long backoffDelay = calculateExponentialBackoff(retryKey);
+
+                                log.warn("Temporary backend exception while replaying DLQ entry (offset: {}, partition: {}). " +
+                                                "Will retry on next poll after {}ms backoff (exponential). STOPPING batch processing to prevent skipping this message. Error: {}",
+                                        record.offset(), record.partition(), backoffDelay, temporaryBackendException.getMessage());
+
                                 // Mark for seek-back - consumer position has already advanced past this offset
                                 failedOffset = record.offset();
                                 failedPartition = new TopicPartition(record.topic(), record.partition());
-                                
+
+                                Thread.sleep(backoffDelay);
                                 break;
+                            } catch (Exception e) {
+                                errorCount.incrementAndGet();
+
+                                //Track retry attempts with timestamp for this specific offset
+                                RetryTrackerEntry entry = retryTracker.get(retryKey);
+                                int retryCount;
+                                if (entry == null) {
+                                    retryCount = 1;
+                                    retryTracker.put(retryKey, new RetryTrackerEntry(retryCount));
+                                } else {
+                                    retryCount = entry.retryCount + 1;
+                                    entry.retryCount = retryCount;
+                                    entry.lastAttemptTime = System.currentTimeMillis();
+                                }
+
+                                if (retryCount >= maxRetries) {
+                                    //Clean up both trackers for poison pill
+                                    log.error("DLQ entry at offset {} partition {} failed {} times (max retries reached). " +
+                                                    "SKIPPING this message to prevent partition blockage. Error: {}",
+                                            record.offset(), record.partition(), retryCount, e.getMessage(), e);
+
+                                    skippedCount.incrementAndGet();
+                                    retryTracker.remove(retryKey);
+                                    resetExponentialBackoff(retryKey); // P0 Fix: Clean up backoff tracker too
+
+                                    // Commit offset to move past poison pill
+                                    Map<TopicPartition, OffsetAndMetadata> offsets = Collections.singletonMap(
+                                            new TopicPartition(record.topic(), record.partition()),
+                                            new OffsetAndMetadata(record.offset() + 1)
+                                    );
+                                    try {
+                                        consumer.commitSync(offsets);
+                                        log.warn("Committed offset {} to skip poison pill", record.offset() + 1);
+                                    } catch (Exception commitEx) {
+                                        log.error("Failed to commit offset after skipping poison pill", commitEx);
+                                    }
+                                    // Continue to next record after skipping poison pill
+                                } else {
+                                    //Add delay before retrying to avoid tight retry loop
+                                    log.warn("Failed to replay DLQ entry (offset: {}, partition: {}). Retry {}/{}. " +
+                                                    "STOPPING batch processing to prevent skipping this message. Will retry on next poll after {}ms delay. Error: {}",
+                                            record.offset(), record.partition(), retryCount, maxRetries, retryDelayMs, e.getMessage());
+
+                                    // Mark for seek-back - consumer position has already advanced past this offset
+                                    failedOffset = record.offset();
+                                    failedPartition = new TopicPartition(record.topic(), record.partition());
+
+                                    //Sleep before breaking to avoid tight retry loop
+                                    Thread.sleep(retryDelayMs);
+                                    break;
+                                }
                             }
                         }
-                    }
-                } finally {
-                    // CRITICAL: Seek back to failed offset before resuming
-                    // The consumer's position advances when records are polled, not when committed
-                    // We need to rewind to retry the failed message
-                    if (failedOffset != null && failedPartition != null) {
-                        try {
-                            consumer.seek(failedPartition, failedOffset);
-                            log.info("Seeked back to offset {} on partition {} to retry failed message",
-                                    failedOffset, failedPartition);
-                        } catch (Exception seekEx) {
-                            log.error("Failed to seek back to offset {} on partition {}. Message may be skipped!",
-                                    failedOffset, failedPartition, seekEx);
+                    } finally {
+                        // The consumer's position advances when records are polled, not when committed
+                        // We need to rewind to retry the failed message
+                        if (failedOffset != null && failedPartition != null) {
+                            try {
+                                consumer.seek(failedPartition, failedOffset);
+                                log.info("Seeked back to offset {} on partition {} to retry failed message",
+                                        failedOffset, failedPartition);
+                            } catch (Exception seekEx) {
+                                log.error("Failed to seek back to offset {} on partition {}. Message may be skipped!",
+                                        failedOffset, failedPartition, seekEx);
+                            }
                         }
+
+                        // RESUME consumption - always do this even if processing failed
+                        consumer.resume(pausedPartitions);
+                        log.info("Resumed consumption on partitions: {}", pausedPartitions);
                     }
-                    
-                    // RESUME consumption - always do this even if processing failed
-                    consumer.resume(pausedPartitions);
-                    log.info("Resumed consumption on partitions: {}", pausedPartitions);
-                }
 
                 } catch (WakeupException e) {
                     // Expected during shutdown - exit gracefully
@@ -418,13 +484,50 @@ public class DLQReplayService {
         } finally {
             boolean wasRunning = isRunning.get();
             isRunning.set(false);
-            
+
             if (wasRunning && !isHealthy.get()) {
                 log.error("DLQ replay thread terminated unexpectedly! Service is unhealthy. Pod should be restarted.");
             }
-            
+
             log.info("DLQ replay thread finished. Total processed: {}, Total errors: {}, Total skipped: {}",
                     processedCount.get(), errorCount.get(), skippedCount.get());
+        }
+    }
+
+    /**
+     * P1 Fix: Periodic cleanup of stale tracker entries to prevent memory leak
+     */
+    private void cleanupStaleTrackersIfNeeded() {
+        long currentTime = System.currentTimeMillis();
+        if (currentTime - lastTrackerCleanupTime > trackerCleanupIntervalMs) {
+            int retryTrackerSizeBefore = retryTracker.size();
+            int backoffTrackerSizeBefore = backoffTracker.size();
+
+            long cutoffTime = currentTime - trackerMaxAgeMs;
+
+            // Clean up stale retry tracker entries
+            retryTracker.entrySet().removeIf(entry -> entry.getValue().lastAttemptTime < cutoffTime);
+
+            // Clean up stale backoff tracker entries (we don't have timestamps, so this is best-effort)
+            // In practice, backoff entries get cleaned on success or poison pill, so this is just safety net
+            if (backoffTracker.size() > retryTracker.size() * 2) {
+                log.warn("Backoff tracker size ({}) is much larger than retry tracker size ({}), clearing orphaned entries",
+                        backoffTracker.size(), retryTracker.size());
+                // Keep only entries that have corresponding retry tracker entries
+                Set<String> activeRetryKeys = retryTracker.keySet();
+                backoffTracker.keySet().removeIf(key -> !activeRetryKeys.contains(key));
+            }
+
+            int retryTrackerCleaned = retryTrackerSizeBefore - retryTracker.size();
+            int backoffTrackerCleaned = backoffTrackerSizeBefore - backoffTracker.size();
+
+            if (retryTrackerCleaned > 0 || backoffTrackerCleaned > 0) {
+                log.info("Cleaned up stale tracker entries: retry tracker {} -> {} (removed {}), backoff tracker {} -> {} (removed {})",
+                        retryTrackerSizeBefore, retryTracker.size(), retryTrackerCleaned,
+                        backoffTrackerSizeBefore, backoffTracker.size(), backoffTrackerCleaned);
+            }
+
+            lastTrackerCleanupTime = currentTime;
         }
     }
 
@@ -435,7 +538,7 @@ public class DLQReplayService {
         long startTime = System.currentTimeMillis();
         StandardJanusGraphTx standardJanusGraphTx = null;
         BaseTransaction replayTx = null;
-        
+
         try {
             DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
             log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
@@ -450,8 +553,11 @@ public class DLQReplayService {
             Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry, keyInfo.get(INDEX_NAME));
             log.info("Completed mutation reconstruction in {}ms", System.currentTimeMillis() - startTime);
 
+
+            log.info("JanusGraph transaction committed (metadata lookup)");
+
             // Create a new transaction for replay
-            log.info("Beginning transaction for index: {}", entry.getIndexName());
+            log.info("Beginning ES transaction for index: {}", entry.getIndexName());
             replayTx = esIndex.beginTransaction(
                     new StandardBaseTransactionConfig.Builder().commitTime(Instant.now()).build()
             );
@@ -464,14 +570,14 @@ public class DLQReplayService {
 
             log.info("ES mutation completed in {}ms, committing ES transaction", System.currentTimeMillis() - mutateStartTime);
             long commitStartTime = System.currentTimeMillis();
-
-            replayTx.commit();
-            log.info("ES transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
-            
-            // Only commit JanusGraph transaction if ES mutation succeeded
+            // Commit JanusGraph transaction BEFORE ES mutation to ensure read-only metadata lookup is complete
+            // This way if ES mutation fails, we only rollback ES, not the metadata lookup
             standardJanusGraphTx.commit();
-            log.info("JanusGraph transaction committed successfully");
-            
+            standardJanusGraphTx = null; // Mark as committed so we don't rollback in catch block
+            replayTx.commit();
+            replayTx = null; // Mark as committed so we don't rollback in catch block
+            log.info("ES transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
+
             long totalTime = System.currentTimeMillis() - startTime;
             log.info("Successfully replayed mutation for index: {}. Total time: {}ms", entry.getIndexName(), totalTime);
 
@@ -506,7 +612,7 @@ public class DLQReplayService {
                 log.error("Failed to rollback ES transaction", rollbackException);
             }
         }
-        
+
         // Rollback JanusGraph transaction (don't commit on failure!)
         if (standardJanusGraphTx != null) {
             try {
@@ -570,13 +676,13 @@ public class DLQReplayService {
     private long calculateExponentialBackoff(String retryKey) {
         long currentDelay = backoffTracker.getOrDefault(retryKey, (long) exponentialBackoffBaseDelayMs);
         long nextDelay = (long) (currentDelay * exponentialBackoffMultiplier);
-        
+
         // Cap at maximum delay
         nextDelay = Math.min(nextDelay, exponentialBackoffMaxDelayMs);
-        
+
         // Store for next time
         backoffTracker.put(retryKey, nextDelay);
-        
+
         return currentDelay; // Return current delay, store next delay for future use
     }
 
@@ -614,14 +720,14 @@ public class DLQReplayService {
         status.put("maxRetries", maxRetries);
         status.put("activeRetries", retryTracker.size());
         status.put("activeBackoffs", backoffTracker.size());
-        
+
         // Exponential backoff configuration
         Map<String, Object> backoffConfig = new HashMap<>();
         backoffConfig.put("baseDelayMs", exponentialBackoffBaseDelayMs);
         backoffConfig.put("maxDelayMs", exponentialBackoffMaxDelayMs);
         backoffConfig.put("multiplier", exponentialBackoffMultiplier);
         status.put("exponentialBackoffConfig", backoffConfig);
-        
+
         return status;
     }
 
