@@ -4271,12 +4271,8 @@ public class EntityGraphMapper {
             if (isArrayOfPrimitiveType || isArrayOfEnum) {
                 vertex.removeProperty(vertexPropertyName);
                 if (CollectionUtils.isNotEmpty(allValues)) {
-                    if(vertexPropertyName.equals("policyResources")){
-                        AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
-                    } else {
-                        for (Object value : allValues) {
-                            AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
-                        }
+                    for (Object value: allValues) {
+                        AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
                 }
             } else {
