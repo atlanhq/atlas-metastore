@@ -43,7 +43,6 @@ We truncate at 63 chars because some Kubernetes name fields are limited to this 
 {{- end -}}
 {{- end -}}
 
-<<<<<<< HEAD
 {{/*
 Return a comma-separated list of node endpoints.
 For isolated deployments, uses master replicas count.
@@ -52,11 +51,6 @@ For non-isolated deployments, uses standard replica count.
 {{- define "elasticsearch.endpoints" -}}
   {{- $replicas := int (toString (.Values.replicas)) -}}
   {{- $uname := printf "%s-%s" .Values.clusterName .Values.nodeGroup -}}
-=======
-{{- define "elasticsearch.endpoints" -}}
-{{- $replicas := int (toString (.Values.replicas)) }}
-{{- $uname := printf "%s-%s" .Values.clusterName .Values.nodeGroup }}
->>>>>>> master
   {{- range $i, $e := untilStep 0 $replicas 1 -}}
 {{ $uname }}-{{ $i }},
   {{- end -}}

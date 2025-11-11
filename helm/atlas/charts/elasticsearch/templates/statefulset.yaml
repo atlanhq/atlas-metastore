@@ -75,11 +75,7 @@ spec:
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
-<<<<<<< HEAD
         {{- toYaml . | nindent 8 }}
-=======
-{{ toYaml . | indent 8 }}
->>>>>>> master
       {{- end }}
       {{- if or (eq .Values.antiAffinity "hard") (eq .Values.antiAffinity "soft") .Values.nodeAffinity }}
       {{- if .Values.priorityClassName }}
@@ -134,18 +130,8 @@ spec:
                 {{- end }}
             {{- end }}
           {{- else }}
-<<<<<<< HEAD
           preferredDuringSchedulingIgnoredDuringExecution:
             {{- toYaml .Values.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
-=======
-          {{- if eq .Values.global.Deployment_Type "Development" }}
-          preferredDuringSchedulingIgnoredDuringExecution:
-            {{- toYaml .Values.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
-          {{- else }}
-          requiredDuringSchedulingIgnoredDuringExecution:
-            {{- toYaml .Values.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 12 }}
-          {{- end }}
->>>>>>> master
           {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriod }}
       volumes:
@@ -341,11 +327,7 @@ spec:
           - name: network.host
             value: "{{ .Values.networkHost }}"
           - name: ES_JAVA_OPTS
-<<<<<<< HEAD
             value: {{ .Values.esJavaOpts }}
-=======
-            value: {{ .Values.esJavaOpts | quote }}
->>>>>>> master
           {{- range $role, $enabled := .Values.roles }}
           - name: node.{{ $role }}
             value: "{{ $enabled }}"
@@ -464,8 +446,4 @@ spec:
       {{- else }}
 {{ toYaml .Values.extraContainers | indent 6 }}
       {{- end }}
-<<<<<<< HEAD
       {{- end }}
-=======
-      {{- end }}
->>>>>>> master

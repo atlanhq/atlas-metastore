@@ -29,8 +29,4 @@ spec:
   internalTrafficPolicy: Cluster
   ipFamilyPolicy: SingleStack
   sessionAffinity: None
-<<<<<<< HEAD
 {{- end }}
-=======
-{{- end }}
->>>>>>> master

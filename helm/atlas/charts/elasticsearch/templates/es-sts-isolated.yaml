@@ -19,11 +19,7 @@ metadata:
     {{ $key }}: {{ $value | quote }}
     {{- end }}
 spec:
-<<<<<<< HEAD
   serviceName: {{ $.Values.esClusterName }}-{{ $nodeName }}-headless
-=======
-  serviceName: {{ $.Values.esClusterName }}-{{ $nodeName }}
->>>>>>> master
   selector:
     matchLabels:
       app: {{ $.Values.esClusterName }}-{{ $nodeName }}
@@ -122,7 +118,6 @@ spec:
           - name: cluster.max_shards_per_node
             value: {{ $.Values.maxShardsPerNode | quote }}
           - name: ES_JAVA_OPTS
-<<<<<<< HEAD
             value: {{- if eq $tierType "Enterprise" }}
                    {{ index $.Values.isolation.esJavaOpts $nodeName }}
                  {{- else if eq $tierType "Basic" }}
@@ -132,9 +127,6 @@ spec:
                  {{- else }}
                    {{ index $.Values.isolation.esJavaOpts $nodeName }}
                  {{- end }}
-=======
-            value: {{ index $.Values.isolation.esJavaOpts $nodeName }}
->>>>>>> master
           {{- if $.Values.extraEnvs }}
 {{ toYaml $.Values.extraEnvs | indent 10 }}
           {{- end }}
@@ -195,15 +187,9 @@ spec:
       nodeSelector:
 {{ toYaml . | indent 8 }}
       {{- end }}
-<<<<<<< HEAD
       {{- with .Values.tolerations }}
       tolerations:
 {{ toYaml . | indent 6 }}
-=======
-      {{- with $.Values.tolerations }}
-      tolerations:
-{{ toYaml . | indent 8 }}
->>>>>>> master
       {{- end }}
       {{- if or (eq $.Values.antiAffinity "hard") (eq $.Values.antiAffinity "soft") }}
       affinity:

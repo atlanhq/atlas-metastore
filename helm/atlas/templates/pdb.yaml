@@ -20,8 +20,4 @@ spec:
     matchLabels:
       app: {{ template "name" . }}
       release: {{ .Release.Name }}
-<<<<<<< HEAD
 {{- end }}
-=======
-{{- end }}
->>>>>>> master

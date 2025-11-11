@@ -11,12 +11,6 @@ metadata:
     {{- else if eq .Values.global.cloud "azure" }}
     konghq.com/path: /api/atlas/v2/
     konghq.com/plugins: svc-rate-limit
-<<<<<<< HEAD
-=======
-    {{- else if eq .Values.albTenant false }}
-    konghq.com/path: /api/atlas/v2/
-    konghq.com/plugins: svc-rate-limit
->>>>>>> master
     {{- end }}
   labels:
     app: {{ template "name" . }}

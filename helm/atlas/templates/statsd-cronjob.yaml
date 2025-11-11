@@ -22,7 +22,6 @@ spec:
     spec:
       template:
         spec:
-<<<<<<< HEAD
           tolerations:
           - key: "kubernetes.azure.com/scalesetpriority"
             operator: "Equal"
@@ -41,8 +40,6 @@ spec:
           nodeSelector:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-=======
->>>>>>> master
           {{- if .Values.atlas.imagePullSecrets }}
           imagePullSecrets:
           {{- toYaml .Values.atlas.imagePullSecrets | nindent 12 }}

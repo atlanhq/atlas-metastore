@@ -37,7 +37,6 @@ spec:
     - host: {{ tpl . $}}
       http:
         paths:
-<<<<<<< HEAD
           - backend:
               service:
                 name: redirect-to-home
@@ -45,8 +44,6 @@ spec:
                   name: use-annotation
             path: /api/meta/admin/
             pathType: Prefix
-=======
->>>>>>> master
 {{- if $extraPaths }}
 {{ toYaml $extraPaths | indent 10 }}
 {{- end }}
