@@ -158,8 +158,6 @@ public class DLQReplayService {
         consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
-        // Use "latest" to avoid reprocessing all historical messages if consumer group state is lost
-        // On first startup with no committed offsets, will only process new DLQ entries
         consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
 
         // Optimized settings for long-running message processing with pause/resume pattern
