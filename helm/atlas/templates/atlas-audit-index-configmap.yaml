@@ -124,9 +124,12 @@ data:
                         "all"
                     ]
                 },
+<<<<<<< HEAD
                 "reqEntityGuid": {
                     "type": "keyword"
                 },
+=======
+>>>>>>> master
                 "resType": {
                     "type": "keyword"
                 },

@@ -83,6 +83,7 @@ data:
               </filter>
           </appender>
 
+<<<<<<< HEAD
           <appender name="consoleAuthAuditExternal" class="ch.qos.logback.core.ConsoleAppender">
               <param name="Target" value="System.out"/>
               <filter class="org.apache.atlas.web.filters.MDCFilter">
@@ -97,6 +98,8 @@ data:
               </filter>
           </appender>
 
+=======
+>>>>>>> master
           <appender name="consoleAtlas" class="ch.qos.logback.core.ConsoleAppender">
               <param name="Target" value="System.out"/>
               <filter class="org.apache.atlas.web.filters.MDCFilter">
@@ -188,10 +191,13 @@ data:
               <appender-ref ref="OpenTelemetry"/>
           </logger>
 
+<<<<<<< HEAD
           <logger name="AUTH_AUDIT_EXTERNAL" additivity="false" level="info">
               <appender-ref ref="consoleAuthAuditExternal"/>
           </logger>
 
+=======
+>>>>>>> master
           <!-- Authz loggers End -->
 
           <logger name="org.apache.atlas.perf" additivity="false" level="debug">

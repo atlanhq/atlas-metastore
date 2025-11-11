@@ -169,7 +169,11 @@ data:
 
     atlas.notification.create.topics=true
     atlas.notification.replicas=3
+<<<<<<< HEAD
     atlas.notification.topics=ATLAS_HOOK,ATLAS_ENTITIES,ATLAS_RELATIONSHIPS
+=======
+    atlas.notification.topics=ATLAS_HOOK,ATLAS_ENTITIES
+>>>>>>> master
     atlas.notification.log.failed.messages=true
     atlas.notification.failed.messages.filename=atlas_hook_failed_messages.log
     atlas.notification.consumer.retry.interval=3000
@@ -280,6 +284,7 @@ data:
 
     ######### Atlas Authorization #########
     #atlas.authorizer.impl=none
+<<<<<<< HEAD
     #atlas.authorizer.impl=ranger
 
     {{- if eq .Values.atlas_auth false }}
@@ -293,6 +298,19 @@ data:
     atlas.authorizer.enable.delta_based_refresh={{ .Values.atlas.authorizer.enable_delta_based_refresh }}
     atlas.authorizer.enable.abac={{ .Values.atlas.authorizer.enable_abac }}
     atlas.authorizer.read_restriction_level={{ .Values.atlas.authorizer.read_restriction_level }}
+=======
+
+    {{- if eq .Values.atlas_auth true }}
+    atlas.authorizer.impl=atlas
+    {{- else }}
+    atlas.authorizer.impl=org.apache.ranger.authorization.atlas.authorizer.RangerAtlasAuthorizer
+    {{- end }}
+
+    atlas.authorizer.enable.delta_based_refresh={{ .Values.atlas.authorizer.enable_delta_based_refresh }}
+    atlas.authorizer.enable.abac={{ .Values.atlas.authorizer.enable_abac }}
+
+    #atlas.authorizer.simple.authz.policy.file=atlas-simple-authz-policy.json
+>>>>>>> master
     
     ######### Atlas User service #########
     atlas.user-service-url=http://heracles-service.heracles.svc.cluster.local
@@ -313,11 +331,19 @@ data:
     atlas.graph.cache.db-cache=true
     atlas.graph.metrics.merge-stores=false
     atlas.graph.cache.cache-type=redis
+<<<<<<< HEAD
     atlas.graph.cache.db-cache-expiry-time=1800000
     atlas.graph.cache.cache-keyspace-prefix=atlas
     atlas.graph.cache.redis-db-id=1
     atlas.graph.cache.redis-client-name=atlas-metastore
     atlas.graph.cache.redis-cache-size=10000
+=======
+    atlas.graph.cache.db-cache-expiry-time=86400000
+    atlas.graph.cache.cache-keyspace-prefix=atlas
+    atlas.graph.cache.redis-db-id=1
+    atlas.graph.cache.redis-client-name=atlas-metastore
+    atlas.graph.cache.redis-cache-size=100000
+>>>>>>> master
     atlas.graph.cache.redis-cache-server-mode=sentinel
     atlas.graph.cache.redis-cache-server-url=redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
     atlas.graph.cache.redis-cache-sentinel-urls={{ .Values.atlas.redis.sentinel_urls }}
@@ -326,8 +352,11 @@ data:
     atlas.graph.cache.redis-cache-password={{ .Values.atlas.redis.password }}
     atlas.graph.cache.redis-cache-mastername={{ .Values.atlas.redis.master_name }}
     atlas.graph.cache.redis-cache-connectTimeout=2000
+<<<<<<< HEAD
     {{- else }}
     atlas.graph.cache.db-cache=false
+=======
+>>>>>>> master
     {{- end }}
 
     atlas.webserver.minthreads=40
@@ -432,6 +461,10 @@ data:
     
     atlas.tasks.enabled = true
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> master
     ########## Ranger Credentials
 
     atlas.ranger.username = admin
@@ -457,8 +490,14 @@ data:
     
     # valid uri patterns to collect metrics
     atlas.metrics.uri_patterns=/api/(meta|atlas/v2)/glossary/terms/[^/]+/assignedEntities,/api/(meta|atlas/v2)/lineage/[^/]+,/api/(meta|atlas/v2)/lineage/list,/api/(meta|atlas/v2)/entity/accessors,/api/(meta|atlas/v2)/entity/auditSearch,/api/(meta|atlas/v2)/entity/bulk,/api/(meta|atlas/v2)/entity/bulk/setClassifications,/api/(meta|atlas/v2)/entity/bulk/uniqueAttribute,/api/(meta|atlas/v2)/entity/evaluator,/api/(meta|atlas/v2)/entity/guid/[^/]+,/api/(meta|atlas/v2)/entity/guid/[^/]+/businessmetadata,/api/(meta|atlas/v2)/entity/uniqueAttribute/type/[^/]+,/api/(meta|atlas/v2)/search/indexsearch,/api/(meta|atlas/v2)/entity/repairhaslineage,/api/(meta|atlas/v2)/types/typedef/name/[^/]+,/api/(meta|atlas/v2)/types/typedefs,/api/atlas/admin/metrics/prometheus,/api/atlas/admin/pushMetricsToStatsd,/api/atlas/v2/auth/download/policies/[^/]+,/api/atlas/v2/auth/download/roles/[^/]+,/api/atlas/v2/auth/download/users/[^/]+,/api/meta/entity/uniqueAttribute/type/[^/]+,/auth/admin/realms/[^/]+/admin-events,/auth/admin/realms/[^/]+/admin-events,/auth/admin/realms/[^/]+/events,/auth/admin/realms/[^/]+/events,/auth/admin/realms/[^/]+/groups,/auth/admin/realms/[^/]+/groups/[^/]+/role-mappings/realm,/auth/admin/realms/[^/]+/roles,/auth/admin/realms/[^/]+/roles-by-id/[^/]+,/auth/admin/realms/[^/]+/roles/[^/]+,/auth/admin/realms/[^/]+/roles/[^/]+/composites,/auth/admin/realms/[^/]+/roles/[^/]+/groups,/auth/admin/realms/[^/]+/roles/[^/]+/users,/auth/admin/realms/[^/]+/users,/auth/admin/realms/[^/]+/users/[^/]+/groups,/auth/admin/realms/[^/]+/users/[^/]+/role-mappings/realm,/auth/realms/[^/]+/protocol/openid-connect/token,/auth/realms/[^/]+/protocol/openid-connect/token/introspect,/users/mappings,/roles/mappings,/api/(meta|atlas/v2)/business-policy/[^/]+/unlink-business-policy,/api/(meta|atlas/v2)/business-policy/link-business-policy,/api/(meta|atlas/v2)/direct/search,/api/(meta|atlas/v2)/attribute/update
+<<<<<<< HEAD
     atlas.metrics.method_level.enable=true
     atlas.metrics.method_patterns=policiesPrefetchFailed,mapVertexToAtlasEntityHeaderWithoutPrefetch,load,elasticSearchQuery,mapVertexToAtlasEntityHeaderWithPrefetch,elasticQueryTimeout,getAllClassifications,scrubSearchResults,getAdjacentEdgesByLabel,preCreateOrUpdate,createOrUpdate,mapAttributes,graphCommit,getAtlasLineageInfo,getLineageInfoOnDemand,getLineageListInfoOnDemand,repairHasLineageForAssetGetById,repairHasLineageForAssetGetRelations,repairHasLineageForRequiredAsset,repairHasLineage,updateClassificationText.getAndCacheEntity,updateClassificationText.toAtlasEntity,processTermAssignments,verifyAccess,getRelationshipEdge,hasEdges,getEdgeBetweenVertices,elasticSearchTaskMismatch
+=======
+    
+    atlas.metrics.method_level.enable=true
+    atlas.metrics.method_patterns=policiesPrefetchFailed,mapVertexToAtlasEntityHeaderWithoutPrefetch,mapVertexToAtlasEntityHeaderWithPrefetch,processTermAssignments,elasticSearchQuery,mapVertexToAtlasEntityHeader,elasticQueryTimeout,getAllClassifications,scrubSearchResults,getAdjacentEdgesByLabel,preCreateOrUpdate,createOrUpdate,mapAttributes,graphCommit,getAtlasLineageInfo,getLineageInfoOnDemand,getLineageListInfoOnDemand,repairHasLineageForAssetGetById,repairHasLineageForAssetGetRelations,repairHasLineageForRequiredAsset,repairHasLineage,getRelationshipEdge,hasEdges,getEdgeBetweenVertices,removeHasLineageOnDelete,resetHasLineageOnInputOutputDelete,updateAssetHasLineageStatus,isAccessAllowed,findDuplicatePendingTasksV2
+>>>>>>> master
     {{ if .Values.atlas.janusgraph.atomic_mutation }}
     ### Atomic batch related configs ###
     atlas.graph.storage.cql.atomic-batch-mutate={{ .Values.atlas.janusgraph.atomic_mutation }}
@@ -466,6 +505,7 @@ data:
     {{ end }}
 
     ######### Canary-Release #########
+<<<<<<< HEAD
     atlas.canary.keycloak.token-introspection = {{ .Values.atlas.keycloak.token_introspection}}
     atlas.keycloak.introspection.use.cache = {{ .Values.atlas.keycloak.introspection_cache }}
     atlas.keycloak.admin.resource-pagination-size = {{ .Values.atlas.keycloak.resource_pagination_size}}
@@ -474,6 +514,10 @@ data:
     {{- if eq .Values.override_auth_policies true }}
     atlas.authorizer.policy.override=true
     {{- end }}
+=======
+    atlas.canary.keycloak.token-introspection = true
+    atlas.keycloak.introspection.use.cache = true
+>>>>>>> master
 
     ######### Atlas Maintenance Mode #########
     atlas.maintenance.mode={{ .Values.atlas.maintenanceMode }}
@@ -487,6 +531,7 @@ data:
     atlas.indexsearch.request.isolation.enable={{ .Values.atlas.indexsearch.enable_request_isolation }}
     atlas.indexsearch.enable.janus.optimization.for.relationship={{ .Values.atlas.indexsearch.enable_janus_optimization_for_relationship }}
     atlas.indexsearch.enable.janus.optimization.extended={{ .Values.atlas.indexsearch.enable_janus_optimization_extended }}
+<<<<<<< HEAD
 
     ######### Atlas Bulk API configs #########
     atlas.bulk.api.max.entities.allowed={{ .Values.atlas.bulk.max_entities_allowed }}
@@ -495,6 +540,17 @@ data:
      ######### Atlas Lineage configs #########
     atlas.lineage.optimised.calculation={{ .Values.atlas.lineage.optimised_calculation }}
     atlas.lineage.enable.connection.lineage={{ .Values.atlas.lineage.enable_connection_lineage }}
+=======
+    atlas.indexsearch.enable.janus.optimization.for.classifications={{ .Values.atlas.indexsearch.enable_janus_optimization_for_classifications }}
+    atlas.jg.super.vertex.min.edge.count={{ .Values.atlas.jg.super.vertex.min.edge.count }}
+    
+    ######### Atlas Bulk API configs #########
+    atlas.bulk.api.max.entities.allowed={{ .Values.atlas.bulk.max_entities_allowed }}
+    
+    ######### Atlas Lineage configs #########
+    atlas.lineage.optimised.calculation={{ .Values.atlas.lineage.optimised_calculation }}
+
+>>>>>>> master
     ######### Atlas Distributed Task configs #########
     atlas.distributed.task.enabled={{ .Values.atlas.distributed_task.enabled }}
     {{- if eq .Values.atlas.distributed_task.enabled true }}
@@ -502,6 +558,13 @@ data:
     atlas.relationship.cleanup.supported.relationship.labels={{ .Values.atlas.distributed_task.cleanup_supported_relationship_labels }}
     {{- end }}
     
+<<<<<<< HEAD
     ######### Atlas Typedefs update configs #########
     atlas.types.update.async.enable={{ .Values.atlas.types_update.async_enable }}
     atlas.types.update.thread.count={{ .Values.atlas.types_update.thread_count }}
+=======
+         ######### Atlas Typedefs update configs #########
+    atlas.types.update.async.enable={{ .Values.atlas.types_update.async_enable }}
+    atlas.types.update.thread.count={{ .Values.atlas.types_update.thread_count }}
+
+>>>>>>> master

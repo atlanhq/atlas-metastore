@@ -22,15 +22,21 @@ metadata:
 spec:
   type: {{ .Values.service.type }}
   selector:
+<<<<<<< HEAD
   {{- if and .Values.isolation.enabled .Values.enable_request_isolation }}
     app: {{ $.Values.esClusterName }}-master
     role: master
   {{- else }}
+=======
+>>>>>>> master
     heritage: {{ .Release.Service | quote }}
     release: {{ .Release.Name | quote }}
     chart: "{{ .Chart.Name }}"
     app: "{{ template "elasticsearch.uname" . }}"
+<<<<<<< HEAD
   {{- end }}
+=======
+>>>>>>> master
   ports:
   - name: {{ .Values.service.httpPortName | default "http" }}
     protocol: TCP
@@ -71,12 +77,16 @@ spec:
   # Create endpoints also if the related pod isn't ready
   publishNotReadyAddresses: true
   selector:
+<<<<<<< HEAD
   {{- if and .Values.isolation.enabled .Values.enable_request_isolation }}
     app: {{ $.Values.esClusterName }}-master
     role: master
   {{- else }}
     app: "{{ template "elasticsearch.uname" . }}"
   {{- end }}
+=======
+    app: "{{ template "elasticsearch.uname" . }}"
+>>>>>>> master
   ports:
   - name: {{ .Values.service.httpPortName | default "http" }}
     port: {{ .Values.httpPort }}

@@ -1,4 +1,8 @@
 {{- if .Values.atlas.ingress.enabled -}}
+<<<<<<< HEAD
+=======
+{{- if eq .Values.atlas.Deployment_Type "Development" -}}
+>>>>>>> master
 {{- $ingressApiIsStable := eq (include "atlas.ingress.isStable" .) "true" -}}
 {{- $ingressSupportsIngressClassName := eq (include "atlas.ingress.supportsIngressClassName" .) "true" -}}
 {{- $ingressSupportsPathType := eq (include "atlas.ingress.supportsPathType" .) "true" -}}
@@ -77,3 +81,7 @@ spec:
             {{- end }}
   {{- end -}}
 {{- end }}
+<<<<<<< HEAD
+=======
+{{- end }}
+>>>>>>> master

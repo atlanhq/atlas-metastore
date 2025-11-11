@@ -17,6 +17,7 @@ data:
 
     echo "[+] Copying Config File"
     cp /tmp/configfile/atlas-application.properties /tmp/newconfigfile/atlas-application.properties
+<<<<<<< HEAD
 
     echo "[+] Checking for Redis availability"
     ATLAS_REDIS_URL=$(grep "atlas.redis." /tmp/newconfigfile/atlas-application.properties | tr -d ' ' | awk -F '=' '$1 == "atlas.redis.url" {print $2}')
@@ -43,6 +44,9 @@ data:
         exit 1
     fi
 
+=======
+    
+>>>>>>> master
     echo "[+] Checking for Keycloak"
     until printf "." && curl -s $KEYCLOAK_ADDRESS/realms/master; do
       sleep 2;
