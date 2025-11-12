@@ -276,7 +276,7 @@ jobs:
 
       - name: Run Integration Tests
         id: integration_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'mlh-1618-staging'
         continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions
