@@ -4297,6 +4297,7 @@ public class EntityGraphMapper {
                                 valuesToRemove.size(), valuesToRemove, valuesToAdd.size(), valuesToAdd);
                     }
                 } else {
+                    vertex.removeProperty(vertexPropertyName);
                     for (Object value : allValues) {
                         AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
