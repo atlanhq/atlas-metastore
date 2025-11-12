@@ -80,10 +80,9 @@ public class RequestContext {
 
     private final Map<String, Set<AtlasRelationship>> relationshipMutationMap = new HashMap<>();
     private final Set<String> edgeLabels = new HashSet<>();
-
+    
     // Observability timing fields
-    private long lineageCalcTime               = 0L;
-    private long arrayElementsPropertyRunTime = 0L;
+    private long lineageCalcTime = 0L;
 
     private String user;
     private Set<String> userGroups;
@@ -990,18 +989,6 @@ public class RequestContext {
 
     public void addLineageCalcTime(long additionalTime) {
         this.lineageCalcTime += additionalTime;
-    }
-
-    public long getArrayElementsPropertyRunTime() {
-        return arrayElementsPropertyRunTime;
-    }
-
-    public void addArrayElementsPropertyRunTime(long additionalTime) {
-        this.arrayElementsPropertyRunTime += additionalTime;
-    }
-
-    public void resetArrayElementsPropertyRunTime() {
-        this.arrayElementsPropertyRunTime = 0L;
     }
 
 }
