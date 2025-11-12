@@ -241,14 +241,14 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
                     try {
                         // Wait for all threads to be ready
                         startLatch.await();
-                        
+
                         int current = currentConcurrent.incrementAndGet();
                         maxObservedConcurrent.updateAndGet(max -> Math.max(max, current));
 
                         HttpRequest request = HttpRequest.newBuilder()
                                 .uri(URI.create(ATLAS_BASE_URL + "/search/indexsearch"))
                                 .header("Authorization", authHeader)
-                                .header("X-Atlan-Client-Origin", "workflow")
+                                .header("x-atlan-agent-id", "workflow")
                                 .header("Accept", "application/json")
                                 .header("Content-Type", "application/json")
                                 .POST(HttpRequest.BodyPublishers.ofString(indexSearchRequestBody))
@@ -281,12 +281,12 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
                 .count();
 
         long throttledCount = responses.stream()
-                .filter(r -> r.statusCode() == 429)
+                .filter(r -> r.statusCode() == 503)
                 .count();
 
         executor.shutdown();
 
-        LOG.info("Concurrency test results: {} successful, {} throttled, max concurrent: {}", 
+        LOG.info("Concurrency test results: {} successful, {} throttled, max concurrent: {}",
                 successCount, throttledCount, maxObservedConcurrent.get());
 
         // Key assertion: max concurrent should be limited
@@ -366,7 +366,7 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
                 .mapToObj(i -> CompletableFuture.supplyAsync(() -> {
                     try {
                         HttpRequest request = HttpRequest.newBuilder()
-                                .uri(URI.create(ATLAS_BASE_URL + "/types/typdefs"))
+                                .uri(URI.create(ATLAS_BASE_URL + "/types/typedefs"))
                                 .header("Authorization", authHeader)
                                 .header("X-Atlan-Client-Origin", "product_webapp")
                                 .header("Accept", "application/json")
