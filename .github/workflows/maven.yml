@@ -25,7 +25,7 @@ on:
       - beta
       - master
       - staging
-      - mlh-1477-staging-dlq
+      - mlh-1618-staging
 
 jobs:
   # Detect what changed to optimize workflow execution
