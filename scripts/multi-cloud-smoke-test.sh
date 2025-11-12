@@ -315,4 +315,3 @@ if [ $FAILED -eq 1 ]; then
 fi
 
 echo -e "${GREEN}✅ All smoke tests passed!${NC}"
-
