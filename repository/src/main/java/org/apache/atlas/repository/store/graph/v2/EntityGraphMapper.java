@@ -4269,9 +4269,35 @@ public class EntityGraphMapper {
 
         if (!isReference(elementType) || isSoftReference) {
             if (isArrayOfPrimitiveType || isArrayOfEnum) {
-                vertex.removeProperty(vertexPropertyName);
-                if (CollectionUtils.isNotEmpty(allValues)) {
-                    for (Object value: allValues) {
+                if (vertexPropertyName.equals("policyResources")) {
+                    Set<Object> newValues = CollectionUtils.isNotEmpty(allValues)
+                            ? new LinkedHashSet<>(allValues)
+                            : Collections.emptySet();
+                    Set<Object> existingValues = CollectionUtils.isNotEmpty(currentValues)
+                            ? new LinkedHashSet<>(currentValues)
+                            : Collections.emptySet();
+
+                    if (newValues.isEmpty()) {
+                        vertex.removeProperty(vertexPropertyName);
+                    } else {
+                        Set<Object> valuesToRemove = new LinkedHashSet<>(existingValues);
+                        valuesToRemove.removeAll(newValues);
+
+                        Set<Object> valuesToAdd = new LinkedHashSet<>(newValues);
+                        valuesToAdd.removeAll(existingValues);
+
+                        //                            for (Object value : valuesToRemove) {
+                        AtlasGraphUtilsV2.removeEncodedProperty(vertex, vertexPropertyName, valuesToRemove);
+                        //                            }
+
+                        for (Object value : valuesToAdd) {
+                            AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
+                        }
+                        LOG.info("policyResources diff: removedCount={} removedValues={} addedCount={} addedValues={}",
+                                valuesToRemove.size(), valuesToRemove, valuesToAdd.size(), valuesToAdd);
+                    }
+                } else {
+                    for (Object value : allValues) {
                         AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
                 }

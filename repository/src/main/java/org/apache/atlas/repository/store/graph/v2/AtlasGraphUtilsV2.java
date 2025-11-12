@@ -190,6 +190,28 @@ public class AtlasGraphUtilsV2 {
         return addProperty(vertex, propertyName, value, true);
     }
 
+    public static AtlasVertex removeEncodedProperty(AtlasVertex vertex, String propertyName, Object value) {
+        return removeProperty(vertex, propertyName, value, true);
+    }
+
+    public static AtlasVertex removeProperty(AtlasVertex vertex, String propertyName, Object value, boolean isEncoded) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> removeProperty({}, {}, {})", toString(vertex), propertyName, value);
+        }
+
+        if (!isEncoded) {
+            propertyName = encodePropertyKey(propertyName);
+        }
+
+        if (vertex instanceof AtlasJanusVertex) {
+            ((AtlasJanusVertex) vertex).removeSinglePropertyValue(propertyName, value);
+        } else {
+            vertex.removePropertyValue(propertyName, value);
+        }
+
+        return vertex;
+    }
+
     public static AtlasEdge addEncodedProperty(AtlasEdge edge, String propertyName, String value) {
         List<String> listPropertyValues = edge.getListProperty(propertyName);
 
