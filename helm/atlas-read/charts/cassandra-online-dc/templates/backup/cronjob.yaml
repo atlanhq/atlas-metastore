@@ -32,6 +32,19 @@ spec:
           nodeSelector:
             {{- toYaml . | nindent 12 }}
           {{- end }}
+          {{- $multiarchEnabled := and $.Values.multiarch (eq $.Values.multiarch.enabled true) }}
+          {{- if or $.Values.tolerations $multiarchEnabled }}
+          tolerations:
+          {{- if $.Values.tolerations }}
+          {{ toYaml $.Values.tolerations | nindent 12 }}
+          {{- end }}
+          {{- if $multiarchEnabled }}
+            - key: "archtype"
+              operator: "Equal"
+              value: "arm64"
+              effect: "NoSchedule"
+          {{- end }}
+          {{- end }}
           containers:
           - name: cassandra-backup
             {{- if and $.Values.multiarch.enabled $.Values.multiarch.image.cain }}

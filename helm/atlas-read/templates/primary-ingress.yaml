@@ -1,5 +1,6 @@
 {{- if or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled) }}
 {{- if .Values.atlas.ingress.enabled -}}
+{{- if eq .Values.atlas.Deployment_Type "Development" -}}
 {{- $ingressApiIsStable := eq (include "atlas.ingress.isStable" .) "true" -}}
 {{- $ingressSupportsIngressClassName := eq (include "atlas.ingress.supportsIngressClassName" .) "true" -}}
 {{- $ingressSupportsPathType := eq (include "atlas.ingress.supportsPathType" .) "true" -}}
@@ -77,5 +78,6 @@ spec:
             pathType: {{ $ingressPathType }}
             {{- end }}
   {{- end -}}
+{{- end }}
 {{- end }}
 {{- end }}

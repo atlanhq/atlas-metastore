@@ -15,6 +15,7 @@ multiarch:
 # Declare variables to be passed into your templates.
 global:
   Tier_Type: ""
+  Deployment_Type: ""
   cloud: ""
   tenantName: ""
   svcIsolation:
@@ -28,8 +29,6 @@ albTenant: false
 podDisruptionBudget:
   enabled: true
   minAvailable: "1"
-otel:
-  enabled: false
 
 hpa: 
   name: atlas
@@ -41,6 +40,7 @@ hpa:
     averageUtilization: 85
 
 atlas:
+  name: atlas
   maintenanceMode: false
   cache:
     enabled: false
@@ -54,18 +54,14 @@ atlas:
   ranger:
     RANGER_PASSWORD: '{{repl ConfigOption "RangerPassword"}}'
     RANGER_SERVICE_URL: "http://ranger-service.ranger.svc.cluster.local:80/api/policy"
+  config:
+    entities_allowed_large_attributes: "rawQueryText,variablesSchemaBase64,visualBuilderSchemaBase64,dataContractSpec,dataContractJson"
   multitenant: ''
   Deployment_Type: ''
   replicaCount: 2
-  config:
-    entities_allowed_large_attributes: "rawQueryText,variablesSchemaBase64,visualBuilderSchemaBase64,dataContractSpec,dataContractJson"
   janusgraph:
     atomic_mutation: true
     janusgraph_tx_buffer_size: 8192
-  keycloak:
-    token_introspection: true
-    resource_pagination_size: 500
-    introspection_cache: false
   indexsearch:
     enable_api_limit: false
     query_size_max_limit: 100000
@@ -75,16 +71,19 @@ atlas:
     enable_request_isolation: false
     enable_janus_optimization_for_relationship: true
     enable_janus_optimization_extended: true
+  jg:
+    super:
+      vertex:
+        min:
+          edge:
+            count: 200
   bulk:
     max_entities_allowed: 10000
-    enable_janus_optimization: true
   lineage:
     optimised_calculation: false
-    enable_connection_lineage: false
   authorizer:
     enable_delta_based_refresh: true
     enable_abac: true
-    read_restriction_level: "scrub" # scrub, guid_only, full
   index:
     audit_index_field_limit: 10000
     audit_index_refresh_interval: 1s
@@ -98,19 +97,25 @@ atlas:
 
   podAnnotations:
     backup.velero.io/backup-volumes-excludes: master
-    instrumentation.opentelemetry.io/inject-java: non-otel-instrumentation
 
   image:
     repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
     tag: ATLAS_LATEST_IMAGE_TAG
     pullPolicy: IfNotPresent
   imagePullSecrets: {}
-
   tolerations: []
+
   # Affinity rules for atlas
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: eks.amazonaws.com/capacityType   #AWS
+            operator: In
+            values:
+            - ON_DEMAND
       - weight: 1
         preference:
           matchExpressions:
@@ -124,7 +129,26 @@ atlas:
           - key: cloud.google.com/gke-provisioning  #GCP
             operator: In
             values:
-            - standard  
+            - standard
+
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: eks.amazonaws.com/capacityType   #AWS
+            operator: In
+            values:
+            - ON_DEMAND
+        - matchExpressions:
+          - key: lifecycle     #Azure
+            operator: In
+            values:
+            - ondemand
+        - matchExpressions:
+          - key: cloud.google.com/gke-provisioning  #GCP
+            operator: In
+            values:
+            - standard 
+    
     podAntiAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         - labelSelector:
@@ -196,7 +220,11 @@ atlas:
     labels: {}
     ## Extra paths to prepend to every host configuration. This is useful when working with annotation based services.
     extraPaths: []
-    annotations: {}
+    annotations:
+      kubernetes.io/ingress.class: "kong"
+      konghq.com/strip-path: "true"
+      konghq.com/preserve-host: "true"
+      konghq.com/plugins: keycloak-jwt, xss
     tls: []
   # Secrets for SSl
     tlsSecrets:
@@ -226,9 +254,17 @@ atlas:
         - name: atlas-init-container-script
           mountPath: /scripts/atlas-init-container.sh
           subPath: atlas-init-container.sh
-      envFrom:
-          - secretRef:
-              name: atlas-init-secret
+      env:
+        - name: ATLAS_SERVICE_NAME
+          value: 'atlas'
+        - name: RANGER_SERVICE_URL
+          value: "http://ranger-service.ranger.svc.cluster.local:80/api/policy"
+        - name: RANGER_USERNAME
+          value: ''
+        - name: RANGER_PASSWORD
+          value: ''
+        - name: KEYCLOAK_ADDRESS
+          value: 'http://keycloak-http.keycloak.svc.cluster.local/auth'
       command:
       - /scripts/atlas-init-container.sh
 
@@ -293,6 +329,7 @@ atlas:
     - name: ATLAS_USE_LEGACY_SEARCH
       value: "false"
 
+
   # We are using these in configmap for atlas-keycloak
   secrets:
     AUTH_SERVER_URL: ''
@@ -304,6 +341,35 @@ atlas:
     SENTRY_DSN_PROD: ''
     INSTANCE_NAME: ''
 
+  # Config for logagent sidecar for atlas.
+  # Used in logagent configmap and atlas statefulset.
+  filebeatLogagent:
+    image:
+      repository: ghcr.io/atlanhq/filebeat
+      tag: 6.8.4
+    data:
+      filebeat.yml: |-
+        filebeat.inputs:
+        - type: log
+          enabled: true
+          paths:
+            - /opt/apache-atlas/logs/audit.log*
+          fields:
+            logtype: audit
+        - type: log
+          enabled: true
+          paths:
+            - /opt/apache-atlas/logs/metric.log
+          fields:
+            logtype: metric
+        - type: log
+          enabled: true
+          paths:
+            - /opt/apache-atlas/logs/atlas_perf.log
+          fields:
+            logtype: performance
+        output.logstash:
+          hosts: ['logstash-logstash:5044']
   # Redis config for atlas
   # This is used in atlas configmap
   redis:
@@ -366,17 +432,17 @@ cassandra:
       memory: 5Gi
       #cpu: 2000m
 
+  # Config for cassandra
+
   max_heap_size: 2048M
   heap_new_size: 512M
 
-  # Config for cassandra
   config:
     cluster_domain: cluster.local
     cluster_name: cassandra
     cluster_size: 3
     seed_size: 3
     start_rpc: true
-
     ports:
       cql: 9042
 
@@ -412,8 +478,8 @@ cassandra:
         release: "prometheus-operator"
       # prometheus: default
     image:
-      repo: ghcr.io/atlanhq/cassandra-exporter-atlan-v2
-      tag: 2.0.2-multiarch
+      repo: ghcr.io/atlanhq/cassandra_exporter
+      tag: 2.0.2
     jvmOpts: ""
     resources:
       limits:
@@ -429,12 +495,12 @@ cassandra:
     enabled: false
     schedule:
     - keyspace: atlas
-      cron: "0 6 * * *"
+      cron: "0 3 * * *"
     annotations:
       iam.amazonaws.com/role: ""
     image:
-      repository: ghcr.io/atlanhq/cain-atlan-v2
-      tag: 0.6.1-multiarch
+      repository: ghcr.io/atlanhq/cain
+      tag: 0.6.0
     # Name of the secret containing the credentials of the service account used by GOOGLE_APPLICATION_CREDENTIALS, as a credentials.json file
     extraArgs:
       - -c
@@ -458,11 +524,11 @@ nginx:
   clientMaxBodySize: "512m"        # The maximum size of the request body.
   clientBodyBufferSize: "512k"     # The buffer size for reading the request body. In is nginx InMemory buffer size per request. Excessive request size will be written on disk defined by clientMaxBodySize.
   clientBodyTimeout: "600s"        # Allow clients up to 10 minutes to actively send their request body before Nginx times out the connection.
-  proxyReadTimeout: "36000s"       # 10 hrs - Time taken to read a response from the atlas server. The workflow client will wait for 3 hrs for the response.
-  proxyConnectTimeout: "600s"       # 10 min - Time taken to establish a connection to the atlas server.
+  proxyReadTimeout: "10800s"       # 3 hrs - Time taken to read a response from the atlas server. The workflow client will wait for 3 hrs for the response.
+  proxyConnectTimeout: "60s"       # 1 min - Time taken to establish a connection to the atlas server.
   ratelimit:
     enabled: true
-    default_atlas_service: true
+    default_atlas_service: false
   default:
     zoneMemory: "20m"
     rate: "500r"

@@ -93,6 +93,26 @@ affinity:
               values:
               - elasticsearch-exporter
           topologyKey: kubernetes.io/hostname
+#   podAntiAffinity:
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#     - labelSelector:
+#         matchExpressions:
+#         - key: release
+#           operator: In
+#           values:
+#           - atlas
+#           - postgresql
+#           - redis
+#           - zookeeper
+#       topologyKey: "kubernetes.io/hostname"
+#   nodeAffinity:
+#     requiredDuringSchedulingIgnoredDuringExecution:
+#      nodeSelectorTerms:
+#      - matchExpressions:
+#        - key: nodegroup
+#          operator: NotIn
+#          values:
+#          - atlan-spark
 
 service:
   type: ClusterIP

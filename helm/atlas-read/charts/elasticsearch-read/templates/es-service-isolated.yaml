@@ -5,7 +5,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ $.Values.esClusterName }}-{{ $nodeName }}-headless
+  name: {{ $.Values.esClusterName }}-{{ $nodeName }}
   namespace: {{ $.Values.Namespace }}
   labels:
     heritage: {{ $.Release.Service | quote }}

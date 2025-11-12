@@ -1,7 +1,8 @@
+{{- if and .Values.nginx.enabled (or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled)) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rate-limit-nginx-config
+  name: rate-limit-nginx-config-read
   namespace: {{ .Values.Namespace }}
 data:
   nginx.conf: |-
@@ -27,12 +28,6 @@ data:
 
       # Increased timeout for client sending request body to 10 minutes
       client_body_timeout {{ .Values.nginx.clientBodyTimeout | default "600s" }};
-
-      # Effective Atlan request id: use incoming header if present, else nginx's $request_id
-      map $http_x_atlan_request_id $atlan_request_id {
-          default $http_x_atlan_request_id;
-          ""      $request_id;
-      }
 
       # Map for the general API rate limiting key & product_webapp bypass
       map $http_x_atlan_client_origin $effective_agent_id_key {
@@ -72,7 +67,7 @@ data:
         '"http_x_atlan_package_name": "$http_x_atlan_package_name", '
         '"http_x_atlan_agent_workflow_id": "$http_x_atlan_agent_workflow_id", '
         '"http_x_atlan_via_ui": "$http_x_atlan_via_ui", '
-        '"http_x_atlan_request_id": "$atlan_request_id", '
+        '"http_x_atlan_request_id": "$http_x_atlan_request_id", '
         '"http_x_atlan_google_sheets_id": "$http_x_atlan_google_sheets_id", '
         '"http_x_atlan_microsoft_excel_id": "$http_x_atlan_microsoft_excel_id", '
         '"http_x_atlan_task_guid": "$http_x_atlan_task_guid", '
@@ -171,7 +166,7 @@ data:
         proxy_set_header x-atlan-package-name $http_x_atlan_package_name;
         proxy_set_header x-atlan-agent-workflow-id $http_x_atlan_agent_workflow_id;
         proxy_set_header x-atlan-via-ui $http_x_atlan_via_ui;
-        proxy_set_header x-atlan-request-id $atlan_request_id;
+        proxy_set_header x-atlan-request-id $http_x_atlan_request_id;
         proxy_set_header x-atlan-google-sheets-id $http_x_atlan_google_sheets_id;
         proxy_set_header x-atlan-microsoft-excel-id $http_x_atlan_microsoft_excel_id;
         proxy_set_header x-atlan-task-guid $http_x_atlan_task_guid;
@@ -322,3 +317,4 @@ data:
         }
       }
     }
+{{- end }}

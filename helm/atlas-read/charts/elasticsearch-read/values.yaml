@@ -4,6 +4,7 @@ multiarch:
   enabled: false
   image: {}
 
+
 clusterName: "atlas-elasticsearch-read"
 nodeGroup: "master"
 
@@ -11,6 +12,7 @@ nodeGroup: "master"
 # This should be set to clusterName + "-" + nodeGroup for your master group
 global:
   Tier_Type: ""
+  Deployment_Type: ""
   esIsolation:
     enabled: false
   globalSvcIsolation:
@@ -27,6 +29,7 @@ roles:
 replicas: 3
 esMajorVersion: 7
 minimumMasterNodes: 1
+
 # JVM automatically uses 50% of container memory as max heap using MaxRAMPercentage
 # This is simpler and more reliable than manual calculation
 esJavaOpts: "-XX:MaxRAMPercentage=50.0 -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=16m -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:+G1UseAdaptiveIHOP -XX:G1MixedGCCountTarget=8"
@@ -38,32 +41,8 @@ esConfig:
     http.max_content_length: 2147483647b
     ingest.geoip.downloader.enabled: false
     xpack.security.enabled: false
-    reindex.remote.whitelist: ["atlas-elasticsearch-master:9200","atlas-elasticsearch-master-0:9200","atlas-elasticsearch-master-1:9200","atlas-elasticsearch-master-2:9200"]
   log4j2.properties: |
     -Dlog4j2.formatMsgNoLookups=true
-    status = error
-    # log action execution errors for easier debugging
-    logger.action.name = org.elasticsearch.action
-    logger.action.level = info
-    appender.console.type = Console
-    appender.console.name = console
-    appender.console.layout.type = PatternLayout
-    appender.console.layout.pattern = [%d{ISO8601}][%-5p][%-25c{1.}] %marker%m%n
-    appender.rolling.type = RollingFile
-    appender.rolling.name = rolling
-    appender.rolling.fileName = /usr/share/elasticsearch/custom_logs/elasticsearch.log
-    appender.rolling.layout.type = PatternLayout
-    appender.rolling.layout.pattern = [%d{ISO8601}][%-5p][%-25c{1.}] %marker%m%n
-    appender.rolling.filePattern = /usr/share/elasticsearch/custom_logs/elasticsearch-%d{yyyy-MM-dd}-%i.log.gz
-    appender.rolling.strategy.type = DefaultRolloverStrategy
-    appender.rolling.strategy.max = 30
-    appender.rolling.policies.type = Policies
-    appender.rolling.policies.time.type = TimeBasedTriggeringPolicy
-    appender.rolling.policies.time.interval = 1
-    appender.rolling.policies.time.modulate = true
-    rootLogger.level = info
-    rootLogger.appenderRef.console.ref = console
-    rootLogger.appenderRef.rolling.ref = rolling    
 
 # Extra environment variables to append to this nodeGroup
 # This will be appended to the current 'env:' key. You can use any of the kubernetes env
@@ -164,7 +143,7 @@ persistence:
 extraVolumes:
   - name: varlog
     emptyDir: {}
-      
+
 extraVolumeMounts:
   - name: varlog
     mountPath: /usr/share/elasticsearch/logs
@@ -213,7 +192,24 @@ nodeAffinity:
       - key: cloud.google.com/gke-provisioning  #GCP
         operator: In
         values:
-        - standard  
+        - standard 
+  requiredDuringSchedulingIgnoredDuringExecution:
+    nodeSelectorTerms:
+    - matchExpressions:
+      - key: eks.amazonaws.com/capacityType   #AWS
+        operator: In
+        values:
+        - ON_DEMAND
+    - matchExpressions:
+      - key: lifecycle     #Azure
+        operator: In
+        values:
+        - ondemand
+    - matchExpressions:
+      - key: cloud.google.com/gke-provisioning  #GCP
+        operator: In
+        values:
+        - standard 
 
 # The default is to deploy all pods serially. By setting this to parallel all pods are started at
 # the same time when bootstrapping the cluster
@@ -271,7 +267,7 @@ readinessProbe:
 custom_deployment:
   enabled: false
   instance_type:
-    - m6a.2xlarge
+  - m6a.2xlarge
 
 # https://www.elastic.co/guide/en/elasticsearch/reference/current/cluster-health.html#request-params wait_for_status
 clusterHealthCheckParams: "wait_for_status=yellow&timeout=1s"
@@ -345,11 +341,11 @@ deploymentTier: Enterprise
 isolation:
   enabled: false
   names:
-    - "product-search"
-    - "non-product-search"
+    - "ui-search"
+    - "non-ui-search"
   replicaCount:
-    product-search: 3
-    non-product-search: 3
+    ui-search: 3
+    non-ui-search: 3
 
   resources_enterprise:
     master:
@@ -359,14 +355,14 @@ isolation:
       limits:
         cpu: "1000m"
         memory: "4Gi"
-    product-search:
+    ui-search:
       requests:
         cpu: "2"
         memory: "6Gi"
       limits:
         cpu: "2"
         memory: "7Gi"
-    non-product-search:
+    non-ui-search:
       requests:
         cpu: "2"
         memory: "6Gi"
@@ -382,14 +378,14 @@ isolation:
       limits:
         cpu: "1000m"
         memory: "2Gi"
-    product-search:
+    ui-search:
       requests:
         cpu: "1000m"
         memory: "4Gi"
       limits:
         cpu: "2000m"
         memory: "4Gi"
-    non-product-search:
+    non-ui-search:
       requests:
         cpu: "1000m"
         memory: "4Gi"
@@ -405,14 +401,14 @@ isolation:
       limits:
         cpu: "1000m"
         memory: "1Gi"
-    product-search:
+    ui-search:
       requests:
         cpu: "500m"
         memory: "2Gi"
       limits:
         cpu: "1000m"
         memory: "2Gi"
-    non-product-search:
+    non-ui-search:
       requests:
         cpu: "500m"
         memory: "2Gi"
@@ -423,16 +419,16 @@ isolation:
   # JVM automatically uses 50% of container memory as max heap using MaxRAMPercentage for isolation mode
   esJavaOpts:
     master: "-XX:MaxRAMPercentage=50.0 -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=16m -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:+G1UseAdaptiveIHOP -XX:G1MixedGCCountTarget=8"
-    product-search: "-XX:MaxRAMPercentage=50.0 -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=16m -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:+G1UseAdaptiveIHOP -XX:G1MixedGCCountTarget=8"
-    non-product-search: "-XX:MaxRAMPercentage=50.0 -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=16m -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:+G1UseAdaptiveIHOP -XX:G1MixedGCCountTarget=8"
+    ui-search: "-XX:MaxRAMPercentage=50.0 -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=16m -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:+G1UseAdaptiveIHOP -XX:G1MixedGCCountTarget=8"
+    non-ui-search: "-XX:MaxRAMPercentage=50.0 -XX:+UnlockExperimentalVMOptions -XX:+UseG1GC -XX:MaxGCPauseMillis=200 -XX:G1HeapRegionSize=16m -XX:G1NewSizePercent=30 -XX:G1MaxNewSizePercent=40 -XX:+G1UseAdaptiveIHOP -XX:G1MixedGCCountTarget=8"
 
   roles:
     master:
       - "master"
-    product-search:
+    ui-search:
       - "data"
       - "ingest"
-    non-product-search:
+    non-ui-search:
       - "data"
       - "ingest"
   # Enterprise tier storage
@@ -442,12 +438,12 @@ isolation:
       resources:
         requests:
           storage: 20Gi
-    product-search:
+    ui-search:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
           storage: 200Gi
-    non-product-search:
+    non-ui-search:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
@@ -460,12 +456,12 @@ isolation:
       resources:
         requests:
           storage: 20Gi
-    product-search:
+    ui-search:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
           storage: 100Gi
-    non-product-search:
+    non-ui-search:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
@@ -478,12 +474,12 @@ isolation:
       resources:
         requests:
           storage: 20Gi
-    product-search:
+    ui-search:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:
           storage: 50Gi
-    non-product-search:
+    non-ui-search:
       accessModes: [ "ReadWriteOnce" ]
       resources:
         requests:

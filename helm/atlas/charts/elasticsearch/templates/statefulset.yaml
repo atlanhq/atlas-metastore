@@ -75,7 +75,7 @@ spec:
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
-        {{- toYaml . | nindent 8 }}
+{{ toYaml . | indent 8 }}
       {{- end }}
       {{- if or (eq .Values.antiAffinity "hard") (eq .Values.antiAffinity "soft") .Values.nodeAffinity }}
       {{- if .Values.priorityClassName }}
@@ -130,8 +130,13 @@ spec:
                 {{- end }}
             {{- end }}
           {{- else }}
+          {{- if eq .Values.global.Deployment_Type "Development" }}
           preferredDuringSchedulingIgnoredDuringExecution:
             {{- toYaml .Values.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution | nindent 10 }}
+          {{- else }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- toYaml .Values.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 12 }}
+          {{- end }}
           {{- end }}
       terminationGracePeriodSeconds: {{ .Values.terminationGracePeriod }}
       volumes:
@@ -327,7 +332,7 @@ spec:
           - name: network.host
             value: "{{ .Values.networkHost }}"
           - name: ES_JAVA_OPTS
-            value: {{ .Values.esJavaOpts }}
+            value: {{ .Values.esJavaOpts | quote }}
           {{- range $role, $enabled := .Values.roles }}
           - name: node.{{ $role }}
             value: "{{ $enabled }}"

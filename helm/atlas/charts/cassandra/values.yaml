@@ -1,4 +1,3 @@
-
 multiarch:
   enabled: false
   image: {}
@@ -6,8 +5,10 @@ multiarch:
 
 ## Cassandra image version
 ## ref: https://hub.docker.com/r/library/cassandra/
+
 global:
   Tier_Type: ""
+  Deployment_Type: ""
 image:
   repo: ghcr.io/atlanhq/cassandra
   tag: 3.11.12
@@ -82,8 +83,10 @@ service:
 #     # agent: 61621
 
 # Config for cassandra
+
 max_heap_size: 2048M
 heap_new_size: 512M
+
 config:
   cluster_domain: cluster.local
   cluster_name: cassandra
@@ -95,6 +98,7 @@ config:
   start_rpc: true
   ports:
     cql: 9042
+
 
 ## Cassandra config files overrides
 configOverrides: {}
@@ -182,7 +186,7 @@ securityContext:
 # PriorityClassName
 priorityClassName: ""
 
-# podAntiAffinity: false
+
 antiAffinity: "hard"
 
 custom_deployment:
@@ -198,6 +202,13 @@ affinity:
     - weight: 1
       preference:
         matchExpressions:
+        - key: eks.amazonaws.com/capacityType   #AWS
+          operator: In
+          values:
+          - ON_DEMAND
+    - weight: 1
+      preference:
+        matchExpressions:
         - key: lifecycle     #Azure
           operator: In
           values:
@@ -205,6 +216,23 @@ affinity:
     - weight: 1
       preference:
         matchExpressions:
+        - key: cloud.google.com/gke-provisioning  #GCP
+          operator: In
+          values:
+          - standard  
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: eks.amazonaws.com/capacityType   #AWS
+          operator: In
+          values:
+          - ON_DEMAND
+      - matchExpressions:
+        - key: lifecycle     #Azure
+          operator: In
+          values:
+          - ondemand
+      - matchExpressions:
         - key: cloud.google.com/gke-provisioning  #GCP
           operator: In
           values:
@@ -315,7 +343,8 @@ extraVolumes:
     configMap:
       name: cassandra-config
   - name: pre-install
-    emptyDir: {}     
+    emptyDir: {}
+    
 extraVolumeMounts:
   - name: varlog
     mountPath: /var/log/cassandra/
@@ -339,7 +368,6 @@ extraContainers:
     volumeMounts:
     - name: varlog
       mountPath: /var/log/cassandra/
-
 janusgraph:
   atomic_mutation: true
   cassandra_batch_size_warn_threshold_in_kb: 4096
