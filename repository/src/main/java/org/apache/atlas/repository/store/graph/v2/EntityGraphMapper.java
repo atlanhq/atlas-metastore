@@ -4269,9 +4269,51 @@ public class EntityGraphMapper {
 
         if (!isReference(elementType) || isSoftReference) {
             if (isArrayOfPrimitiveType || isArrayOfEnum) {
-                vertex.removeProperty(vertexPropertyName);
-                if (CollectionUtils.isNotEmpty(allValues)) {
-                    for (Object value: allValues) {
+                if (vertexPropertyName.equals("policyResources")) {
+                    AtlasPerfMetrics.MetricRecorder diffRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.setArrayElementsProperty.policyResources.diff");
+                    Set<Object> newValues = CollectionUtils.isNotEmpty(allValues)
+                            ? new LinkedHashSet<>(allValues)
+                            : Collections.emptySet();
+                    Set<Object> existingValues = CollectionUtils.isNotEmpty(currentValues)
+                            ? new LinkedHashSet<>(currentValues)
+                            : Collections.emptySet();
+
+                    if (newValues.isEmpty()) {
+                        vertex.removeProperty(vertexPropertyName);
+                    } else {
+                        Set<Object> valuesToRemove = new LinkedHashSet<>(existingValues);
+                        valuesToRemove.removeAll(newValues);
+
+                        Set<Object> valuesToAdd = new LinkedHashSet<>(newValues);
+                        valuesToAdd.removeAll(existingValues);
+                        RequestContext.get().endMetricRecord(diffRecorder);
+                        AtlasPerfMetrics.MetricRecorder removalRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.setArrayElementsProperty.policyResources.remove");
+
+                        if (CollectionUtils.isNotEmpty(valuesToRemove)) {
+                            List<Object> batchedRemovals = new ArrayList<>(valuesToRemove);
+                            final int batchSize = 100;
+
+                            for (int start = 0; start < batchedRemovals.size(); start += batchSize) {
+                                int end = Math.min(start + batchSize, batchedRemovals.size());
+                                List<Object> batch = batchedRemovals.subList(start, end);
+                                AtlasGraphUtilsV2.removeEncodedProperty(vertex, vertexPropertyName, new ArrayList<>(batch));
+                            }
+                        }
+                        RequestContext.get().endMetricRecord(removalRecorder);
+                        AtlasPerfMetrics.MetricRecorder addRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.setArrayElementsProperty.policyResources.add");
+
+                        if (CollectionUtils.isNotEmpty(valuesToAdd)) {
+                            for (Object value : valuesToAdd) {
+                                AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
+                            }
+                        }
+                        RequestContext.get().endMetricRecord(addRecorder);
+                        LOG.info("policyResources diff: removedCount={} removedValues={} addedCount={} addedValues={}",
+                                valuesToRemove.size(), valuesToRemove, valuesToAdd.size(), valuesToAdd);
+                    }
+                } else {
+                    vertex.removeProperty(vertexPropertyName);
+                    for (Object value : allValues) {
                         AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
                 }
