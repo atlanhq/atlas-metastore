@@ -32,6 +32,7 @@ import org.apache.atlas.model.typedef.AtlasEnumDef;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.*;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
 import org.apache.atlas.repository.store.graph.v2.utils.MDCScope;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasEnumType;
@@ -238,6 +239,20 @@ public class AtlasGraphUtilsV2 {
         }
 
         vertex.addProperty(propertyName, value);
+
+        return vertex;
+    }
+
+    public static AtlasVertex removeProperty(AtlasVertex vertex, String propertyName, Object value) {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> removeProperty({}, {}, {})", toString(vertex), propertyName, value);
+        }
+
+        if (vertex instanceof AtlasJanusVertex) {
+            ((AtlasJanusVertex) vertex).removeSinglePropertyValue(propertyName, value);
+        } else {
+            vertex.removePropertyValue(propertyName, value);
+        }
 
         return vertex;
     }
