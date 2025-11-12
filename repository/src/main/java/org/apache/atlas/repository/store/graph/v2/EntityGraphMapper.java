@@ -4264,58 +4264,20 @@ public class EntityGraphMapper {
         return Collections.emptyList();
     }
     private void setArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName, List<Object> allValues, List<Object> currentValues, Cardinality cardinality) {
-        long startTime = System.currentTimeMillis();
+        boolean isArrayOfPrimitiveType = elementType.getTypeCategory().equals(TypeCategory.PRIMITIVE);
+        boolean isArrayOfEnum = elementType.getTypeCategory().equals(TypeCategory.ENUM);
 
-        try {
-            boolean isArrayOfPrimitiveType = elementType.getTypeCategory().equals(TypeCategory.PRIMITIVE);
-            boolean isArrayOfEnum = elementType.getTypeCategory().equals(TypeCategory.ENUM);
-
-            if (!isReference(elementType) || isSoftReference) {
-                if (isArrayOfPrimitiveType || isArrayOfEnum) {
-                    if(vertexPropertyName.equals("policyResources")) {
-                        Set<Object> newValues = CollectionUtils.isNotEmpty(allValues)
-                                ? new LinkedHashSet<>(allValues)
-                                : Collections.emptySet();
-                        Set<Object> existingValues = CollectionUtils.isNotEmpty(currentValues)
-                                ? new LinkedHashSet<>(currentValues)
-                                : Collections.emptySet();
-
-                        if (newValues.isEmpty()) {
-                            vertex.removeProperty(vertexPropertyName);
-                        } else {
-                            Set<Object> valuesToRemove = new LinkedHashSet<>(existingValues);
-                            valuesToRemove.removeAll(newValues);
-
-                            Set<Object> valuesToAdd = new LinkedHashSet<>(newValues);
-                            valuesToAdd.removeAll(existingValues);
-
-//                            for (Object value : valuesToRemove) {
-                                AtlasGraphUtilsV2.removeEncodedProperty(vertex, vertexPropertyName, valuesToRemove);
-//                            }
-
-                            for (Object value : valuesToAdd) {
-                                AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
-                            }
-
-                            LOG.info("policyResources diff: removedCount={} removedValues={} addedCount={} addedValues={}",
-                                    valuesToRemove.size(), valuesToRemove, valuesToAdd.size(), valuesToAdd);
-                        }
-                    } else {
-                        for (Object value: allValues) {
-                            AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
-                        }
+        if (!isReference(elementType) || isSoftReference) {
+            if (isArrayOfPrimitiveType || isArrayOfEnum) {
+                vertex.removeProperty(vertexPropertyName);
+                if (CollectionUtils.isNotEmpty(allValues)) {
+                    for (Object value: allValues) {
+                        AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
-                } else {
-                    AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
                 }
+            } else {
+                AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
             }
-        } finally {
-            long duration = System.currentTimeMillis() - startTime;
-            RequestContext requestContext = RequestContext.get();
-            requestContext.addArrayElementsPropertyRunTime(duration);
-
-                LOG.info("setArrayElementsProperty took {} ms (cumulative {} ms) for property {} in request {}",
-                        duration, requestContext.getArrayElementsPropertyRunTime(), vertexPropertyName, requestContext.getRequestTime());
         }
     }
 
@@ -6836,7 +6798,7 @@ public class EntityGraphMapper {
 
     public void addHasLineage(Set<AtlasEdge> inputOutputEdges, boolean isRestoreEntity) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("addHasLineage");
-
+        
         // Timing: Lineage calculation
         long lineageCalcStart = System.currentTimeMillis();
 
@@ -6885,11 +6847,11 @@ public class EntityGraphMapper {
                 }
             }
         }
-
+        
         // Record lineage calculation time
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
-
+        
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
