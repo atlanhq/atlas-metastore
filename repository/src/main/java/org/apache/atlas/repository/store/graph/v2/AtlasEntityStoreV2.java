@@ -625,6 +625,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         // Notify the change listeners
         entityChangeNotifier.onEntitiesMutated(ret, false);
+        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
         atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
@@ -669,6 +670,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         // Notify the change listeners
         entityChangeNotifier.onEntitiesMutated(ret, false);
+        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
         atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
@@ -709,6 +711,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         // Notify the change listeners
         entityChangeNotifier.onEntitiesMutated(ret, false);
+        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
         atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
@@ -745,6 +748,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         // Notify the change listeners
         entityChangeNotifier.onEntitiesMutated(ret, false);
+        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
         atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
@@ -781,6 +785,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         // Notify the change listeners
         entityChangeNotifier.onEntitiesMutated(ret, false);
+        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
         atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
@@ -942,6 +947,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 processTermEntityDeletion(ret.getDeletedEntities());
             // Notify the change listeners
             entityChangeNotifier.onEntitiesMutated(ret, false);
+            entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
 
         } catch (JanusGraphException jge) {
@@ -1655,7 +1661,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "createOrUpdate()");
         }
 
-        MetricRecorder metric = RequestContext.get().startMetricRecord("createOrUpdate");
+        MetricRecorder metric = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.createOrUpdate.segment0");
 
         try {
             // Timing: preCreateOrUpdate (includes validation)
@@ -1668,14 +1674,24 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             if (!RequestContext.get().isImportInProgress() && !RequestContext.get().isSkipAuthorizationCheck()) {
                 for (AtlasEntity entity : context.getCreatedEntities()) {
                     if (!PreProcessor.skipInitialAuthCheckTypes.contains(entity.getTypeName())) {
-                        AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
-                                "create entity: type=", entity.getTypeName());
+                        MetricRecorder policySegment = null;
+                        if (POLICY_ENTITY_TYPE.equals(entity.getTypeName())) {
+                            policySegment = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.createOrUpdate.policy.segment1");
+                        }
+                        try {
+                            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
+                                    "create entity: type=", entity.getTypeName());
+                        } finally {
+                            if (policySegment != null) {
+                                RequestContext.get().endMetricRecord(policySegment);
+                            }
+                        }
                     }
                 }
             }
             // for existing entities, skip update if incoming entity doesn't have any change
             if (CollectionUtils.isNotEmpty(context.getUpdatedEntities())) {
-                MetricRecorder checkForUnchangedEntities = RequestContext.get().startMetricRecord("checkForUnchangedEntities");
+                MetricRecorder checkForUnchangedEntities = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.createOrUpdate.segment4");
 
                 List<AtlasEntity>     entitiesToSkipUpdate = new ArrayList<>();
                 AtlasEntityComparator entityComparator     = new AtlasEntityComparator(typeRegistry, entityRetriever, context.getGuidAssignments(), bulkRequestContext);
@@ -1685,38 +1701,53 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     if (entity.getStatus() == AtlasEntity.Status.DELETED) {// entity status could be updated during import
                         continue;
                     }
+                    // extra metrics for policy entities (from "left")
+                    boolean        isPolicyEntity = POLICY_ENTITY_TYPE.equals(entity.getTypeName());
+                    MetricRecorder policySegment  = null;
+                    if (isPolicyEntity) {
+                        policySegment = RequestContext.get()
+                                .startMetricRecord("AtlasEntityStoreV2.createOrUpdate.policy.segment2");
+                    }
 
-                    AtlasVertex           storedVertex = context.getVertex(entity.getGuid());
-                    
-                    // Timing: Diff calculation
-                    long diffCalcStart = System.currentTimeMillis();
-                    AtlasEntityDiffResult diffResult   = entityComparator.getDiffResult(entity, storedVertex, !storeDifferentialAudits);
-                    long diffCalcTime = System.currentTimeMillis() - diffCalcStart;
-                    
-                    // Accumulate diff calculation time
-                    long currentDiffTime = observabilityData.getDiffCalcTime();
-                    observabilityData.setDiffCalcTime(currentDiffTime + diffCalcTime);
+                    try {
+                        AtlasVertex storedVertex = context.getVertex(entity.getGuid());
 
-                    if (diffResult.hasDifference()) {
-                        if (storeDifferentialAudits) {
-                            diffResult.getDiffEntity().setGuid(entity.getGuid());
-                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity());
+                        // diff calc timing + accumulation (from "right")
+                        long diffCalcStart = System.currentTimeMillis();
+                        AtlasEntityDiffResult diffResult =
+                                entityComparator.getDiffResult(entity, storedVertex, !storeDifferentialAudits);
+                        long diffCalcTime = System.currentTimeMillis() - diffCalcStart;
+
+                        // Accumulate diff calculation time (guard in case observabilityData is null)
+                        if (observabilityData != null) {
+                            long currentDiffTime = observabilityData.getDiffCalcTime();
+                            observabilityData.setDiffCalcTime(currentDiffTime + diffCalcTime);
                         }
+                        if (diffResult.hasDifference()) {
+                            if (storeDifferentialAudits) {
+                                diffResult.getDiffEntity().setGuid(entity.getGuid());
+                                reqContext.cacheDifferentialEntity(diffResult.getDiffEntity());
+                            }
 
-                        if (diffResult.hasDifferenceOnlyInCustomAttributes()) {
-                            reqContext.recordEntityWithCustomAttributeUpdate(entity.getGuid());
-                        }
+                            if (diffResult.hasDifferenceOnlyInCustomAttributes()) {
+                                reqContext.recordEntityWithCustomAttributeUpdate(entity.getGuid());
+                            }
 
-                        if (diffResult.hasDifferenceOnlyInBusinessAttributes()) {
-                            reqContext.recordEntityWithBusinessAttributeUpdate(entity.getGuid());
-                        }
-                    } else {
-                        if (LOG.isDebugEnabled()) {
-                            LOG.debug("skipping unchanged entity: {}", entity);
-                        }
+                            if (diffResult.hasDifferenceOnlyInBusinessAttributes()) {
+                                reqContext.recordEntityWithBusinessAttributeUpdate(entity.getGuid());
+                            }
+                        } else {
+                            if (LOG.isDebugEnabled()) {
+                                LOG.debug("skipping unchanged entity: {}", entity);
+                            }
 
-                        entitiesToSkipUpdate.add(entity);
-                        reqContext.recordEntityToSkip(entity.getGuid());
+                            entitiesToSkipUpdate.add(entity);
+                            reqContext.recordEntityToSkip(entity.getGuid());
+                        }
+                    } finally {
+                        if (policySegment != null) {
+                            RequestContext.get().endMetricRecord(policySegment);
+                        }
                     }
                 }
 
@@ -1725,27 +1756,38 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     context.getUpdatedEntities().removeAll(entitiesToSkipUpdate);
                 }
 
-                // Check if authorized to update entities
-                if (!reqContext.isImportInProgress()) {
-                    for (AtlasEntity entity : context.getUpdatedEntities()) {
-                        AtlasEntityHeader entityHeaderWithClassifications = entityRetriever.toAtlasEntityHeaderWithClassifications(entity.getGuid());
-                        AtlasEntityHeader entityHeader = new AtlasEntityHeader(entity);
+                    // Check if authorized to update entities
+                    if (!reqContext.isImportInProgress()) {
+                        for (AtlasEntity entity : context.getUpdatedEntities()) {
+                            boolean isPolicyEntity = POLICY_ENTITY_TYPE.equals(entity.getTypeName());
+                            MetricRecorder policySegment = null;
+                            if (isPolicyEntity) {
+                                policySegment = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.createOrUpdate.policy.segment3");
+                            }
+                            try {
+                                AtlasEntityHeader entityHeaderWithClassifications = entityRetriever.toAtlasEntityHeaderWithClassifications(entity.getGuid());
+                                AtlasEntityHeader entityHeader = new AtlasEntityHeader(entity);
 
-                        if(CollectionUtils.isNotEmpty(entityHeaderWithClassifications.getClassifications())) {
-                            entityHeader.setClassifications(entityHeaderWithClassifications.getClassifications());
-                        }
+                                if(CollectionUtils.isNotEmpty(entityHeaderWithClassifications.getClassifications())) {
+                                    entityHeader.setClassifications(entityHeaderWithClassifications.getClassifications());
+                                }
 
-                        AtlasEntity diffEntity = reqContext.getDifferentialEntity(entity.getGuid());
-                        boolean skipAuthBaseConditions = diffEntity != null && MapUtils.isEmpty(diffEntity.getCustomAttributes()) && MapUtils.isEmpty(diffEntity.getBusinessAttributes()) && CollectionUtils.isEmpty(diffEntity.getClassifications()) && CollectionUtils.isEmpty(diffEntity.getLabels());
-                        boolean skipAuthMeaningsUpdate = diffEntity != null && MapUtils.isNotEmpty(diffEntity.getRelationshipAttributes()) && diffEntity.getRelationshipAttributes().containsKey("meanings") && diffEntity.getRelationshipAttributes().size() == 1 && MapUtils.isEmpty(diffEntity.getAttributes());
-                        boolean skipAuthStarredDetailsUpdate = diffEntity != null && MapUtils.isEmpty(diffEntity.getRelationshipAttributes()) && MapUtils.isNotEmpty(diffEntity.getAttributes()) && diffEntity.getAttributes().size() == 3 && diffEntity.getAttributes().containsKey(ATTR_STARRED_BY) && diffEntity.getAttributes().containsKey(ATTR_STARRED_COUNT) && diffEntity.getAttributes().containsKey(ATTR_STARRED_DETAILS_LIST);
-                        if (skipAuthBaseConditions && (skipAuthMeaningsUpdate || skipAuthStarredDetailsUpdate)) {
-                            //do nothing, only diff is relationshipAttributes.meanings or starred, allow update
-                        } else {
-                            AtlasAuthorizationUtils.verifyUpdateEntityAccess(typeRegistry, entityHeader,"update entity: type=" + entity.getTypeName());
+                                AtlasEntity diffEntity = reqContext.getDifferentialEntity(entity.getGuid());
+                                boolean skipAuthBaseConditions = diffEntity != null && MapUtils.isEmpty(diffEntity.getCustomAttributes()) && MapUtils.isEmpty(diffEntity.getBusinessAttributes()) && CollectionUtils.isEmpty(diffEntity.getClassifications()) && CollectionUtils.isEmpty(diffEntity.getLabels());
+                                boolean skipAuthMeaningsUpdate = diffEntity != null && MapUtils.isNotEmpty(diffEntity.getRelationshipAttributes()) && diffEntity.getRelationshipAttributes().containsKey("meanings") && diffEntity.getRelationshipAttributes().size() == 1 && MapUtils.isEmpty(diffEntity.getAttributes());
+                                boolean skipAuthStarredDetailsUpdate = diffEntity != null && MapUtils.isEmpty(diffEntity.getRelationshipAttributes()) && MapUtils.isNotEmpty(diffEntity.getAttributes()) && diffEntity.getAttributes().size() == 3 && diffEntity.getAttributes().containsKey(ATTR_STARRED_BY) && diffEntity.getAttributes().containsKey(ATTR_STARRED_COUNT) && diffEntity.getAttributes().containsKey(ATTR_STARRED_DETAILS_LIST);
+                                if (skipAuthBaseConditions && (skipAuthMeaningsUpdate || skipAuthStarredDetailsUpdate)) {
+                                    //do nothing, only diff is relationshipAttributes.meanings or starred, allow update
+                                } else {
+                                    AtlasAuthorizationUtils.verifyUpdateEntityAccess(typeRegistry, entityHeader,"update entity: type=" + entity.getTypeName());
+                                }
+                            } finally {
+                                if (policySegment != null) {
+                                    RequestContext.get().endMetricRecord(policySegment);
+                                }
+                            }
                         }
                     }
-                }
 
                 reqContext.endMetricRecord(checkForUnchangedEntities);
             }
@@ -1763,12 +1805,15 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 }
             }
 
+            for (AtlasEntity entity: context.getCreatedEntities()) {
+                RequestContext.get().cacheDifferentialEntity(entity);
+            }
 
             // Timing: Entity processing (lineage calculations happen in mapAttributesAndClassifications)
             long entityProcessingStart = System.currentTimeMillis();
             EntityMutationResponse ret = entityGraphMapper.mapAttributesAndClassifications(context, isPartialUpdate, bulkRequestContext);
             long entityProcessingTime = System.currentTimeMillis() - entityProcessingStart;
-            
+
             // Use accumulated lineage calculation time from RequestContext
             long totalLineageCalcTime = RequestContext.get().getLineageCalcTime();
             observabilityData.setLineageCalcTime(totalLineageCalcTime);
@@ -1777,29 +1822,28 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             // Timing: Ingestion (caching)
             long ingestionStart = System.currentTimeMillis();
-            for (AtlasEntity entity: context.getCreatedEntities()) {
-                RequestContext.get().cacheDifferentialEntity(entity);
-            }
+
             long ingestionTime = System.currentTimeMillis() - ingestionStart;
             observabilityData.setIngestionTime(ingestionTime);
-            
+
             // Timing: Notifications
             long notificationStart = System.currentTimeMillis();
             entityChangeNotifier.onEntitiesMutated(ret, RequestContext.get().isImportInProgress());
+            entityChangeNotifier.notifyDifferentialEntityChanges(ret, RequestContext.get().isImportInProgress());
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
             long notificationTime = System.currentTimeMillis() - notificationStart;
             observabilityData.setNotificationTime(notificationTime);
-            
+
             // Timing: Audit logging (simplified - just a small overhead)
             long auditStart = System.currentTimeMillis();
             // Audit logging happens automatically in the transaction
             long auditTime = System.currentTimeMillis() - auditStart;
             observabilityData.setAuditLogTime(auditTime);
-            
+
             // Record observability metrics
             long endTime = System.currentTimeMillis();
             observabilityData.setDuration(endTime - startTime);
-            
+
             // Analyze payload if available
             // Record observability metrics (low-cardinality only for Prometheus)
             try {
@@ -1808,7 +1852,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     PayloadAnalyzer payloadAnalyzer = new PayloadAnalyzer(typeRegistry);
                     payloadAnalyzer.analyzePayload(atlasEntityStream.getEntitiesWithExtInfo(), observabilityData);
                 }
-                
+
                 // Record metrics (no high-cardinality fields like traceId, vertexIds, assetGuids)
                 observabilityService.recordCreateOrUpdateDuration(observabilityData);
                 observabilityService.recordPayloadSize(observabilityData);
@@ -1820,10 +1864,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 // Log error details with high-cardinality fields for debugging
                 observabilityService.logErrorDetails(observabilityData, "Failed to record observability metrics", e);
             }
-            
+
             // Always record success - the createOrUpdate operation itself succeeded
             observabilityService.recordOperationCount("createOrUpdate", "success");
-            
+
             if (LOG.isDebugEnabled()) {
                 LOG.debug("<== createOrUpdate()");
             }
@@ -1873,7 +1917,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, EntityGraphMapper entityGraphMapper, boolean isPartialUpdate) throws AtlasBaseException {
-        MetricRecorder metric = RequestContext.get().startMetricRecord("preCreateOrUpdate");
+        MetricRecorder metric = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.preCreateOrUpdate.segment0");
         EntityGraphDiscovery        graphDiscoverer  = new AtlasEntityGraphDiscoveryV2(graph, typeRegistry, entityStream, entityGraphMapper);
         EntityGraphDiscoveryContext discoveryContext = graphDiscoverer.discoverEntities();
         EntityMutationContext       context          = new EntityMutationContext(discoveryContext);
@@ -1891,44 +1935,60 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     throw new AtlasBaseException(element.getValue(), AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), entity.getTypeName());
                 }
 
-                compactAttributes(entity, entityType);
-                flushAutoUpdateAttributes(entity, entityType);
+                boolean isPolicyEntity = POLICY_ENTITY_TYPE.equals(entity.getTypeName());
+                MetricRecorder policySegment1 = null;
+                if (isPolicyEntity) {
+                    policySegment1 = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.preCreateOrUpdate.policy.segment1");
+                }
+                try {
+                    compactAttributes(entity, entityType);
+                    flushAutoUpdateAttributes(entity, entityType);
+                } finally {
+                    if (policySegment1 != null) {
+                        RequestContext.get().endMetricRecord(policySegment1);
+                    }
+                }
 
                 AtlasVertex vertex = getResolvedEntityVertex(discoveryContext, entity);
 
-                autoUpdateStarredDetailsAttributes(entity, vertex);
-
+                MetricRecorder policySegment2 = null;
+                if (isPolicyEntity) {
+                    policySegment2 = RequestContext.get().startMetricRecord("AtlasEntityStoreV2.preCreateOrUpdate.policy.segment2");
+                }
                 try {
-                    if (vertex != null) {
-                        if (!isPartialUpdate) {
-                            graphDiscoverer.validateAndNormalize(entity);
+                    autoUpdateStarredDetailsAttributes(entity, vertex);
 
-                            // change entity 'isInComplete' to 'false' during full update
-                            if (isEntityIncomplete(vertex)) {
-                                vertex.removeProperty(IS_INCOMPLETE_PROPERTY_KEY);
+                    try {
+                        if (vertex != null) {
+                            if (!isPartialUpdate) {
+                                graphDiscoverer.validateAndNormalize(entity);
 
-                                entity.setIsIncomplete(FALSE);
+                                // change entity 'isInComplete' to 'false' during full update
+                                if (isEntityIncomplete(vertex)) {
+                                    vertex.removeProperty(IS_INCOMPLETE_PROPERTY_KEY);
+
+                                    entity.setIsIncomplete(FALSE);
+                                }
+                            } else {
+                                graphDiscoverer.validateAndNormalizeForUpdate(entity);
                             }
+
+                            String guidVertex = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+
+                            if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+                                checkAndCreateProcessRelationshipsCleanupTaskNotification(entityType, vertex);
+                            }
+
+                            if (!StringUtils.equals(guidVertex, guid)) { // if entity was found by unique attribute
+                                entity.setGuid(guidVertex);
+
+                                requestContext.recordEntityGuidUpdate(entity, guid);
+                            }
+
+                            context.addUpdated(guid, entity, entityType, vertex);
+
                         } else {
-                            graphDiscoverer.validateAndNormalizeForUpdate(entity);
-                        }
-
-                        String guidVertex = AtlasGraphUtilsV2.getIdFromVertex(vertex);
-
-                        if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
-                            checkAndCreateProcessRelationshipsCleanupTaskNotification(entityType, vertex);
-                        }
-
-                        if (!StringUtils.equals(guidVertex, guid)) { // if entity was found by unique attribute
-                            entity.setGuid(guidVertex);
-
-                            requestContext.recordEntityGuidUpdate(entity, guid);
-                        }
-
-                        context.addUpdated(guid, entity, entityType, vertex);
-
-                    } else {
-                        graphDiscoverer.validateAndNormalize(entity);
+                            graphDiscoverer.validateAndNormalize(entity);
 
                         //Create vertices which do not exist in the repository
                         if (RequestContext.get().isAllowCustomGuid() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
@@ -1937,66 +1997,70 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                             vertex = entityGraphMapper.createVertex(entity);
                         }
 
-                        discoveryContext.addResolvedGuid(guid, vertex);
+                            discoveryContext.addResolvedGuid(guid, vertex);
 
-                        discoveryContext.addResolvedIdByUniqAttribs(getAtlasObjectId(entity), vertex);
+                            discoveryContext.addResolvedIdByUniqAttribs(getAtlasObjectId(entity), vertex);
 
-                        String generatedGuid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
+                            String generatedGuid = AtlasGraphUtilsV2.getIdFromVertex(vertex);
 
-                        entity.setGuid(generatedGuid);
+                            entity.setGuid(generatedGuid);
 
-                        requestContext.recordEntityGuidUpdate(entity, guid);
+                            requestContext.recordEntityGuidUpdate(entity, guid);
 
-                        context.addCreated(guid, entity, entityType, vertex);
-                    }
-
-                } catch (AtlasBaseException exception) {
-                    exception.setEntityGuid(element.getValue());
-                    throw exception;
-                }
-
-
-                String entityStateValue = (String) entity.getAttribute(STATE_PROPERTY_KEY);
-                String entityStatusValue = entity.getStatus() != null ? entity.getStatus().toString() : null;
-                String entityActiveKey = Status.ACTIVE.toString();
-                boolean isRestoreRequested = ((StringUtils.isNotEmpty(entityStateValue) && entityStateValue.equals(entityActiveKey)) || (StringUtils.isNotEmpty(entityStatusValue) && entityStatusValue.equals(entityActiveKey)));
-
-                if (discoveryContext.isAppendRelationshipAttributeVisited() && MapUtils.isNotEmpty(entity.getAppendRelationshipAttributes())) {
-                    context.setUpdatedWithRelationshipAttributes(entity);
-                }
-
-                if (discoveryContext.isRemoveRelationshipAttributeVisited() && MapUtils.isNotEmpty(entity.getRemoveRelationshipAttributes())) {
-                    context.setUpdatedWithRemoveRelationshipAttributes(entity);
-                }
-
-                if (isRestoreRequested) {
-                    Status currStatus = AtlasGraphUtilsV2.getState(vertex);
-                    if (currStatus == Status.DELETED) {
-                        context.addEntityToRestore(vertex);
-                    }
-                }
-
-                // during import, update the system attributes
-                if (RequestContext.get().isImportInProgress()) {
-                    Status newStatus = entity.getStatus();
-
-                    if (newStatus != null) {
-                        Status currStatus = AtlasGraphUtilsV2.getState(vertex);
-
-                        if (currStatus == Status.ACTIVE && newStatus == Status.DELETED) {
-                            if (LOG.isDebugEnabled()) {
-                                LOG.debug("entity-delete via import - guid={}", guid);
-                            }
-
-                            context.addEntityToDelete(vertex);
-                        } else if (currStatus == Status.DELETED && newStatus == Status.ACTIVE) {
-                            LOG.warn("Import is attempting to activate deleted entity (guid={}).", guid);
-                            entityGraphMapper.importActivateEntity(vertex, entity);
                             context.addCreated(guid, entity, entityType, vertex);
+                        }
+
+                    } catch (AtlasBaseException exception) {
+                        exception.setEntityGuid(element.getValue());
+                        throw exception;
+                    }
+
+                    String entityStateValue = (String) entity.getAttribute(STATE_PROPERTY_KEY);
+                    String entityStatusValue = entity.getStatus() != null ? entity.getStatus().toString() : null;
+                    String entityActiveKey = Status.ACTIVE.toString();
+                    boolean isRestoreRequested = ((StringUtils.isNotEmpty(entityStateValue) && entityStateValue.equals(entityActiveKey)) || (StringUtils.isNotEmpty(entityStatusValue) && entityStatusValue.equals(entityActiveKey)));
+
+                    if (discoveryContext.isAppendRelationshipAttributeVisited() && MapUtils.isNotEmpty(entity.getAppendRelationshipAttributes())) {
+                        context.setUpdatedWithRelationshipAttributes(entity);
+                    }
+
+                    if (discoveryContext.isRemoveRelationshipAttributeVisited() && MapUtils.isNotEmpty(entity.getRemoveRelationshipAttributes())) {
+                        context.setUpdatedWithRemoveRelationshipAttributes(entity);
+                    }
+
+                    if (isRestoreRequested) {
+                        Status currStatus = AtlasGraphUtilsV2.getState(vertex);
+                        if (currStatus == Status.DELETED) {
+                            context.addEntityToRestore(vertex);
                         }
                     }
 
-                    entityGraphMapper.updateSystemAttributes(vertex, entity);
+                    // during import, update the system attributes
+                    if (RequestContext.get().isImportInProgress()) {
+                        Status newStatus = entity.getStatus();
+
+                        if (newStatus != null) {
+                            Status currStatus = AtlasGraphUtilsV2.getState(vertex);
+
+                            if (currStatus == Status.ACTIVE && newStatus == Status.DELETED) {
+                                if (LOG.isDebugEnabled()) {
+                                    LOG.debug("entity-delete via import - guid={}", guid);
+                                }
+
+                                context.addEntityToDelete(vertex);
+                            } else if (currStatus == Status.DELETED && newStatus == Status.ACTIVE) {
+                                LOG.warn("Import is attempting to activate deleted entity (guid={}).", guid);
+                                entityGraphMapper.importActivateEntity(vertex, entity);
+                                context.addCreated(guid, entity, entityType, vertex);
+                            }
+                        }
+
+                        entityGraphMapper.updateSystemAttributes(vertex, entity);
+                    }
+                } finally {
+                    if (policySegment2 != null) {
+                        RequestContext.get().endMetricRecord(policySegment2);
+                    }
                 }
             }
         }
