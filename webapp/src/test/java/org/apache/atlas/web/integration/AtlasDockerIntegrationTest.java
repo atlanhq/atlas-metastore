@@ -88,7 +88,7 @@ public class AtlasDockerIntegrationTest {
 
     // Atlas container with volume mount
     @Container
-    static GenericContainer<?> atlas = createAtlasContainer();
+    protected static GenericContainer<?> atlas = createAtlasContainer();
 
     private static GenericContainer<?> createAtlasContainer() {
         // Get the deploy directory path
@@ -316,6 +316,12 @@ public class AtlasDockerIntegrationTest {
             #atlas.authentication.method.keycloak.ugi-groups=false
             #atlas.authentication.method.keycloak.groups_claim=groups
             atlas.http.authentication.enabled=false
+            
+            atlas.throttle.unknown.concurrent=1
+            atlas.throttle.unknown.concurrentRatio=0.01
+            atlas.throttle.numaflow.default.concurrent=2
+            atlas.throttle.product_sdk.concurrent=3
+            atlas.throttle.workflow.concurrent=5
             EOF
             
             # Export required environment variables

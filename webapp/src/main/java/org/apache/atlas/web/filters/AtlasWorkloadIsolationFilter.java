@@ -6,6 +6,7 @@ import io.github.resilience4j.bulkhead.BulkheadFullException;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.github.resilience4j.ratelimiter.RequestNotPermitted;
+import org.apache.atlas.ApplicationProperties;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,15 +14,13 @@ import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.env.Environment;
 import org.springframework.stereotype.Component;
-import org.springframework.web.filter.OncePerRequestFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Timer;
 import io.micrometer.core.instrument.Gauge;
 
 import javax.annotation.PostConstruct;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
+import javax.servlet.*;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -32,7 +31,7 @@ import java.util.concurrent.TimeUnit;
 
 @Component
 @Order(Ordered.HIGHEST_PRECEDENCE)
-public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
+public class AtlasWorkloadIsolationFilter implements Filter {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasWorkloadIsolationFilter.class);
     
@@ -49,11 +48,12 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
     
     // Throttled endpoints
     private static final Set<String> THROTTLED_PATHS = new HashSet<>(Arrays.asList(
-        "/api/atlas/v2/search/indexsearch",
-        "/api/atlas/v2/entity/bulk"
+        "search/indexsearch",
+        "entity/bulk",
+        "test/slowOperation"
     ));
 
-    private final Map<String, WorkloadLimiter> clientLimiters = new ConcurrentHashMap<>();
+    private static final Map<String, WorkloadLimiter> clientLimiters = new ConcurrentHashMap<>();
     
     // To prevent unlimited growth of clientLimiters map
     private static final int MAX_CLIENT_LIMITERS = 1000;
@@ -69,81 +69,85 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
 
     @Autowired(required = false)
     private MeterRegistry meterRegistry;
-    
-    /**
-     * System capacity holder - calculated at startup
-     */
-    private static class SystemCapacity {
-        final int availableCpuCores;
-        final long availableMemoryMB;
-        final int baselineConcurrency;      // Based on CPU cores
-        final int baselineRatePerSec;       // Based on upstream nginx limits
-        
-        SystemCapacity(int cpuCores, long memoryMB, int baselineConcurrency, int baselineRatePerSec) {
-            this.availableCpuCores = cpuCores;
-            this.availableMemoryMB = memoryMB;
-            this.baselineConcurrency = baselineConcurrency;
-            this.baselineRatePerSec = baselineRatePerSec;
+
+    @Override
+    public void init(FilterConfig filterConfig) throws ServletException {
+    }
+
+    @Override
+    public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain filterChain) throws IOException, ServletException {
+        HttpServletRequest request = (HttpServletRequest) servletRequest;
+        HttpServletResponse response = (HttpServletResponse) servletResponse;
+        // Check if this path should be throttled
+        if (!shouldThrottle(request)) {
+            filterChain.doFilter(request, response);
+            return;
         }
-        
-        @Override
-        public String toString() {
-            return String.format("CPU=%d cores, Memory=%d MB, Baseline: %d concurrent, %d req/sec",
-                    availableCpuCores, availableMemoryMB, baselineConcurrency, baselineRatePerSec);
+
+        // Get client identification from headers
+        String clientOrigin = request.getHeader(HEADER_CLIENT_ORIGIN);
+        String agentId = request.getHeader(HEADER_AGENT_ID);
+
+        // Log headers for debugging (remove in production or use DEBUG level)
+        LOG.debug("Request from origin: {}, agent: {}, path: {}", clientOrigin, agentId, request.getRequestURI());
+
+        // product_webapp is NOT throttled
+        if (ORIGIN_PRODUCT_WEBAPP.equalsIgnoreCase(clientOrigin)) {
+            LOG.debug("Skipping throttle for product_webapp");
+            filterChain.doFilter(request, response);
+            return;
+        }
+
+        // Identify client and get appropriate limiter
+        ClientIdentity clientIdentity = identifyClient(clientOrigin, agentId);
+        WorkloadLimiter limiter = getLimiterForClient(clientIdentity);
+
+        long startTime = System.currentTimeMillis();
+
+        try {
+            LOG.info("🔥🔥🔥 THROTTLING: {}, available calls: {}", request.getRequestURI(), limiter.concurrencyLimit.getMetrics().getAvailableConcurrentCalls());
+            // Acquire permits (blocks with backpressure)
+            limiter.acquire();
+
+            try {
+                Bulkhead.decorateCheckedRunnable(limiter.concurrencyLimit, () -> {
+                    try {
+                        filterChain.doFilter(request, response);
+                    } catch (IOException | ServletException e) {
+                        throw new RuntimeException(e);
+                    }
+                }).run();
+            } finally {
+                limiter.release();
+                LOG.info("releasing throttle for {}", request.getRequestURI());
+            }
+
+        } catch (BulkheadFullException e) {
+            LOG.warn("Bulkhead full for client: {}, URI: {}", clientIdentity, request.getRequestURI());
+            handleBackpressure(response, clientIdentity.toString(), "concurrency", limiter);
+
+        } catch (RequestNotPermitted e) {
+            LOG.warn("Rate limit exceeded for client: {}, URI: {}", clientIdentity, request.getRequestURI());
+            handleBackpressure(response, clientIdentity.toString(), "rate", limiter);
+
+        } catch (Exception e) {
+            LOG.error("Throttling error for client: {}", clientIdentity, e);
+            throw new ServletException("Throttling error", e);
+
+        } catch (Throwable e) {
+            throw new RuntimeException(e);
+        } finally {
+            recordMetrics(clientIdentity.toString(), request, System.currentTimeMillis() - startTime);
         }
     }
 
-    static class WorkloadLimiter {
-        final Bulkhead concurrencyLimit;    // Max concurrent requests
-        final RateLimiter sustainedRate;     // Sustained throughput (can be null if disabled)
-        final String clientType;
-        final boolean rateLimitingEnabled;
+    @Override
+    public void destroy() {
 
-        WorkloadLimiter(String clientType, int maxConcurrent, int ratePerSec, boolean rateLimitingEnabled) {
-            this.clientType = clientType;
-            this.rateLimitingEnabled = rateLimitingEnabled;
-            
-            // Always create bulkhead (concurrency limiting)
-            this.concurrencyLimit = Bulkhead.of(clientType + "-concurrent",
-                    BulkheadConfig.custom()
-                            .maxConcurrentCalls(maxConcurrent)
-                            .maxWaitDuration(Duration.ofSeconds(30))
-                            .build()
-            );
-            
-            // Only create rate limiter if enabled
-            if (rateLimitingEnabled) {
-                this.sustainedRate = RateLimiter.of(clientType + "-rate",
-                        RateLimiterConfig.custom()
-                                .limitRefreshPeriod(Duration.ofSeconds(1))
-                                .limitForPeriod(ratePerSec)
-                                .timeoutDuration(Duration.ofSeconds(30))
-                                .build());
-            } else {
-                this.sustainedRate = null;
-            }
-        }
-
-        void acquire() throws Throwable {
-            // First: Check sustained rate (if enabled)
-            if (rateLimitingEnabled && sustainedRate != null) {
-                boolean acquired = sustainedRate.acquirePermission();
-                if (!acquired) {
-                    throw RequestNotPermitted.createRequestNotPermitted(sustainedRate);
-                }
-            }
-
-            // Second: Check concurrency (blocks if needed)
-            Bulkhead.decorateCheckedRunnable(concurrencyLimit, () -> {}).run();
-        }
-
-        void release() {
-            // Bulkhead auto-releases when decorated runnable completes
-        }
     }
 
     @PostConstruct
-    public void initLimiters() {
+    private void initLimiters() {
         // Step 1: Detect system capacity
         systemCapacity = detectSystemCapacity();
         LOG.info("Detected system capacity: {}", systemCapacity);
@@ -201,7 +205,7 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
         clientLimiters.put(ORIGIN_NUMAFLOW + ":default", new WorkloadLimiter(ORIGIN_NUMAFLOW + ":default", numaflowDefaultConcurrent, numaflowDefaultRate, rateLimitingEnabled));
         
         // unknown/missing origin - LOWEST PRIORITY (most restrictive)
-        int unknownConcurrent = calculateLimit("unknown", "concurrent", 0.05, 3);
+        int unknownConcurrent = calculateLimit("unknown", "concurrent", 0.01, 3);
         int unknownRate = calculateLimit("unknown", "rate", 0.05, 5);
         clientLimiters.put(ORIGIN_UNKNOWN, new WorkloadLimiter(ORIGIN_UNKNOWN, unknownConcurrent, unknownRate, rateLimitingEnabled));
         
@@ -379,11 +383,19 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
     }
     
     private int getIntProperty(String key, int defaultValue) {
-        return environment.getProperty(key, Integer.class, defaultValue);
+        try {
+            return ApplicationProperties.get().getInt(key);
+        } catch (Exception e) {
+            return defaultValue;
+        }
     }
     
     private double getDoubleProperty(String key, double defaultValue) {
-        return environment.getProperty(key, Double.class, defaultValue);
+        try {
+            return ApplicationProperties.get().getDouble(key);
+        } catch (Exception e) {
+            return defaultValue;
+        }
     }
     
     /**
@@ -480,67 +492,6 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
         return pipelineId.replaceAll("[^a-zA-Z0-9-]", "_").toLowerCase();
     }
 
-    @Override
-    protected void doFilterInternal(HttpServletRequest request,
-                                    HttpServletResponse response,
-                                    FilterChain filterChain)
-            throws ServletException, IOException {
-
-        // Check if this path should be throttled
-        if (!shouldThrottle(request)) {
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        // Get client identification from headers
-        String clientOrigin = request.getHeader(HEADER_CLIENT_ORIGIN);
-        String agentId = request.getHeader(HEADER_AGENT_ID);
-        
-        // Log headers for debugging (remove in production or use DEBUG level)
-        LOG.debug("Request from origin: {}, agent: {}, path: {}", clientOrigin, agentId, request.getRequestURI());
-
-        // product_webapp is NOT throttled
-        if (ORIGIN_PRODUCT_WEBAPP.equalsIgnoreCase(clientOrigin)) {
-            LOG.debug("Skipping throttle for product_webapp");
-            filterChain.doFilter(request, response);
-            return;
-        }
-
-        // Identify client and get appropriate limiter
-        ClientIdentity clientIdentity = identifyClient(clientOrigin, agentId);
-        WorkloadLimiter limiter = getLimiterForClient(clientIdentity);
-
-        long startTime = System.currentTimeMillis();
-
-        try {
-            // Acquire permits (blocks with backpressure)
-            limiter.acquire();
-
-            try {
-                filterChain.doFilter(request, response);
-            } finally {
-                limiter.release();
-            }
-
-        } catch (BulkheadFullException e) {
-            LOG.warn("Bulkhead full for client: {}, URI: {}", clientIdentity, request.getRequestURI());
-            handleBackpressure(response, clientIdentity.toString(), "concurrency", limiter);
-
-        } catch (RequestNotPermitted e) {
-            LOG.warn("Rate limit exceeded for client: {}, URI: {}", clientIdentity, request.getRequestURI());
-            handleBackpressure(response, clientIdentity.toString(), "rate", limiter);
-
-        } catch (Exception e) {
-            LOG.error("Throttling error for client: {}", clientIdentity, e);
-            throw new ServletException("Throttling error", e);
-
-        } catch (Throwable e) {
-            throw new RuntimeException(e);
-        } finally {
-            recordMetrics(clientIdentity.toString(), request, System.currentTimeMillis() - startTime);
-        }
-    }
-    
     /**
      * Check if the request path should be throttled
      */
@@ -691,5 +642,74 @@ public class AtlasWorkloadIsolationFilter extends OncePerRequestFilter {
                 .tag("client_type", clientType)
                 .register(meterRegistry)
                 .record(durationMs, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * System capacity holder - calculated at startup
+     */
+    private static class SystemCapacity {
+        final int availableCpuCores;
+        final long availableMemoryMB;
+        final int baselineConcurrency;      // Based on CPU cores
+        final int baselineRatePerSec;       // Based on upstream nginx limits
+
+        SystemCapacity(int cpuCores, long memoryMB, int baselineConcurrency, int baselineRatePerSec) {
+            this.availableCpuCores = cpuCores;
+            this.availableMemoryMB = memoryMB;
+            this.baselineConcurrency = baselineConcurrency;
+            this.baselineRatePerSec = baselineRatePerSec;
+        }
+
+        @Override
+        public String toString() {
+            return String.format("CPU=%d cores, Memory=%d MB, Baseline: %d concurrent, %d req/sec",
+                    availableCpuCores, availableMemoryMB, baselineConcurrency, baselineRatePerSec);
+        }
+    }
+
+    private static class WorkloadLimiter {
+        final Bulkhead concurrencyLimit;    // Max concurrent requests
+        final RateLimiter sustainedRate;     // Sustained throughput (can be null if disabled)
+        final String clientType;
+        final boolean rateLimitingEnabled;
+
+        WorkloadLimiter(String clientType, int maxConcurrent, int ratePerSec, boolean rateLimitingEnabled) {
+            this.clientType = clientType;
+            this.rateLimitingEnabled = rateLimitingEnabled;
+
+            // Always create bulkhead (concurrency limiting)
+            this.concurrencyLimit = Bulkhead.of(clientType + "-concurrent",
+                    BulkheadConfig.custom()
+                            .maxConcurrentCalls(maxConcurrent)
+                            .maxWaitDuration(Duration.ofMillis(1000))
+                            .build()
+            );
+
+            // Only create rate limiter if enabled
+            if (rateLimitingEnabled) {
+                this.sustainedRate = RateLimiter.of(clientType + "-rate",
+                        RateLimiterConfig.custom()
+                                .limitRefreshPeriod(Duration.ofSeconds(1))
+                                .limitForPeriod(ratePerSec)
+                                .timeoutDuration(Duration.ofSeconds(30))
+                                .build());
+            } else {
+                this.sustainedRate = null;
+            }
+        }
+
+        void acquire() throws Throwable {
+            // First: Check sustained rate (if enabled)
+            if (rateLimitingEnabled && sustainedRate != null) {
+                boolean acquired = sustainedRate.acquirePermission();
+                if (!acquired) {
+                    throw RequestNotPermitted.createRequestNotPermitted(sustainedRate);
+                }
+            }
+        }
+
+        void release() {
+            // Bulkhead auto-releases when decorated runnable completes
+        }
     }
 }
