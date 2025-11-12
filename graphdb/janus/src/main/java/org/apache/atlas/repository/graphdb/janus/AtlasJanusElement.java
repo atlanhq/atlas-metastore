@@ -19,6 +19,7 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+import jline.internal.Log;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
@@ -27,6 +28,10 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
 import org.apache.commons.lang.StringUtils;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
+import org.apache.tinkerpop.gremlin.process.traversal.P;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
+import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
 import org.codehaus.jettison.json.JSONException;
@@ -36,6 +41,8 @@ import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.atlas.type.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.INTERNAL_PROPERTY_KEY_PREFIX;
@@ -137,6 +144,41 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         }
 
         recordInternalAttribute(propertyName, finalValues);
+    }
+
+    public void removeSinglePropertyValue(String propertyName, Object propertyValue) {
+        GraphTraversalSource traversalSource = graph.getGraph().traversal();
+        boolean shouldRecordInternalState = propertyName != null && propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX);
+
+        try {
+            GraphTraversal<?, ?> propertiesTraversal = traversalSource.V(getWrappedElement().id())
+                    .properties(propertyName);
+
+            if (propertyValue instanceof Collection) {
+                Collection<?> values = (Collection<?>) propertyValue;
+
+                if (values.isEmpty()) {
+                    return;
+                }
+
+                propertiesTraversal = propertiesTraversal.hasValue(P.within(values));
+            } else {
+                propertiesTraversal = propertiesTraversal.hasValue(propertyValue).limit(1);
+            }
+
+            propertiesTraversal.drop().iterate();
+        } finally {
+            try {
+                traversalSource.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+
+        if (shouldRecordInternalState) {
+            List<Object> remaining = getMultiValuedProperty(propertyName, Object.class);
+            recordInternalAttribute(propertyName, remaining);
+        }
     }
 
     @Override
