@@ -18,32 +18,7 @@ data:
 
     echo "[+] Copying Config File"
     cp /tmp/configfile/atlas-application.properties /tmp/newconfigfile/atlas-application.properties
-
-    echo "[+] Checking for Redis availability"
-    ATLAS_REDIS_URL=$(grep "atlas.redis." /tmp/newconfigfile/atlas-application.properties | tr -d ' ' | awk -F '=' '$1 == "atlas.redis.url" {print $2}')
-    ATLAS_REDIS_HOST=$(echo "$ATLAS_REDIS_URL" | sed "s/redis:\/\///g" | awk -F ':' '{print $1}')
-    ATLAS_REDIS_PORT=$(echo "$ATLAS_REDIS_URL" | awk -F ':' '{print $3}')
-    ATLAS_REDIS_USERNAME=$(grep "atlas.redis." /tmp/newconfigfile/atlas-application.properties | tr -d ' ' | awk -F '=' '$1 == "atlas.redis.username" {print $2}')
-    ATLAS_REDIS_PASSWORD=$(grep "atlas.redis." /tmp/newconfigfile/atlas-application.properties | tr -d ' ' | awk -F '=' '$1 == "atlas.redis.password" {print $2}')
-    echo "Redis Host: $ATLAS_REDIS_HOST Redis Port: $ATLAS_REDIS_PORT Redis Username:$ATLAS_REDIS_USERNAME"
-    redis_status=1
-    retries=0
-    while [ $retries -lt 20 ]; do
-        printf "."
-        echo -e "AUTH $ATLAS_REDIS_USERNAME $ATLAS_REDIS_PASSWORD\r\nPING\r\n" | nc -w 1 $ATLAS_REDIS_HOST $ATLAS_REDIS_PORT | grep -q "+PONG"
-        redis_status=$?
-        if [ $redis_status -eq 0 ]; then
-            echo 'Redis OK ✓'
-            break
-        fi
-        sleep 10s
-        retries=$((retries+1))
-    done
-    if [ $redis_status -ne 0 ]; then
-        echo -e "\n/!\ ERROR: Redis check failed"
-        exit 1
-    fi
-
+    
     echo "[+] Checking for Keycloak"
     until printf "." && curl -s $KEYCLOAK_ADDRESS/realms/master; do
       sleep 2;

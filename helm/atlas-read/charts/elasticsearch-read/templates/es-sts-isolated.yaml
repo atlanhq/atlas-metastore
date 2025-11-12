@@ -19,7 +19,7 @@ metadata:
     {{ $key }}: {{ $value | quote }}
     {{- end }}
 spec:
-  serviceName: {{ $.Values.esClusterName }}-{{ $nodeName }}-headless
+  serviceName: {{ $.Values.esClusterName }}-{{ $nodeName }}
   selector:
     matchLabels:
       app: {{ $.Values.esClusterName }}-{{ $nodeName }}
@@ -118,23 +118,13 @@ spec:
           - name: cluster.max_shards_per_node
             value: {{ $.Values.maxShardsPerNode | quote }}
           - name: ES_JAVA_OPTS
-            value: {{- if eq $tierType "Enterprise" }}
-                   {{ index $.Values.isolation.esJavaOpts $nodeName }}
-                 {{- else if eq $tierType "Basic" }}
-                   {{ index $.Values.isolation.esJavaOpts_basic $nodeName }}
-                 {{- else if eq $tierType "Standard" }}
-                   {{ index $.Values.isolation.esJavaOpts_standard $nodeName }}
-                 {{- else }}
-                   {{ index $.Values.isolation.esJavaOpts $nodeName }}
-                 {{- end }}
+            value: {{ index $.Values.isolation.esJavaOpts $nodeName }}
           {{- if $.Values.extraEnvs }}
 {{ toYaml $.Values.extraEnvs | indent 10 }}
           {{- end }}
         volumeMounts:
-          {{- if ne $nodeName "master" }}
           - name: {{ $.Values.esClusterName }}-{{ $nodeName }}
             mountPath: /usr/share/elasticsearch/data
-          {{- end }}
           - name: elasticsearch-synonym-config
             mountPath: /usr/share/elasticsearch/config/synonym.txt
             subPath: synonym.txt
@@ -187,9 +177,9 @@ spec:
       nodeSelector:
 {{ toYaml . | indent 8 }}
       {{- end }}
-      {{- with .Values.tolerations }}
+      {{- with $.Values.tolerations }}
       tolerations:
-{{ toYaml . | indent 6 }}
+{{ toYaml . | indent 8 }}
       {{- end }}
       {{- if or (eq $.Values.antiAffinity "hard") (eq $.Values.antiAffinity "soft") }}
       affinity:

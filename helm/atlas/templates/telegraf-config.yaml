@@ -26,7 +26,7 @@ data:
       # quiet = false
       hostname = "" # Will be set by Telegraf automatically
       omit_hostname = false
-    {{- if .Values.nginx.enabled }}
+    {{- if .Values.nginx.ratelimit.enabled }}
     # Input plugin for basic Nginx stub_status metrics
     [[inputs.nginx]]
       ## An array of Nginx stub_status URI to gather stats from.

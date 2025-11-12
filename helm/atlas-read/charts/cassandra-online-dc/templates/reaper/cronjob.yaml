@@ -22,10 +22,19 @@ spec:
         template:
           spec:
             restartPolicy: {{ .Values.reaper.restartPolicy }}
-            {{- with .Values.nodeSelector }}
-            nodeSelector:
-              {{- toYaml . | nindent 14 }}
-            {{- end }}   
+            {{- $multiarchEnabled := and .Values.multiarch (eq .Values.multiarch.enabled true) }}
+            {{- if or .Values.tolerations $multiarchEnabled }}
+            tolerations:
+            {{- if .Values.tolerations }}
+            {{ toYaml .Values.tolerations | nindent 14 }}
+            {{- end }}
+            {{- if $multiarchEnabled }}
+              - key: "archtype"
+                operator: "Equal"
+                value: "arm64"
+                effect: "NoSchedule"
+            {{- end }}
+            {{- end }}
             containers:
                 - name: reaper
                   {{- if and .Values.multiarch.enabled .Values.multiarch.image.reaper }}
@@ -79,4 +88,4 @@ spec:
             imagePullSecrets: 
                 - name: {{ .Values.image.pullSecrets }}
 {{- end}}
-{{- end }}
+{{- end}}

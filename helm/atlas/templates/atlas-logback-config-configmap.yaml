@@ -83,20 +83,6 @@ data:
               </filter>
           </appender>
 
-          <appender name="consoleAuthAuditExternal" class="ch.qos.logback.core.ConsoleAppender">
-              <param name="Target" value="System.out"/>
-              <filter class="org.apache.atlas.web.filters.MDCFilter">
-                  <mdcKey>filter</mdcKey>
-                  <mdcValue>atlas-auth-audit-external</mdcValue>
-              </filter>
-              <encoder>
-                  <pattern>{"severity_text":"%level","timestamp":"%date{ISO8601}","body":"%m"}%n</pattern>
-              </encoder>
-              <filter class="ch.qos.logback.classic.filter.ThresholdFilter">
-                  <level>INFO</level>
-              </filter>
-          </appender>
-
           <appender name="consoleAtlas" class="ch.qos.logback.core.ConsoleAppender">
               <param name="Target" value="System.out"/>
               <filter class="org.apache.atlas.web.filters.MDCFilter">
@@ -186,10 +172,6 @@ data:
           <logger name="AUTH_AUDIT" additivity="false" level="info">
               <appender-ref ref="consoleAuthAudit"/>
               <appender-ref ref="OpenTelemetry"/>
-          </logger>
-
-          <logger name="AUTH_AUDIT_EXTERNAL" additivity="false" level="info">
-              <appender-ref ref="consoleAuthAuditExternal"/>
           </logger>
 
           <!-- Authz loggers End -->

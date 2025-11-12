@@ -37,13 +37,6 @@ spec:
     - host: {{ tpl . $}}
       http:
         paths:
-          - backend:
-              service:
-                name: redirect-to-home
-                port:
-                  name: use-annotation
-            path: /api/meta/admin/
-            pathType: Prefix
 {{- if $extraPaths }}
 {{ toYaml $extraPaths | indent 10 }}
 {{- end }}

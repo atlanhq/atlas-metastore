@@ -1,8 +1,9 @@
+{{- if or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled) }}
 {{- if .Values.podDisruptionBudget.enabled }}
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
-  name: atlas
+  name: atlas-read-pdb
   namespace: {{ .Values.Namespace  }}
   labels:
     app: {{ template "name" . }}
@@ -20,4 +21,5 @@ spec:
     matchLabels:
       app: {{ template "name" . }}
       release: {{ .Release.Name }}
+{{- end }}
 {{- end }}
