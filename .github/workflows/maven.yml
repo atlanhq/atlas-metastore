@@ -37,7 +37,8 @@ on:
 
 jobs:
   # Detect what changed to optimize workflow execution
-  # This dramatically speeds up helm-only changes by skipping the 20+ minute build job
+  # Helm-only changes: Skip build, use latest image, run smoke test, publish charts
+  # Application changes: Full build pipeline with new image
   changes:
     runs-on: ubuntu-latest
     outputs:
@@ -405,9 +406,12 @@ jobs:
     name: Multi-Cloud Smoke Test
     needs: [build, changes]
     runs-on: ubuntu-latest
-    # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
+    # Run smoke tests on protected branches for:
+    # 1. Application changes (build succeeded - use new image)
+    # 2. Helm-only changes (build skipped - use latest existing image)
     if: |
-      needs.build.result == 'success' &&
+      always() &&
+      (needs.build.result == 'success' || needs.build.result == 'skipped') &&
       (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
     
     # Concurrency control: Only one smoke test at a time across all branches
@@ -432,8 +436,54 @@ jobs:
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
       
+      - name: Determine image tag strategy
+        id: image_strategy
+        env:
+          GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
+        run: |
+          if [[ "${{ needs.build.result }}" == "success" ]]; then
+            # Build succeeded - use new image tag
+            IMAGE_TAG="${{ env.COMMIT_ID }}"
+            echo "✅ Using NEW image tag from build: ${IMAGE_TAG}"
+            echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          else
+            # Build skipped (helm-only changes) - fetch latest existing image tag
+            IMAGE_NAME="atlas-metastore-${{ env.BRANCH_NAME }}"
+            echo "📦 Build skipped (helm-only changes), fetching latest image tag for ${IMAGE_NAME}..."
+            
+            # Fetch the latest existing image tag from GHCR (excluding arm64/amd64 variants)
+            all_tags=()
+            link="n=200"
+            
+            while [[ $link != "" ]]; do
+              response=$(curl -s -X GET "https://ghcr.io/v2/atlanhq/${IMAGE_NAME}/tags/list?${link}" \
+                -H "Authorization: Bearer $(echo ${GITHUB_TOKEN} | base64)")
+              
+              # Filter out arm64/amd64 variants and "latest" tag
+              tags=$(echo "$response" | jq -r '.tags[]' 2>/dev/null | grep -vE '(-arm64|-amd64|^latest)$' || true)
+              all_tags+=($tags)
+              
+              # Check for next page
+              link=$(curl -s -I -X GET "https://ghcr.io/v2/atlanhq/${IMAGE_NAME}/tags/list?${link}" \
+                -H "Authorization: Bearer $(echo ${GITHUB_TOKEN} | base64)" | \
+                grep -i link | cut -f 2 -d '<' | cut -f 1 -d '>' | cut -f 2 -d '?' || true)
+              sleep 1
+            done
+            
+            # Get the last valid tag (most recent)
+            if [[ ${#all_tags[@]} -eq 0 ]]; then
+              echo "❌ No valid tags found for ${IMAGE_NAME}"
+              echo "💡 This might be the first commit on this branch - cannot run helm-only smoke test"
+              exit 1
+            else
+              IMAGE_TAG="${all_tags[-1]}"
+              echo "📌 Using latest existing image tag: ${IMAGE_TAG}"
+              echo "tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+            fi
+          fi
+      
       - name: Set test image
-        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
+        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ steps.image_strategy.outputs.tag }}" >> $GITHUB_ENV
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -614,13 +664,13 @@ jobs:
     runs-on: ubuntu-latest
     # Run helm-publish if:
     # 1. Helm-lint passed (quality gate)
-    # 2. Build succeeded AND smoke-test passed/skipped: publish (code/workflow changes)
-    # 3. Build skipped AND helm changed: publish (helm-only changes)
+    # 2. Build succeeded AND smoke-test passed/skipped: publish with new image
+    # 3. Build skipped (helm-only) AND smoke-test passed: publish with latest existing image
     if: |
       always() && 
       needs.helm-lint.result == 'success' && (
         (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
-        (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')
+        (needs.build.result == 'skipped' && needs.smoke-test.result == 'success' && needs.changes.outputs.helm == 'true')
       )
     strategy:
       matrix:
