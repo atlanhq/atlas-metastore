@@ -1,5 +1,4 @@
-{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
-{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+{{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -22,5 +21,4 @@ data:
     {{- end }}
     tags=Instance:{{ .Values.atlas.secrets.INSTANCE_NAME }}
     sample_rate={{ .Values.atlas.sentry.sampleRate }}
-{{- end }}
 {{- end }}

@@ -172,11 +172,7 @@ spec:
             - name: create-atlas-keycloak-config
               mountPath: /create-atlas-keycloak-config.sh
               subPath: create-atlas-keycloak-config.sh
-          {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
-            - name: sentry-dsn-config
-              mountPath: /opt/apache-atlas/conf/sentry.properties
-              subPath: sentry.properties
-          {{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+          {{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
             - name: sentry-dsn-config
               mountPath: /opt/apache-atlas/conf/sentry.properties
               subPath: sentry.properties
@@ -250,11 +246,7 @@ spec:
           configMap:
             name: create-atlas-keycloak-config-cm
             defaultMode: 0755
-      {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
-        - name: sentry-dsn-config
-          configMap:
-            name: sentry-dsn-config
-      {{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+      {{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
         - name: sentry-dsn-config
           configMap:
             name: sentry-dsn-config

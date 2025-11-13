@@ -20,7 +20,7 @@ spec:
     matchLabels:
       app: "{{ template "elasticsearch.uname" . }}"
   {{- if eq .Values.global.Deployment_Type "Lite" }}
-  replicas: {{ .Values.replicas }}
+  replicas: 1
   {{- else }}
   replicas: {{ .Values.replicas }}
   {{- end }}

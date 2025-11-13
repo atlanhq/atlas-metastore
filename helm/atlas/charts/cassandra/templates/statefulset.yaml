@@ -17,7 +17,11 @@ spec:
       app: {{ template "cassandra.name" . }}
       release: {{ .Release.Name }}
   serviceName: {{ template "cassandra.fullname" . }}
+  {{- if eq .Values.Deployment_Type "Lite" }}
+  replicas: 1
+  {{- else }}
   replicas: {{ .Values.config.cluster_size }}
+  {{- end }}
   podManagementPolicy: {{ .Values.podManagementPolicy }}
   updateStrategy:
     type: {{ .Values.updateStrategy.type }}
