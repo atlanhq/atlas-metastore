@@ -499,5 +499,5 @@ data:
     atlas.types.update.async.enable={{ .Values.atlas.types_update.async_enable }}
     atlas.types.update.thread.count={{ .Values.atlas.types_update.thread_count }}
 
-      ######### Atlas notification configs #########
+    ######### Atlas notification configs #########
     atlas.notification.differential.entity.changes.enabled={{ .Values.atlas.notification.differential_entity_changes_enabled }}
