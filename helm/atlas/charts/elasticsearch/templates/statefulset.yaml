@@ -20,7 +20,7 @@ spec:
   selector:
     matchLabels:
       app: "{{ template "elasticsearch.uname" . }}"
-  {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1) }}
+  {{- if eq .Values.global.Deployment_Type "Lite" }}
   replicas: {{ .Values.replicas }}
   {{- else }}
   replicas: {{ .Values.replicas }}
@@ -85,7 +85,7 @@ spec:
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
-      {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1) }}
+      {{- if eq .Values.global.Deployment_Type "Lite" }}
       {{- with .Values.affinity_hard }}
       affinity:
 {{ toYaml . | indent 8 }}
@@ -94,7 +94,7 @@ spec:
       affinity:
       {{- $tierType := .Values.global.Tier_Type | default "" }}
       {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
-      {{- if not (and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1)) }}
+      {{- if not (eq .Values.global.Deployment_Type "Lite") }}
       {{- if eq .Values.antiAffinity "hard" }}
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -118,7 +118,7 @@ spec:
       {{- end }}
       {{- end }}
       {{- end }}
-      {{- if not (and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1)) }}
+      {{- if not (eq .Values.global.Deployment_Type "Lite") }}
         nodeAffinity:
           {{- if eq .Values.custom_deployment.enabled true }}
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -302,7 +302,7 @@ spec:
         - name: transport
           containerPort: {{ .Values.transportPort }}
         resources:
-{{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.replicas) 1) }}
+{{- if eq .Values.global.Deployment_Type "Lite" }}
 {{ toYaml .Values.resources_dev | indent 10 }}
 {{- else if eq .Values.global.Tier_Type "Enterprise" }}
 {{ toYaml .Values.resources | indent 10 }}

@@ -12,6 +12,10 @@ metadata:
   annotations:
     configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
     secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
+{{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
+    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
 {{- else }}
   annotations:
     configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,rate-limit-nginx-config"
@@ -34,7 +38,7 @@ spec:
     spec:
       {{- if and .Values.atlas.affinity (ne .Values.global.Tier_Type "Basic") (ne .Values.global.Tier_Type "Standard") }}
       affinity:
-        {{- if eq .Values.Deployment_Type "Development" }}
+        {{- if eq .Values.Deployment_Type "Lite" }}
         {{- toYaml .Values.atlas.affinity_hard | nindent 8 }}
         {{- else }}
         nodeAffinity:
@@ -97,7 +101,7 @@ spec:
           ports:
             - containerPort: {{ .Values.atlas.service.targetPort }}
           env:
-          {{- if and (eq .Values.atlas.Deployment_Type "Development") (eq (int .Values.atlas.replicaCount) 1) }}
+          {{- if eq .Values.global.Deployment_Type "Lite" }}
             - name: SPRING_PROFILES_ACTIVE
               value: "local"
           {{- end }}
@@ -173,6 +177,10 @@ spec:
             - name: sentry-dsn-config
               mountPath: /opt/apache-atlas/conf/sentry.properties
               subPath: sentry.properties
+          {{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+            - name: sentry-dsn-config
+              mountPath: /opt/apache-atlas/conf/sentry.properties
+              subPath: sentry.properties
           {{- end}}
             - name: atlas-logs
               mountPath: /opt/apache-atlas/logs
@@ -244,6 +252,10 @@ spec:
             name: create-atlas-keycloak-config-cm
             defaultMode: 0755
       {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+        - name: sentry-dsn-config
+          configMap:
+            name: sentry-dsn-config
+      {{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
         - name: sentry-dsn-config
           configMap:
             name: sentry-dsn-config

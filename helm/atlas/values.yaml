@@ -308,6 +308,14 @@ atlas:
     requests:
       memory: 20Mi
 
+  resources_lite:
+    limits:
+      cpu: 2000m
+      memory: 8Gi
+    requests:
+      cpu: 1000m
+      memory: 6Gi
+
   # Liveness and readiness probes for atlas
   livenessProbe:
     failureThreshold: 3

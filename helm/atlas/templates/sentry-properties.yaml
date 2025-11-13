@@ -1,4 +1,5 @@
 {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,7 +13,7 @@ metadata:
 data:
   sentry.properties: |
     {{- if .Values.multitenant }}
-    {{- if eq .Values.atlas.Deployment_Type "Development" }}
+    {{- if or (eq .Values.atlas.Deployment_Type "Development") (eq .Values.atlas.Deployment_Type "Lite") }}
     dsn={{ .Values.atlas.secrets.SENTRY_DSN_DEV }}
     {{- else }}
     dsn={{ .Values.atlas.secrets.SENTRY_DSN_PROD }}
@@ -22,4 +23,5 @@ data:
     {{- end }}
     tags=Instance:{{ .Values.atlas.secrets.INSTANCE_NAME }}
     sample_rate={{ .Values.atlas.sentry.sampleRate }}
+{{- end }}
 {{- end }}

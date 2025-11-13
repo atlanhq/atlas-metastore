@@ -50,7 +50,7 @@ spec:
         fsGroup: {{ .Values.securityContext.fsGroup }}
         runAsUser: {{ .Values.securityContext.runAsUser }}
       {{- end }}
-{{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.config.cluster_size) 1) }}
+{{- if eq .Values.global.Deployment_Type "Lite" }}
       {{- with .Values.affinity_hard }}
       affinity:
 {{ toYaml . | indent 8 }}
@@ -186,14 +186,19 @@ spec:
 {{- $tierType := .Values.global.Tier_Type | default "" }}
 {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
         resources:
-        {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.config.cluster_size) 1) }}
+        {{- if eq .Values.global.Deployment_Type "Lite" }}
 {{ toYaml .Values.resources_dev | indent 10 }}
         {{- else }}
 {{ toYaml .Values.resources | indent 10 }}
         {{- end }}
 {{- end }}
         env:
+        {{- $seed_size := 1 -}}
+        {{- if eq .Values.Deployment_Type "Lite" }}
+        {{- $seed_size := 1 -}}
+        {{- else }}
         {{- $seed_size := default 1 .Values.config.seed_size | int -}}
+        {{- end }}
         {{- $global := . }}
         - name: CASSANDRA_SEEDS
           {{- if .Values.hostNetwork }}
@@ -296,7 +301,7 @@ spec:
           runAsUser: {{.Values.securityContext.runAsUser}}
           runAsGroup: {{ .Values.securityContext.fsGroup }}
         resources:
-        {{- if and (eq .Values.Deployment_Type "Development") (eq (int .Values.config.cluster_size) 1) }}
+        {{- if eq .Values.global.Deployment_Type "Lite" }}
 {{ toYaml .Values.icarus.resources_dev | indent 10 }}
         {{- else }}
 {{ toYaml .Values.icarus.resources | indent 10 }}
