@@ -4,6 +4,7 @@ on:
   workflow_run:
     workflows:
       - "Java CI with Maven"
+    # Do not use hyphen (-) in branch names, use underscore (_) instead
     branches:
       - master
       - staging
