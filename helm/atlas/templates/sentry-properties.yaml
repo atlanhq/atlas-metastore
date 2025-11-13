@@ -1,5 +1,5 @@
 {{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
-{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
