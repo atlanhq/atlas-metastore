@@ -4313,8 +4313,10 @@ public class EntityGraphMapper {
                     }
                 } else {
                     vertex.removeProperty(vertexPropertyName);
-                    for (Object value : allValues) {
-                        AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
+                    if (CollectionUtils.isNotEmpty(allValues)) {
+                        for (Object value : allValues) {
+                            AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
+                        }
                     }
                 }
             } else {
