@@ -229,7 +229,7 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
         // Fire more requests than the concurrent limit
         int numRequests = 20;
         int expectedMaxConcurrent = 5; // Assuming default config allows ~5 for workflow
-        
+        ATLAS_BASE_URL = String.format("http://localhost:%d/api/meta", atlas.getMappedPort(21000));
         ExecutorService executor = Executors.newFixedThreadPool(numRequests);
         
         AtomicInteger currentConcurrent = new AtomicInteger(0);
@@ -306,6 +306,7 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
     @DisplayName("Test different client origins have different limits")
     void testDifferentClientOriginsHaveDifferentLimits() throws Exception {
         LOG.info("Testing that different client origins have different throttle limits...");
+        ATLAS_BASE_URL = String.format("http://localhost:%d/api/meta", atlas.getMappedPort(21000));
         // Test workflow client
         ThrottleTestResult workflowResult = testClientOrigin("workflow", 30);
         LOG.info("Workflow: {} successful, {} throttled", 
@@ -335,6 +336,7 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
     @DisplayName("Test numaflow pipelines are isolated from each other")
     void testNumaflowPipelineIsolation() throws Exception {
         LOG.info("Testing that different numaflow pipelines are isolated...");
+        ATLAS_BASE_URL = String.format("http://localhost:%d/api/meta", atlas.getMappedPort(21000));
         // Fire requests for pipeline-1
         ThrottleTestResult pipeline1Result = testClientOrigin("numaflow", 20, "pipeline-1");
         LOG.info("Pipeline-1: {} successful, {} throttled", 
@@ -413,7 +415,7 @@ public class WorkloadIsolationFilterTest extends AtlasDockerIntegrationTest {
         // Fire many requests quickly to trigger throttling
         int numRequests = 100;
         ExecutorService executor = Executors.newFixedThreadPool(numRequests);
-
+        ATLAS_BASE_URL = String.format("http://localhost:%d/api/meta", atlas.getMappedPort(21000));
         List<CompletableFuture<HttpResponse<String>>> futures = IntStream.range(0, numRequests)
                 .mapToObj(i -> CompletableFuture.supplyAsync(() -> {
                     try {
