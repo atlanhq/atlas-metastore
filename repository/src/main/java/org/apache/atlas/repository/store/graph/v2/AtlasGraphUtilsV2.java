@@ -191,29 +191,6 @@ public class AtlasGraphUtilsV2 {
         return addProperty(vertex, propertyName, value, true);
     }
 
-    public static AtlasVertex addEncodedPropertyOpt(AtlasVertex vertex, String propertyName, Collection<?> values) {
-        return addPropertyValues(vertex, propertyName, values, true);
-    }
-
-    private static AtlasVertex addPropertyValues(AtlasVertex vertex, String propertyName, Collection<?> values, boolean isEncoded) {
-        if (CollectionUtils.isEmpty(values)) {
-            return vertex;
-        }
-
-        String finalPropertyName = isEncoded ? propertyName : encodePropertyKey(propertyName);
-
-        if (vertex instanceof AtlasJanusVertex) {
-            ((AtlasJanusVertex) vertex).addMultiValuedProperty(finalPropertyName, values);
-            return vertex;
-        }
-
-        for (Object value : values) {
-            addProperty(vertex, finalPropertyName, value, true);
-        }
-
-        return vertex;
-    }
-
     public static AtlasEdge addEncodedProperty(AtlasEdge edge, String propertyName, String value) {
         List<String> listPropertyValues = edge.getListProperty(propertyName);
 

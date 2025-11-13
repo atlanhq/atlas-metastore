@@ -26,15 +26,12 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.process.traversal.P;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
-import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 import org.codehaus.jettison.json.JSONException;
 import org.codehaus.jettison.json.JSONObject;
 
@@ -156,35 +153,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         if (shouldRecordInternalState) {
             List<Object> remaining = getMultiValuedProperty(propertyName, Object.class);
             recordInternalAttribute(propertyName, remaining);
-        }
-    }
-
-    public void addMultiValuedProperty(String propertyName, Collection<?> propertyValues) {
-        if (CollectionUtils.isEmpty(propertyValues)) {
-            return;
-        }
-
-        GraphTraversalSource traversalSource = graph.getGraph().traversal();
-
-        try {
-            GraphTraversal<Vertex, Vertex> vertexTraversal = traversalSource.V(getWrappedElement().id());
-
-            vertexTraversal.forEachRemaining(v -> {
-                for (Object value : propertyValues) {
-                    v.property(VertexProperty.Cardinality.set, propertyName, value);
-                }
-            });
-        } finally {
-            try {
-                traversalSource.close();
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-
-        if (propertyName != null && propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
-            List<Object> currentValues = getMultiValuedProperty(propertyName, Object.class);
-            recordInternalAttribute(propertyName, currentValues);
         }
     }
 
