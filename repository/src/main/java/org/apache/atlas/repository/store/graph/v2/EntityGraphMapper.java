@@ -4303,13 +4303,8 @@ public class EntityGraphMapper {
                         AtlasPerfMetrics.MetricRecorder addRecorder = RequestContext.get().startMetricRecord("EntityGraphMapper.setArrayElementsProperty.policyResources.add");
 
                         if (CollectionUtils.isNotEmpty(valuesToAdd)) {
-                            List<Object> batchedAdditions = new ArrayList<>(valuesToAdd);
-                            final int batchSize = 100;
-
-                            for (int start = 0; start < batchedAdditions.size(); start += batchSize) {
-                                int end = Math.min(start + batchSize, batchedAdditions.size());
-                                List<Object> batch = new ArrayList<>(batchedAdditions.subList(start, end));
-                                AtlasGraphUtilsV2.addEncodedPropertyOpt(vertex, vertexPropertyName, batch);
+                            for (Object value : valuesToAdd) {
+                                AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                             }
                         }
                         RequestContext.get().endMetricRecord(addRecorder);
