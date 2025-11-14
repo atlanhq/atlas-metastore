@@ -26,6 +26,7 @@ on:
       - beta
       - development
       - master
+      - mlh-1521
       - staging
       - tagscanary
       - tagscanarymerge
@@ -33,7 +34,6 @@ on:
       - interceptapis
       - mlh-1240-improve-cm-refresh-master
       - mlh1432
-      - mlh-1620
 
 jobs:
   # Detect what changed to optimize workflow execution
