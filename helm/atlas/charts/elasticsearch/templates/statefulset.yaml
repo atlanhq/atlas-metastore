@@ -322,7 +322,11 @@ spec:
           {{- if eq .Values.roles.master "true" }}
           {{- if ge (int (include "elasticsearch.esMajorVersion" .)) 7 }}
           - name: cluster.initial_master_nodes
+            {{- if eq .Values.global.Deployment_Type "Lite" }}
+            value: "atlas-elasticsearch-master-0"
+            {{- else }}
             value: "{{ template "elasticsearch.endpoints" . }}"
+            {{- end }}
           {{- else }}
           - name: discovery.zen.minimum_master_nodes
             value: "{{ .Values.minimumMasterNodes }}"
