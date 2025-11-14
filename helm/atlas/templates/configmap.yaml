@@ -108,11 +108,7 @@ data:
     #
     atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository
     atlas.EntityAuditRepository.keyspace=atlas_audit
-    {{- if eq .Values.global.Deployment_Type "Lite" }}
-    atlas.EntityAuditRepository.replicationFactor=1
-    {{- else }}
     atlas.EntityAuditRepository.replicationFactor={{ .Values.cassandra.config.cluster_size }}
-    {{- end }}
     atlas.entity.audit.differential=true
     atlas.EntityAuditRepositorySearch.impl=org.apache.atlas.repository.audit.ESBasedAuditRepository
     # if Cassandra is used as a backend for audit from the above property, uncomment and set the following
@@ -164,8 +160,11 @@ data:
     atlas.kafka.zookeeper.session.timeout.ms=60000
     atlas.kafka.zookeeper.connection.timeout.ms=30000
     atlas.kafka.zookeeper.sync.time.ms=20
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
+    atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181
+    {{- else }}
     atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
-
+    {{- end }}
     atlas.kafka.auto.commit.interval.ms=1000
     atlas.kafka.hook.group.id=atlas
     atlas.kafka.enable.auto.commit=false
@@ -277,7 +276,11 @@ data:
     atlas.server.ids=id1,id2
     atlas.server.address.id1=atlas-0.atlas-service-atlas.atlas.svc.cluster.local:21000
     atlas.server.address.id2=atlas-1.atlas-service-atlas.atlas.svc.cluster.local:21000
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
+    atlas.server.ha.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181
+    {{- else }}
     atlas.server.ha.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
+    {{- end }}
     atlas.server.ha.zookeeper.retry.sleeptime.ms=10000
     atlas.server.ha.zookeeper.num.retries=18
     atlas.server.ha.zookeeper.session.timeout.ms=20000
