@@ -11,11 +11,9 @@ import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.janusgraph.diskstorage.BaseTransaction;
 import org.janusgraph.diskstorage.TemporaryBackendException;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -509,9 +507,6 @@ public class DLQReplayService {
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
         long startTime = System.currentTimeMillis();
-        StandardJanusGraphTx standardJanusGraphTx = null;
-        BaseTransaction replayTx = null;
-
         try {
             DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
             log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
@@ -532,38 +527,11 @@ public class DLQReplayService {
         } catch (TemporaryBackendException e) {
             // Already a TemporaryBackendException from JanusGraph - rethrow as-is
             log.warn("Temporary backend exception replaying DLQ entry: {}", e.getMessage());
-            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
             throw e;
         } catch (Exception e) {
             // Other exceptions - might be permanent (bad data, schema issues, etc.)
             log.error("Error replaying DLQ entry - treating as permanent failure", e);
-            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
             throw e;
-        }
-    }
-
-    /**
-     * Cleanup transactions when replay fails
-     */
-    private void cleanupFailedTransactions(BaseTransaction replayTx, StandardJanusGraphTx standardJanusGraphTx) {
-        // Rollback ES transaction
-        if (replayTx != null) {
-            try {
-                replayTx.rollback();
-                log.debug("Rolled back ES transaction");
-            } catch (Exception rollbackException) {
-                log.error("Failed to rollback ES transaction", rollbackException);
-            }
-        }
-
-        // Rollback JanusGraph transaction (don't commit on failure!)
-        if (standardJanusGraphTx != null) {
-            try {
-                standardJanusGraphTx.rollback();
-                log.debug("Rolled back JanusGraph transaction");
-            } catch (Exception rollbackException) {
-                log.error("Failed to rollback JanusGraph transaction", rollbackException);
-            }
         }
     }
 
