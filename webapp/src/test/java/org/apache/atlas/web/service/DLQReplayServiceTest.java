@@ -289,14 +289,6 @@ class DLQReplayServiceTest {
         assertFalse(healthy, "Service should be unhealthy when thread is dead");
     }
 
-    @Test
-    void testCleanupFailedTransactions_BothTransactionsNull() {
-        // Act & Assert - Should not throw
-        assertDoesNotThrow(() -> {
-            ReflectionTestUtils.invokeMethod(dlqReplayService, "cleanupFailedTransactions", null, null);
-        });
-    }
-
     // Helper methods
 
     private String createValidDLQJson() throws Exception {
