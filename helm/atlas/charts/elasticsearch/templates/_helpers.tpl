@@ -49,9 +49,10 @@ For isolated deployments, uses master replicas count.
 For non-isolated deployments, uses standard replica count.
 */}}
 {{- define "elasticsearch.endpoints" -}}
-  {{- $replicas := int (toString (.Values.replicas)) -}}
+  {{- $replicas := int (toString .Values.replicas) -}}
+  {{- $count := ternary 1 $replicas (eq .Values.Deployment_Type "Lite") -}}
   {{- $uname := printf "%s-%s" .Values.clusterName .Values.nodeGroup -}}
-  {{- range $i, $e := untilStep 0 $replicas 1 -}}
+  {{- range $i, $e := untilStep 0 $count 1 -}}
 {{ $uname }}-{{ $i }},
   {{- end -}}
 {{- end -}}
