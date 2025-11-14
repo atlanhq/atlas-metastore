@@ -166,13 +166,15 @@ public class RepairIndex {
             for (String entityGuid : entityGUIDs) {
                 for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
                     AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
-                    try {
-                        indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
-                        break;
-                    } catch (Exception e) {
-                        LOG.info("Exception: " + e.getMessage());
-                        LOG.info("Pausing before retry..");
-                        Thread.sleep(2000 * attemptCount);
+                    if (vertex != null) {
+                        try {
+                            indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
+                            break;
+                        } catch (Exception e) {
+                            LOG.info("Exception: " + e.getMessage());
+                            LOG.info("Pausing before retry..");
+                            Thread.sleep(2000 * attemptCount);
+                        }
                     }
                 }
             }
