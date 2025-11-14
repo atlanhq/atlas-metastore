@@ -21,13 +21,14 @@ package org.apache.atlas.util;
 import org.apache.atlas.AtlanElasticSearchIndex;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.graph.GraphHelper;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.janusgraph.core.JanusGraph;
 import org.janusgraph.core.schema.JanusGraphIndex;
-import org.janusgraph.diskstorage.BackendTransaction;
 import org.janusgraph.diskstorage.indexing.IndexEntry;
 import org.janusgraph.graphdb.database.IndexSerializer;
 import org.janusgraph.graphdb.database.StandardJanusGraph;
@@ -36,41 +37,106 @@ import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.janusgraph.graphdb.types.MixedIndexType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
+import javax.annotation.PostConstruct;
+import javax.inject.Inject;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
+import static org.apache.atlas.type.Constants.INDEX_NAME_EDGE_INDEX;
+import static org.apache.atlas.type.Constants.INDEX_NAME_VERTEX_INDEX;
+
+@Component
 public class RepairIndex {
     private static final Logger LOG = LoggerFactory.getLogger(RepairIndex.class);
 
     private static final int  MAX_TRIES_ON_FAILURE = 3;
 
-    private static final String INDEX_NAME_VERTEX_INDEX = "vertex_index";
-    private static final String INDEX_NAME_FULLTEXT_INDEX = "fulltext_index";
-    private static final String INDEX_NAME_EDGE_INDEX = "edge_index";
-
-    private static JanusGraph graph;
-    private static AtlanElasticSearchIndex searchIndex;
+    private JanusGraph graph;
+    private AtlanElasticSearchIndex searchIndex;
     private EntityMutationService entityMutationService;
+    private GraphHelper graphHelper;
 
-    public RepairIndex(EntityMutationService entityMutationService) {
+    @Inject
+    public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph) {
         this.entityMutationService = entityMutationService;
+        graphHelper = new GraphHelper(atlasGraph);
     }
 
-    public static void setupGraph() {
+    @PostConstruct
+    protected void setupGraph() {
         LOG.info("Initializing graph: ");
         graph = AtlasJanusGraphDatabase.getGraphInstance();
-
         try {
             searchIndex = new AtlanElasticSearchIndex();
         } catch (AtlasException e) {
             throw new RuntimeException(e);
         }
         LOG.info("Graph Initialized!");
+    }
+
+    public void reindexVerticesByIds(String indexName, Set<Long> vertexIds) throws Exception {
+        Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
+        ManagementSystem mgmt = (ManagementSystem) graph.openManagement();
+        StandardJanusGraphTx tx = mgmt.getWrappedTx();
+        JanusGraphIndex index = mgmt.getGraphIndex(indexName);
+        MixedIndexType indexType = (MixedIndexType) mgmt.getSchemaVertex(index).asIndexType();
+        Set<AtlasVertex> vertices = graphHelper.getVertices(vertexIds);
+        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
+        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
+        Set<String> guids = new HashSet<>();
+        for (AtlasVertex vertex : vertices){
+            try {
+                indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
+                guids.add(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
+            } catch (Exception e){
+                LOG.info("Exception: " + e.getMessage());
+                LOG.info("Pausing before retry..");
+            }
+        }
+        searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
+        entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
+    }
+
+    public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
+        Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
+        LOG.info("processing referencedGuids => " + referencedGUIDs);
+
+        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
+        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
+
+        for (String indexName : getIndexes()) {
+            LOG.info("Restoring: " + indexName);
+            long startTime = System.currentTimeMillis();
+            reindexVertex(indexName, indexSerializer, referencedGUIDs);
+
+            LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
+        }
+
+        referencedGUIDs.add(guid);
+        entityMutationService.repairClassificationMappings(new ArrayList<>(referencedGUIDs));
+    }
+
+    public void restoreByIds(Set<String> guids) throws Exception {
+
+        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
+        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
+
+        for (String indexName : getIndexes()) {
+            LOG.info("Restoring: " + indexName);
+            long startTime = System.currentTimeMillis();
+            reindexVertex(indexName, indexSerializer, guids);
+
+            LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
+            LOG.info(": Done!");
+        }
+
+        entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
     }
 
     private static String[] getIndexes() {
@@ -110,39 +176,4 @@ public class RepairIndex {
         return set;
     }
 
-    public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
-        Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
-        LOG.info("processing referencedGuids => " + referencedGUIDs);
-
-        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
-        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
-
-        for (String indexName : getIndexes()) {
-            LOG.info("Restoring: " + indexName);
-            long startTime = System.currentTimeMillis();
-            reindexVertex(indexName, indexSerializer, referencedGUIDs);
-
-            LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
-        }
-
-        referencedGUIDs.add(guid);
-        entityMutationService.repairClassificationMappings(new ArrayList<>(referencedGUIDs));
-    }
-
-    public void restoreByIds(Set<String> guids) throws Exception {
-
-        StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
-        IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
-
-        for (String indexName : getIndexes()) {
-            LOG.info("Restoring: " + indexName);
-            long startTime = System.currentTimeMillis();
-            reindexVertex(indexName, indexSerializer, guids);
-
-            LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
-            LOG.info(": Done!");
-        }
-
-        entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
-    }
 }

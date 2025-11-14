@@ -3,21 +3,10 @@ package org.apache.atlas.web.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.janusgraph.diskstorage.Backend;
+import org.apache.atlas.util.RepairIndex;
 import org.janusgraph.diskstorage.BaseTransaction;
-import org.janusgraph.diskstorage.BaseTransactionConfigurable;
-import org.janusgraph.diskstorage.TemporaryBackendException;
-import org.janusgraph.diskstorage.configuration.Configuration;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.diskstorage.es.ElasticSearchIndex;
-import org.janusgraph.diskstorage.indexing.KeyInformation;
-import org.janusgraph.diskstorage.keycolumnvalue.StoreFeatures;
-import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
-import org.janusgraph.graphdb.database.IndexSerializer;
-import org.janusgraph.graphdb.database.StandardJanusGraph;
-import org.janusgraph.graphdb.database.index.IndexInfoRetriever;
 import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,82 +18,40 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.ArgumentMatchers.anySet;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class DLQReplayServiceTest {
 
     @Mock
-    private AtlasJanusGraph atlasJanusGraph;
-    @Mock
-    private StandardJanusGraph standardJanusGraph;
-    @Mock
-    private GraphDatabaseConfiguration graphConfig;
-    @Mock
-    private Configuration configuration;
-    @Mock
-    private ElasticSearchIndex esIndex;
-    @Mock
-    private IndexSerializer indexSerializer;
-    @Mock
-    private StoreFeatures storeFeatures;
-    @Mock
-    private StandardJanusGraphTx standardJanusGraphTx;
-    @Mock
-    private IndexInfoRetriever indexInfoRetriever;
-    @Mock
-    private KeyInformation.IndexRetriever keyInformationRetriever;
-    @Mock
-    private KeyInformation.StoreRetriever storeRetriever;
-    @Mock
-    private BaseTransactionConfigurable esTransaction;
+    private RepairIndex repairIndex;
 
     private DLQReplayService dlqReplayService;
     private ObjectMapper objectMapper;
     
     private MockedStatic<ApplicationProperties> mockApplicationProperties;
-    private MockedStatic<Backend> mockBackend;
 
     @BeforeEach
     void setUp() throws AtlasException {
         // Clean up any existing static mocks first (defensive programming)
         cleanupStaticMocks();
         
-        // Mock the graph hierarchy
-        when(atlasJanusGraph.getGraph()).thenReturn(standardJanusGraph);
-        when(standardJanusGraph.getConfiguration()).thenReturn(graphConfig);
-        when(graphConfig.getConfiguration()).thenReturn(configuration);
-        when(graphConfig.getBackend()).thenReturn(mock(org.janusgraph.diskstorage.Backend.class));
-        when(graphConfig.getBackend().getStoreFeatures()).thenReturn(storeFeatures);
-        when(graphConfig.getSerializer()).thenReturn(mock(org.janusgraph.graphdb.database.serialize.Serializer.class));
-        when(graphConfig.getBackend().getIndexInformation()).thenReturn(Map.of("search", mock(org.janusgraph.diskstorage.indexing.IndexInformation.class)));
-        when(storeFeatures.isDistributed()).thenReturn(true);
-        when(storeFeatures.isKeyOrdered()).thenReturn(true);
-
-        // Mock configuration values
-        when(configuration.restrictTo(anyString())).thenReturn(configuration);
-        when(configuration.get(any(), anyString())).thenReturn("elasticsearch");
-
         // Mock ApplicationProperties (static)
         mockApplicationProperties = mockStatic(ApplicationProperties.class);
         org.apache.commons.configuration.Configuration mockConfig = mock(org.apache.commons.configuration.Configuration.class);
         mockApplicationProperties.when(ApplicationProperties::get).thenReturn(mockConfig);
         when(mockConfig.getString("atlas.graph.kafka.bootstrap.servers")).thenReturn("localhost:9092");
 
-        // Mock Backend.getImplementationClass to return our mocked esIndex (static)
-        mockBackend = mockStatic(Backend.class);
-        mockBackend.when(() -> Backend.getImplementationClass(any(), anyString(), any())).thenReturn(esIndex);
-
         // Create service - now it will use mocked esIndex
-        dlqReplayService = spy(new DLQReplayService(atlasJanusGraph));
-        
-        // Inject remaining mocks
-        ReflectionTestUtils.setField(dlqReplayService, "indexSerializer", indexSerializer);
-        ReflectionTestUtils.setField(dlqReplayService, "standardJanusGraph", standardJanusGraph);
+        dlqReplayService = spy(new DLQReplayService(repairIndex));
         
         // Set test configuration values
         ReflectionTestUtils.setField(dlqReplayService, "dlqTopic", "TEST_DLQ");
@@ -142,14 +89,6 @@ class DLQReplayServiceTest {
             }
             mockApplicationProperties = null;
         }
-        if (mockBackend != null) {
-            try {
-                mockBackend.close();
-            } catch (Exception e) {
-                // Ignore - mock might already be closed
-            }
-            mockBackend = null;
-        }
     }
 
     @Test
@@ -157,75 +96,13 @@ class DLQReplayServiceTest {
         // Arrange
         String dlqJson = createValidDLQJson();
         
-        when(standardJanusGraph.newTransaction()).thenReturn(standardJanusGraphTx);
-        when(indexSerializer.getIndexInfoRetriever(any())).thenReturn(indexInfoRetriever);
-        when(indexInfoRetriever.get(anyString())).thenReturn(keyInformationRetriever);
-        when(keyInformationRetriever.get(anyString())).thenReturn(storeRetriever);
-        when(esIndex.beginTransaction(any())).thenReturn(esTransaction);
-        
+        doNothing().when(repairIndex).reindexVerticesByIds(anyString(), anySet());
+
         // Act
         ReflectionTestUtils.invokeMethod(dlqReplayService, "replayDLQEntry", dlqJson);
         
         // Assert
-        verify(esIndex).mutate(any(), any(), eq(esTransaction));
-        verify(esTransaction).commit();
-        verify(standardJanusGraphTx).commit();
-        verify(esTransaction, never()).rollback();
-        verify(standardJanusGraphTx, never()).rollback();
-    }
-
-    @Test
-    void testReplayDLQEntry_TemporaryBackendException() throws Exception {
-        // Arrange
-        String dlqJson = createValidDLQJson();
-        
-        when(standardJanusGraph.newTransaction()).thenReturn(standardJanusGraphTx);
-        when(indexSerializer.getIndexInfoRetriever(any())).thenReturn(indexInfoRetriever);
-        when(indexInfoRetriever.get(anyString())).thenReturn(keyInformationRetriever);
-        when(keyInformationRetriever.get(anyString())).thenReturn(storeRetriever);
-        when(esIndex.beginTransaction(any())).thenReturn(esTransaction);
-        
-        doThrow(new TemporaryBackendException("ES cluster block"))
-            .when(esIndex).mutate(any(), any(), eq(esTransaction));
-        
-        // Act & Assert
-        // ReflectionTestUtils wraps exceptions in UndeclaredThrowableException, so we need to unwrap
-        Exception thrown = assertThrows(Exception.class, () -> {
-            ReflectionTestUtils.invokeMethod(dlqReplayService, "replayDLQEntry", dlqJson);
-        });
-        
-        // Unwrap the exception
-        Throwable cause = thrown.getCause();
-        assertTrue(cause instanceof TemporaryBackendException, 
-            "Expected TemporaryBackendException but got: " + (cause != null ? cause.getClass() : "null"));
-        
-        verify(esTransaction).rollback();
-        verify(standardJanusGraphTx).rollback();
-        verify(esTransaction, never()).commit();
-        verify(standardJanusGraphTx, never()).commit();
-    }
-
-    @Test
-    void testReplayDLQEntry_PermanentException() throws Exception {
-        // Arrange
-        String dlqJson = createValidDLQJson();
-        
-        when(standardJanusGraph.newTransaction()).thenReturn(standardJanusGraphTx);
-        when(indexSerializer.getIndexInfoRetriever(any())).thenReturn(indexInfoRetriever);
-        when(indexInfoRetriever.get(anyString())).thenReturn(keyInformationRetriever);
-        when(keyInformationRetriever.get(anyString())).thenReturn(storeRetriever);
-        when(esIndex.beginTransaction(any())).thenReturn(esTransaction);
-        
-        doThrow(new RuntimeException("Schema mismatch"))
-            .when(esIndex).mutate(any(), any(), eq(esTransaction));
-        
-        // Act & Assert
-        assertThrows(RuntimeException.class, () -> {
-            ReflectionTestUtils.invokeMethod(dlqReplayService, "replayDLQEntry", dlqJson);
-        });
-        
-        verify(esTransaction).rollback();
-        verify(standardJanusGraphTx).rollback();
+        verify(repairIndex).reindexVerticesByIds(anyString(), anySet());
     }
 
     @Test
@@ -244,7 +121,7 @@ class DLQReplayServiceTest {
         assertTrue(cause instanceof IOException, 
             "Expected IOException but got: " + (cause != null ? cause.getClass() : "null"));
         
-        verify(esIndex, never()).mutate(any(), any(), any());
+        verify(repairIndex, never()).reindexVerticesByIds(anyString(), anySet());
     }
 
     @Test
@@ -412,25 +289,6 @@ class DLQReplayServiceTest {
         
         // Assert
         assertFalse(healthy, "Service should be unhealthy when thread is dead");
-    }
-
-    @Test
-    void testReconstructMutations() throws Exception {
-        // Arrange
-        DLQEntry entry = createDLQEntry();
-        
-        when(keyInformationRetriever.get(anyString())).thenReturn(storeRetriever);
-        
-        // Act
-        Map<String, Map<String, org.janusgraph.diskstorage.indexing.IndexMutation>> result = 
-            ReflectionTestUtils.invokeMethod(dlqReplayService, "reconstructMutations", entry, keyInformationRetriever);
-        
-        // Assert
-        assertNotNull(result);
-        assertTrue(result.containsKey("vertex_index"));
-        Map<String, org.janusgraph.diskstorage.indexing.IndexMutation> storeMutations = result.get("vertex_index");
-        assertNotNull(storeMutations);
-        assertTrue(storeMutations.containsKey("doc1"));
     }
 
     @Test
