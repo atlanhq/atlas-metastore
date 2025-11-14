@@ -25,7 +25,11 @@ spec:
     matchLabels:
       app: {{ template "name" . }}
       release: {{ .Release.Name }}
+  {{- if eq .Values.global.Deployment_Type "Lite" }}
+  replicas: 1
+  {{- else }}
   replicas: {{ .Values.atlas.replicaCount }}
+  {{- end }}
   serviceName: "atlas-service-atlas"
   template:
     metadata:
