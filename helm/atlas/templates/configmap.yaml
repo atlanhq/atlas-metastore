@@ -63,7 +63,7 @@ data:
     atlas.graph.storage.backend=cql
     atlas.graph.storage.hostname={{ .Chart.Name }}-cassandra
     atlas.graph.storage.cql.keyspace={{ .Chart.Name }}
-    {{- if eq .Values.Deployment_Type "Lite" }}
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
     atlas.graph.storage.cql.replication-factor=1
     {{- else }}
     atlas.graph.storage.cql.replication-factor={{ .Values.cassandra.config.cluster_size }}
@@ -108,7 +108,7 @@ data:
     #
     atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.NoopEntityAuditRepository
     atlas.EntityAuditRepository.keyspace=atlas_audit
-    {{- if eq .Values.Deployment_Type "Lite" }}
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
     atlas.EntityAuditRepository.replicationFactor=1
     {{- else }}
     atlas.EntityAuditRepository.replicationFactor={{ .Values.cassandra.config.cluster_size }}
@@ -327,7 +327,7 @@ data:
     atlas.graph.cache.redis-cache-size=10000
     atlas.graph.cache.redis-cache-server-mode=sentinel
     atlas.graph.cache.redis-cache-server-url=redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
-    {{- if eq .Values.Deployment_Type "Lite" }}
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
     atlas.graph.cache.redis-cache-sentinel-urls={{ .Values.atlas.redis.sentinel_urls_lite }}
     {{- else }}
     atlas.graph.cache.redis-cache-sentinel-urls={{ .Values.atlas.redis.sentinel_urls }}
@@ -456,7 +456,7 @@ data:
     # org.apache.atlas.service.redis.NoRedisServiceImpl - default, dummy redis implementation.
     atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
     atlas.redis.url = redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
-    {{- if eq .Values.Deployment_Type "Lite" }}
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
     atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls_lite }}
     {{- else }}
     atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls }}
