@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.util.RepairIndex;
+import org.apache.commons.collections.MapUtils;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
@@ -519,16 +520,18 @@ public class DLQReplayService {
             log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
 
             Map<String, SerializableIndexMutation> vertexIndex = entry.getMutations().get("vertex_index");
-            Set<Long> vertexIds = new HashSet<>();
-            for(Map.Entry<String, SerializableIndexMutation> ve : vertexIndex.entrySet()) {
-                log.debug("DLQ Entry Vertex Index Mutation - DocID: {}, Additions: {}, Deletions: {}",
-                        ve.getKey(), ve.getValue().getAdditions().size(), ve.getValue().getDeletions().size());
-                vertexIds.add(LongEncoding.decode(ve.getKey()));
+            if (MapUtils.isNotEmpty(vertexIndex)) {
+                Set<Long> vertexIds = new HashSet<>();
+                for (Map.Entry<String, SerializableIndexMutation> ve : vertexIndex.entrySet()) {
+                    log.debug("DLQ Entry Vertex Index Mutation - DocID: {}, Additions: {}, Deletions: {}",
+                            ve.getKey(), ve.getValue().getAdditions().size(), ve.getValue().getDeletions().size());
+                    vertexIds.add(LongEncoding.decode(ve.getKey()));
+                }
+                repairIndex.reindexVerticesByIds(INDEX_NAME_VERTEX_INDEX, vertexIds);
+                log.debug("Replayed vertex index mutations for {} vertices", vertexIds.size());
             }
-            repairIndex.reindexVerticesByIds(INDEX_NAME_VERTEX_INDEX, vertexIds);
             long totalTime = System.currentTimeMillis() - startTime;
-            log.info("Successfully replayed mutation for index: {}. Total time: {}ms", entry.getIndexName(), totalTime);
-
+            log.debug("Successfully replayed mutation for index: {}. Total time: {}ms", entry.getIndexName(), totalTime);
         } catch (TemporaryBackendException e) {
             // Already a TemporaryBackendException from JanusGraph - rethrow as-is
             log.warn("Temporary backend exception replaying DLQ entry: {}", e.getMessage());
