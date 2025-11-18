@@ -1,4 +1,4 @@
-{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+{{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -11,7 +11,7 @@ metadata:
 data:
   sentry.properties: |
     {{- if .Values.multitenant }}
-    {{- if eq .Values.atlas.Deployment_Type "Development" }}
+    {{- if or (eq .Values.atlas.Deployment_Type "Development") (eq .Values.atlas.Deployment_Type "Lite") }}
     dsn={{ .Values.atlas.secrets.SENTRY_DSN_DEV }}
     {{- else }}
     dsn={{ .Values.atlas.secrets.SENTRY_DSN_PROD }}
