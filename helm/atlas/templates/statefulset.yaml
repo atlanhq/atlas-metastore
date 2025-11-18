@@ -7,6 +7,15 @@ metadata:
     app: {{ template "name" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
+{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
+    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
+{{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
+    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
+{{- else }}
   annotations:
     configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,rate-limit-nginx-config"
     secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
@@ -15,7 +24,11 @@ spec:
     matchLabels:
       app: {{ template "name" . }}
       release: {{ .Release.Name }}
+  {{- if eq .Values.global.Deployment_Type "Lite" }}
+  replicas: 1
+  {{- else }}
   replicas: {{ .Values.atlas.replicaCount }}
+  {{- end }}
   serviceName: "atlas-service-atlas"
   template:
     metadata:
@@ -31,6 +44,9 @@ spec:
       {{- end }}
       {{- if and .Values.atlas.affinity (ne .Values.global.Tier_Type "Basic") (ne .Values.global.Tier_Type "Standard") }}
       affinity:
+        {{- if eq .Values.Deployment_Type "Lite" }}
+        {{- toYaml .Values.atlas.affinity_hard | nindent 8 }}
+        {{- else }}
         nodeAffinity:
           {{- if eq .Values.atlas.custom_deployment.enabled true }}
           requiredDuringSchedulingIgnoredDuringExecution:
@@ -91,7 +107,10 @@ spec:
           ports:
             - containerPort: {{ .Values.atlas.service.targetPort }}
           env:
-          {{- toYaml .Values.atlas.env | nindent 12 }}
+          {{- if eq .Values.global.Deployment_Type "Lite" }}
+            - name: SPRING_PROFILES_ACTIVE
+              value: "local"
+          {{- end }}
             - name: K8S_POD_IP
               valueFrom:
                 fieldRef:
@@ -159,6 +178,11 @@ spec:
             - name: create-atlas-keycloak-config
               mountPath: /create-atlas-keycloak-config.sh
               subPath: create-atlas-keycloak-config.sh
+          {{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
+            - name: sentry-dsn-config
+              mountPath: /opt/apache-atlas/conf/sentry.properties
+              subPath: sentry.properties
+          {{- end}}
             - name: atlas-logs
               mountPath: /opt/apache-atlas/logs
           {{- if .Values.atlas.lifecycle }}
@@ -239,6 +263,11 @@ spec:
           configMap:
             name: create-atlas-keycloak-config-cm
             defaultMode: 0755
+      {{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
+        - name: sentry-dsn-config
+          configMap:
+            name: sentry-dsn-config
+      {{- end }}
         - name: atlas-init-script
           configMap:
             name: atlas-init-script
