@@ -19,6 +19,7 @@
 
 package org.apache.atlas.authorizer;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.authorize.AtlasAccessRequest;
@@ -59,11 +60,17 @@ import java.util.Set;
 
 import static org.apache.atlas.authorizer.ABACAuthorizerUtils.SERVICE_DEF_ATLAS;
 import static org.apache.atlas.authorizer.ABACAuthorizerUtils.isABACAuthorizerEnabled;
+import static org.apache.atlas.constants.RangerAtlasConstants.READ_RESTRICTION_LEVEL_FULL;
 import static org.apache.atlas.repository.Constants.SKIP_DELETE_AUTH_CHECK_TYPES;
 import static org.apache.atlas.repository.Constants.SKIP_UPDATE_AUTH_CHECK_TYPES;
 
 public class AtlasAuthorizationUtils {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasAuthorizationUtils.class);
+    public static final String READ_RESTRICTION_LEVEL = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
+
+    public static boolean isFullRestrictionConfigured() {
+        return READ_RESTRICTION_LEVEL.equals(READ_RESTRICTION_LEVEL_FULL);
+    }
 
     public static void verifyAccess(AtlasAdminAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
         if (! isAccessAllowed(request)) {
@@ -194,12 +201,6 @@ public class AtlasAuthorizationUtils {
                     return atlasPoliciesResult.isAllowed();
                 }
 
-
-                // if priority is override, then it's an explicit deny as implicit deny won't have priority set to override
-                if (!atlasPoliciesResult.isAllowed() && atlasPoliciesResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
-                    return false;
-                }
-
                 AtlasAccessResult finalResult = null;
                 metric = RequestContext.get().startMetricRecord("isAccessAllowed.abac");
                 AtlasAccessResult abacPoliciesResult = ABACAuthorizerUtils.isAccessAllowed(request.getEntity(), request.getAction());
@@ -218,7 +219,7 @@ public class AtlasAuthorizationUtils {
                         // Atlas DENY
                         if (atlasPoliciesResult.isExplicitDeny()) {
                             // Matrix row: DENY + DENY (explicit) case
-                            if (abacPoliciesResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
+                            if (abacPoliciesResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE && atlasPoliciesResult.getPolicyPriority() != RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
                                 finalResult = abacPoliciesResult; // ABAC override DENY or ALLOW
                             } else {
                                 finalResult = atlasPoliciesResult; // Atlas DENY takes precedence
@@ -250,6 +251,7 @@ public class AtlasAuthorizationUtils {
                     // log final result audit
                     NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
                     try {
+                        finalResult.setEnforcer("merged_auth");
                         auditHandler.processResult(finalResult, request);
                     } finally {
                         auditHandler.flushAudit();
