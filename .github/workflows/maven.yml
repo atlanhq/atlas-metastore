@@ -26,7 +26,6 @@ on:
       - beta
       - development
       - master
-      - ids_beta_updated
 jobs:
   # Detect what changed to optimize workflow execution
   # This dramatically speeds up helm-only changes by skipping the 20+ minute build job
