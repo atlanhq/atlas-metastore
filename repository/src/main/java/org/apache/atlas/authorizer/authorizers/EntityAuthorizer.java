@@ -16,6 +16,7 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.lang.reflect.Array;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -83,7 +84,7 @@ public class EntityAuthorizer {
         // don't need to fetch vertex for indexsearch response scrubbing as it already has the required attributes
         // setting vertex to null here as usage is already with a check for null possibility
         AtlasVertex vertex =  entity.getDocId() == null || !ACTION_READ.equals(action) ? AtlasGraphUtilsV2.findByGuid(entity.getGuid()) : null;
-        LOG.info("ABAC_AUTH: attributes of entity guid={}: {}", entity.getGuid(), entity.getAttributes());
+        LOG.info("ABAC_AUTH: attributes of entity guid={} vertexId={} action={} policyCount={}: {}", entity.getGuid(), vertex != null ? vertex.getId() : "null", action, abacPolicies.size(), entity.getAttributes());
 
         for (RangerPolicy policy : abacPolicies) {
             boolean matched = false;
@@ -172,6 +173,7 @@ public class EntityAuthorizer {
         } else {
             attributeValues.add(attributeValueNode.asText());
         }
+        LOG.info("ABAC_AUTH: evaluating for entityId={}, vertex={}, attribute={} operator={} attributeValues={}", entity.getGuid(), vertex != null ? vertex.getId() : "null", attributeName, operator, attributeValues);
 
         switch (operator) {
             case POLICY_FILTER_CRITERIA_EQUALS -> {
@@ -310,6 +312,7 @@ public class EntityAuthorizer {
                     entityAttributeValues.add(String.valueOf(value));
                 }
             }
+            LOG.info("ABAC_AUTH: fetching the attribute value attr={}, entityId={}, entityAttributeValues={} attrValue={} vertexId={}", relatedAttribute, entity.getGuid(), entityAttributeValues, attrValue, vertex !=null ? vertex.getId() : "null");
         }
         return entityAttributeValues;
     }

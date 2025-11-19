@@ -383,8 +383,8 @@ jobs:
           provenance: true
           push: true
           tags: |
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ steps.get_branch.outputs.branch_lower }}:latest
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ steps.get_branch.outputs.branch_lower }}:${{ env.COMMIT_ID }}
 
       - name: Check Image Manifest
         run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ steps.get_branch.outputs.branch_lower }}:${{ env.COMMIT_ID }}
@@ -436,7 +436,7 @@ jobs:
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
       
       - name: Set test image
-        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
+        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ steps.get_branch.outputs.branch_lower }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
