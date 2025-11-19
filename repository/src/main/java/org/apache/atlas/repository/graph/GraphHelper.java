@@ -101,6 +101,20 @@ public final class GraphHelper {
     public static final String RETRY_DELAY = "atlas.graph.storage.retry.sleeptime.ms";
     public static final String DEFAULT_REMOVE_PROPAGATIONS_ON_ENTITY_DELETE = "atlas.graph.remove.propagations.default";
 
+    /**
+     * Configuration for entity types and their attributes that use single-valued array properties
+     * instead of multi-valued properties for primitive/enum arrays.
+     * Key: EntityTypeName, Value: Set of attribute names
+     * 
+     * This is used to optimize JanusGraph flush operations by storing arrays as single-valued properties
+     * containing arrays, rather than multiple property instances.
+     */
+    private static final Map<String, Set<String>> SINGLE_VALUED_ARRAY_PROPERTIES = new HashMap<String, Set<String>>() {{
+        put("AuthPolicy", new HashSet<>(Arrays.asList("policyResources")));
+        // Add more entity types and their attributes here as needed
+        // Example: put("AnotherEntityType", new HashSet<>(Arrays.asList("attribute1", "attribute2")));
+    }};
+
     private AtlasGraph graph;
 
     private int     maxRetries = 3;
@@ -1700,6 +1714,44 @@ public final class GraphHelper {
         return typeName != null && typeName.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX);
     }
 
+    /**
+     * Checks if the given entity type and attribute should use single-valued array property format.
+     * This is used for optimized storage where arrays are stored as single-valued properties containing arrays,
+     * rather than multiple property instances.
+     *
+     * @param vertex The vertex to check
+     * @param vertexPropertyName The encoded property name (e.g., "AuthPolicy.policy.policyResources")
+     * @return true if single-valued array format should be used, false otherwise
+     */
+    private static boolean useSingleValuedArrayPropertyFormat(AtlasVertex vertex, String vertexPropertyName) {
+        if (vertex == null || vertexPropertyName == null) {
+            return false;
+        }
+
+        // Get entity type from vertex
+        String entityType = AtlasGraphUtilsV2.getTypeName(vertex);
+        if (entityType == null) {
+            return false;
+        }
+
+        // Check if this entity type has any single-valued array properties configured
+        Set<String> configuredAttributes = SINGLE_VALUED_ARRAY_PROPERTIES.get(entityType);
+        if (configuredAttributes == null || configuredAttributes.isEmpty()) {
+            return false;
+        }
+
+        // Extract attribute name from vertex property name
+        // Vertex property names are in format "EntityType.attributeType.attributeName"
+        // For example: "AuthPolicy.policy.policyResources"
+        for (String attrName : configuredAttributes) {
+            if (vertexPropertyName.endsWith("." + attrName) || vertexPropertyName.equals(attrName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     @SuppressWarnings("unchecked,rawtypes")
     public static List<Object> getArrayElementsProperty(AtlasType elementType, AtlasVertex instanceVertex, AtlasAttribute attribute, VertexEdgePropertiesCache vertexEdgePropertiesCache) {
         String propertyName = attribute.getVertexPropertyName();
@@ -1721,11 +1773,27 @@ public final class GraphHelper {
                 return (List) getCollectionElementsUsingRelationship(instanceVertex, attribute);
             }
         } else if (isArrayOfPrimitiveType || isArrayOfEnum) {
-            if (vertexEdgePropertiesCache != null) {
-                List values =  vertexEdgePropertiesCache.getMultiValuedProperties(instanceVertex.getIdForDisplay(), propertyName, elementType.getClass());
-                return values;
+            // Check if this property uses single-valued array format (e.g., AuthPolicy.policyResources)
+            if (useSingleValuedArrayPropertyFormat(instanceVertex, propertyName)) {
+                // Read as single-valued property containing an array
+                Object property = instanceVertex.getProperty(propertyName, Object.class);
+                if (property instanceof List) {
+                    return (List<Object>) property;
+                } else if (property != null) {
+                    // Single value, wrap in list
+                    return Collections.singletonList(property);
+                } else {
+                    // Property doesn't exist, return empty list
+                    return Collections.emptyList();
+                }
+            } else {
+                // Use traditional multi-valued property format
+                if (vertexEdgePropertiesCache != null) {
+                    List values =  vertexEdgePropertiesCache.getMultiValuedProperties(instanceVertex.getIdForDisplay(), propertyName, elementType.getClass());
+                    return values;
+                }
+                return (List) instanceVertex.getMultiValuedProperty(propertyName, elementType.getClass());
             }
-            return (List) instanceVertex.getMultiValuedProperty(propertyName, elementType.getClass());
         } else {
             return (List) instanceVertex.getListProperty(propertyName);
         }
