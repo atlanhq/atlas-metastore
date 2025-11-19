@@ -1646,7 +1646,6 @@ public abstract class DeleteHandlerV1 {
     public void removeHasLineageOnDelete(Collection<AtlasVertex> vertices) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("removeHasLineageOnDelete");
 
-        // Timing: Lineage calculation
         long lineageCalcStart = System.currentTimeMillis();
 
         if (RequestContext.get().skipHasLineageCalculation()) {
@@ -1676,11 +1675,9 @@ public abstract class DeleteHandlerV1 {
                 }
             }
         }
-
         // Record lineage calculation time
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
-
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -1765,11 +1762,9 @@ public abstract class DeleteHandlerV1 {
                 }
             }
         }
-
         // Record lineage calculation time
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
-
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -1863,7 +1858,6 @@ public abstract class DeleteHandlerV1 {
     }
     private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
-
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
 
         Iterator<AtlasEdge> edgeIterator = assetVertex.query()
