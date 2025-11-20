@@ -58,7 +58,7 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
 
     private static final int DEFAULT_RICH_TEXT_ATTRIBUTE_LIMIT = 50;
     private static final String RICH_TEXT_ATTRIBUTE_LIMIT_PROPERTY = "atlas.business.metadata.richtext.limit";
-    private static final String ATTR_OPTION_PRIMITIVE_TYPE = "primitiveType";
+    private static final String ATTR_OPTION_ENUM_TYPE = "enumType";
 
     @Inject
     public AtlasBusinessMetadataDefStoreV2(AtlasTypeDefGraphStoreV2 typeDefStore, AtlasTypeRegistry typeRegistry, EntityDiscoveryService entityDiscoveryService) {
@@ -610,8 +610,12 @@ public class AtlasBusinessMetadataDefStoreV2 extends AtlasAbstractDefStoreV2<Atl
             String key = entry.getKey();
             String value = entry.getValue();
 
-            if (StringUtils.isBlank(value)) {
+            if (StringUtils.isBlank(value) && !key.equals(ATTR_OPTION_ENUM_TYPE)) {
                 throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "options['" + key + "'] for attribute " + attrName + " has null/empty value");
+            }
+
+            if (key.equals(ATTR_OPTION_ENUM_TYPE) && value == null) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "options['" + key + "'] for attribute " + attrName + " cannot be null");
             }
 
             // Check if stringified JSON value is valid JSON
