@@ -69,8 +69,7 @@ public class AtlasAuthorizationUtils {
     public static final String READ_RESTRICTION_LEVEL = AtlasConfiguration.READ_RESTRICTION_LEVEL.getString();
 
     public static boolean isFullRestrictionConfigured() {
-        // return READ_RESTRICTION_LEVEL.equals(READ_RESTRICTION_LEVEL_FULL);
-        return true;
+         return READ_RESTRICTION_LEVEL.equals(READ_RESTRICTION_LEVEL_FULL);
     }
 
     public static void verifyAccess(AtlasAdminAccessRequest request, Object... errorMsgParams) throws AtlasBaseException {
