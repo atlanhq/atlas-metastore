@@ -17,7 +17,7 @@ public interface IngestionDAO {
     class IngestionRequest {
         private String requestId;
         private String status;
-        private byte[] resultSummary;
+        private Object resultSummary;
         private String errorMessage;
         private long updatedAt;
 
@@ -25,8 +25,8 @@ public interface IngestionDAO {
         public void setRequestId(String requestId) { this.requestId = requestId; }
         public String getStatus() { return status; }
         public void setStatus(String status) { this.status = status; }
-        public byte[] getResultSummary() { return resultSummary; }
-        public void setResultSummary(byte[] resultSummary) { this.resultSummary = resultSummary; }
+        public Object getResultSummary() { return resultSummary; }
+        public void setResultSummary(Object resultSummary) { this.resultSummary = resultSummary; }
         public String getErrorMessage() { return errorMessage; }
         public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
         public long getUpdatedAt() { return updatedAt; }

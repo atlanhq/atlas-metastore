@@ -15,6 +15,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.repository.graphdb.AtlasGraphProvider;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
@@ -111,9 +112,7 @@ public class IngestionService {
     }
 
     private void processTask(String requestId) {
-        Timer.Sample timerSample = Timer.start(Metrics.globalRegistry);
         try {
-            // 1. Load context and payload in a single call
             IngestionDAO.IngestionPayloadAndContext payloadAndContext = ingestionDAO.getPayloadAndContext(requestId);
             if (payloadAndContext == null || payloadAndContext.getPayload() == null) {
                 LOG.error("Payload for request {} not found", requestId);
@@ -130,7 +129,7 @@ public class IngestionService {
                 return;
             }
 
-            RequestContext.clear(); // Clean up any stale context from previous runs
+            RequestContext.clear();
             RequestContext.get().setUser(contextDTO.getUser(), contextDTO.getUserGroups());
             RequestContext.get().setClientIPAddress(contextDTO.getClientIPAddress());
 
@@ -172,7 +171,7 @@ public class IngestionService {
             EntityMutationResponse response = entityMutationService.createOrUpdate(entityStream, context);
 
             // 4. Update success
-            byte[] responseBytes = AtlasType.toJson(response).getBytes(StandardCharsets.UTF_8);
+            byte[] responseBytes = AtlasJson.toBytes(response);
             ingestionDAO.updateStatus(requestId, "COMPLETED", responseBytes, null);
             MetricUtils.getMeterRegistry().counter("ingestion.tasks.completed").increment();
             LOG.info("Ingestion request {} completed successfully", requestId);

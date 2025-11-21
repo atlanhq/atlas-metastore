@@ -28,6 +28,8 @@ import java.time.Instant;
 import java.util.UUID;
 import java.util.Map;
 import java.util.stream.Collectors;
+import org.apache.atlas.utils.AtlasJson;
+
 
 import static org.apache.atlas.repository.store.graph.v2.tags.CassandraTagConfig.CASSANDRA_HOSTNAME_PROPERTY;
 import static org.apache.atlas.repository.store.graph.v2.tags.CassandraTagConfig.CASSANDRA_PORT;
@@ -168,14 +170,16 @@ public class IngestionDAOCassandraImpl implements IngestionDAO, Closeable {
                     .setByteBuffer("payload", ByteBuffer.wrap(payload))
                     .setByteBuffer("request_options", ByteBuffer.wrap(requestOptions))
                     .setByteBuffer("request_context", ByteBuffer.wrap(requestContext))
-                    .setInstant("created_at", now);
+                    .setInstant("created_at", now)
+                    .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM);
             cassSession.execute(rawBound);
 
             // Insert into Status Table
             BoundStatement statusBound = insertStatusStmt.bind()
                     .setUuid("ingest_id", uuid)
                     .setString("status", "PENDING")
-                    .setInstant("updated_at", now);
+                    .setInstant("updated_at", now)
+                    .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM);
             cassSession.execute(statusBound);
 
         } catch (Exception e) {
@@ -246,7 +250,7 @@ public class IngestionDAOCassandraImpl implements IngestionDAO, Closeable {
             if (resultBuffer != null) {
                 byte[] resultBytes = new byte[resultBuffer.remaining()];
                 resultBuffer.get(resultBytes);
-                request.setResultSummary(resultBytes);
+                request.setResultSummary(AtlasJson.fromBytes(resultBytes, Object.class));
             }
             
             request.setErrorMessage(row.getString("error_msg"));
@@ -268,7 +272,9 @@ public class IngestionDAOCassandraImpl implements IngestionDAO, Closeable {
     public IngestionPayloadAndContext getPayloadAndContext(String requestId) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.getPayloadAndContext");
         try {
-            BoundStatement bound = getPayloadStmt.bind().setUuid("ingest_id", UUID.fromString(requestId));
+            BoundStatement bound = getPayloadStmt.bind()
+                                                 .setUuid("ingest_id", UUID.fromString(requestId))
+                                                 .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM);
             ResultSet rs = cassSession.execute(bound);
             Row row = rs.one();
 
