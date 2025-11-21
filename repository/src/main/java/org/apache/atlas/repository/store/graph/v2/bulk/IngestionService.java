@@ -1,0 +1,144 @@
+package org.apache.atlas.repository.store.graph.v2.bulk;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.AtlasConfiguration;
+import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
+import org.apache.atlas.model.instance.EntityMutationResponse;
+import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
+import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
+import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
+import org.apache.atlas.type.AtlasType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+
+import javax.annotation.PreDestroy;
+import javax.inject.Inject;
+import java.nio.charset.StandardCharsets;
+import java.util.Collection;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.Timer;
+import org.apache.atlas.service.metrics.MetricUtils;
+
+@Service
+public class IngestionService {
+    private static final Logger LOG = LoggerFactory.getLogger(IngestionService.class);
+    private static final ObjectMapper mapper = new ObjectMapper();
+
+    private final IngestionDAO ingestionDAO;
+    private final EntityMutationService entityMutationService;
+    private final ThreadPoolExecutor executorService;
+
+    @Inject
+    public IngestionService(IngestionDAO ingestionDAO, EntityMutationService entityMutationService) {
+        this.ingestionDAO = ingestionDAO;
+        this.entityMutationService = entityMutationService;
+
+        int cpuCores = Runtime.getRuntime().availableProcessors();
+        int threadCount = Math.max(cpuCores / 2, 1);
+        int queueSize = AtlasConfiguration.INGESTION_DUMP_QUEUE_SIZE.getInt();
+
+        this.executorService = new ThreadPoolExecutor(
+                threadCount,
+                threadCount,
+                0L,
+                TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<>(queueSize),
+                new ThreadPoolExecutor.AbortPolicy()
+        );
+        
+        LOG.info("IngestionService initialized with {} threads (cores/2) and queue size {}", threadCount, queueSize);
+        MetricUtils.getMeterRegistry().gauge("ingestion.queue.size", executorService.getQueue(), Collection::size);
+    }
+
+    public String submit(String payload, Map<String, String> queryParams) throws AtlasBaseException {
+        String requestId = UUID.randomUUID().toString();
+        String options = AtlasType.toJson(queryParams);
+
+        ingestionDAO.save(requestId, payload.getBytes(StandardCharsets.UTF_8), options);
+        LOG.info("Ingestion request {} persisted with status PENDING", requestId);
+
+        try {
+            executorService.submit(() -> processTask(requestId));
+            MetricUtils.getMeterRegistry().counter("ingestion.tasks.submitted").increment();
+        } catch (Exception e) {
+            MetricUtils.getMeterRegistry().counter("ingestion.tasks.rejected").increment();
+            LOG.error("Failed to submit task to executor, updating status to FAILED", e);
+            ingestionDAO.updateStatus(requestId, "FAILED", "System overloaded: " + e.getMessage());
+            throw e;
+        }
+        return requestId;
+    }
+
+    public IngestionDAO.IngestionRequest getStatus(String requestId) throws AtlasBaseException {
+        return ingestionDAO.getStatus(requestId);
+    }
+
+    private void processTask(String requestId) {
+        Timer.Sample timerSample = Timer.start(Metrics.globalRegistry);
+        try {
+            LOG.info("Processing ingestion request {}", requestId);
+            ingestionDAO.updateStatus(requestId, "IN_PROGRESS", null);
+
+            byte[] payloadBytes = ingestionDAO.getPayload(requestId);
+            if (payloadBytes == null) {
+                LOG.error("Payload for request {} not found", requestId);
+                ingestionDAO.updateStatus(requestId, "FAILED", "Payload not found");
+                return;
+            }
+            
+            String payloadJson = new String(payloadBytes, StandardCharsets.UTF_8);
+            AtlasEntitiesWithExtInfo entities = AtlasType.fromJson(payloadJson, AtlasEntitiesWithExtInfo.class);
+
+            String optionsJson = ingestionDAO.getRequestOptions(requestId);
+            Map<String, String> queryParams = AtlasType.fromJson(optionsJson, Map.class);
+
+            boolean replaceClassifications = Boolean.parseBoolean(queryParams.getOrDefault("replaceClassifications", "false"));
+            boolean replaceTags = Boolean.parseBoolean(queryParams.getOrDefault("replaceTags", "false"));
+            boolean appendTags = Boolean.parseBoolean(queryParams.getOrDefault("appendTags", "false"));
+            boolean replaceBusinessAttributes = Boolean.parseBoolean(queryParams.getOrDefault("replaceBusinessAttributes", "false"));
+            boolean isOverwriteBusinessAttributes = Boolean.parseBoolean(queryParams.getOrDefault("overwriteBusinessAttributes", "false"));
+
+            BulkRequestContext context = new BulkRequestContext.Builder()
+                    .setReplaceClassifications(replaceClassifications)
+                    .setReplaceTags(replaceTags)
+                    .setAppendTags(appendTags)
+                    .setReplaceBusinessAttributes(replaceBusinessAttributes)
+                    .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
+                    .build();
+
+            AtlasEntityStream entityStream = new AtlasEntityStream(entities);
+            EntityMutationResponse response = entityMutationService.createOrUpdate(entityStream, context);
+
+            // 4. Update success
+            byte[] responseBytes = AtlasType.toJson(response).getBytes(StandardCharsets.UTF_8);
+            ingestionDAO.updateStatus(requestId, "COMPLETED", responseBytes, null);
+            MetricUtils.getMeterRegistry().counter("ingestion.tasks.completed").increment();
+            LOG.info("Ingestion request {} completed successfully", requestId);
+
+        } catch (Exception e) {
+            MetricUtils.getMeterRegistry().counter("ingestion.tasks.failed").increment();
+            LOG.error("Failed to process ingestion request {}", requestId, e);
+            try {
+                ingestionDAO.updateStatus(requestId, "FAILED", e.getMessage());
+            } catch (AtlasBaseException ex) {
+                LOG.error("Failed to update failure status for request {}", requestId, ex);
+            }
+        } finally {
+            timerSample.stop(MetricUtils.getMeterRegistry().timer("ingestion.processing.duration"));
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        if (executorService != null) {
+            executorService.shutdown();
+        }
+    }
+}
