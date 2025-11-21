@@ -183,7 +183,12 @@ public enum AtlasConfiguration {
     // Task resource management configuration
     TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 75),
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
-    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3);
+    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
+
+    // Ingestion dump configuration
+    INGESTION_DUMP_THREADS("atlas.ingestion.dump.threads", 10),
+    INGESTION_DUMP_QUEUE_SIZE("atlas.ingestion.dump.queue.size", 100),
+    INGESTION_DUMP_KEYSPACE("atlas.ingestion.dump.cassandra.keyspace", "atlas_ingest");
 
     private static final Configuration APPLICATION_PROPERTIES;
 
