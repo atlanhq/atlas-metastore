@@ -2,17 +2,19 @@ package org.apache.atlas.repository.store.graph.v2.bulk;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.AtlasConfiguration;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.exception.AtlasErrorCode;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasJson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.apache.atlas.utils.AtlasPerfTracer;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
@@ -29,10 +31,12 @@ import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.RequestContext;
+import java.util.Set;
 
 @Service
 public class IngestionService {
     private static final Logger LOG = LoggerFactory.getLogger(IngestionService.class);
+    private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("service.IngestionService");
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final IngestionDAO ingestionDAO;
@@ -61,57 +65,92 @@ public class IngestionService {
     }
 
     public String submit(InputStream payloadStream, Map<String, String> queryParams) throws AtlasBaseException {
-        String requestId = UUID.randomUUID().toString();
-        String options = AtlasType.toJson(queryParams);
-        final RequestContext parentContext = RequestContext.get();
-
-        byte[] payload;
+        AtlasPerfTracer perf = null;
         try {
-            payload = payloadStream.readAllBytes();
-        } catch (IOException e) {
-            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Failed to read request body", e);
-        }
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "IngestionService.submit()");
+            }
+            String requestId = UUID.randomUUID().toString();
+            
+            final RequestContext parentContext = RequestContext.get();
+            RequestContextDTO contextDTO = new RequestContextDTO(parentContext);
+            
+            byte[] optionsBytes = AtlasJson.toBytes(queryParams);
+            byte[] contextBytes = AtlasJson.toBytes(contextDTO);
 
-        // 1. Persist to Cassandra
-        ingestionDAO.save(requestId, payload, options);
-        LOG.info("Ingestion request {} persisted with status PENDING", requestId);
+            byte[] payload;
+            try {
+                payload = payloadStream.readAllBytes();
+            } catch (IOException e) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Failed to read request body");
+            }
 
-        // 2. Submit to ThreadPool
-        try {
-            executorService.submit(() -> processTask(requestId, parentContext));
-            MetricUtils.getMeterRegistry().counter("ingestion.tasks.submitted").increment();
-        } catch (Exception e) {
-            MetricUtils.getMeterRegistry().counter("ingestion.tasks.rejected").increment();
-            LOG.error("Failed to submit task to executor, updating status to FAILED", e);
-            ingestionDAO.updateStatus(requestId, "FAILED", "System overloaded: " + e.getMessage());
-            throw e;
+            // 1. Persist to Cassandra
+            ingestionDAO.save(requestId, payload, optionsBytes, contextBytes);
+            LOG.info("Ingestion request {} persisted with status PENDING", requestId);
+
+            // 2. Submit to ThreadPool
+            try {
+                executorService.submit(() -> processTask(requestId));
+                MetricUtils.getMeterRegistry().counter("ingestion.tasks.submitted").increment();
+            } catch (Exception e) {
+                MetricUtils.getMeterRegistry().counter("ingestion.tasks.rejected").increment();
+                LOG.error("Failed to submit task to executor, updating status to FAILED", e);
+                ingestionDAO.updateStatus(requestId, "FAILED", "System overloaded: " + e.getMessage());
+                throw e;
+            }
+            
+            return requestId;
+        } finally {
+            AtlasPerfTracer.log(perf);
         }
-        return requestId;
     }
 
     public IngestionDAO.IngestionRequest getStatus(String requestId) throws AtlasBaseException {
         return ingestionDAO.getStatus(requestId);
     }
 
-    private void processTask(String requestId, RequestContext parentContext) {
-        RequestContext.set(parentContext);
-        Timer.Sample timerSample = Timer.start(Metrics.globalRegistry);
+    private void processTask(String requestId) {
         try {
-            LOG.info("Processing ingestion request {}", requestId);
-            ingestionDAO.updateStatus(requestId, "IN_PROGRESS", null);
-
-            byte[] payloadBytes = ingestionDAO.getPayload(requestId);
-            if (payloadBytes == null) {
+            // 1. Load context and payload
+            IngestionDAO.IngestionPayloadAndContext payloadAndContext = ingestionDAO.getPayloadAndContext(requestId);
+            if (payloadAndContext == null || payloadAndContext.getPayload() == null) {
                 LOG.error("Payload for request {} not found", requestId);
                 ingestionDAO.updateStatus(requestId, "FAILED", "Payload not found");
                 return;
             }
+
+            RequestContextDTO contextDTO;
+            try {
+                contextDTO = AtlasJson.fromBytes(payloadAndContext.getRequestContext(), RequestContextDTO.class);
+            } catch (IOException e) {
+                LOG.error("Failed to deserialize RequestContextDTO for request {}", requestId, e);
+                ingestionDAO.updateStatus(requestId, "FAILED", "Invalid request context format");
+                return;
+            }
+
+            RequestContext.clear(); // Clean up any stale context from previous runs
+            RequestContext.get().setUser(contextDTO.getUser(), contextDTO.getUserGroups());
+            RequestContext.get().setClientIPAddress(contextDTO.getClientIPAddress());
+
+            LOG.info("Processing ingestion request {}", requestId);
+            ingestionDAO.updateStatus(requestId, "IN_PROGRESS", null);
+
+            byte[] payloadBytes = payloadAndContext.getPayload();
             
             String payloadJson = new String(payloadBytes, StandardCharsets.UTF_8);
             AtlasEntitiesWithExtInfo entities = AtlasType.fromJson(payloadJson, AtlasEntitiesWithExtInfo.class);
-
-            String optionsJson = ingestionDAO.getRequestOptions(requestId);
-            Map<String, String> queryParams = AtlasType.fromJson(optionsJson, Map.class);
+            
+            // 2. Load Options
+            byte[] optionsBytes = payloadAndContext.getRequestOptions();
+            Map<String, String> queryParams;
+            try {
+                queryParams = AtlasJson.fromBytes(optionsBytes, Map.class);
+            } catch (IOException e) {
+                LOG.error("Failed to deserialize query parameters for request {}", requestId, e);
+                ingestionDAO.updateStatus(requestId, "FAILED", "Invalid query parameters format");
+                return;
+            }
 
             boolean replaceClassifications = Boolean.parseBoolean(queryParams.getOrDefault("replaceClassifications", "false"));
             boolean replaceTags = Boolean.parseBoolean(queryParams.getOrDefault("replaceTags", "false"));
@@ -145,7 +184,6 @@ public class IngestionService {
                 LOG.error("Failed to update failure status for request {}", requestId, ex);
             }
         } finally {
-            timerSample.stop(MetricUtils.getMeterRegistry().timer("ingestion.processing.duration"));
             RequestContext.clear();
         }
     }
@@ -155,5 +193,25 @@ public class IngestionService {
         if (executorService != null) {
             executorService.shutdown();
         }
+    }
+
+    // DTO for serializing RequestContext
+    private static class RequestContextDTO {
+        private String user;
+        private Set<String> userGroups;
+        private String clientIPAddress;
+
+        // For Jackson
+        public RequestContextDTO() {}
+
+        public RequestContextDTO(RequestContext context) {
+            this.user = context.getUser();
+            this.userGroups = context.getUserGroups();
+            this.clientIPAddress = context.getClientIPAddress();
+        }
+
+        public String getUser() { return user; }
+        public Set<String> getUserGroups() { return userGroups; }
+        public String getClientIPAddress() { return clientIPAddress; }
     }
 }

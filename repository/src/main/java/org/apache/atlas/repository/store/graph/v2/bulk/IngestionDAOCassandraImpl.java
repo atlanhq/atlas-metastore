@@ -104,10 +104,11 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
                 "CREATE TABLE IF NOT EXISTS %s.%s (" +
                         "ingest_id uuid PRIMARY KEY, " +
                         "payload blob, " +
-                        "request_options text, " +
+                        "request_options blob, " +
+                        "request_context blob, " +
                         "created_at timestamp" +
                         ") WITH compaction = {'class': 'SizeTieredCompactionStrategy'};",
-                keyspace, RAW_INGEST_TABLE);
+                this.keyspace, RAW_INGEST_TABLE);
         
         cassSession.execute(SimpleStatement.builder(createRawTable).setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
         LOG.info("Ensured table {}.{} exists", keyspace, RAW_INGEST_TABLE);
@@ -120,7 +121,7 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
                         "error_msg text, " +
                         "updated_at timestamp" +
                         ") WITH compaction = {'class': 'SizeTieredCompactionStrategy'};",
-                keyspace, STATUS_TABLE);
+                this.keyspace, STATUS_TABLE);
 
         cassSession.execute(SimpleStatement.builder(createStatusTable).setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
         LOG.info("Ensured table {}.{} exists", keyspace, STATUS_TABLE);
@@ -128,32 +129,32 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
 
     private void prepareStatements() {
         insertRawStmt = cassSession.prepare(String.format(
-                "INSERT INTO %s.%s (ingest_id, payload, request_options, created_at) VALUES (?, ?, ?, ?)",
-                keyspace, RAW_INGEST_TABLE));
+                "INSERT INTO %s.%s (ingest_id, payload, request_options, request_context, created_at) VALUES (?, ?, ?, ?, ?)",
+                this.keyspace, RAW_INGEST_TABLE));
 
         insertStatusStmt = cassSession.prepare(String.format(
                 "INSERT INTO %s.%s (ingest_id, status, updated_at) VALUES (?, ?, ?)",
-                keyspace, STATUS_TABLE));
+                this.keyspace, STATUS_TABLE));
 
         updateStatusStmt = cassSession.prepare(String.format(
                 "UPDATE %s.%s SET status = ?, updated_at = ?, error_msg = ? WHERE ingest_id = ?",
-                keyspace, STATUS_TABLE));
+                this.keyspace, STATUS_TABLE));
 
         updateStatusResultStmt = cassSession.prepare(String.format(
                 "UPDATE %s.%s SET status = ?, updated_at = ?, result_payload = ?, error_msg = ? WHERE ingest_id = ?",
-                keyspace, STATUS_TABLE));
+                this.keyspace, STATUS_TABLE));
 
         getStatusStmt = cassSession.prepare(String.format(
                 "SELECT ingest_id, status, result_payload, error_msg, updated_at FROM %s.%s WHERE ingest_id = ?",
-                keyspace, STATUS_TABLE));
+                this.keyspace, STATUS_TABLE));
 
         getPayloadStmt = cassSession.prepare(String.format(
-                "SELECT payload, request_options FROM %s.%s WHERE ingest_id = ?",
-                keyspace, RAW_INGEST_TABLE));
+                "SELECT payload, request_options, request_context FROM %s.%s WHERE ingest_id = ?",
+                this.keyspace, RAW_INGEST_TABLE));
     }
 
     @Override
-    public void save(String requestId, byte[] payload, String requestOptions) throws AtlasBaseException {
+    public void save(String requestId, byte[] payload, byte[] requestOptions, byte[] requestContext) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.save");
         try {
             Instant now = Instant.now();
@@ -163,7 +164,8 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
             BoundStatement rawBound = insertRawStmt.bind()
                     .setUuid("ingest_id", uuid)
                     .setByteBuffer("payload", ByteBuffer.wrap(payload))
-                    .setString("request_options", requestOptions)
+                    .setByteBuffer("request_options", ByteBuffer.wrap(requestOptions))
+                    .setByteBuffer("request_context", ByteBuffer.wrap(requestContext))
                     .setInstant("created_at", now);
             cassSession.execute(rawBound);
 
@@ -261,6 +263,50 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
     }
 
     @Override
+    public IngestionPayloadAndContext getPayloadAndContext(String requestId) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.getPayloadAndContext");
+        try {
+            BoundStatement bound = getPayloadStmt.bind().setUuid("ingest_id", UUID.fromString(requestId));
+            ResultSet rs = cassSession.execute(bound);
+            Row row = rs.one();
+
+            if (row == null) {
+                return null;
+            }
+
+            IngestionPayloadAndContext result = new IngestionPayloadAndContext();
+            
+            ByteBuffer payloadBuffer = row.getByteBuffer("payload");
+            if (payloadBuffer != null) {
+                byte[] payloadBytes = new byte[payloadBuffer.remaining()];
+                payloadBuffer.get(payloadBytes);
+                result.setPayload(payloadBytes);
+            }
+
+            ByteBuffer optionsBuffer = row.getByteBuffer("request_options");
+            if (optionsBuffer != null) {
+                byte[] optionsBytes = new byte[optionsBuffer.remaining()];
+                optionsBuffer.get(optionsBytes);
+                result.setRequestOptions(optionsBytes);
+            }
+
+            ByteBuffer contextBuffer = row.getByteBuffer("request_context");
+            if (contextBuffer != null) {
+                byte[] contextBytes = new byte[contextBuffer.remaining()];
+                contextBuffer.get(contextBytes);
+                result.setRequestContext(contextBytes);
+            }
+            
+            return result;
+        } catch (Exception e) {
+            LOG.error("Error fetching payload and context: {}", requestId, e);
+            throw new AtlasBaseException("Error fetching payload and context", e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    @Override
     public byte[] getPayload(String requestId) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.getPayload");
         try {
@@ -289,22 +335,6 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
     
     @Override
     public String getRequestOptions(String requestId) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.getRequestOptions");
-        try {
-            BoundStatement bound = getPayloadStmt.bind().setUuid("ingest_id", UUID.fromString(requestId));
-            ResultSet rs = cassSession.execute(bound);
-            Row row = rs.one();
-
-            if (row == null) {
-                return null;
-            }
-
-            return row.getString("request_options");
-        } catch (Exception e) {
-            LOG.error("Error fetching request options: {}", requestId, e);
-            throw new AtlasBaseException("Error fetching request options", e);
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
+        throw new UnsupportedOperationException("This method is deprecated, use getPayloadAndContext instead");
     }
 }

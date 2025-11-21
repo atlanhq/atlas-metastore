@@ -4,13 +4,15 @@ import org.apache.atlas.exception.AtlasBaseException;
 
 public interface IngestionDAO {
 
-    void save(String requestId, byte[] payload, String requestOptions) throws AtlasBaseException;
+    void save(String requestId, byte[] payload, byte[] requestOptions, byte[] requestContext) throws AtlasBaseException;
 
     void updateStatus(String requestId, String status, String errorMessage) throws AtlasBaseException;
 
     void updateStatus(String requestId, String status, byte[] resultSummary, String errorMessage) throws AtlasBaseException;
 
     IngestionRequest getStatus(String requestId) throws AtlasBaseException;
+
+    IngestionPayloadAndContext getPayloadAndContext(String requestId) throws AtlasBaseException;
 
     byte[] getPayload(String requestId) throws AtlasBaseException;
 
@@ -33,5 +35,18 @@ public interface IngestionDAO {
         public void setErrorMessage(String errorMessage) { this.errorMessage = errorMessage; }
         public long getUpdatedAt() { return updatedAt; }
         public void setUpdatedAt(long updatedAt) { this.updatedAt = updatedAt; }
+    }
+
+    class IngestionPayloadAndContext {
+        private byte[] payload;
+        private byte[] requestOptions;
+        private byte[] requestContext;
+
+        public byte[] getPayload() { return payload; }
+        public void setPayload(byte[] payload) { this.payload = payload; }
+        public byte[] getRequestOptions() { return requestOptions; }
+        public void setRequestOptions(byte[] requestOptions) { this.requestOptions = requestOptions; }
+        public byte[] getRequestContext() { return requestContext; }
+        public void setRequestContext(byte[] requestContext) { this.requestContext = requestContext; }
     }
 }
