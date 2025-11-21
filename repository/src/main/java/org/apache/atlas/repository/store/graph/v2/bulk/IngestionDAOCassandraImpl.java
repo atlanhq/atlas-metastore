@@ -19,6 +19,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 import javax.annotation.PostConstruct;
+import javax.annotation.PreDestroy;
+import java.io.Closeable;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.time.Duration;
@@ -34,7 +36,7 @@ import org.apache.atlas.AtlasConfiguration;
 
 
 @Repository
-public class IngestionDAOCassandraImpl implements IngestionDAO {
+public class IngestionDAOCassandraImpl implements IngestionDAO, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(IngestionDAOCassandraImpl.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("IngestionDAOCassandraImpl");
 
@@ -336,5 +338,14 @@ public class IngestionDAOCassandraImpl implements IngestionDAO {
     @Override
     public String getRequestOptions(String requestId) throws AtlasBaseException {
         throw new UnsupportedOperationException("This method is deprecated, use getPayloadAndContext instead");
+    }
+
+    @Override
+    @PreDestroy
+    public void close() {
+        if (cassSession != null && !cassSession.isClosed()) {
+            LOG.info("Closing Cassandra session for IngestionDAO");
+            cassSession.close();
+        }
     }
 }
