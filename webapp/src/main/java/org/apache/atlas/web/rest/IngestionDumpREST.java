@@ -23,6 +23,7 @@ import javax.ws.rs.Produces;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
+import java.io.InputStream;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
@@ -48,16 +49,20 @@ public class IngestionDumpREST {
     }
 
     @POST
-    public Response submit(String requestBody, @Context HttpServletRequest httpServletRequest) throws AtlasBaseException {
+    public Response submit(InputStream requestBodyStream, @Context HttpServletRequest httpServletRequest) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "IngestionDumpREST.submit()");
             }
 
-            Map<String, String> queryParams = getStringStringMap(requestBody, httpServletRequest);
+            if (requestBodyStream == null) {
+                throw new AtlasBaseException(BAD_REQUEST, "Request body cannot be empty");
+            }
 
-            String requestId = ingestionService.submit(requestBody, queryParams);
+            Map<String, String> queryParams = getStringStringMap(httpServletRequest);
+
+            String requestId = ingestionService.submit(requestBodyStream, queryParams);
             MetricUtils.getMeterRegistry().counter("ingestion.requests.submitted").increment();
             
             Map<String, String> response = Collections.singletonMap("requestId", requestId);
@@ -68,11 +73,7 @@ public class IngestionDumpREST {
         }
     }
 
-    private static Map<String, String> getStringStringMap(String requestBody, HttpServletRequest httpServletRequest) throws AtlasBaseException {
-        if (StringUtils.isEmpty(requestBody)) {
-            throw new AtlasBaseException(BAD_REQUEST, "Request body cannot be empty");
-        }
-
+    private static Map<String, String> getStringStringMap(HttpServletRequest httpServletRequest) {
         Map<String, String[]> parameterMap = httpServletRequest.getParameterMap();
         Map<String, String> queryParams = new HashMap<>();
         for (Map.Entry<String, String[]> entry : parameterMap.entrySet()) {

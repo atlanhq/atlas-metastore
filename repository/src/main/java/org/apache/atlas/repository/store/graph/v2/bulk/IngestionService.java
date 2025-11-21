@@ -3,6 +3,7 @@ package org.apache.atlas.repository.store.graph.v2.bulk;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.exception.AtlasErrorCode;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
@@ -15,6 +16,8 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Collection;
 import java.util.Map;
@@ -25,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.service.metrics.MetricUtils;
+import org.apache.atlas.RequestContext;
 
 @Service
 public class IngestionService {
@@ -40,8 +44,7 @@ public class IngestionService {
         this.ingestionDAO = ingestionDAO;
         this.entityMutationService = entityMutationService;
 
-        int cpuCores = Runtime.getRuntime().availableProcessors();
-        int threadCount = Math.max(cpuCores / 2, 1);
+        int threadCount = AtlasConfiguration.INGESTION_DUMP_THREADS.getInt();
         int queueSize = AtlasConfiguration.INGESTION_DUMP_QUEUE_SIZE.getInt();
 
         this.executorService = new ThreadPoolExecutor(
@@ -57,15 +60,25 @@ public class IngestionService {
         MetricUtils.getMeterRegistry().gauge("ingestion.queue.size", executorService.getQueue(), Collection::size);
     }
 
-    public String submit(String payload, Map<String, String> queryParams) throws AtlasBaseException {
+    public String submit(InputStream payloadStream, Map<String, String> queryParams) throws AtlasBaseException {
         String requestId = UUID.randomUUID().toString();
         String options = AtlasType.toJson(queryParams);
+        final RequestContext parentContext = RequestContext.get();
 
-        ingestionDAO.save(requestId, payload.getBytes(StandardCharsets.UTF_8), options);
+        byte[] payload;
+        try {
+            payload = payloadStream.readAllBytes();
+        } catch (IOException e) {
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Failed to read request body", e);
+        }
+
+        // 1. Persist to Cassandra
+        ingestionDAO.save(requestId, payload, options);
         LOG.info("Ingestion request {} persisted with status PENDING", requestId);
 
+        // 2. Submit to ThreadPool
         try {
-            executorService.submit(() -> processTask(requestId));
+            executorService.submit(() -> processTask(requestId, parentContext));
             MetricUtils.getMeterRegistry().counter("ingestion.tasks.submitted").increment();
         } catch (Exception e) {
             MetricUtils.getMeterRegistry().counter("ingestion.tasks.rejected").increment();
@@ -80,7 +93,8 @@ public class IngestionService {
         return ingestionDAO.getStatus(requestId);
     }
 
-    private void processTask(String requestId) {
+    private void processTask(String requestId, RequestContext parentContext) {
+        RequestContext.set(parentContext);
         Timer.Sample timerSample = Timer.start(Metrics.globalRegistry);
         try {
             LOG.info("Processing ingestion request {}", requestId);
@@ -132,6 +146,7 @@ public class IngestionService {
             }
         } finally {
             timerSample.stop(MetricUtils.getMeterRegistry().timer("ingestion.processing.duration"));
+            RequestContext.clear();
         }
     }
 
