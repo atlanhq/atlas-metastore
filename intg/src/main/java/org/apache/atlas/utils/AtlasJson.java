@@ -269,6 +269,26 @@ public class AtlasJson {
         return mapper;
     }
 
+    public static byte[] toBytes(Object obj) {
+        try {
+            return mapper.writeValueAsBytes(obj);
+        } catch (IOException e) {
+            LOG.error("AtlasJson.toBytes()", e);
+            return null;
+        }
+    }
+
+    public static <T> T fromBytes(byte[] bytes, Class<T> type) throws IOException {
+        if (bytes != null) {
+            T ret = mapper.readValue(bytes, type);
+            if (ret instanceof Struct) {
+                ((Struct) ret).normalize();
+            }
+            return ret;
+        }
+        return null;
+    }
+
     static class DateSerializer extends JsonSerializer<Date> {
         @Override
         public void serialize(Date value, JsonGenerator jgen, SerializerProvider provider) throws IOException {
