@@ -234,7 +234,9 @@ public class IngestionDAOCassandraImpl implements IngestionDAO, Closeable {
     public IngestionRequest getStatus(String requestId) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.getStatus");
         try {
-            BoundStatement bound = getStatusStmt.bind().setUuid("ingest_id", UUID.fromString(requestId));
+            BoundStatement bound = getStatusStmt.bind()
+                                                .setUuid("ingest_id", UUID.fromString(requestId))
+                                                .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM);
             ResultSet rs = cassSession.execute(bound);
             Row row = rs.one();
 
