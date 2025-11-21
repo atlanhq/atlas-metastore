@@ -14,10 +14,6 @@ public interface IngestionDAO {
 
     IngestionPayloadAndContext getPayloadAndContext(String requestId) throws AtlasBaseException;
 
-    byte[] getPayload(String requestId) throws AtlasBaseException;
-
-    String getRequestOptions(String requestId) throws AtlasBaseException;
-
     class IngestionRequest {
         private String requestId;
         private String status;

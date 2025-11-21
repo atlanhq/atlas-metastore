@@ -111,8 +111,9 @@ public class IngestionService {
     }
 
     private void processTask(String requestId) {
+        Timer.Sample timerSample = Timer.start(Metrics.globalRegistry);
         try {
-            // 1. Load context and payload
+            // 1. Load context and payload in a single call
             IngestionDAO.IngestionPayloadAndContext payloadAndContext = ingestionDAO.getPayloadAndContext(requestId);
             if (payloadAndContext == null || payloadAndContext.getPayload() == null) {
                 LOG.error("Payload for request {} not found", requestId);
@@ -132,6 +133,7 @@ public class IngestionService {
             RequestContext.clear(); // Clean up any stale context from previous runs
             RequestContext.get().setUser(contextDTO.getUser(), contextDTO.getUserGroups());
             RequestContext.get().setClientIPAddress(contextDTO.getClientIPAddress());
+
 
             LOG.info("Processing ingestion request {}", requestId);
             ingestionDAO.updateStatus(requestId, "IN_PROGRESS", null);

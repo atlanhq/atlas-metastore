@@ -308,37 +308,6 @@ public class IngestionDAOCassandraImpl implements IngestionDAO, Closeable {
         }
     }
 
-    @Override
-    public byte[] getPayload(String requestId) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("IngestionDAO.getPayload");
-        try {
-            BoundStatement bound = getPayloadStmt.bind().setUuid("ingest_id", UUID.fromString(requestId));
-            ResultSet rs = cassSession.execute(bound);
-            Row row = rs.one();
-
-            if (row == null) {
-                return null;
-            }
-
-            ByteBuffer payloadBuffer = row.getByteBuffer("payload");
-            if (payloadBuffer != null) {
-                byte[] payloadBytes = new byte[payloadBuffer.remaining()];
-                payloadBuffer.get(payloadBytes);
-                return payloadBytes;
-            }
-            return null;
-        } catch (Exception e) {
-            LOG.error("Error fetching payload: {}", requestId, e);
-            throw new AtlasBaseException("Error fetching payload", e);
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
-    }
-    
-    @Override
-    public String getRequestOptions(String requestId) throws AtlasBaseException {
-        throw new UnsupportedOperationException("This method is deprecated, use getPayloadAndContext instead");
-    }
 
     @Override
     @PreDestroy
