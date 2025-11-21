@@ -15,7 +15,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.apache.atlas.utils.AtlasPerfTracer;
-import org.apache.atlas.repository.graphdb.AtlasGraphProvider;
 
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
@@ -28,8 +27,6 @@ import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import io.micrometer.core.instrument.Metrics;
-import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.RequestContext;
 import java.util.Set;
@@ -38,7 +35,6 @@ import java.util.Set;
 public class IngestionService {
     private static final Logger LOG = LoggerFactory.getLogger(IngestionService.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("service.IngestionService");
-    private static final ObjectMapper mapper = new ObjectMapper();
 
     private final IngestionDAO ingestionDAO;
     private final EntityMutationService entityMutationService;
@@ -61,7 +57,7 @@ public class IngestionService {
                 new ThreadPoolExecutor.AbortPolicy()
         );
         
-        LOG.info("IngestionService initialized with {} threads (cores/2) and queue size {}", threadCount, queueSize);
+        LOG.info("IngestionService initialized with {} threads and queue size {}", threadCount, queueSize);
         MetricUtils.getMeterRegistry().gauge("ingestion.queue.size", executorService.getQueue(), Collection::size);
     }
 
