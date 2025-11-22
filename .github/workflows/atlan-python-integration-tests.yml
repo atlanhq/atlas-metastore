@@ -1,0 +1,246 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+
+name: Atlan Python Integration Tests
+
+on:
+  push:
+    branches:
+      - alpha
+      - beta
+      - development
+      - master
+      - staging
+  pull_request:
+    branches:
+      - master
+      - development
+      - staging
+  workflow_dispatch:
+    inputs:
+      atlan_python_branch:
+        description: 'Branch of atlan-python to test against'
+        required: false
+        default: 'main'
+        type: string
+      test_pattern:
+        description: 'Test pattern to run (e.g., test_integration). If not provided, runs admin_test.py and adls_asset_test.py'
+        required: false
+        type: string
+
+env:
+  ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+  ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout atlan-python repository
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-python
+          ref: ${{ github.event.inputs.atlan_python_branch || 'main' }}
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+          path: atlan-python
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - id: build-matrix
+        name: Build dynamic matrix (max 5 parallel groups)
+        working-directory: atlan-python
+        env:
+          TEST_PATTERN: ${{ github.event.inputs.test_pattern }}
+        run: |
+          echo "Building matrix..."
+          python - <<'PY'
+          import glob, json, os
+          pattern = os.environ.get('TEST_PATTERN', '').strip()
+          if pattern:
+              matrix = {"include": [{"name": "pattern", "pattern": pattern}]}
+          else:
+              files = [
+
+                      'tests/integration/admin_test.py',
+                      'tests/integration/atlan_tag_test.py',
+                      'tests/integration/connection_test.py',
+                      'tests/integration/custom_metadata_test.py',
+                      'tests/integration/glossary_test.py',
+                      'tests/integration/insights_test.py',
+                      'tests/integration/persona_test.py',
+                      'tests/integration/purpose_test.py',
+                      'tests/integration/test_asset_batch.py',
+                      'tests/integration/test_client.py',
+                      'tests/integration/test_index_search.py',
+
+                  ]
+              num_groups = min(5, max(1, len(files)))
+              groups = [[] for _ in range(num_groups)]
+              for idx, f in enumerate(files):
+                  groups[idx % num_groups].append(f)
+              include = []
+              for i, grp in enumerate(groups, start=1):
+                  include.append({
+                      "name": f"group-{i}",
+                      "files": grp,
+                      "files_str": " ".join(grp)
+                  })
+              matrix = {"include": include}
+          out = json.dumps(matrix)
+          print(out)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as fh:
+              fh.write(f"matrix={out}\n")
+          PY
+
+  integration-tests:
+    needs: prepare-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    strategy:
+      matrix: ${{ fromJSON(needs.prepare-matrix.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 5
+
+    steps:
+      - name: Checkout atlan-python repository
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/atlan-python
+          ref: ${{ github.event.inputs.atlan_python_branch || 'main' }}
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+          path: atlan-python
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      - name: Cache Python packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-3.11-${{ hashFiles('atlan-python/**/requirements*.txt', 'atlan-python/**/pyproject.toml', 'atlan-python/**/setup.py') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-3.11-
+            ${{ runner.os }}-pip-
+
+      - name: Verify Atlan API connectivity
+        env:
+          ATLAN_BASE_URL: ${{ secrets.ATLAN_BASE_URL }}
+          ATLAN_API_KEY: ${{ secrets.ATLAN_API_KEY }}
+        run: |
+          echo "Verifying Atlan API connectivity..."
+          if [ -z "$ATLAN_BASE_URL" ] || [ -z "$ATLAN_API_KEY" ]; then
+            echo "❌ ATLAN_BASE_URL or ATLAN_API_KEY secrets not configured"
+            exit 1
+          fi
+          
+          # Test API connectivity (adjust endpoint as needed for atlan-python)
+          curl -H "Authorization: Bearer $ATLAN_API_KEY" \
+               -H "Content-Type: application/json" \
+               "$ATLAN_BASE_URL/api/meta" || exit 1
+          echo "✅ Atlan API is accessible"
+
+      - name: Install atlan-python dependencies
+        working-directory: atlan-python
+        run: |
+          python -m pip install --upgrade pip
+          
+          # Install from requirements.txt if it exists
+          if [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
+          
+          # Install from pyproject.toml if it exists
+          if [ -f pyproject.toml ]; then
+            pip install -e .
+          elif [ -f setup.py ]; then
+            pip install -e .
+          fi
+          
+          # Install test dependencies
+          if [ -f requirements-test.txt ]; then
+            pip install -r requirements-test.txt
+          elif [ -f test-requirements.txt ]; then
+            pip install -r test-requirements.txt
+          fi
+          
+          # Install common test packages with specific versions
+          pip install pytest pytest-cov pytest-xdist pytest-vcr pytest-order requests "vcrpy>=6.0.0,<7.0.0"
+
+
+      - name: Run Integration Tests
+        working-directory: atlan-python
+        env:
+          ATLAN_BASE_URL: ${{ env.ATLAN_BASE_URL }}
+          ATLAN_API_KEY: ${{ env.ATLAN_API_KEY }}
+          PYTHONPATH: ${{ github.workspace }}/atlan-python:${{ github.workspace }}/atlan-python/tests:${{ github.workspace }}/atlan-python/tests/integration
+          PATTERN: ${{ matrix.pattern }}
+          FILES: ${{ matrix.files_str }}
+        run: |
+          if [ -n "$PATTERN" ]; then
+            echo "Running integration tests with pattern (scoped to tests/integration): $PATTERN"
+            python -m pytest -v tests/integration -k "$PATTERN" --tb=short --maxfail=5
+          else
+            echo "Running integration tests for group files sequentially: $FILES"
+            status=0
+            for f in $FILES; do
+              echo "Running: $f"
+              python -m pytest -v "$f" --tb=short --maxfail=5 || status=$?
+              if [ $status -ne 0 ]; then
+                echo "Test failure detected in $f"
+                break
+              fi
+            done
+            exit $status
+          fi
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.name }}
+          if-no-files-found: ignore
+          path: |
+            atlan-python/test-results/
+            atlan-python/tests/test-results/
+            atlan-python/coverage.xml
+            atlan-python/pytest.xml
+
+
+
+  notify-results:
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Notify on success
+        if: needs.integration-tests.result == 'success'
+        run: |
+          echo "✅ All integration tests passed successfully!"
+
+      - name: Notify on failure
+        if: needs.integration-tests.result == 'failure'
+        run: |
+          echo "❌ Integration tests failed. Check the logs for details."
+          exit 1 
