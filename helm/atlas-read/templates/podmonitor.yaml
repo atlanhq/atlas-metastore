@@ -1,8 +1,9 @@
+{{- if or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled) }}
 {{- if .Values.atlas.podMonitor.enabled }}
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: atlas-podmonitor
+  name: atlas-read-podmonitor
   {{- if .Values.atlas.podMonitor.namespace }}
   namespace: {{ .Values.atlas.podMonitor.namespace }}
   {{- end }}
@@ -33,4 +34,5 @@ spec:
   namespaceSelector:
     matchNames:
       - atlas
+{{- end }}
 {{- end }}

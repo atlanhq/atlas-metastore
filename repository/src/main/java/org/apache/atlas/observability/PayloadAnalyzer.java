@@ -11,10 +11,8 @@ import java.util.*;
  * Analyzes payload for observability metrics.
  */
 public class PayloadAnalyzer {
-    private final AtlasTypeRegistry typeRegistry;
-    
-    public PayloadAnalyzer(AtlasTypeRegistry typeRegistry) {
-        this.typeRegistry = typeRegistry;
+
+    public PayloadAnalyzer() {
     }
     
     public void analyzePayload(AtlasEntity.AtlasEntitiesWithExtInfo entitiesWithExtInfo, AtlasObservabilityData data) {
@@ -36,19 +34,11 @@ public class PayloadAnalyzer {
             }
         }
         data.setAssetGuids(assetGuids);
-        
-        // Calculate payload bytes (simplified - just estimate)
-        data.setPayloadRequestBytes(estimatePayloadSize(entitiesWithExtInfo));
-        
+
         // Analyze array relationships
         analyzeArrayRelationships(entitiesWithExtInfo, data);
     }
-    
-    private long estimatePayloadSize(AtlasEntity.AtlasEntitiesWithExtInfo entitiesWithExtInfo) {
-        // Simple estimation - in real implementation, you might serialize and measure
-        return entitiesWithExtInfo.toString().length();
-    }
-    
+
     private void analyzeArrayRelationships(AtlasEntity.AtlasEntitiesWithExtInfo entitiesWithExtInfo, AtlasObservabilityData data) {
         Map<String, Integer> relationshipAttributes = new HashMap<>();
         Map<String, Integer> appendRelationshipAttributes = new HashMap<>();
@@ -94,7 +84,7 @@ public class PayloadAnalyzer {
         // Analyze relationshipAttributes
         if (MapUtils.isNotEmpty(entity.getRelationshipAttributes())) {
             for (Map.Entry<String, Object> entry : entity.getRelationshipAttributes().entrySet()) {
-                if (isArrayRelationship(entry.getValue())) {
+                if (isArrayAttribute(entry.getValue())) {
                     int count = getArrayCount(entry.getValue());
                     relationshipAttributes.merge(entry.getKey(), count, Integer::sum);
                 }
@@ -104,7 +94,7 @@ public class PayloadAnalyzer {
         // Analyze appendRelationshipAttributes
         if (MapUtils.isNotEmpty(entity.getAppendRelationshipAttributes())) {
             for (Map.Entry<String, Object> entry : entity.getAppendRelationshipAttributes().entrySet()) {
-                if (isArrayRelationship(entry.getValue())) {
+                if (isArrayAttribute(entry.getValue())) {
                     int count = getArrayCount(entry.getValue());
                     appendRelationshipAttributes.merge(entry.getKey(), count, Integer::sum);
                 }
@@ -114,7 +104,7 @@ public class PayloadAnalyzer {
         // Analyze removeRelationshipAttributes
         if (MapUtils.isNotEmpty(entity.getRemoveRelationshipAttributes())) {
             for (Map.Entry<String, Object> entry : entity.getRemoveRelationshipAttributes().entrySet()) {
-                if (isArrayRelationship(entry.getValue())) {
+                if (isArrayAttribute(entry.getValue())) {
                     int count = getArrayCount(entry.getValue());
                     removeRelationshipAttributes.merge(entry.getKey(), count, Integer::sum);
                 }
@@ -134,11 +124,7 @@ public class PayloadAnalyzer {
             }
         }
     }
-    
-    private boolean isArrayRelationship(Object value) {
-        return value instanceof Collection && !((Collection<?>) value).isEmpty();
-    }
-    
+
     private boolean isArrayAttribute(Object value) {
         return value instanceof Collection && !((Collection<?>) value).isEmpty();
     }

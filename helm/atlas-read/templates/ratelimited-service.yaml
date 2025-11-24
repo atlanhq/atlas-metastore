@@ -1,8 +1,8 @@
-{{- if not .Values.global.atlasNginx.enabled }}
+{{- if and .Values.nginx.enabled (or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled)) }}
 apiVersion: v1
 kind: Service
 metadata:
-  name: atlas-ratelimited
+  name: atlas-read-ratelimited
   namespace: {{ .Values.Namespace }}
   labels:
     app: {{ template "name" . }}
@@ -15,7 +15,7 @@ spec:
     - port: 80
       targetPort: 8080
       protocol: TCP
-      name: {{ .Values.atlas.service.portName }}
+      name: http
     {{- else }}
     - port: {{ .Values.atlas.service.port }}
       targetPort: {{ .Values.atlas.service.targetPort }}

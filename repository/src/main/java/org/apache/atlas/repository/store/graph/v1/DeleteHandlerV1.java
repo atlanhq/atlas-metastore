@@ -1646,7 +1646,6 @@ public abstract class DeleteHandlerV1 {
     public void removeHasLineageOnDelete(Collection<AtlasVertex> vertices) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("removeHasLineageOnDelete");
 
-        // Timing: Lineage calculation
         long lineageCalcStart = System.currentTimeMillis();
 
         if (RequestContext.get().skipHasLineageCalculation()) {
@@ -1676,11 +1675,9 @@ public abstract class DeleteHandlerV1 {
                 }
             }
         }
-
         // Record lineage calculation time
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
-
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -1765,11 +1762,9 @@ public abstract class DeleteHandlerV1 {
                 }
             }
         }
-
         // Record lineage calculation time
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
-
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -1863,7 +1858,6 @@ public abstract class DeleteHandlerV1 {
     }
     private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
-
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
 
         Iterator<AtlasEdge> edgeIterator = assetVertex.query()
@@ -1910,7 +1904,7 @@ public abstract class DeleteHandlerV1 {
                 LOG.warn("Cannot add removed process relationship: diffEntity is null");
                 return;
             }
-
+            
             if (removedEdge == null) {
                 LOG.warn("Cannot add removed process relationship: currentEdge is null");
                 return;
@@ -1928,7 +1922,7 @@ public abstract class DeleteHandlerV1 {
                 // Edge is not deleted and not in the deleted list, skip processing
                 return;
             }
-
+            
             // Get vertices from the edge
             AtlasVertex vertexA = removedEdge.getOutVertex();
             AtlasVertex vertexB = removedEdge.getInVertex();
@@ -1961,7 +1955,7 @@ public abstract class DeleteHandlerV1 {
                 // diffEntity is EndDef2 (InVertex)
                 attributeName = relationshipDef.getEndDef2().getName();
             }
-
+            
             if (otherVertex == null) {
                 LOG.warn("Cannot add removed process relationship: otherVertex is null");
                 return;
@@ -1975,17 +1969,17 @@ public abstract class DeleteHandlerV1 {
 
 
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(getTypeName(diffVertex));
-            AtlasAttribute relationshipAttribute = entityType != null ?
+            AtlasAttribute relationshipAttribute = entityType != null ? 
                 entityType.getRelationshipAttribute(attributeName, relationshipDef.getName()) : null;
-
+            
             TypeCategory typeCategory = relationshipAttribute != null && relationshipAttribute.getAttributeType() != null ?
                 relationshipAttribute.getAttributeType().getTypeCategory() : null;
-
+            
             AtlasObjectId objectId = new AtlasObjectId(getGuid(otherVertex), getTypeName(otherVertex));
-
+            
             // If attribute is an array type, pass as a list; otherwise pass as a single object
             if (typeCategory == TypeCategory.ARRAY) {
-                diffEntity.setRemovedRelationshipAttribute(attributeName, Collections.singletonList(objectId));
+                diffEntity.addOrAppendRemovedRelationshipAttribute(attributeName, objectId);
             } else {
                 diffEntity.setRemovedRelationshipAttribute(attributeName, objectId);
             }

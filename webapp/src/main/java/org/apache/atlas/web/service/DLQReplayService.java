@@ -1,39 +1,20 @@
 package org.apache.atlas.web.service;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.module.SimpleModule;
-import com.fasterxml.jackson.databind.JsonDeserializer;
-import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.core.JsonParser;
-import java.io.IOException;
+import com.fasterxml.jackson.databind.*;
+import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.util.RepairIndex;
+import org.apache.commons.collections.MapUtils;
 import org.apache.kafka.clients.consumer.*;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.serialization.StringDeserializer;
-import org.janusgraph.diskstorage.Backend;
-import org.janusgraph.diskstorage.BaseTransaction;
-import org.janusgraph.diskstorage.StandardIndexProvider;
 import org.janusgraph.diskstorage.TemporaryBackendException;
-import org.janusgraph.diskstorage.configuration.Configuration;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.diskstorage.keycolumnvalue.StoreFeatures;
-import org.janusgraph.diskstorage.util.StandardBaseTransactionConfig;
-import org.janusgraph.diskstorage.indexing.IndexProvider;
-import org.janusgraph.diskstorage.indexing.IndexEntry;
-import org.janusgraph.diskstorage.indexing.IndexMutation;
-import org.janusgraph.diskstorage.indexing.KeyInformation;
-import org.janusgraph.diskstorage.es.ElasticSearchIndex;
-import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
-import org.janusgraph.graphdb.database.IndexSerializer;
-import org.janusgraph.graphdb.database.StandardJanusGraph;
-import org.janusgraph.graphdb.database.index.IndexInfoRetriever;
-import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -41,13 +22,15 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
+import java.io.IOException;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.ConcurrentHashMap;
+
+import static org.apache.atlas.type.Constants.INDEX_NAME_VERTEX_INDEX;
 
 /**
  * Service for replaying DLQ messages back to Elasticsearch.
@@ -82,8 +65,8 @@ public class DLQReplayService {
     private int heartbeatIntervalMs = 30000; // 30 seconds
 
     // Timing configuration
-    @Value("${atlas.kafka.dlq.pollTimeoutSeconds:5}")
-    private int pollTimeoutSeconds = 5;
+    @Value("${atlas.kafka.dlq.pollTimeoutSeconds:15}")
+    private int pollTimeoutSeconds = 15;
 
     @Value("${atlas.kafka.dlq.shutdownWaitSeconds:60}")
     private int shutdownWaitSeconds = 60;
@@ -113,12 +96,6 @@ public class DLQReplayService {
     @Value("${atlas.kafka.dlq.retryDelayMs:5000}")
     private int retryDelayMs = 5000; // 5 seconds
 
-    private final ElasticSearchIndex esIndex;
-    protected final IndexSerializer indexSerializer;
-    private final ObjectMapper mapper;
-    private GraphDatabaseConfiguration graphConfig;
-    private StandardJanusGraph standardJanusGraph;
-
     //Track retry attempts with timestamps for cleanup
     private static class RetryTrackerEntry {
         int retryCount;
@@ -146,21 +123,15 @@ public class DLQReplayService {
     private final AtomicInteger errorCount = new AtomicInteger(0);
     private final AtomicInteger skippedCount = new AtomicInteger(0);
 
+    private ObjectMapper mapper;
+    private RepairIndex repairIndex;
+
     private final static String INDEX_NAME = "search";
 
-    public DLQReplayService(AtlasJanusGraph graph) throws AtlasException {
+    public DLQReplayService(RepairIndex repairIndex) throws AtlasException {
         this.mapper = configureMapper();
-        // Extract ES configuration from existing graph
-        this.graphConfig = ((StandardJanusGraph)graph.getGraph()).getConfiguration();
-        this.standardJanusGraph = ((StandardJanusGraph)graph.getGraph());
+        this.repairIndex = repairIndex;
         this.bootstrapServers = ApplicationProperties.get().getString("atlas.graph.kafka.bootstrap.servers");
-        Configuration fullConfig = graphConfig.getConfiguration();
-        IndexProvider indexProvider = Backend.getImplementationClass(fullConfig.restrictTo(INDEX_NAME), fullConfig.get(GraphDatabaseConfiguration.INDEX_BACKEND,INDEX_NAME),
-                StandardIndexProvider.getAllProviderClasses());
-        StoreFeatures storeFeatures = graphConfig.getBackend().getStoreFeatures();
-        this.indexSerializer = new IndexSerializer(fullConfig, graphConfig.getSerializer(),
-                graphConfig.getBackend().getIndexInformation(), storeFeatures.isDistributed() && storeFeatures.isKeyOrdered());
-        esIndex = (ElasticSearchIndex) indexProvider;
     }
 
     /**
@@ -522,7 +493,7 @@ public class DLQReplayService {
             int backoffTrackerCleaned = backoffTrackerSizeBefore - backoffTracker.size();
 
             if (retryTrackerCleaned > 0 || backoffTrackerCleaned > 0) {
-                log.info("Cleaned up stale tracker entries: retry tracker {} -> {} (removed {}), backoff tracker {} -> {} (removed {})",
+                log.debug("Cleaned up stale tracker entries: retry tracker {} -> {} (removed {}), backoff tracker {} -> {} (removed {})",
                         retryTrackerSizeBefore, retryTracker.size(), retryTrackerCleaned,
                         backoffTrackerSizeBefore, backoffTracker.size(), backoffTrackerCleaned);
             }
@@ -536,136 +507,32 @@ public class DLQReplayService {
      */
     private void replayDLQEntry(String dlqJson) throws Exception {
         long startTime = System.currentTimeMillis();
-        StandardJanusGraphTx standardJanusGraphTx = null;
-        BaseTransaction replayTx = null;
-
         try {
             DLQEntry entry = mapper.readValue(dlqJson, DLQEntry.class);
             log.info("Replaying DLQ entry for index: {}, store: {}", entry.getIndexName(), entry.getStoreName());
 
-            // Create key information retriever
-            log.info("Creating key information retriever for index: {}", entry.getIndexName());
-            standardJanusGraphTx = (StandardJanusGraphTx) this.standardJanusGraph.newTransaction();
-            IndexInfoRetriever keyInfo = this.indexSerializer.getIndexInfoRetriever(standardJanusGraphTx);
-
-            // Reconstruct mutations from serialized form
-            log.info("Starting mutation reconstruction for index: {}", entry.getIndexName());
-            Map<String, Map<String, IndexMutation>> mutations = reconstructMutations(entry, keyInfo.get(INDEX_NAME));
-            log.info("Completed mutation reconstruction in {}ms", System.currentTimeMillis() - startTime);
-
-
-            log.info("JanusGraph transaction committed (metadata lookup)");
-
-            // Create a new transaction for replay
-            log.info("Beginning ES transaction for index: {}", entry.getIndexName());
-            replayTx = esIndex.beginTransaction(
-                    new StandardBaseTransactionConfig.Builder().commitTime(Instant.now()).build()
-            );
-
-            // This is the same method that originally failed - now we're replaying it!
-            log.info("Starting ES mutation for index: {}", entry.getIndexName());
-            long mutateStartTime = System.currentTimeMillis();
-
-            esIndex.mutate(mutations, keyInfo.get(INDEX_NAME), replayTx);
-
-            log.info("ES mutation completed in {}ms, committing ES transaction", System.currentTimeMillis() - mutateStartTime);
-            long commitStartTime = System.currentTimeMillis();
-            // Commit JanusGraph transaction BEFORE ES mutation to ensure read-only metadata lookup is complete
-            // This way if ES mutation fails, we only rollback ES, not the metadata lookup
-            standardJanusGraphTx.commit();
-            standardJanusGraphTx = null; // Mark as committed so we don't rollback in catch block
-            replayTx.commit();
-            replayTx = null; // Mark as committed so we don't rollback in catch block
-            log.info("ES transaction commit completed in {}ms", System.currentTimeMillis() - commitStartTime);
-
+            Map<String, SerializableIndexMutation> vertexIndex = entry.getMutations().get("vertex_index");
+            if (MapUtils.isNotEmpty(vertexIndex)) {
+                Set<Long> vertexIds = new HashSet<>();
+                for (Map.Entry<String, SerializableIndexMutation> ve : vertexIndex.entrySet()) {
+                    log.debug("DLQ Entry Vertex Index Mutation - DocID: {}, Additions: {}, Deletions: {}",
+                            ve.getKey(), ve.getValue().getAdditions().size(), ve.getValue().getDeletions().size());
+                    vertexIds.add(LongEncoding.decode(ve.getKey()));
+                }
+                repairIndex.reindexVerticesByIds(INDEX_NAME_VERTEX_INDEX, vertexIds);
+                log.debug("Replayed vertex index mutations for {} vertices", vertexIds.size());
+            }
             long totalTime = System.currentTimeMillis() - startTime;
-            log.info("Successfully replayed mutation for index: {}. Total time: {}ms", entry.getIndexName(), totalTime);
-
+            log.debug("Successfully replayed mutation for index: {}. Total time: {}ms", entry.getIndexName(), totalTime);
         } catch (TemporaryBackendException e) {
             // Already a TemporaryBackendException from JanusGraph - rethrow as-is
             log.warn("Temporary backend exception replaying DLQ entry: {}", e.getMessage());
-            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
-            throw e;
-        } catch (IOException e) {
-            // JSON deserialization error - permanent failure
-            log.error("Failed to deserialize DLQ entry JSON - permanent failure", e);
-            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
             throw e;
         } catch (Exception e) {
             // Other exceptions - might be permanent (bad data, schema issues, etc.)
             log.error("Error replaying DLQ entry - treating as permanent failure", e);
-            cleanupFailedTransactions(replayTx, standardJanusGraphTx);
             throw e;
         }
-    }
-
-    /**
-     * Cleanup transactions when replay fails
-     */
-    private void cleanupFailedTransactions(BaseTransaction replayTx, StandardJanusGraphTx standardJanusGraphTx) {
-        // Rollback ES transaction
-        if (replayTx != null) {
-            try {
-                replayTx.rollback();
-                log.debug("Rolled back ES transaction");
-            } catch (Exception rollbackException) {
-                log.error("Failed to rollback ES transaction", rollbackException);
-            }
-        }
-
-        // Rollback JanusGraph transaction (don't commit on failure!)
-        if (standardJanusGraphTx != null) {
-            try {
-                standardJanusGraphTx.rollback();
-                log.debug("Rolled back JanusGraph transaction");
-            } catch (Exception rollbackException) {
-                log.error("Failed to rollback JanusGraph transaction", rollbackException);
-            }
-        }
-    }
-
-    /**
-     * Reconstruct IndexMutation objects from serialized form
-     */
-    private Map<String, Map<String, IndexMutation>> reconstructMutations(DLQEntry entry, KeyInformation.IndexRetriever indexRetriever) {
-        Map<String, Map<String, IndexMutation>> result = new HashMap<>();
-
-        for (Map.Entry<String, Map<String, SerializableIndexMutation>> storeEntry :
-                entry.getMutations().entrySet()) {
-
-            String storeName = storeEntry.getKey();
-            Map<String, IndexMutation> storeMutations = new HashMap<>();
-
-            for (Map.Entry<String, SerializableIndexMutation> docEntry :
-                    storeEntry.getValue().entrySet()) {
-
-                String docId = docEntry.getKey();
-                SerializableIndexMutation serMut = docEntry.getValue();
-
-                // Reconstruct IndexMutation
-                IndexMutation mutation = new IndexMutation(
-                        indexRetriever.get(storeName),
-                        serMut.isNew(),
-                        serMut.isDeleted()
-                );
-
-                // Add additions
-                for (SerializableIndexMutation.SerializableIndexEntry add : serMut.getAdditions()) {
-                    mutation.addition(new IndexEntry(add.getField(), add.getValue()));
-                }
-
-                // Add deletions
-                for (SerializableIndexMutation.SerializableIndexEntry del : serMut.getDeletions()) {
-                    mutation.deletion(new IndexEntry(del.getField(), del.getValue()));
-                }
-
-                storeMutations.put(docId, mutation);
-            }
-
-            result.put(storeName, storeMutations);
-        }
-
-        return result;
     }
 
     /**
