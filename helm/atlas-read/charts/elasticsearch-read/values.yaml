@@ -41,6 +41,7 @@ esConfig:
     http.max_content_length: 2147483647b
     ingest.geoip.downloader.enabled: false
     xpack.security.enabled: false
+    reindex.remote.whitelist: "*:9200"
   log4j2.properties: |
     -Dlog4j2.formatMsgNoLookups=true
 
