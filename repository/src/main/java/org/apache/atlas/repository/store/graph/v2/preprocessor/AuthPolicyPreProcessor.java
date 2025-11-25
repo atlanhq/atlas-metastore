@@ -181,7 +181,18 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         policy.setAttribute(ATTR_POLICY_ROLES, Arrays.asList(roleName));
         policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
         policy.setAttribute(ATTR_POLICY_GROUPS, new ArrayList<>());
-        policy.setAttribute(ATTR_POLICY_IS_ENABLED, getIsAccessControlEnabled(parentEntity));
+        
+        // Safely get boolean value from parent
+        boolean isEnabled = true; // default
+        if (parentEntity.hasAttribute(ATTR_ACCESS_CONTROL_ENABLED)) {
+            Object enabledValue = parentEntity.getAttribute(ATTR_ACCESS_CONTROL_ENABLED);
+            if (enabledValue instanceof Boolean) {
+                isEnabled = (Boolean) enabledValue;
+            } else if (enabledValue != null) {
+                isEnabled = Boolean.parseBoolean(String.valueOf(enabledValue));
+            }
+        }
+        policy.setAttribute(ATTR_POLICY_IS_ENABLED, isEnabled);
     }
 
     /**
@@ -212,7 +223,18 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         List<String> purposeTags = getPurposeTags(parentEntity);
         List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
         policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);
-        policy.setAttribute(ATTR_POLICY_IS_ENABLED, getIsAccessControlEnabled(parentEntity));
+        
+        // Safely get boolean value from parent
+        boolean isEnabled = true; // default
+        if (parentEntity.hasAttribute(ATTR_ACCESS_CONTROL_ENABLED)) {
+            Object enabledValue = parentEntity.getAttribute(ATTR_ACCESS_CONTROL_ENABLED);
+            if (enabledValue instanceof Boolean) {
+                isEnabled = (Boolean) enabledValue;
+            } else if (enabledValue != null) {
+                isEnabled = Boolean.parseBoolean(String.valueOf(enabledValue));
+            }
+        }
+        policy.setAttribute(ATTR_POLICY_IS_ENABLED, isEnabled);
     }
 
     /**
@@ -241,7 +263,10 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePolicy");
         AtlasEntity policy = (AtlasEntity) entity;
         
-        entity.setAttribute(ATTR_POLICY_IS_ENABLED, entity.getAttributes().getOrDefault(ATTR_POLICY_IS_ENABLED, true));
+        // Set default isPolicyEnabled if not provided, ensuring proper boolean type
+        if (!entity.hasAttribute(ATTR_POLICY_IS_ENABLED)) {
+            entity.setAttribute(ATTR_POLICY_IS_ENABLED, true);
+        }
         
         // STEP 1: Validate (extracted method - REUSED)
         AtlasEntityWithExtInfo parent = validatePolicyForCreation(policy);
