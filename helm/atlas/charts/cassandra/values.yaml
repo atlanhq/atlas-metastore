@@ -332,7 +332,7 @@ icarus:
   resources:
     limits:
       cpu: 0.5
-      memory: 3Gi
+      memory: 2Gi
     requests:
       cpu: 0.5
       memory: 2Gi
