@@ -7,8 +7,6 @@ import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
 import org.janusgraph.diskstorage.Backend;
 import org.janusgraph.diskstorage.BackendException;
-import org.janusgraph.diskstorage.BaseTransaction;
-import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -282,21 +280,6 @@ class DLQReplayServiceIntegrationTest {
         assertEquals(2, status.get("activeRetries"));
         assertEquals(1, status.get("activeBackoffs"));
         assertNotNull(status.get("exponentialBackoffConfig"));
-    }
-
-    @Test
-    void testTransactionCleanup_OnFailure() throws Exception {
-        // Arrange
-        BaseTransaction esTransaction = mock(BaseTransaction.class);
-        StandardJanusGraphTx janusTransaction = mock(StandardJanusGraphTx.class);
-
-        // Act
-        ReflectionTestUtils.invokeMethod(dlqReplayService, "cleanupFailedTransactions",
-                esTransaction, janusTransaction);
-
-        // Assert
-        verify(esTransaction).rollback();
-        verify(janusTransaction).rollback();
     }
 
     @Test

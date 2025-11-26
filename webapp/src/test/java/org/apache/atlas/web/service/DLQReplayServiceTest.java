@@ -4,10 +4,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.util.RepairIndex;
-import org.janusgraph.diskstorage.BaseTransaction;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -289,55 +287,6 @@ class DLQReplayServiceTest {
         
         // Assert
         assertFalse(healthy, "Service should be unhealthy when thread is dead");
-    }
-
-    @Test
-    void testCleanupFailedTransactions_BothTransactionsNull() {
-        // Act & Assert - Should not throw
-        assertDoesNotThrow(() -> {
-            ReflectionTestUtils.invokeMethod(dlqReplayService, "cleanupFailedTransactions", null, null);
-        });
-    }
-
-    @Test
-    void testCleanupFailedTransactions_ESTransactionRollback() throws Exception {
-        // Arrange
-        BaseTransaction mockESTransaction = mock(BaseTransaction.class);
-        
-        // Act
-        ReflectionTestUtils.invokeMethod(dlqReplayService, "cleanupFailedTransactions", 
-            mockESTransaction, null);
-        
-        // Assert
-        verify(mockESTransaction).rollback();
-    }
-
-    @Test
-    void testCleanupFailedTransactions_JanusGraphTransactionRollback() throws Exception {
-        // Arrange
-        StandardJanusGraphTx mockJanusTx = mock(StandardJanusGraphTx.class);
-        
-        // Act
-        ReflectionTestUtils.invokeMethod(dlqReplayService, "cleanupFailedTransactions", 
-            null, mockJanusTx);
-        
-        // Assert
-        verify(mockJanusTx).rollback();
-    }
-
-    @Test
-    void testCleanupFailedTransactions_RollbackException() throws Exception {
-        // Arrange
-        BaseTransaction mockESTransaction = mock(BaseTransaction.class);
-        doThrow(new RuntimeException("Rollback failed")).when(mockESTransaction).rollback();
-        
-        // Act & Assert - Should log error but not throw
-        assertDoesNotThrow(() -> {
-            ReflectionTestUtils.invokeMethod(dlqReplayService, "cleanupFailedTransactions", 
-                mockESTransaction, null);
-        });
-        
-        verify(mockESTransaction).rollback();
     }
 
     // Helper methods
