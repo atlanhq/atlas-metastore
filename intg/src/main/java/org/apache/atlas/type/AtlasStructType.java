@@ -407,15 +407,7 @@ public class AtlasStructType extends AtlasType {
                         String    fieldName = objName + "." + attrName;
 
                         if (value != null) {
-                            if (dataType instanceof AtlasBuiltInTypes.AtlasStringType &&
-                                    ("name".equals(attrName) || "qualifiedName".equals(attrName)) &&
-                                    value.toString().isBlank()) {
-
-                                ret = false;
-                                messages.add(fieldName + ": mandatory attribute value is empty/blank in type " + getTypeName());
-                            } else {
-                                ret = dataType.validateValue(value, fieldName, messages) && ret;
-                            }
+                            ret = dataType.validateValue(value, fieldName, messages) && ret;
                         } else if (!attributeDef.getIsOptional()) {
                             // if required attribute is null, check if attribute value specified in relationship
                             if (structObj instanceof AtlasEntity) {
@@ -446,15 +438,7 @@ public class AtlasStructType extends AtlasType {
                         String    fieldName = objName + "." + attrName;
 
                         if (value != null) {
-                            if (dataType instanceof AtlasBuiltInTypes.AtlasStringType &&
-                                    ("name".equals(attrName) || "qualifiedName".equals(attrName)) &&
-                                    value.toString().isBlank()) {
-
-                                ret = false;
-                                messages.add(fieldName + ": mandatory attribute value is empty/blank in type " + getTypeName());
-                            } else {
-                                ret = dataType.validateValue(value, fieldName, messages) && ret;
-                            }
+                            ret = dataType.validateValue(value, fieldName, messages) && ret;
                         } else if (!attributeDef.getIsOptional()) {
                             // if required attribute is null, check if attribute value specified in relationship
                             if (MapUtils.isEmpty(relationshipAttributes) || !relationshipAttributes.containsKey(attrName)) {
