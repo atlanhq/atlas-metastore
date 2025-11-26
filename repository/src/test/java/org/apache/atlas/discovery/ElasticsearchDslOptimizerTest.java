@@ -4724,5 +4724,4 @@ public class ElasticsearchDslOptimizerTest extends TestCase {
         assertFalse("Optimized query should not contain empty regexp patterns",
                    optimizedStr.contains("\"regexp\":{\"displayName.keyword\":\"(|)\"}"));
     }
-
 } 
