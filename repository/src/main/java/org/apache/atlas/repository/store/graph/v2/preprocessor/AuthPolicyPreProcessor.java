@@ -341,7 +341,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             updatePurposePolicyAttributes(policy, existingPolicy, parentEntity);
             if (parent != null) {
                 parent.addReferredEntity(policy);
-                aliasStore.updateAlias(parent, null);
+                // Note: No ES alias update for PURPOSE policy updates (matches original behavior)
             } else {
                 throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for purpose policy update");
             }
