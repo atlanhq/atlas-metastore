@@ -21,9 +21,11 @@ package org.apache.atlas.plugin.util;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.authz.admin.client.AtlasAuthAdminClient;
 import org.apache.atlas.policytransformer.CachePolicyTransformerImpl;
+import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
@@ -36,7 +38,6 @@ import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.Reader;
 import java.io.Writer;
-import java.util.Timer;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 
@@ -57,7 +58,7 @@ public class PolicyRefresher extends Thread {
 	private final String                         cacheDir;
 	private final Gson                           gson;
 	private final BlockingQueue<DownloadTrigger> policyDownloadQueue = new LinkedBlockingQueue<>();
-	private       Timer                          policyDownloadTimer;
+	private       java.util.Timer                policyDownloadTimer;
 	private       long                           lastKnownVersion    = -1L;
 	private       long 							lastUpdatedTimeInMillis = -1L;
 	private       long                           lastActivationTimeInMillis;
@@ -147,7 +148,7 @@ public class PolicyRefresher extends Thread {
 		loadUserStore();
 		super.start();
 
-		policyDownloadTimer = new Timer("policyDownloadTimer", true);
+		policyDownloadTimer = new java.util.Timer("policyDownloadTimer", true);
 
 		try {
 			policyDownloadTimer.schedule(new DownloaderTask(policyDownloadQueue), pollingIntervalMs, pollingIntervalMs);
@@ -165,7 +166,7 @@ public class PolicyRefresher extends Thread {
 
 	public void stopRefresher() {
 
-		Timer policyDownloadTimer = this.policyDownloadTimer;
+		java.util.Timer policyDownloadTimer = this.policyDownloadTimer;
 
 		this.policyDownloadTimer = null;
 
@@ -236,6 +237,7 @@ public class PolicyRefresher extends Thread {
 		}
 
 		RangerPerfTracer perf = null;
+		Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
 
 		if(RangerPerfTracer.isPerfTraceEnabled(PERF_POLICYENGINE_INIT_LOG)) {
 			perf = RangerPerfTracer.getPerfTracer(PERF_POLICYENGINE_INIT_LOG, "PolicyRefresher.loadPolicy(serviceName=" + serviceName + ")");
@@ -285,6 +287,10 @@ public class PolicyRefresher extends Thread {
 			}
 		} catch (Exception excp) {
 			LOG.error("Encountered unexpected exception!!!!!!!!!!! Message:" + excp.getMessage() + "Stacktrace: " + excp.getStackTrace().toString(), excp);
+		} finally {
+			sample.stop(Timer.builder("atlas.startup.policy.load.duration")
+					.description("Time taken to load policies during Atlas startup")
+					.register(MetricUtils.getMeterRegistry()));
 		}
 
 		RangerPerfTracer.log(perf);
@@ -504,8 +510,15 @@ public class PolicyRefresher extends Thread {
 			LOG.debug("==> PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
 		}
 
-		//Load the Ranger UserGroup Roles
-		rolesProvider.loadUserGroupRoles(plugIn);
+		Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
+		try {
+			//Load the Ranger UserGroup Roles
+			rolesProvider.loadUserGroupRoles(plugIn);
+		} finally {
+			sample.stop(Timer.builder("atlas.startup.roles.load.duration")
+					.description("Time taken to load roles during Atlas startup")
+					.register(MetricUtils.getMeterRegistry()));
+		}
 
 		if(LOG.isDebugEnabled()) {
 			LOG.debug("<== PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
@@ -517,8 +530,15 @@ public class PolicyRefresher extends Thread {
 			LOG.debug("==> PolicyRefresher(serviceName=" + serviceName + ").loadGroups()");
 		}
 
-		//Load the Ranger UserGroup Roles
-		userStoreProvider.loadUserStore(plugIn);
+		Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
+		try {
+			//Load the Ranger UserGroup Roles
+			userStoreProvider.loadUserStore(plugIn);
+		} finally {
+			sample.stop(Timer.builder("atlas.startup.userstore.load.duration")
+					.description("Time taken to load user store during Atlas startup")
+					.register(MetricUtils.getMeterRegistry()));
+		}
 
 		if(LOG.isDebugEnabled()) {
 			LOG.debug("<== PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
