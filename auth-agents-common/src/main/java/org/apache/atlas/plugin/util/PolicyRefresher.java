@@ -143,9 +143,33 @@ public class PolicyRefresher extends Thread {
 	}
 
 	public void startRefresher() {
-		loadRoles();
-		loadPolicy();
-		loadUserStore();
+		Timer.Sample rolesLoadSample = Timer.start(MetricUtils.getMeterRegistry());
+		try {
+			loadRoles();
+		} finally {
+			rolesLoadSample.stop(Timer.builder("atlas.startup.roles.load.duration")
+					.description("Time taken to load roles during Atlas startup")
+					.register(MetricUtils.getMeterRegistry()));
+		}
+
+		Timer.Sample policyLoadSample = Timer.start(MetricUtils.getMeterRegistry());
+		try {
+			loadPolicy();
+		} finally {
+			policyLoadSample.stop(Timer.builder("atlas.startup.policy.load.duration")
+					.description("Time taken to load policies during Atlas startup")
+					.register(MetricUtils.getMeterRegistry()));
+		}
+
+		Timer.Sample userStoreLoadSample = Timer.start(MetricUtils.getMeterRegistry());
+		try {
+			loadUserStore();
+		} finally {
+			userStoreLoadSample.stop(Timer.builder("atlas.startup.userstore.load.duration")
+					.description("Time taken to load user store during Atlas startup")
+					.register(MetricUtils.getMeterRegistry()));
+		}
+
 		super.start();
 
 		policyDownloadTimer = new java.util.Timer("policyDownloadTimer", true);
@@ -237,7 +261,6 @@ public class PolicyRefresher extends Thread {
 		}
 
 		RangerPerfTracer perf = null;
-		Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
 
 		if(RangerPerfTracer.isPerfTraceEnabled(PERF_POLICYENGINE_INIT_LOG)) {
 			perf = RangerPerfTracer.getPerfTracer(PERF_POLICYENGINE_INIT_LOG, "PolicyRefresher.loadPolicy(serviceName=" + serviceName + ")");
@@ -287,10 +310,6 @@ public class PolicyRefresher extends Thread {
 			}
 		} catch (Exception excp) {
 			LOG.error("Encountered unexpected exception!!!!!!!!!!! Message:" + excp.getMessage() + "Stacktrace: " + excp.getStackTrace().toString(), excp);
-		} finally {
-			sample.stop(Timer.builder("atlas.startup.policy.load.duration")
-					.description("Time taken to load policies during Atlas startup")
-					.register(MetricUtils.getMeterRegistry()));
 		}
 
 		RangerPerfTracer.log(perf);
@@ -510,15 +529,8 @@ public class PolicyRefresher extends Thread {
 			LOG.debug("==> PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
 		}
 
-		Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
-		try {
-			//Load the Ranger UserGroup Roles
-			rolesProvider.loadUserGroupRoles(plugIn);
-		} finally {
-			sample.stop(Timer.builder("atlas.startup.roles.load.duration")
-					.description("Time taken to load roles during Atlas startup")
-					.register(MetricUtils.getMeterRegistry()));
-		}
+		//Load the Ranger UserGroup Roles
+		rolesProvider.loadUserGroupRoles(plugIn);
 
 		if(LOG.isDebugEnabled()) {
 			LOG.debug("<== PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
@@ -530,15 +542,8 @@ public class PolicyRefresher extends Thread {
 			LOG.debug("==> PolicyRefresher(serviceName=" + serviceName + ").loadGroups()");
 		}
 
-		Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
-		try {
-			//Load the Ranger UserGroup Roles
-			userStoreProvider.loadUserStore(plugIn);
-		} finally {
-			sample.stop(Timer.builder("atlas.startup.userstore.load.duration")
-					.description("Time taken to load user store during Atlas startup")
-					.register(MetricUtils.getMeterRegistry()));
-		}
+		//Load the Ranger UserGroup Roles
+		userStoreProvider.loadUserStore(plugIn);
 
 		if(LOG.isDebugEnabled()) {
 			LOG.debug("<== PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
