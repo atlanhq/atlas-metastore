@@ -298,9 +298,10 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
      */
     private void initialize(AtlasGraph graph) throws RepositoryException, IndexException {
         Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
-        AtlasGraphManagement management = graph.getManagementSystem();
+        AtlasGraphManagement management = null;
 
         try {
+            management = graph.getManagementSystem();
             LOG.debug("Creating indexes for graph.");
 
             if (management.getGraphIndex(VERTEX_INDEX) == null) {
@@ -450,7 +451,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         } catch (Throwable t) {
             LOG.error("GraphBackedSearchIndexer.initialize() failed", t);
 
-            rollback(management);
+            if (management != null) {
+                rollback(management);
+            }
             throw new RepositoryException(t);
         } finally {
             sample.stop(Timer.builder("atlas.startup.graph.index.init.duration")

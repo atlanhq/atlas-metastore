@@ -73,11 +73,14 @@ public class Services {
                 String serviceName = svc.getClass().getSimpleName();
                 LOG.info("Starting service {}", svc.getClass().getName());
                 Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
-                svc.start();
-                sample.stop(Timer.builder("atlas.startup.service.duration")
-                        .description("Time taken to start individual services during Atlas startup")
-                        .tag("service", serviceName)
-                        .register(MetricUtils.getMeterRegistry()));
+                try {
+                    svc.start();
+                } finally {
+                    sample.stop(Timer.builder("atlas.startup.service.duration")
+                            .description("Time taken to start individual services during Atlas startup")
+                            .tag("service", serviceName)
+                            .register(MetricUtils.getMeterRegistry()));
+                }
             }
         } catch (Exception e) {
             throw new RuntimeException(e);
