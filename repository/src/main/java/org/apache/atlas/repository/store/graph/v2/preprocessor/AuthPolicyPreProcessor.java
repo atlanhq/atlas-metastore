@@ -278,7 +278,6 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
             populatePersonaPolicyAttributes(policy, parentEntity);
             if (parent != null) {
-                parent.addReferredEntity(policy);
                 updateESAliasForPolicy(parent, policy);
             } else {
                 throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for persona policy");
@@ -286,7 +285,6 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
             populatePurposePolicyAttributes(policy, parentEntity);
             if (parent != null) {
-                parent.addReferredEntity(policy);
                 updateESAliasForPolicy(parent, policy);
             } else {
                 throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for purpose policy");
