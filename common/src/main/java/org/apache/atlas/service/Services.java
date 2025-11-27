@@ -20,7 +20,6 @@ package org.apache.atlas.service;
 import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.annotation.AtlasService;
 import org.apache.atlas.service.metrics.MetricUtils;
-import org.apache.atlas.type.AtlasType;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
