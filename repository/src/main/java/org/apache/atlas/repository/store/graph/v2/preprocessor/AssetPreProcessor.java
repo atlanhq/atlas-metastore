@@ -44,7 +44,6 @@ public class AssetPreProcessor implements PreProcessor {
     private final Set<String> referenceAttributeNames = new HashSet<>(Arrays.asList(OUTPUT_PORT_GUIDS_ATTR, INPUT_PORT_GUIDS_ATTR));
     private final Set<String> referencingEntityTypes = new HashSet<>(Arrays.asList(DATA_PRODUCT_ENTITY_TYPE));
 
-    private final Set<String> nonEmptyAttributes = new HashSet<>(Arrays.asList(NAME, QUALIFIED_NAME));
     private static final Set<String> emptyAttributesAllowedTypes = new HashSet<>(Arrays.asList(
             ATLAS_GLOSSARY_ENTITY_TYPE,
             ATLAS_GLOSSARY_TERM_ENTITY_TYPE,
@@ -131,20 +130,21 @@ public class AssetPreProcessor implements PreProcessor {
 
     private void validateMandatoryAttributes(AtlasEntity entity) throws AtlasBaseException {
         String assetTypeName = entity.getTypeName();
+
+        List<String> messages = new ArrayList<>();
+
+        if (StringUtils.isBlank((String) entity.getAttribute(NAME))) {
+            messages.add(NAME + ": mandatory attribute value is empty/blank in type " + assetTypeName);
+        }
+
         if (!emptyAttributesAllowedTypes.contains(assetTypeName)) {
-            List<String> messages = new ArrayList<>(nonEmptyAttributes.size());
-
-            for (String attributeName: nonEmptyAttributes) {
-                String attributeValue = (String) entity.getAttribute(attributeName);
-
-                if (StringUtils.isBlank(attributeValue)) {
-                    messages.add(attributeName + ": mandatory attribute value is empty/blank in type " + assetTypeName);
-                }
+            if (StringUtils.isBlank((String) entity.getAttribute(QUALIFIED_NAME))) {
+                messages.add(QUALIFIED_NAME + ": mandatory attribute value is empty/blank in type " + assetTypeName);
             }
+        }
 
-            if (!messages.isEmpty()) {
-                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_CRUD_INVALID_PARAMS, messages);
-            }
+        if (!messages.isEmpty()) {
+            throw new AtlasBaseException(AtlasErrorCode.INSTANCE_CRUD_INVALID_PARAMS, messages);
         }
     }
 
