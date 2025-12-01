@@ -23,7 +23,6 @@ import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections4.CollectionUtils;
-import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -43,24 +42,6 @@ public class AssetPreProcessor implements PreProcessor {
     private EntityDiscoveryService discovery;
     private final Set<String> referenceAttributeNames = new HashSet<>(Arrays.asList(OUTPUT_PORT_GUIDS_ATTR, INPUT_PORT_GUIDS_ATTR));
     private final Set<String> referencingEntityTypes = new HashSet<>(Arrays.asList(DATA_PRODUCT_ENTITY_TYPE));
-
-    private final Set<String> nonEmptyAttributes = new HashSet<>(Arrays.asList(NAME, QUALIFIED_NAME));
-    private static final Set<String> emptyAttributesAllowedTypes = new HashSet<>(Arrays.asList(
-            ATLAS_GLOSSARY_ENTITY_TYPE,
-            ATLAS_GLOSSARY_TERM_ENTITY_TYPE,
-            ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE,
-            DATA_DOMAIN_ENTITY_TYPE,
-            DATA_PRODUCT_ENTITY_TYPE,
-            QUERY_ENTITY_TYPE,
-            QUERY_FOLDER_ENTITY_TYPE,
-            QUERY_COLLECTION_ENTITY_TYPE,
-            PERSONA_ENTITY_TYPE,
-            PURPOSE_ENTITY_TYPE,
-            POLICY_ENTITY_TYPE,
-            STAKEHOLDER_ENTITY_TYPE,
-            CONTRACT_ENTITY_TYPE,
-            STAKEHOLDER_TITLE_ENTITY_TYPE
-    ));
 
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
@@ -103,8 +84,6 @@ public class AssetPreProcessor implements PreProcessor {
     private void processCreateAsset(AtlasEntity entity, AtlasVertex vertex, EntityMutations.EntityOperation operation) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateAsset");
 
-        validateMandatoryAttributes(entity);
-
         processDomainLinkAttribute(entity, vertex, operation);
 
         RequestContext.get().endMetricRecord(metricRecorder);
@@ -113,8 +92,6 @@ public class AssetPreProcessor implements PreProcessor {
 
     private void processUpdateAsset(AtlasEntity entity, AtlasVertex vertex, EntityMutations.EntityOperation operation) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateAsset");
-
-        validateMandatoryAttributes(entity);
 
         processDomainLinkAttribute(entity, vertex, operation);
 
@@ -126,25 +103,6 @@ public class AssetPreProcessor implements PreProcessor {
         if(entity.hasAttribute(DOMAIN_GUIDS)){
             validateDomainAssetLinks(entity);
             isAuthorized(vertex, operation, entity);
-        }
-    }
-
-    private void validateMandatoryAttributes(AtlasEntity entity) throws AtlasBaseException {
-        String assetTypeName = entity.getTypeName();
-        if (!emptyAttributesAllowedTypes.contains(assetTypeName)) {
-            List<String> messages = new ArrayList<>(nonEmptyAttributes.size());
-
-            for (String attributeName: nonEmptyAttributes) {
-                String attributeValue = (String) entity.getAttribute(attributeName);
-
-                if (StringUtils.isBlank(attributeValue)) {
-                    messages.add(attributeName + ": mandatory attribute value is empty/blank in type " + assetTypeName);
-                }
-            }
-
-            if (!messages.isEmpty()) {
-                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_CRUD_INVALID_PARAMS, messages);
-            }
         }
     }
 
