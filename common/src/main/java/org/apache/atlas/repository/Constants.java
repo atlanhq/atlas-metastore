@@ -21,6 +21,7 @@ package org.apache.atlas.repository;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.service.FeatureFlag;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
@@ -38,6 +39,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.apache.atlas.service.FeatureFlag.USE_TEMP_ES_INDEX;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.AtlasStructType.UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX;
 
@@ -162,6 +164,7 @@ public final class Constants {
     public static final String OUTPUT_PORT_PRODUCT_EDGE_LABEL = "__Asset.outputPortDataProducts";
 
     public static final String OUTPUT_PORTS = "outputPorts";
+    public static final String INPUT_PORTS = "inputPorts";
     public static final String ADDED_OUTPUT_PORTS = "addedOutputPorts";
     public static final String REMOVED_OUTPUT_PORTS = "removedOutputPorts";
 
@@ -379,13 +382,17 @@ public final class Constants {
     public static final String TASK_ATTEMPT_COUNT     = encodePropertyKey(TASK_PREFIX + "attemptCount");
     public static final String TASK_PARAMETERS        = encodePropertyKey(TASK_PREFIX + "parameters");
     public static final String TASK_ERROR_MESSAGE     = encodePropertyKey(TASK_PREFIX + "errorMessage");
+    public static final String TASK_WARNING_MESSAGE     = encodePropertyKey(TASK_PREFIX + "warning");
     public static final String TASK_START_TIME        = encodePropertyKey(TASK_PREFIX + "startTime");
     public static final String TASK_END_TIME          = encodePropertyKey(TASK_PREFIX + "endTime");
     public static final String TASK_TIME_TAKEN_IN_SECONDS   = encodePropertyKey(TASK_PREFIX + "timeTakenInSeconds");
     public static final String TASK_CLASSIFICATION_ID       = encodePropertyKey(TASK_PREFIX + "classificationId");
     public static final String TASK_ENTITY_GUID             = encodePropertyKey(TASK_PREFIX + "entityGuid");
+    public static final String TASK_PARENT_ENTITY_GUID             = encodePropertyKey(TASK_PREFIX + "parentEntityGuid");
     public static final String TASK_CLASSIFICATION_TYPENAME = encodePropertyKey(TASK_PREFIX + "classificationTypeName");
     public static final String ACTIVE_STATE_VALUE           = "ACTIVE";
+
+    public static final String ATLAN_HEADER_PREFIX_PATTERN  = "x-atlan-";
     public static final String TASK_HEADER_ATLAN_AGENT      = "x-atlan-agent";
     public static final String TASK_HEADER_ATLAN_AGENT_ID   = "x-atlan-agent-id";
     public static final String TASK_HEADER_ATLAN_PKG_NAME   = "x-atlan-package-name";
@@ -462,6 +469,12 @@ public final class Constants {
 
     public static final String CATALOG_PROCESS_INPUT_RELATIONSHIP_LABEL = "__Process.inputs";
     public static final String CATALOG_PROCESS_OUTPUT_RELATIONSHIP_LABEL = "__Process.outputs";
+    public static final String CATALOG_AIRFLOW_INPUT_RELATIONSHIP_LABEL = "__AirflowTask.inputs";
+    public static final String CATALOG_AIRFLOW_OUTPUT_RELATIONSHIP_LABEL = "__AirflowTask.outputs";
+    public static final String CATALOG_CONNECTION_PROCESS_INPUT_RELATIONSHIP_LABEL = "__ConnectionProcess.inputs";
+    public static final String CATALOG_CONNECTION_PROCESS_OUTPUT_RELATIONSHIP_LABEL = "__ConnectionProcess.outputs";
+    public static final String CATALOG_SPARK_JOB_INPUT_RELATIONSHIP_LABEL = "__SparkJob.inputs";
+    public static final String CATALOG_SPARK_JOB_OUTPUT_RELATIONSHIP_LABEL = "__SparkJob.outputs";
     public static final String CLASSIFICATION_PROPAGATION_MODE_DEFAULT  ="DEFAULT";
     public static final String CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE  ="RESTRICT_LINEAGE";
 
@@ -471,7 +484,13 @@ public final class Constants {
     public static final HashMap<String, ArrayList<String>> CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP = new HashMap<String, ArrayList<String>>(){{
         put(CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE, new ArrayList<>(
                 Arrays.asList(CATALOG_PROCESS_INPUT_RELATIONSHIP_LABEL,
-                CATALOG_PROCESS_OUTPUT_RELATIONSHIP_LABEL
+                        CATALOG_PROCESS_OUTPUT_RELATIONSHIP_LABEL,
+                CATALOG_AIRFLOW_INPUT_RELATIONSHIP_LABEL,
+                CATALOG_AIRFLOW_OUTPUT_RELATIONSHIP_LABEL,
+                CATALOG_CONNECTION_PROCESS_INPUT_RELATIONSHIP_LABEL,
+                CATALOG_CONNECTION_PROCESS_OUTPUT_RELATIONSHIP_LABEL,
+                CATALOG_SPARK_JOB_INPUT_RELATIONSHIP_LABEL,
+                CATALOG_SPARK_JOB_OUTPUT_RELATIONSHIP_LABEL
         )));
         put(CLASSIFICATION_PROPAGATION_MODE_DEFAULT, null);
         put(CLASSIFICATION_PROPAGATION_MODE_RESTRICT_HIERARCHY, new ArrayList<>(
@@ -504,6 +523,8 @@ public final class Constants {
 
     public static final String REQUEST_HEADER_USER_AGENT = "User-Agent";
     public static final String REQUEST_HEADER_HOST       = "Host";
+
+    public static final String ACTION_READ = "entity-read";
 
     public static final Set<String> SKIP_UPDATE_AUTH_CHECK_TYPES = new HashSet<String>() {{
         add(README_ENTITY_TYPE);
@@ -542,7 +563,7 @@ public final class Constants {
         String indexSuffix  = null;
         if(AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean()) {
             try {
-                if (FeatureFlagStore.evaluate("use_temp_es_index", "true")) {
+                if (FeatureFlagStore.evaluate( USE_TEMP_ES_INDEX.getKey(), "true")) {
                     indexSuffix = "_temp";
                 }
             } catch (Exception e) {

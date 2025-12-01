@@ -17,6 +17,8 @@ import org.springframework.stereotype.Component;
 
 import java.util.*;
 
+import static org.apache.atlas.utils.AtlasEntityUtil.calculateBucket;
+
 @Component
 public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutationPostProcessor {
 
@@ -24,8 +26,8 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
 
     private final TagDAO tagDAO;
 
-    public EntityCreateOrUpdateMutationPostProcessor(TagDAO tagDAO) {
-        this.tagDAO = tagDAO;
+    public EntityCreateOrUpdateMutationPostProcessor() {
+        this.tagDAO = TagDAOCassandraImpl.getInstance();
     }
 
     @Override
@@ -133,7 +135,7 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
         tag.setVertexId(op.getVertexId());
         tag.setTagTypeName(op.getTagTypeName());
         tag.setSourceVertexId(op.getVertexId());
-        tag.setBucket(TagDAOCassandraImpl.calculateBucket(op.getVertexId()));
+        tag.setBucket(calculateBucket(op.getVertexId()));
         return tag;
     }
 

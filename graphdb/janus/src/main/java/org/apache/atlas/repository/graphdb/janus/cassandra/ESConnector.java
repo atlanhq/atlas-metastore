@@ -1,18 +1,16 @@
 package org.apache.atlas.repository.graphdb.janus.cassandra;
 
-import com.datastax.oss.driver.shaded.json.JSONArray;
-import com.datastax.oss.driver.shaded.json.JSONObject;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
 
+import org.apache.commons.collections.MapUtils;
 import org.apache.http.HttpEntity;
 import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
@@ -31,6 +29,7 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -45,6 +44,7 @@ import static org.apache.atlas.repository.Constants.PROPAGATED_TRAIT_NAMES_PROPE
 import static org.apache.atlas.repository.Constants.TRAIT_NAMES_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_INDEX_NAME;
 
+
 public class ESConnector {
     private static final Logger LOG      = LoggerFactory.getLogger(ESConnector.class);
 
@@ -52,40 +52,43 @@ public class ESConnector {
 
     private static Set<String> DENORM_ATTRS;
     private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
+    public static final String JG_ES_DOC_ID_PREFIX = "S"; // S fot string type custom vertex ID
+
+
 
     public static final String INDEX_BACKEND_CONF = "atlas.graph.index.search.hostname";
 
     static {
         try {
-            if (lowLevelClient == null) {
-                try {
-                    LOG.info("ESBasedAuditRepo - setLowLevelClient!");
-                    List<HttpHost> httpHosts = getHttpHosts();
+            lowLevelClient = initializeClient();
+            DENORM_ATTRS = initializeDenormAttributes();
+        } catch (AtlasException e) {
+            throw new RuntimeException("Failed to initialize ESConnector", e);
+        }
+    }
 
-                    RestClientBuilder builder = RestClient.builder(httpHosts.get(0));
-                    builder.setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
+    private static RestClient initializeClient() throws AtlasException {
+        try {
+            List<HttpHost> httpHosts = getHttpHosts();
+            RestClientBuilder builder = RestClient.builder(httpHosts.get(0))
+                    .setRequestConfigCallback(requestConfigBuilder -> requestConfigBuilder
                             .setConnectTimeout(AtlasConfiguration.INDEX_CLIENT_CONNECTION_TIMEOUT.getInt())
                             .setSocketTimeout(AtlasConfiguration.INDEX_CLIENT_SOCKET_TIMEOUT.getInt()));
 
-                    lowLevelClient = builder.build();
-
-                    DENORM_ATTRS = new HashSet<>();
-                    DENORM_ATTRS.add(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY); //List
-                    DENORM_ATTRS.add(PROPAGATED_CLASSIFICATION_NAMES_KEY); //String
-                    DENORM_ATTRS.add(CLASSIFICATION_TEXT_KEY);//String
-
-                    DENORM_ATTRS.add(TRAIT_NAMES_PROPERTY_KEY); //List
-                    DENORM_ATTRS.add(CLASSIFICATION_NAMES_KEY); //String
-
-                } catch (AtlasException e) {
-                    LOG.error("Failed to initialize low level rest client for ES");
-                    throw new AtlasException(e);
-                }
-            }
-
+            return builder.build();
         } catch (Exception e) {
-            throw new RuntimeException(e);
+            throw new AtlasException("Failed to initialize Elasticsearch client", e);
         }
+    }
+
+    private static Set<String> initializeDenormAttributes() {
+        Set<String> attrs = new HashSet<>();
+        attrs.add(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY); //List
+        attrs.add(PROPAGATED_CLASSIFICATION_NAMES_KEY); //String
+        attrs.add(CLASSIFICATION_TEXT_KEY); //String
+        attrs.add(TRAIT_NAMES_PROPERTY_KEY); //List
+        attrs.add(CLASSIFICATION_NAMES_KEY); //String
+        return Collections.unmodifiableSet(attrs);
     }
 
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap) {
@@ -95,18 +98,20 @@ public class ESConnector {
     public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
 
-        if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
+        if (MapUtils.isEmpty(entitiesMapForUpdate) || CollectionUtils.isEmpty(docIdsToDelete)) {
             return;
         }
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
-            if (entitiesMapForUpdate != null) {
+            if (MapUtils.isEmpty(entitiesMapForUpdate)) {
                 for (String assetVertexId : entitiesMapForUpdate.keySet()) {
                     Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
 
-                    long vertexId = Long.valueOf(assetVertexId);
-                    String docId = LongEncoding.encode(vertexId);
+                    //long vertexId = Long.valueOf(assetVertexId);
+                    //String docId = LongEncoding.encode(vertexId);
+                    String docId =  JG_ES_DOC_ID_PREFIX + assetVertexId;
+
                     bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"" + docId + "\" }}\n");
 
                     bulkRequestBody.append("{");
@@ -122,7 +127,7 @@ public class ESConnector {
                 }
             }
 
-            if (docIdsToDelete != null) {
+            if (CollectionUtils.isEmpty(docIdsToDelete)) {
                 for (String docId: docIdsToDelete) {
                     bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
                     bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
@@ -133,12 +138,44 @@ public class ESConnector {
             Request request = new Request("POST", "/_bulk");
             request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
 
-            try {
-                lowLevelClient.performRequest(request);
-            } catch (IOException e) {
-                LOG.error("Failed to update ES doc for denorm attributes");
-                throw new RuntimeException(e);
+            int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
+            long retryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+            long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+
+            for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
+                try {
+                    Response response = lowLevelClient.performRequest(request); // Capture the response
+                    int statusCode = response.getStatusLine().getStatusCode();
+
+                    if (statusCode >= 200 && statusCode < 300) {
+                        // Check response body for partial failures if necessary
+                        return; // Success
+                    }
+
+                    // Add logic to retry on 5xx or throw on 4xx
+                    if (statusCode >= 500) {
+                        LOG.warn("Failed to update ES doc due to server error ({}). Retrying...", statusCode);
+                    } else {
+                        // Not a retryable error
+                        String responseBody = EntityUtils.toString(response.getEntity());
+                        throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
+                    }
+                } catch (IOException e) {
+                    LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
+                }
+
+                if (retryCount < maxRetries - 1) {
+                    try {
+                        long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount);
+                        Thread.sleep(exponentialBackoffDelay);
+                    } catch (InterruptedException interruptedException) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
+                    }
+                }
             }
+            // If the loop completes, all retries have failed. Throw an exception.
+            throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries + " retries");
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -160,61 +197,6 @@ public class ESConnector {
      */
     public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
         syncToEs(entitiesMap, upsert, null);
-    }
-
-    public static Map<String, Map<String, Object>> getTagAttributes(Collection<AtlasVertex> vertices) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getTagAttributesES");
-        Map<String, Map<String, Object>> ret = new HashMap<>();
-
-        try {
-            Map<String, String> docIdTovertexIdMap = new HashMap<>();
-            List<String> vertexIds = vertices.stream().map(x -> x.getIdForDisplay()).toList();
-            vertexIds.forEach(vertexId -> docIdTovertexIdMap.put(LongEncoding.encode(Long.parseLong(vertexId)), vertexId));
-            Set<String> docIds = docIdTovertexIdMap.keySet();
-
-            JSONObject requestBody = new JSONObject();
-            requestBody.put("ids", new JSONArray(docIds));
-
-
-            Request request = new Request("POST", GET_DOCS_BY_ID + "?_source=" + StringUtils.join(DENORM_ATTRS, ","));
-            HttpEntity entity = new NStringEntity(requestBody.toString(), ContentType.APPLICATION_JSON);
-            request.setEntity(entity);
-
-            Response response = lowLevelClient.performRequest(request);
-            String responseBody = EntityUtils.toString(response.getEntity());
-
-            JSONObject jsonResponse = new JSONObject(responseBody);
-            JSONArray docs = jsonResponse.getJSONArray("docs");
-
-            for (int i = 0; i < docs.length(); i++) {
-                JSONObject doc = docs.getJSONObject(i);
-                String docId = doc.getString("_id");
-                Map<String, Object> assetAttributes = new HashMap<>();
-
-                if (doc.getBoolean("found")) {
-                    JSONObject source = doc.getJSONObject("_source");
-
-                    // Print all properties in the source
-                    Iterator<String> keys = source.keys();
-                    while (keys.hasNext()) {
-                        String key = keys.next();
-                        assetAttributes.put(key, source.get(key));
-                    }
-                } else {
-                    LOG.warn("Document with docId {} not found", docId);
-                }
-
-                ret.put(docIdTovertexIdMap.get(docId) ,assetAttributes);
-            }
-
-        } catch (IOException e) {
-            LOG.error("Failed to GET denorm attributes from ES");
-            throw new RuntimeException(e);
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
-
-        return ret;
     }
 
     private static List<HttpHost> getHttpHosts() throws AtlasException {

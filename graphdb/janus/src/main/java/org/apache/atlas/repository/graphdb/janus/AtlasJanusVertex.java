@@ -20,6 +20,7 @@ package org.apache.atlas.repository.graphdb.janus;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Set;
 import java.util.stream.StreamSupport;
 
@@ -69,11 +70,13 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
                 this.getDynamicVertex().addSetProperty(propertyName, value);
 
                 if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
-                    getWrappedElement().property(propertyName, value);
+                    getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
                 }
             } else {
                 getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
             }
+
+            recordInternalAttributeIncrementalAdd(propertyName, Set.class);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         } finally {
@@ -89,11 +92,13 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
                 this.getDynamicVertex().addListProperty(propertyName, value);
 
                 if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
-                    getWrappedElement().property(propertyName, value);
+                    getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
                 }
+            } else {
+                getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
             }
 
-            getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
+            recordInternalAttributeIncrementalAdd(propertyName, List.class);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         } finally {

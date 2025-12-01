@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.store.graph.v1;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -54,6 +55,7 @@ import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.*;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getIdFromEdge;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.isReference;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 
 @Singleton
@@ -109,6 +111,13 @@ public class RestoreHandlerV1 {
                     continue;
                 }
 
+                String typeName = AtlasGraphUtilsV2.getTypeName(instanceVertex);
+                if (typeName.equals(DATA_DOMAIN_ENTITY_TYPE) || typeName.equals(DATA_PRODUCT_ENTITY_TYPE)) {
+                    if (!canRestoreEntity(typeName, instanceVertex)) {
+                        throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED, "Cannot restore " + typeName + " with guid " + guid + " because it has no parent domain relationship");
+                    }
+                }
+
                 // Record all restoring candidate entities in RequestContext
                 // and gather restoring candidate vertices.
                 for (VertexInfo vertexInfo : getOwnedVertices(instanceVertex)) {
@@ -125,6 +134,26 @@ public class RestoreHandlerV1 {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private boolean canRestoreEntity(String typeName, AtlasVertex instanceVertex) throws AtlasBaseException {
+        AtlasEntity entity = entityRetriever.toAtlasEntity(instanceVertex);
+        boolean flag = true;
+
+        if (typeName.equals(DATA_DOMAIN_ENTITY_TYPE)) {
+            boolean noParentRel = entity.getRelationshipAttribute(PARENT_DOMAIN_REL_TYPE) == null;
+            if (noParentRel) {
+                // To ensure super domains can be restored
+                String superDomainQualifiedName = instanceVertex.getProperty(SUPER_DOMAIN_QN_ATTR, String.class);
+                String parentQualifiedName = instanceVertex.getProperty(PARENT_DOMAIN_QN_ATTR, String.class);
+
+                boolean isSuperDomain = superDomainQualifiedName == null && parentQualifiedName == null;
+                flag = isSuperDomain;
+            }
+        } else if (typeName.equals(DATA_PRODUCT_ENTITY_TYPE)) {
+            flag = entity.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE) != null;
+        }
+        return flag;
     }
 
     private void restoreEdgeBetweenVertices(AtlasVertex outVertex, AtlasVertex inVertex, AtlasStructType.AtlasAttribute attribute) throws AtlasBaseException {
@@ -391,18 +420,19 @@ public class RestoreHandlerV1 {
 
     protected void restoreVertex(AtlasVertex instanceVertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("RestoreHandlerV1.restoreVertex");
-
         try {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Setting the external references to {} to null(removing edges)", string(instanceVertex));
             }
             Iterable<AtlasEdge> incomingEdges;
 
-        // Restore external references to this vertex - incoming edges from lineage or glossary term edges
-            if (RequestContext.get().isSkipProcessEdgeRestoration())
-                    incomingEdges = instanceVertex.getInEdges(PROCESS_EDGE_LABELS);
-            else
-                    incomingEdges = instanceVertex.getInEdges(null);
+            // The restoration logic now unconditionally excludes PROCESS_EDGE_LABELS (process inputs/outputs),
+            // removing any previous conditional behavior based on isSkipProcessEdgeRestoration().
+            // This means process edges will never be restored in this method, while non-process edges
+            // (like glossary term edges and other relationship edges) will be restored.
+            // Note: The configuration flag ATLAS_RELATIONSHIP_SKIP_PROCESS_EDGE_RESTORATION is defined
+            // but not actually used to control this behavior.
+           incomingEdges = instanceVertex.getInEdges(PROCESS_EDGE_LABELS);
 
             for (AtlasEdge edge : incomingEdges) {
                 AtlasEntity.Status edgeStatus = getStatus(edge);

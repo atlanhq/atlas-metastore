@@ -16,6 +16,7 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.type.AtlasType;
+import org.apache.atlas.utils.AtlasEntityUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -24,6 +25,8 @@ import org.slf4j.LoggerFactory;
 import javax.inject.Inject;
 import java.util.*;
 import java.util.concurrent.*;
+
+import static org.apache.atlas.utils.AtlasEntityUtil.calculateBucket;
 
 /**
  * Enhanced Cassandra implementation for vertex data repository with advanced
@@ -142,17 +145,6 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         queryBuilder.append(" ALLOW FILTERING");
 
         return session.prepare(queryBuilder.toString());
-    }
-
-    private int calculateBucket(String vertexId) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("calculateBucket");
-
-        try {
-            int numBuckets = 2 << 5; // 2^5=32
-            return (int) (Long.parseLong(vertexId) % numBuckets);
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
     }
 
     /**

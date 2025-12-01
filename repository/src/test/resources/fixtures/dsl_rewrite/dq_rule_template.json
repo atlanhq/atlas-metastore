@@ -1,0 +1,46 @@
+{
+    "size": 100,
+    "query": {
+      "bool": {
+        "filter": {
+          "bool": {
+            "must": [
+              {
+                "term": {
+                  "__state": "ACTIVE"
+                }
+              },
+              {
+                "bool": {
+                  "should": [
+                    {
+                      "term": {
+                        "__typeName.keyword": "DataQualityTemplate"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "bool": {
+                  "filter": {
+                    "term": {
+                      "__state": "ACTIVE"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "aggs": {
+      "group_by_dimension": {
+        "terms": {
+          "field": "dqRuleTemplateDimension",
+          "size": 10
+        }
+      }
+    }
+  }

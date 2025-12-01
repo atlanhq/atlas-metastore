@@ -36,8 +36,8 @@ import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.instance.EntityMutations.EntityOperation;
 import org.apache.atlas.model.notification.EntityNotification;
-import org.apache.atlas.repository.audit.AtlasAuditService;
 import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.atlas.v1.model.instance.Referenceable;
@@ -60,9 +60,12 @@ import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.atlas.model.TypeCategory.PRIMITIVE;
 import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2.PROPAGATED_CLASSIFICATION_ADD;
 import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2.PROPAGATED_CLASSIFICATION_DELETE;
 import static org.apache.atlas.repository.Constants.ENTITY_TEXT_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.TYPE_NAME_PROPERTY_KEY;
+import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 
 
 @Component
@@ -75,7 +78,13 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     private final FullTextMapperV2            fullTextMapperV2;
     private final AtlasTypeRegistry           atlasTypeRegistry;
     private final boolean                     isV2EntityNotificationEnabled;
+    private final boolean                     notifyDifferentialEntityChangesEnabled;
     private static final List<String> ALLOWED_RELATIONSHIP_TYPES = Arrays.asList(AtlasConfiguration.SUPPORTED_RELATIONSHIP_EVENTS.getStringArray());
+    private static final Set<String> DIFFERENTIAL_NOTIFICATION_ATTRIBUTES = Collections.unmodifiableSet(
+        new HashSet<>(Arrays.asList(HAS_LINEAGE))
+        // Future attributes can be added here, e.g., ASSET_POLICY_GUIDS, DOMAIN_GUIDS_ATTR, etc.
+    );
+    public static final String ENTITY_TYPE_AUDIT_ENTRY = "__AtlasAuditEntry";
 
     @Inject
     public AtlasEntityChangeNotifier(Set<EntityChangeListener> entityChangeListeners,
@@ -89,6 +98,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         this.fullTextMapperV2              = fullTextMapperV2;
         this.atlasTypeRegistry             = atlasTypeRegistry;
         this.isV2EntityNotificationEnabled = AtlasRepositoryConfiguration.isV2EntityNotificationEnabled();
+        this.notifyDifferentialEntityChangesEnabled = AtlasConfiguration.NOTIFY_DIFFERENTIAL_ENTITY_CHANGES.getBoolean();
     }
 
     @Override
@@ -210,9 +220,32 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     @Async
-    public void onClassificationPropagationAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline) throws AtlasBaseException {
+    public void onClassificationPropagationAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        setRequestContext(requestContext);
         for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
             listener.onClassificationPropagationsAdded(entities, addedClassifications, forceInline);
+        }
+    }
+
+    @Override
+    @Async
+    public void onClassificationPropagationAddedToEntitiesV2(Set<AtlasVertex> vertices, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
+        List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
+        setRequestContext(requestContext);
+        for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
+            listener.onClassificationPropagationsAdded(entities, addedClassifications, forceInline);
+        }
+    }
+
+    @Override
+    @Async
+    public void onClassificationsAddedToEntitiesV2(Set<AtlasVertex> vertices, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
+        List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
+        setRequestContext(requestContext);
+        for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
+            listener.onClassificationsAdded(entities, addedClassifications, forceInline);
         }
     }
 
@@ -246,12 +279,11 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    public void onClassificationUpdatedToEntityV2(AtlasEntity entity, List<AtlasClassification> updatedClassifications, boolean forceInline) throws AtlasBaseException {
-        doFullTextMapping(entity.getGuid());
+    public void onClassificationUpdatedToEntity(AtlasEntity entity, List<AtlasClassification> updatedClassifications, boolean forceInline) throws AtlasBaseException {
 
         if (isV2EntityNotificationEnabled) {
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
-                listener.onClassificationsUpdatedV2(entity, updatedClassifications, forceInline);
+                listener.onClassificationPropagationUpdated(entity, updatedClassifications, forceInline);
             }
         } else {
             if (instanceConverter != null) {
@@ -282,9 +314,21 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     @Async
-    public void onClassificationUpdatedToEntitiesV2(List<AtlasEntity> entities, AtlasClassification updatedClassification, boolean forceInline) throws AtlasBaseException {
+    public void onClassificationUpdatedToEntitiesV2(List<AtlasEntity> entities, AtlasClassification updatedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        setRequestContext(requestContext);
         for (AtlasEntity entity : entities) {
-            onClassificationUpdatedToEntityV2(entity, Collections.singletonList(updatedClassification), forceInline);
+            onClassificationUpdatedToEntity(entity, Collections.singletonList(updatedClassification), forceInline);
+        }
+    }
+
+    @Override
+    @Async
+    public void onClassificationUpdatedToEntitiesV2(Set<AtlasVertex> vertices, AtlasClassification updatedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
+        List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
+        setRequestContext(requestContext);
+        for (AtlasEntity entity : entities) {
+            onClassificationUpdatedToEntity(entity, Collections.singletonList(updatedClassification), forceInline);
         }
     }
 
@@ -358,15 +402,41 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
-    public void onClassificationDeletedFromEntitiesV2(List<AtlasEntity> entities, AtlasClassification deletedClassification, boolean forceInline) throws AtlasBaseException {
+    public void onClassificationDeletedFromEntitiesV2(Set<AtlasVertex> vertices, AtlasClassification deletedClassification) throws AtlasBaseException {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
+        List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
         for (AtlasEntity entity : entities) {
-            onClassificationDeletedFromEntityV2(entity, Collections.singletonList(deletedClassification), forceInline);
+            onClassificationDeletedFromEntity(entity, Collections.singletonList(deletedClassification));
         }
     }
 
     @Override
-    public void onClassificationDeletedFromEntityV2(AtlasEntity entity, List<AtlasClassification> deletedClassifications, boolean forceInline) throws AtlasBaseException {
+    @Async
+    public void onClassificationPropagationDeleted(List<AtlasEntity> entities, AtlasClassification deletedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        setRequestContext(requestContext);
+        for (AtlasEntity entity : entities) {
+            onClassificationPropagationDeleted(entity, Collections.singletonList(deletedClassification), forceInline);
+        }
+    }
+
+    @Override
+    @Async
+    public void onClassificationPropagationDeletedV2(Set<AtlasVertex> vertices, AtlasClassification deletedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
+        List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
+        setRequestContext(requestContext);
+        for (AtlasEntity entity : entities) {
+            onClassificationPropagationDeleted(entity, Collections.singletonList(deletedClassification), forceInline);
+        }
+    }
+    
+    public void setRequestContext(RequestContext requestContext) {
+        RequestContext.get().setRequestContextHeaders(requestContext.getRequestContextHeaders());
+        RequestContext.get().setUser(requestContext.getUser(), requestContext.getUserGroups());
+    }
+
+    @Override
+    public void onClassificationPropagationDeleted(AtlasEntity entity, List<AtlasClassification> deletedClassifications, boolean forceInline) throws AtlasBaseException {
         doFullTextMapping(entity.getGuid());
 
         if (isV2EntityNotificationEnabled) {
@@ -462,7 +532,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     @Override
     public void onBusinessAttributesUpdated(String entityGuid, Map<String, Map<String, Object>> updatedBusinessAttributes) throws AtlasBaseException{
         if (isV2EntityNotificationEnabled) {
-            AtlasEntity entity = instanceConverter.getAndCacheEntity(entityGuid);
+            AtlasEntity entity = instanceConverter.getEntityWithMandatoryRelations(entityGuid);
 
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
                 listener.onBusinessAttributesUpdated(entity, updatedBusinessAttributes);
@@ -502,7 +572,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
         return listener.getClass().getSimpleName();
     }
 
-    private static final Predicate<AtlasEntityHeader> PRED_IS_NOT_TYPE_AUDIT_ENTITY = obj -> !obj.getTypeName().equals(AtlasAuditService.ENTITY_TYPE_AUDIT_ENTRY);
+    private static final Predicate<AtlasEntityHeader> PRED_IS_NOT_TYPE_AUDIT_ENTITY = obj -> !obj.getTypeName().equals(ENTITY_TYPE_AUDIT_ENTRY);
 
     private boolean skipAuditEntries(List<AtlasEntityHeader> entityHeaders) {
         return CollectionUtils.isEmpty(entityHeaders) || !entityHeaders.stream().anyMatch(PRED_IS_NOT_TYPE_AUDIT_ENTITY);
@@ -699,12 +769,28 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                 } else {
                     String entityGuid = entityHeader.getGuid();
                     entity = fullTextMapperV2.getAndCacheEntity(entityGuid);
+
+                    // MLH-927: Fix for ENTITY_UPDATE events missing attributes on relationship changes
+                    // Previously, we unconditionally replaced entity.attributes with entityHeader.attributes
+                    // For relationship-driven updates, the header often has null/sparse attributes,
+                    // causing attribute loss in notifications. Now we safely merge only when header has attributes.
                     if (operation == EntityOperation.UPDATE || entityHeader.getAttributes() != null) {
-                        entity.setAttributes(entityHeader.getAttributes());
+                        if (entity != null && MapUtils.isNotEmpty(entityHeader.getAttributes())) {
+                            Map<String, Object> mergedAttributes = new HashMap<>(entityHeader.getAttributes());
+                            if (entity.getAttributes() != null) {
+                              // remove all keys that are already in entity.attributes to avoid stale values
+                                mergedAttributes.keySet().removeAll(entity.getAttributes().keySet());
+                                mergedAttributes.putAll(entity.getAttributes());
+                            }
+                            entity.setAttributes(mergedAttributes);
+                        }
                     }
                 }
 
                 if (entity != null) {
+                    // For ES Isolation
+                    entity.setDocId(entityHeader.getDocId());
+                    entity.setSuperTypeNames(entityHeader.getSuperTypeNames());
                     ret.add(entity);
                 }
             }
@@ -884,6 +970,223 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                     iter.remove();
                 }
             }
+        }
+    }
+
+    private Set<AtlasStructType.AtlasAttribute> getEntityTypeAttributes(Set<AtlasVertex> entities) {
+        Set<AtlasStructType.AtlasAttribute> atlasAttributes = new HashSet<>();
+        for (AtlasVertex entity : entities) {
+            AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(entity.getProperty(TYPE_NAME_PROPERTY_KEY, String.class));
+            if (entityType != null) {
+                Map<String, AtlasStructType.AtlasAttribute> attributes = entityType.getAllAttributes();
+                if (MapUtils.isNotEmpty(attributes)) {
+                    for (AtlasStructType.AtlasAttribute attribute : attributes.values()) {
+                        if (PRIMITIVE.equals(attribute.getAttributeType().getTypeCategory())) {
+                            atlasAttributes.add(attribute);
+                        }
+                    }
+                }
+            }
+        }
+
+        return atlasAttributes;
+
+    }
+
+    @Override
+    public void notifyDifferentialEntityChanges(EntityMutationResponse entityMutationResponse, boolean isImport) throws AtlasBaseException {
+        if (!notifyDifferentialEntityChangesEnabled) {
+            return; // Early exit if disabled
+        }
+
+        if (CollectionUtils.isEmpty(entityChangeListeners)) {
+            return;
+        }
+
+        MetricRecorder metric = RequestContext.get().startMetricRecord("notifyDifferentialEntityChanges");
+
+        try {
+            // 1. Get DifferentialEntitiesMap
+            Map<String, AtlasEntity> diffEntitiesMap = RequestContext.get().getDifferentialEntitiesMap();
+
+            if (MapUtils.isEmpty(diffEntitiesMap)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: DifferentialEntitiesMap is empty, skipping");
+                }
+                return;
+            }
+
+            // 2. Build set of GUIDs already in EntityMutationResponse (for duplicate prevention)
+            Set<String> existingGuids = collectGuidsFromResponse(entityMutationResponse);
+
+            // 3. Filter entities that have tracked attributes and are not duplicates
+            List<AtlasEntityHeader> entitiesToNotify = filterDifferentialEntities(
+                diffEntitiesMap, existingGuids, DIFFERENTIAL_NOTIFICATION_ATTRIBUTES
+            );
+
+            if (CollectionUtils.isEmpty(entitiesToNotify)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: No entities to notify after filtering");
+                }
+                return;
+            }
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("notifyDifferentialEntityChanges: Notifying {} entities affected by differential changes",
+                    entitiesToNotify.size());
+            }
+
+            // 4. Full text mapping
+            doFullTextMapping(entitiesToNotify);
+
+            // 5. Notify as UPDATE operations
+            notifyListeners(entitiesToNotify, EntityOperation.UPDATE, isImport);
+
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+        }
+    }
+
+    /**
+     * Collect all GUIDs from EntityMutationResponse to prevent duplicate notifications
+     */
+    private Set<String> collectGuidsFromResponse(EntityMutationResponse response) {
+        Set<String> guids = new HashSet<>();
+
+        if (response != null) {
+            addGuids(guids, response.getCreatedEntities());
+            addGuids(guids, response.getUpdatedEntities());
+            addGuids(guids, response.getPartialUpdatedEntities());
+            addGuids(guids, response.getDeletedEntities());
+            addGuids(guids, response.getPurgedEntities());
+        }
+
+        return guids;
+    }
+
+    /**
+     * Helper method to add GUIDs from a list of entity headers
+     */
+    private void addGuids(Set<String> guids, List<AtlasEntityHeader> headers) {
+        if (CollectionUtils.isNotEmpty(headers)) {
+            for (AtlasEntityHeader header : headers) {
+                if (header != null && header.getGuid() != null) {
+                    guids.add(header.getGuid());
+                }
+            }
+        }
+    }
+
+    /**
+     * Filter differential entities based on criteria:
+     * - Have tracked attributes set
+     * - Are not already in EntityMutationResponse
+     * - Are not internal types
+     */
+    private List<AtlasEntityHeader> filterDifferentialEntities(
+        Map<String, AtlasEntity> diffEntitiesMap,
+        Set<String> existingGuids,
+        Set<String> trackedAttributes
+    ) throws AtlasBaseException {
+        List<AtlasEntityHeader> result = new ArrayList<>();
+
+        for (Map.Entry<String, AtlasEntity> entry : diffEntitiesMap.entrySet()) {
+            String guid = entry.getKey();
+            AtlasEntity diffEntity = entry.getValue();
+
+            if (diffEntity == null || StringUtils.isEmpty(guid)) {
+                continue;
+            }
+
+            // Skip if already in response
+            if (existingGuids.contains(guid)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: Skipping entity {} (already in EntityMutationResponse)", guid);
+                }
+                continue;
+            }
+
+            // Check if entity has any tracked attribute
+            if (!hasTrackedAttribute(diffEntity, trackedAttributes)) {
+                continue;
+            }
+
+            // Check if internal type
+            String typeName = diffEntity.getTypeName();
+            if (typeName != null && GraphHelper.isInternalType(typeName)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: Skipping internal type {} for entity {}", typeName, guid);
+                }
+                continue;
+            }
+
+            // Convert diffEntity to AtlasEntityHeader (just use diffEntity, don't fetch from graph)
+            AtlasEntityHeader header = convertDiffEntityToHeader(diffEntity);
+            if (header != null) {
+                result.add(header);
+
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: Entity {} will be notified for differential changes", guid);
+                }
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Check if diffEntity has any of the tracked attributes
+     */
+    private boolean hasTrackedAttribute(AtlasEntity diffEntity, Set<String> trackedAttributes) {
+        if (diffEntity == null || diffEntity.getAttributes() == null) {
+            return false;
+        }
+
+        return trackedAttributes.stream()
+            .anyMatch(attr -> diffEntity.getAttributes().containsKey(attr));
+    }
+
+    /**
+     * Convert diffEntity to AtlasEntityHeader (using diffEntity only, no graph fetch)
+     */
+    private AtlasEntityHeader convertDiffEntityToHeader(AtlasEntity diffEntity) throws AtlasBaseException {
+        if (diffEntity == null || StringUtils.isEmpty(diffEntity.getGuid())) {
+            return null;
+        }
+
+        try {
+            // Use constructor that creates header from entity
+            AtlasEntityHeader header = new AtlasEntityHeader(diffEntity);
+
+            // Validate type exists
+            String typeName = header.getTypeName();
+            if (StringUtils.isEmpty(typeName)) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: Skipping entity {} (missing typeName)", diffEntity.getGuid());
+                }
+                return null;
+            }
+
+            AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(typeName);
+            if (entityType == null) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("notifyDifferentialEntityChanges: Skipping entity {} (type {} not found)",
+                        diffEntity.getGuid(), typeName);
+                }
+                return null;
+            }
+
+            // Skip internal types (double-check)
+            if (entityType.isInternalType()) {
+                return null;
+            }
+
+            return header;
+
+        } catch (Exception e) {
+            LOG.warn("notifyDifferentialEntityChanges: Failed to convert diffEntity to header for guid {}: {}",
+                diffEntity.getGuid(), e.getMessage());
+            return null;
         }
     }
 }

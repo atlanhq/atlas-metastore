@@ -19,18 +19,18 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
-import com.datastax.oss.driver.shaded.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.atlas.AtlasErrorCode;
+
+
 import org.apache.atlas.RequestContext;
-import org.apache.atlas.exception.AtlasBaseException;
+
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
-import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
 import org.codehaus.jettison.json.JSONException;
@@ -42,6 +42,9 @@ import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import static org.apache.atlas.type.Constants.GUID_PROPERTY_KEY;
+import static org.apache.atlas.type.Constants.INTERNAL_PROPERTY_KEY_PREFIX;
 
 /**
  * Janus implementation of AtlasElement.
@@ -55,7 +58,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     private T element;
     protected AtlasJanusGraph graph;
     protected final static Set<String> VERTEX_CORE_PROPERTIES = new HashSet<>();
-    ObjectMapper mapper = new ObjectMapper();
 
     //excludeProperties: Getting key related issue while Migration mode when fetching few attributes from graph
     //This is dirty fix to ignore getting such attributes value from graph & return null explicitly
@@ -165,27 +167,36 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         while(it.hasNext()) {
             Property<String> property = it.next();
             property.remove();
+            recordInternalAttribute(propertyName, null);
         }
     }
 
     @Override
     public void removePropertyValue(String propertyName, Object propertyValue) { //TODO
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
+        List<Object> finalValues = new ArrayList<>();
+        boolean removedFirst = false;
 
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
 
-            if (Objects.equals(currentPropertyValue, propertyValue)) {
+            if (!removedFirst && Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
-                break;
+                removedFirst = true;
+            } else {
+                finalValues.add(currentPropertyValue);
             }
         }
+
+        recordInternalAttribute(propertyName, finalValues);
     }
 
     @Override
     public void removeAllPropertyValue(String propertyName, Object propertyValue) { //TODO
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
+        List<Object> finalValues = new ArrayList<>();
+
 
         while (it.hasNext()) {
             Property currentProperty      = it.next();
@@ -193,8 +204,12 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
             if (Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
+            } else {
+                finalValues.add(currentPropertyValue);
             }
         }
+
+        recordInternalAttribute(propertyName, finalValues);
     }
 
     @Override
@@ -217,6 +232,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 } else {
                     // Might be an edge
                     getWrappedElement().property(propertyName, value);
+                    recordInternalAttribute(propertyName, value);
                  }
             }
         } catch(SchemaViolationException e) {
@@ -424,7 +440,6 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     @Override
     public void setPropertyFromElementId(String propertyName, AtlasElement value) {
         setProperty(propertyName, value.getId().toString());
-
     }
 
 
@@ -433,4 +448,51 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
         return true;
     }
 
+    protected void recordInternalAttribute(String propertyName, Object finalValue) {
+        if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+            RequestContext context = RequestContext.get();
+            String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+
+            if (StringUtils.isNotEmpty(entityGuid)) {
+                if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                    context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, finalValue);
+                } else {
+                    Map<String, Object> map = new HashMap<>();
+                    map.put(propertyName, finalValue);
+                    context.getAllInternalAttributesMap().put(entityGuid, map);
+                }
+            }
+        }
+    }
+
+    protected void recordInternalAttributeIncrementalAdd(String propertyName, Class cardinality) {
+        if (propertyName.startsWith(INTERNAL_PROPERTY_KEY_PREFIX)) {
+            String entityGuid = this.getProperty(GUID_PROPERTY_KEY, String.class);
+
+            if (StringUtils.isNotEmpty(entityGuid)) {
+                Collection<Object> currentValues = null;
+
+                if (cardinality == List.class) {
+                    currentValues = getMultiValuedProperty(propertyName, Object.class);
+                } else {
+                    currentValues = getMultiValuedSetProperty(propertyName, Object.class);
+                }
+
+                // Assumption: This method is being called after setting the property on element,
+                // hence assuming currentValues is the final expected state and not adding `value` to `currentValues`
+
+                if (StringUtils.isNotEmpty(entityGuid)) {
+                    RequestContext context = RequestContext.get();
+
+                    if (context.getAllInternalAttributesMap().get(entityGuid) != null) {
+                        context.getAllInternalAttributesMap().get(entityGuid).put(propertyName, currentValues);
+                    } else {
+                        Map<String, Object> map = new HashMap<>();
+                        map.put(propertyName, currentValues);
+                        context.getAllInternalAttributesMap().put(entityGuid, map);
+                    }
+                }
+            }
+        }
+    }
 }

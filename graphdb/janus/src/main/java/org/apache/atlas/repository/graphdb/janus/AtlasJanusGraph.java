@@ -17,9 +17,17 @@
  */
 package org.apache.atlas.repository.graphdb.janus;
 
+import com.datastax.driver.core.exceptions.NoHostAvailableException;
+import com.datastax.driver.core.exceptions.WriteTimeoutException;
 import com.datastax.oss.driver.api.core.CqlSession;
+import com.datastax.oss.driver.api.core.CqlSessionBuilder;
+import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;
+import com.datastax.oss.driver.api.core.DriverTimeoutException;
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
+import com.datastax.oss.driver.api.core.cql.ResultSet;
+import com.datastax.oss.driver.api.core.cql.SimpleStatement;
+import com.datastax.oss.driver.api.core.cql.Statement;
 import com.google.common.base.Function;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -27,6 +35,7 @@ import com.google.common.collect.Maps;
 import org.apache.atlas.*;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
+import org.apache.atlas.idgenerator.DistributedIdGenerator;
 import org.apache.atlas.model.discovery.SearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.Constants;
@@ -150,6 +159,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     // Sonyflake-based distributed ID generator
     private static final IdGenerator SONYFLAKE_ID_GENERATOR;
+    private static final DistributedIdGenerator CUSTOM_ID_GENERATOR;
+
+
     static {
         IdGeneratorProperties props = new IdGeneratorProperties();
         // Set machineId based on hostname hash (or customize as needed)
@@ -162,6 +174,26 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             props.setMachineId((long) (Math.random() * 65536));
         }
         SONYFLAKE_ID_GENERATOR = new IdGenerator(props);
+
+        try {
+            String hostName = ApplicationProperties.get().getString("atlas.graph.storage.hostname", "localhost");
+            int port = ApplicationProperties.get().getInt("atlas.graph.storage.port", 9042);
+            String podName = System.getenv("K8S_POD_NAME");
+
+            if (podName == null || podName.isBlank()) {
+                podName = "local-atlas-0";
+                String message = "Pod name not found in env for DistributedIdGenerator for custom vertex ID generation, falling back to " + podName;
+                LOG.warn(message);
+
+                //LOG.error(message);
+                //throw new RuntimeException(message);
+            }
+
+            CUSTOM_ID_GENERATOR = new DistributedIdGenerator(hostName, port, podName);
+        } catch (AtlasException e) {
+            LOG.error("Failed to initialize DistributedIdGenerator for custom vertex ID generation");
+            throw new RuntimeException(e);
+        }
     }
 
     public DynamicVertexService getDynamicVertexRetrievalService() {
@@ -205,6 +237,13 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.elasticsearchClient = elasticsearchClient;
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
+
+        try {
+            initializeSchema();
+        } catch (AtlasBaseException e) {
+
+        }
+
         this.cqlSession = initializeCassandraSession();
         this.dynamicVertexService = new DynamicVertexService(cqlSession);
     }
@@ -217,6 +256,14 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             throw new RuntimeException(e);
         }
 
+        String keyspace = AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString();
+
+        return getCQLBuilder(hostname)
+                .withKeyspace(keyspace)
+                .build();
+    }
+
+    private CqlSessionBuilder getCQLBuilder (String hostname) {
         return CqlSession.builder()
                 .addContactPoint(new InetSocketAddress(hostname, 9042))
                 .withConfigLoader(
@@ -228,9 +275,35 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                                 .withDuration(DefaultDriverOption.REQUEST_TRACE_INTERVAL, Duration.ofMillis(500))
                                 .withDuration(DefaultDriverOption.REQUEST_TRACE_ATTEMPTS, Duration.ofSeconds(20))
                                 .build())
-                .withLocalDatacenter("datacenter1")
-                .withKeyspace(AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString())
-                .build();
+                .withLocalDatacenter("datacenter1");
+    }
+
+    private void initializeSchema() throws AtlasBaseException {
+        String hostname = null;
+        try {
+            hostname = ApplicationProperties.get().getString(CASSANDRA_HOSTNAME_PROPERTY, "localhost");
+        } catch (AtlasException e) {
+            throw new RuntimeException(e);
+        }
+
+        String keyspace = AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString();
+        String replFactor = AtlasConfiguration.CASSANDRA_REPLICATION_FACTOR_PROPERTY.getString();
+
+        Map<String, String> replicationConfig =
+                Map.of(
+                        "class", "SimpleStrategy",
+                        "replication_factor", replFactor);
+
+        String replicationConfigString = replicationConfig.entrySet().stream()
+                .map(entry -> String.format("'%s': '%s'", entry.getKey(), entry.getValue()))
+                .collect(Collectors.joining(", "));
+
+        String createKeyspaceQuery = String.format(
+                "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {%s} AND durable_writes = true;",
+                keyspace, replicationConfigString);
+
+        executeWithRetry(hostname, SimpleStatement.builder(createKeyspaceQuery).setConsistencyLevel(DefaultConsistencyLevel.ALL).build());
+        LOG.info("Ensured keyspace {} exists", keyspace);
     }
 
     @Override
@@ -328,9 +401,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
-        long divisor = getVertexIdDivisor();
-        long id = SONYFLAKE_ID_GENERATOR.nextId();
-        id = id - (id % divisor); // Ensure id is divisible by the correct divisor
+        //long id = SONYFLAKE_ID_GENERATOR.nextId();
+        String id = generateCustomId();
         Vertex result = getGraph().addVertex(T.id, id);
         return GraphDbObjectFactory.createVertex(this, result);
     }
@@ -637,6 +709,19 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return GraphDbObjectFactory.createJanusVertex(this, vertex);
     }
 
+    public Set<AtlasVertex> getVertices(String... vertexIds) {
+        Set<AtlasVertex> result = new HashSet<>();
+        Iterator<Vertex> it     = getGraph().vertices(vertexIds);
+        while( it.hasNext()) {
+            Vertex vertex = it.next();
+            if (vertex == null) {
+                LOG.warn("Vertex with id {} not found", vertexIds);
+            } else {
+                result.add(GraphDbObjectFactory.createVertex(this, vertex));
+            }
+        }
+        return result;
+    }
 
     @Override
     public Iterable<AtlasVertex<AtlasJanusVertex, AtlasJanusEdge>> getVertices(String key, Object value) {
@@ -909,14 +994,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         return null;
     }
 
-    public void setEnableCache(boolean enableCache) {
-        this.janusGraph.setEnableCache(enableCache);
-    }
-
-    public Boolean isCacheEnabled() {
-        return this.janusGraph.isCacheEnabled();
-    }
-
     private long getVertexIdDivisor() {
         try {
             Object numPartitionsObj = getGraph().configuration().getProperty("ids.num-partitions");
@@ -936,5 +1013,52 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             // fallback to default divisor
             return 32L;
         }
+    }
+
+    private <T extends Statement<T>> ResultSet executeWithRetry(String hostname,
+                                                                Statement<T> statement) throws AtlasBaseException {
+        int MAX_RETRIES = 3;
+        Duration INITIAL_BACKOFF = Duration.ofMillis(100);
+        int retryCount = 0;
+        Exception lastException;
+
+        try (CqlSession tempCqlSession = getCQLBuilder(hostname).build();) {
+            while (true) {
+                try {
+                    return tempCqlSession.execute(statement);
+                } catch (DriverTimeoutException | WriteTimeoutException | NoHostAvailableException e) {
+                    lastException = e;
+                    retryCount++;
+                    LOG.warn("Retry attempt {} for statement execution due to exception: {}", retryCount, e.toString());
+                    if (retryCount >= MAX_RETRIES) {
+                        break;
+                    }
+                    try {
+                        long backoff = INITIAL_BACKOFF.toMillis() * (long)Math.pow(2, retryCount - 1);
+                        Thread.sleep(backoff);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new AtlasBaseException("AtlasJAnusGraph: Interrupted during retry backoff", ie);
+                    }
+                }
+            }
+        } catch (AtlasBaseException be) {
+            throw be;
+        }
+
+        LOG.error("AtlasJAnusGraph: Failed to execute statement after {} retries", MAX_RETRIES, lastException);
+        throw new AtlasBaseException("AtlasJAnusGraph: Failed to execute statement after " + MAX_RETRIES + " retries", lastException);
+    }
+
+    private String generateCustomId() {
+        return CUSTOM_ID_GENERATOR.nextId();
+    }
+
+    private long generateSnowflakeId() {
+        long id = SONYFLAKE_ID_GENERATOR.nextId();
+        long divisor = getVertexIdDivisor();
+        id = id - (id % divisor); // Ensure id is divisible by the correct divisor
+
+        return id;
     }
 }

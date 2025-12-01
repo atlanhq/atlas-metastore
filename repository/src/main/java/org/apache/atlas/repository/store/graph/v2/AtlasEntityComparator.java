@@ -23,13 +23,16 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.util.AtlasEntityUtils;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasBusinessMetadataType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasEntityUtil;
+import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.MapUtils;
 
 import java.util.ArrayList;
@@ -39,10 +42,8 @@ import java.util.Objects;
 import java.util.HashMap;
 
 import static org.apache.atlas.repository.graph.GraphHelper.getCustomAttributes;
-import static org.apache.atlas.repository.graph.GraphHelper.getJanusOptimisationEnabled;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_ADD;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_DELETE;
-import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_NOOP;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_UPDATE;
 
 public class AtlasEntityComparator {
@@ -68,6 +69,8 @@ public class AtlasEntityComparator {
     }
 
     private AtlasEntityDiffResult getDiffResult(AtlasEntity updatedEntity, AtlasEntity storedEntity, AtlasVertex storedVertex, boolean findOnlyFirstDiff) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getDiffResult");
+        try{
         AtlasEntity                              diffEntity                       = new AtlasEntity(updatedEntity.getTypeName());
         AtlasEntityType                          entityType                       = typeRegistry.getEntityTypeByName(updatedEntity.getTypeName());
         Map<String, AtlasAttribute>              entityTypeAttributes             = entityType.getAllAttributes();
@@ -165,7 +168,7 @@ public class AtlasEntityComparator {
             if (storedEntity != null) {
                 currVal = storedEntity.getClassifications();
             } else {
-                if (getJanusOptimisationEnabled()) {
+                if (FeatureFlagStore.isTagV2Enabled()) {
                     currVal = entityRetriever.getDirectClassifications(storedVertex);
                 } else {
                     currVal = entityRetriever.getAllClassifications_V1(storedVertex);
@@ -246,7 +249,18 @@ public class AtlasEntityComparator {
             }
         }
 
-        return new AtlasEntityDiffResult(diffEntity, sectionsWithDiff > 0, sectionsWithDiff == 1 && hasDiffInCustomAttributes, sectionsWithDiff == 1 && hasDiffInBusinessAttributes);
+        AtlasEntity.Status newStatus  = updatedEntity.getStatus();
+        if (newStatus != null && newStatus.equals(AtlasEntity.Status.ACTIVE)) {
+            String currStatus = GraphHelper.getStateAsString(storedVertex);
+            if (currStatus != null && !currStatus.equals(newStatus.name())) {
+                sectionsWithDiff++;
+                diffEntity.setStatus(AtlasEntity.Status.ACTIVE);
+            }
+        }
+            return new AtlasEntityDiffResult(diffEntity, sectionsWithDiff > 0, sectionsWithDiff == 1 && hasDiffInCustomAttributes, sectionsWithDiff == 1 && hasDiffInBusinessAttributes);
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+        }
     }
 
     public Map<String, Map<String, Object>> getBusinessMetadataFromEntityAttribute(AtlasEntity entity, AtlasEntityType entityType) {

@@ -1,5 +1,8 @@
 package org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.DeleteType;
 import org.apache.atlas.RequestContext;
@@ -31,6 +34,8 @@ import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
+import static org.apache.atlas.v1.model.instance.Id.EntityState.ACTIVE;
+import static org.apache.atlas.v1.model.instance.Id.EntityState.DELETED;
 
 public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(DataProductPreProcessor.class);
@@ -85,6 +90,8 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         entity.removeAttribute(OUTPUT_PORT_GUIDS_ATTR);
         entity.removeAttribute(INPUT_PORT_GUIDS_ATTR);
 
+        validateProductAssetDSLAttr(entity);
+
         if (parentDomainObject == null) {
             throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot create a Product without a Domain Relationship");
         } else {
@@ -115,15 +122,33 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private void processUpdateProduct(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdateProduct");
 
+        String state = vertex.getProperty(STATE_PROPERTY_KEY, String.class);
+
+        if (DELETED.name().equals(state)) {
+            //  To allow product restoration and update on daapLineageStatus but block all other updates if the product is archived
+            boolean isBeingRestored = false;
+
+            if (context != null && context.getEntitiesToRestore() != null) {
+                isBeingRestored = context.getEntitiesToRestore().contains(vertex);
+            }
+
+            if (!isBeingRestored && !entity.hasAttribute(DAAP_LINEAGE_STATUS_ATTR)) {
+                throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot update DataProduct that is Archived!");
+            }
+        }
+
         entity.removeAttribute(OUTPUT_PORT_GUIDS_ATTR);
         entity.removeAttribute(INPUT_PORT_GUIDS_ATTR);
+
+        if (entity.hasAttribute(DAAP_ASSET_DSL_ATTR)) {
+            validateProductAssetDSLAttr(entity);
+        }
 
         if(entity.hasRelationshipAttribute(DATA_DOMAIN_REL_TYPE) && entity.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE) == null){
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "DataProduct can only be moved to another Domain.");
         }
 
         AtlasEntity diffEntity = RequestContext.get().getDifferentialEntity(entity.getGuid());
-        String state = vertex.getProperty(STATE_PROPERTY_KEY, String.class);
 
         if(entity.getAttribute(DAAP_LINEAGE_STATUS_ATTR) != null && entity.getAttribute(DAAP_LINEAGE_STATUS_ATTR).equals(DAAP_LINEAGE_STATUS_COMPLETED)){
             if (!ARGO_SERVICE_USER_NAME.equals(RequestContext.getCurrentUser())) {
@@ -450,6 +475,25 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         }
 
         return isDaapVisibilityChanged;
+    }
+
+    private void validateProductAssetDSLAttr(AtlasEntity entity) throws AtlasBaseException {
+        if (entity.getAttribute(DAAP_ASSET_DSL_ATTR) == null) {
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "dataProductAssetsDSL attribute is mandatory for DataProducts");
+        }
+
+        String dslString = ((String) entity.getAttribute(DAAP_ASSET_DSL_ATTR)).trim();
+
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+            Map<String, Object> dslMap = mapper.readValue(dslString, new TypeReference<>() {});
+
+            if (dslMap == null || dslMap.isEmpty()) {
+                throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "dataProductAssetsDSL attribute cannot be empty");
+            }
+        } catch (JsonProcessingException e) {
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "dataProductAssetsDSL attribute must be a valid JSON object: " + e.getMessage());
+        }
     }
 
     public static boolean compareLists(List<String> list1, List<String> list2) {

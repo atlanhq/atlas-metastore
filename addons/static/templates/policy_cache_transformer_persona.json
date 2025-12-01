@@ -14,7 +14,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -35,7 +35,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -64,7 +64,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -93,7 +93,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -114,7 +114,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -135,7 +135,7 @@
         {
           "policyConditionType": "excludeEntityTypes",
           "policyConditionValues": [
-            "alpha_DQRule"
+            "DataQualityRule"
           ]
         }
       ]
@@ -996,6 +996,60 @@
         "end-two-entity:*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "description": "Allow to update relation for linked assets for this AIApplication",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:AIApplication",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+        "end-one-entity:{entity}/*",
+
+        "end-two-entity-type:Catalog",
+        "end-two-entity-type:Connection",
+        "end-two-entity-type:Process",
+        "end-two-entity-type:Namespace",
+        "end-two-entity-type:ProcessExecution",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "remove-relationship"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "description": "Allow to update relation for linked assets for this AIApplication",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:Catalog",
+        "end-one-entity-type:Connection",
+        "end-one-entity-type:Process",
+        "end-one-entity-type:Namespace",
+        "end-one-entity-type:ProcessExecution",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIApplication",
+        "end-two-entity-classification:*",
+        "end-two-entity:*",
+        "end-two-entity:{entity}/*"
+      ],
+      "actions": ["add-relationship", "remove-relationship"]
+    },
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "description": "Create/delete process to update datasets for this AIApplication",
+      "resources": [
+        "entity:*",
+        "entity-type:Process",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create", "entity-update", "entity-delete"]
     }
   ],
   "persona-ai-application-delete": [
@@ -1160,6 +1214,60 @@
         "end-two-entity:*"
       ],
       "actions": ["add-relationship", "update-relationship", "remove-relationship"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "description": "Allow to update relation for datasets for this AIModel",
+      "resources": [
+        "relationship-type:*",
+        "end-one-entity-type:AIModel",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+        "end-one-entity:{entity}/*",
+
+        "end-two-entity-type:Catalog",
+        "end-two-entity-type:Connection",
+        "end-two-entity-type:Process",
+        "end-two-entity-type:Namespace",
+        "end-two-entity-type:ProcessExecution",
+        "end-two-entity-classification:*",
+        "end-two-entity:*"
+      ],
+      "actions": ["add-relationship", "remove-relationship"]
+    },
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "RELATIONSHIP",
+      "description": "Allow to update relation for datasets for this AIModel",
+      "resources": [
+        "relationship-type:*",
+
+        "end-one-entity-type:Catalog",
+        "end-one-entity-type:Connection",
+        "end-one-entity-type:Process",
+        "end-one-entity-type:Namespace",
+        "end-one-entity-type:ProcessExecution",
+        "end-one-entity-classification:*",
+        "end-one-entity:*",
+
+        "end-two-entity-type:AIModel",
+        "end-two-entity-classification:*",
+        "end-two-entity:*",
+        "end-two-entity:{entity}/*"
+      ],
+      "actions": ["add-relationship", "remove-relationship"]
+    },
+    {
+      "policyResourceCategory": "ENTITY",
+      "policyType": "ACCESS",
+      "description": "Create/delete process to update datasets for this AIModel",
+      "resources": [
+        "entity:*",
+        "entity-type:Process",
+        "entity-classification:*"
+      ],
+      "actions": ["entity-create", "entity-update", "entity-delete"]
     }
   ],
   "persona-ai-model-delete": [
@@ -1263,7 +1371,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-read"]
@@ -1275,7 +1383,7 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-create"]
@@ -1288,7 +1396,7 @@
         "relationship-type:*",
 
         "end-one-entity:{entity}/*/rule/*",
-        "end-one-entity-type:alpha_DQRule",
+        "end-one-entity-type:DataQualityRule",
         "end-one-entity-classification:*",
 
         "end-two-entity:*",
@@ -1305,7 +1413,7 @@
       "policyResourceCategory": "ENTITY",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-update"]
@@ -1317,7 +1425,7 @@
         "relationship-type:*",
 
         "end-one-entity:{entity}/*/rule/*",
-        "end-one-entity-type:alpha_DQRule",
+        "end-one-entity-type:DataQualityRule",
         "end-one-entity-classification:*",
 
         "end-two-entity:*",
@@ -1333,14 +1441,14 @@
       "policyType": "ACCESS",
       "resources": [
         "entity:{entity}/*/rule/*",
-        "entity-type:alpha_DQRule",
+        "entity-type:DataQualityRule",
         "entity-classification:*"
       ],
       "actions": ["entity-delete"]
     }
   ],
 
-  "persona-abac-read": [
+  "persona-asset-read-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
@@ -1348,7 +1456,7 @@
       "actions": ["entity-read"]
     }
   ],
-  "persona-abac-update": [
+  "persona-asset-update-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
@@ -1368,7 +1476,15 @@
       "actions": ["add-relationship", "remove-relationship"]
     }
   ],
-  "persona-abac-delete": [
+  "persona-api-create-abac": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "policyFilterCriteria": "{criteria}",
+      "actions": ["entity-create"]
+    }
+  ],
+  "persona-api-delete-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
@@ -1376,7 +1492,7 @@
       "actions": ["entity-delete"]
     }
   ],
-  "persona-abac-update-business-metadata": [
+  "persona-business-update-metadata-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
@@ -1384,7 +1500,7 @@
       "actions": ["entity-update-business-metadata"]
     }
   ],
-  "persona-abac-add-classification": [
+  "persona-entity-add-classification-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
@@ -1392,7 +1508,15 @@
       "actions": ["entity-add-classification", "entity-update-classification"]
     }
   ],
-  "persona-abac-remove-classification": [
+  "persona-entity-update-classification-abac": [
+    {
+      "policyType": "ACCESS",
+      "policyResourceCategory": "ENTITY",
+      "policyFilterCriteria": "{criteria}",
+      "actions": ["entity-update-classification"]
+    }
+  ],
+  "persona-entity-remove-classification-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "ENTITY",
@@ -1400,7 +1524,7 @@
       "actions": ["entity-update-classification", "entity-remove-classification"]
     }
   ],
-  "persona-abac-add-terms": [
+  "persona-add-terms-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",
@@ -1408,7 +1532,7 @@
       "actions": ["add-relationship", "update-relationship"]
     }
   ],
-  "persona-abac-remove-terms": [
+  "persona-remove-terms-abac": [
     {
       "policyType": "ACCESS",
       "policyResourceCategory": "RELATIONSHIP",

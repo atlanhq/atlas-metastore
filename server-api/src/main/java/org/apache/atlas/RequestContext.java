@@ -27,12 +27,14 @@ import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.atlas.model.instance.AtlasObjectId.KEY_GUID;
 
@@ -51,8 +53,7 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         deletedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
     private final Map<String, Object>                    restoreVertices      = new HashMap<>();
-
-    private Boolean isIdOnlyGraphEnabled = null;
+    private final Map<String, Map<String, Object>> allInternalAttributesMap     = new HashMap<>();
 
     private       Map<String, String>                    lexoRankCache        = null;
     private final Map<String, AtlasEntity>               entityCache          = new HashMap<>();
@@ -82,6 +83,9 @@ public class RequestContext {
 
     private final Map<String, Set<AtlasRelationship>> relationshipMutationMap = new HashMap<>();
     private final Set<String> edgeLabels = new HashSet<>();
+    
+    // Observability timing fields
+    private final AtomicLong lineageCalcTime = new AtomicLong(0L);
 
     private String user;
     private Set<String> userGroups;
@@ -116,8 +120,6 @@ public class RequestContext {
     private boolean skipAuthorizationCheck = false;
     private Set<String> deletedEdgesIdsForResetHasLineage = new HashSet<>(0);
     private String requestUri;
-    private boolean cacheEnabled;
-
     private boolean delayTagNotifications = false;
     private boolean skipHasLineageCalculation = false;
     private boolean isInvokedByIndexSearch = false;
@@ -128,6 +130,8 @@ public class RequestContext {
     // Track Cassandra operations for rollback
     private final Map<String, Stack<CassandraTagOperation>> cassandraTagOperations = new HashMap<>();
     private final List<ESDeferredOperation> esDeferredOperations = new ArrayList<>();
+    private static final String X_ATLAN_CLIENT_ORIGIN = "X-Atlan-Client-Origin";
+    private static final String CLIENT_ORIGIN_PRODUCT = "product_webapp";
 
     Map<String, Object> tagsDiff = new HashMap<>();
 
@@ -196,10 +200,13 @@ public class RequestContext {
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
-        this.isIdOnlyGraphEnabled = null;
         this.verticesToSoftDelete.clear();
         this.verticesToHardDelete.clear();
 
+        this.allInternalAttributesMap.clear();
+
+        // Reset observability timing fields
+        this.lineageCalcTime.set(0L);
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -473,6 +480,7 @@ public class RequestContext {
     }
 
     public boolean isIdOnlyGraphEnabled() {
+        //TODO: extract flag from Redis
 //        if (isIdOnlyGraphEnabled == null || !isIdOnlyGraphEnabled) {
 //            // flag is not set yet
 //            // set it for the current request
@@ -683,6 +691,10 @@ public class RequestContext {
         return restoreEntities.values();
     }
 
+    public AtlasEntityHeader getRestoredEntity(String guid) {
+        return restoreEntities.get(guid);
+    }
+
     public Collection<Object> getRestoredVertices() {
         return restoreVertices.values();
     }
@@ -721,6 +733,12 @@ public class RequestContext {
     public void addRequestContextHeader(String headerName, String headerValue) {
         if (StringUtils.isNotEmpty(headerName)) {
             requestContextHeaders.put(headerName, headerValue);
+        }
+    }
+
+    public void setRequestContextHeaders(Map<String, String> requestContextHeaders) {
+        if (requestContextHeaders != null) {
+            this.requestContextHeaders.putAll(requestContextHeaders);
         }
     }
 
@@ -814,14 +832,6 @@ public class RequestContext {
         return this.requestUri;
     }
 
-    public void setEnableCache(boolean cacheEnabled) {
-        this.cacheEnabled = cacheEnabled;
-    }
-
-    public boolean isCacheEnabled() {
-        return this.cacheEnabled;
-    }
-
     public boolean isIncludeClassificationNames() {
         return includeClassificationNames;
     }
@@ -869,12 +879,26 @@ public class RequestContext {
         return isInvokedByIndexSearch;
     }
 
+    public boolean isInvokedByProduct() {
+        Map<String, String> requestContextHeaders = getRequestContextHeaders();
+        if (MapUtils.isEmpty(requestContextHeaders)) {
+            return false;
+        }
+
+        return CLIENT_ORIGIN_PRODUCT.equals(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN)) ||
+                CLIENT_ORIGIN_PRODUCT.equals(requestContextHeaders.get(X_ATLAN_CLIENT_ORIGIN.toLowerCase()));
+    }
+
     public void setIsInvokedByLineage(boolean isInvokedByLineage) {
         this.isInvokedByLineage = isInvokedByLineage;
     }
 
     public boolean isInvokedByLineage() {
         return isInvokedByLineage;
+    }
+
+    public Map<String, Map<String, Object>> getAllInternalAttributesMap() {
+        return allInternalAttributesMap;
     }
 
     public class EntityGuidPair {
@@ -967,6 +991,14 @@ public class RequestContext {
 
     public List<ESDeferredOperation> getESDeferredOperations() {
         return esDeferredOperations;
+    }
+
+    public void addLineageCalcTime(long additionalTime) {
+        this.lineageCalcTime.addAndGet(additionalTime);
+    }
+
+    public long getLineageCalcTime() {
+        return this.lineageCalcTime.get();
     }
 
 }
