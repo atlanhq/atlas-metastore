@@ -75,7 +75,7 @@ public class AtlasIndexInfoRetriever extends org.janusgraph.graphdb.database.ind
                     try {
                         infoMap = b.build();
                     } catch (IllegalArgumentException e) {
-                        throw new JanusGraphException("Duplicate index field names found, likely you have multiple properties mapped to the same index field", e);
+                        throw new JanusGraphException("Duplicate index field names found, likely you have multiple properties mapped to the same index field , store : "+ store, e);
                     }
                     final KeyInformation.StoreRetriever storeRetriever = infoMap::get;
                     indexes.put(store,storeRetriever);
