@@ -1661,6 +1661,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 requestContext.getRequestContextHeaders().get("x-atlan-agent-id"),
                 requestContext.getClientOrigin()
         );
+        analyzePayload(entityStream, observabilityData);
         try {
             // Record operation start
             observabilityService.recordOperationStart("createOrUpdate", requestContext.getClientOrigin());
@@ -1795,8 +1796,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         } catch (AtlasBaseException e) {
             // Record operation failure
             if (!operationRecorded) {
-                String errorCode = e.getAtlasErrorCode() != null ? e.getAtlasErrorCode().getErrorCode() : "UNKNOWN_ERROR";
+                String errorCode = e.getAtlasErrorCode() != null ? e.getAtlasErrorCode().name() : "UNKNOWN_ERROR";
                 observabilityService.recordOperationFailure("createOrUpdate", errorCode, requestContext.getClientOrigin());
+                observabilityService.logErrorDetails(observabilityData, "Unchecked exception in createOrUpdate", e);
             }
             throw e;
         } catch (Exception e) {
@@ -3489,7 +3491,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
            if (observabilityService == null || observabilityData == null) {
                return;
            }
-           analyzePayload(entityStream, observabilityData);
            observabilityService.recordCreateOrUpdateDuration(observabilityData);
            observabilityService.recordPayloadSize(observabilityData);
            observabilityService.recordArrayRelationships(observabilityData);
