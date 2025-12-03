@@ -1663,7 +1663,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         );
         try {
             // Record operation start
-            observabilityService.recordOperationStart("createOrUpdate");
+            observabilityService.recordOperationStart("createOrUpdate", requestContext.getClientOrigin());
 
             // Timing: preCreateOrUpdate (includes validation)
             long preCreateStart = System.currentTimeMillis();
@@ -1784,7 +1784,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             entityChangeNotifier.notifyDifferentialEntityChanges(ret, RequestContext.get().isImportInProgress());
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
 
-            observabilityService.recordOperationEnd("createOrUpdate", "success");
+            observabilityService.recordOperationEnd("createOrUpdate", "success", requestContext.getClientOrigin());
             operationRecorded = true;
 
             if (LOG.isDebugEnabled()) {
@@ -1796,14 +1796,14 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             // Record operation failure
             if (!operationRecorded) {
                 String errorCode = e.getAtlasErrorCode() != null ? e.getAtlasErrorCode().getErrorCode() : "UNKNOWN_ERROR";
-                observabilityService.recordOperationFailure("createOrUpdate", errorCode);
+                observabilityService.recordOperationFailure("createOrUpdate", errorCode, requestContext.getClientOrigin());
             }
             throw e;
         } catch (Exception e) {
             // Record operation failure for unchecked exceptions (RuntimeException, NullPointerException, etc.)
             if (!operationRecorded) {
                 String errorType = e.getClass().getSimpleName();
-                observabilityService.recordOperationFailure("createOrUpdate", errorType);
+                observabilityService.recordOperationFailure("createOrUpdate", errorType, requestContext.getClientOrigin());
                 observabilityService.logErrorDetails(observabilityData, "Unchecked exception in createOrUpdate", e);
             }
             throw e;

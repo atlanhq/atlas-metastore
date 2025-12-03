@@ -134,8 +134,8 @@ public class AtlasObservabilityService {
         timer.record(durationMs, TimeUnit.MILLISECONDS);
     }
     
-    public void recordOperationCount(String operation, String status) {
-        Counter counter = getOrCreateCounter("operations", UNKNOWN_CLIENT_ORIGIN, 
+    public void recordOperationCount(String operation, String status, String clientOrigin) {
+        Counter counter = getOrCreateCounter("operations", normalizeClientOrigin(clientOrigin), 
             "operation", operation, "status", status);
         counter.increment();
         // Note: totalOperations is incremented by recordOperationEnd/recordOperationFailure, not here
@@ -144,29 +144,30 @@ public class AtlasObservabilityService {
     /**
      * Record operation start - increments operations in progress
      */
-    public void recordOperationStart(String operation) {
+    public void recordOperationStart(String operation, String clientOrigin) {
         operationsInProgress.incrementAndGet();
     }
     
     /**
      * Record operation end - decrements operations in progress and increments total
      */
-    public void recordOperationEnd(String operation, String status) {
+    public void recordOperationEnd(String operation, String status, String clientOrigin) {
         operationsInProgress.decrementAndGet();
         totalOperations.incrementAndGet();
-        recordOperationCount(operation, status);
+        recordOperationCount(operation, status, clientOrigin);
     }
     
     /**
      * Record operation failure - decrements operations in progress and records failure
      */
-    public void recordOperationFailure(String operation, String errorType) {
+    public void recordOperationFailure(String operation, String errorType, String clientOrigin) {
+        String normalizedClientOrigin = normalizeClientOrigin(clientOrigin);
         operationsInProgress.decrementAndGet();
         totalOperations.incrementAndGet();
-        recordOperationCount(operation, "failure");
+        recordOperationCount(operation, "failure", clientOrigin);
         
         // Record specific error type
-        Counter errorCounter = getOrCreateCounter("operation_errors", UNKNOWN_CLIENT_ORIGIN,
+        Counter errorCounter = getOrCreateCounter("operation_errors", normalizedClientOrigin,
             "operation", operation, "error_type", errorType);
         errorCounter.increment();
     }
@@ -215,23 +216,23 @@ public class AtlasObservabilityService {
                     .publishPercentiles(0.5, 0.75, 0.95, 0.99) // Key percentiles
                     .publishPercentileHistogram()
                     .serviceLevelObjectives(
-                        // Fast operations (milliseconds)
-                        Duration.ofMillis(100),      // 100ms
-                        Duration.ofMillis(500),      // 500ms
-                        Duration.ofMillis(1000),     // 1s
-                        // Medium operations (seconds)
-                        Duration.ofSeconds(5),       // 5s
-                        Duration.ofSeconds(10),      // 10s
-                        Duration.ofSeconds(30),      // 30s
-                        Duration.ofMinutes(1),       // 1m
-                        Duration.ofMinutes(5),       // 5m
-                        // Long operations (minutes)
-                        Duration.ofMinutes(15),      // 15m
-                        Duration.ofMinutes(30),      // 30m
-                        Duration.ofHours(1),         // 1h
-                        Duration.ofHours(2)          // 2h
+                            // fast operations
+                            Duration.ofSeconds(1),      // 1s
+                            Duration.ofSeconds(10),     // 10s
+                            Duration.ofSeconds(30),     // 30s
+                            // intermediate slow operations
+                            Duration.ofMinutes(1),      // 1m
+                            Duration.ofMinutes(5),      // 5m
+                            Duration.ofMinutes(15),     // 15m
+                            Duration.ofMinutes(30),     // 30m
+                            // slow operations
+                            Duration.ofHours(1),        // 1h
+                            Duration.ofHours(2),        // 2h
+                            Duration.ofHours(4),        // 4h
+                            Duration.ofHours(8),        // 8h
+                            Duration.ofHours(12)        // 12h
                     )
-                    .minimumExpectedValue(Duration.ofMillis(100))
+                    .minimumExpectedValue(Duration.ofMillis(500))
                     .maximumExpectedValue(Duration.ofHours(4))
                     .register(meterRegistry);
         });
