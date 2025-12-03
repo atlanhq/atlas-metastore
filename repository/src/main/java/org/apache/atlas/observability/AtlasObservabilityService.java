@@ -232,8 +232,8 @@ public class AtlasObservabilityService {
                             Duration.ofHours(8),        // 8h
                             Duration.ofHours(12)        // 12h
                     )
-                    .minimumExpectedValue(Duration.ofMillis(500))
-                    .maximumExpectedValue(Duration.ofHours(4))
+                    .minimumExpectedValue(Duration.ofSeconds(1))
+                    .maximumExpectedValue(Duration.ofHours(24))
                     .register(meterRegistry);
         });
     }
