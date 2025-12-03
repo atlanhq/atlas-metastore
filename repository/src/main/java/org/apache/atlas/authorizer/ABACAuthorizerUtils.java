@@ -68,11 +68,18 @@ public class ABACAuthorizerUtils {
     }
 
     public static AtlasAccessResult isAccessAllowed(AtlasEntityHeader entityHeader, AtlasPrivilege action) {
+        LOG.debug("ABAC_DEBUG: ABACAuthorizerUtils.isAccessAllowed - Entry: action={}, entityGuid={}, entityType={}, ABACEnabled={}",
+                action, entityHeader.getGuid(), entityHeader.getTypeName(), ABACAuthorizerEnabled);
+        
         if (!ABACAuthorizerEnabled) {
+            LOG.warn("ABAC_DEBUG: ABAC authorizer is disabled, returning default (deny) result");
             return new AtlasAccessResult();
         }
 
-        return verifyAccess(entityHeader, action);
+        AtlasAccessResult result = verifyAccess(entityHeader, action);
+        LOG.debug("ABAC_DEBUG: ABACAuthorizerUtils.isAccessAllowed - Result: isAllowed={}, policyId={}, priority={}",
+                result.isAllowed(), result.getPolicyId(), result.getPolicyPriority());
+        return result;
     }
 
     public static AtlasAccessResult isAccessAllowed(String relationShipType, AtlasEntityHeader endOneEntity, AtlasEntityHeader endTwoEntity, AtlasPrivilege action) {
@@ -85,6 +92,8 @@ public class ABACAuthorizerUtils {
 
     private static AtlasAccessResult verifyAccess(AtlasEntityHeader entity, AtlasPrivilege action) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("verifyEntityAccess");
+        LOG.debug("ABAC_DEBUG: verifyAccess - Entry: action={}, entityGuid={}, entityType={}",
+                action, entity.getGuid(), entity.getTypeName());
 
         AtlasAccessResult result = null;
 
@@ -92,13 +101,20 @@ public class ABACAuthorizerUtils {
         NewAtlasAuditHandler auditHandler = new NewAtlasAuditHandler(request, SERVICE_DEF_ATLAS);
 
         try {
+            LOG.debug("ABAC_DEBUG: Calling EntityAuthorizer.isAccessAllowedInMemory for action={}", action.getType());
             result = EntityAuthorizer.isAccessAllowedInMemory(entity, action.getType());
+            LOG.debug("ABAC_DEBUG: EntityAuthorizer returned: isAllowed={}, policyId={}, priority={}",
+                    result.isAllowed(), result.getPolicyId(), result.getPolicyPriority());
             auditHandler.processResult(result, request);
         } finally {
             auditHandler.flushAudit();
             RequestContext.get().endMetricRecord(recorder);
         }
 
+        LOG.debug("ABAC_DEBUG: verifyAccess - Final result: isAllowed={}, policyId={}, priority={}",
+                result != null ? result.isAllowed() : false, 
+                result != null ? result.getPolicyId() : null,
+                result != null ? result.getPolicyPriority() : null);
         return result;
     }
 

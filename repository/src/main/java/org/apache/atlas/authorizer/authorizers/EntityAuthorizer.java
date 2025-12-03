@@ -47,21 +47,33 @@ public class EntityAuthorizer {
     );
 
     public static AtlasAccessResult isAccessAllowedInMemory(AtlasEntityHeader entity, String action) {
+        LOG.debug("ABAC_DEBUG: isAccessAllowedInMemory - Entry: action={}, entityGuid={}, entityType={}, qualifiedName={}",
+                action, entity.getGuid(), entity.getTypeName(), entity.getAttribute(ATTR_QUALIFIED_NAME));
 
         AtlasAccessResult denyResult = isAccessAllowedInMemory(entity, action, POLICY_TYPE_DENY);
+        LOG.debug("ABAC_DEBUG: Deny policy evaluation result: isAllowed={}, policyId={}, priority={}",
+                denyResult.isAllowed(), denyResult.getPolicyId(), denyResult.getPolicyPriority());
+        
         if (denyResult.isAllowed() && denyResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
+            LOG.debug("ABAC_DEBUG: Override deny policy found, returning deny");
             return new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
         }
 
         AtlasAccessResult allowResult = isAccessAllowedInMemory(entity, action, POLICY_TYPE_ALLOW);
+        LOG.debug("ABAC_DEBUG: Allow policy evaluation result: isAllowed={}, policyId={}, priority={}",
+                allowResult.isAllowed(), allowResult.getPolicyId(), allowResult.getPolicyPriority());
+        
         if (allowResult.isAllowed() && allowResult.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
+            LOG.debug("ABAC_DEBUG: Override allow policy found, returning allow");
             return allowResult;
         }
 
         if (denyResult.isAllowed() && !"-1".equals(denyResult.getPolicyId())) {
             // explicit deny
+            LOG.debug("ABAC_DEBUG: Explicit deny policy found, returning deny");
             return new AtlasAccessResult(false, denyResult.getPolicyId(), denyResult.getPolicyPriority());
         } else {
+            LOG.debug("ABAC_DEBUG: Final result: isAllowed={}, policyId={}", allowResult.isAllowed(), allowResult.getPolicyId());
             return allowResult;
         }
     }
@@ -70,8 +82,23 @@ public class EntityAuthorizer {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("isAccessAllowedInMemory."+policyType);
         AtlasAccessResult result;
 
+        LOG.debug("ABAC_DEBUG: Getting relevant policies - action={}, policyType={}, entityGuid={}", action, policyType, entity.getGuid());
         List<RangerPolicy> policies = policiesStore.getRelevantPolicies(null, null, "atlas_abac", Arrays.asList(action), policyType);
+        LOG.debug("ABAC_DEBUG: Retrieved {} ABAC policies for action={}, policyType={}", policies.size(), action, policyType);
+        
+        if (policies.isEmpty()) {
+            LOG.warn("ABAC_DEBUG: No ABAC policies found for action={}, policyType={}, entityGuid={}", action, policyType, entity.getGuid());
+        } else {
+            for (int i = 0; i < policies.size(); i++) {
+                RangerPolicy policy = policies.get(i);
+                LOG.debug("ABAC_DEBUG: Policy[{}]: id={}, name={}, guid={}, priority={}", 
+                        i, policy.getId(), policy.getName(), policy.getGuid(), policy.getPolicyPriority());
+            }
+        }
+        
         result = evaluateABACPoliciesInMemory(policies, entity, action);
+        LOG.debug("ABAC_DEBUG: Evaluation result for policyType={}: isAllowed={}, policyId={}, priority={}",
+                policyType, result.isAllowed(), result.getPolicyId(), result.getPolicyPriority());
 
         RequestContext.get().endMetricRecord(recorder);
         return result;
@@ -79,25 +106,48 @@ public class EntityAuthorizer {
 
     private static AtlasAccessResult evaluateABACPoliciesInMemory(List<RangerPolicy> abacPolicies, AtlasEntityHeader entity, String action) {
         AtlasAccessResult result = new AtlasAccessResult(false);
+        LOG.debug("ABAC_DEBUG: evaluateABACPoliciesInMemory - Entry: entityGuid={}, entityType={}, policiesCount={}, action={}",
+                entity.getGuid(), entity.getTypeName(), abacPolicies.size(), action);
 
         // don't need to fetch vertex for indexsearch response scrubbing as it already has the required attributes
         // setting vertex to null here as usage is already with a check for null possibility
         AtlasVertex vertex =  entity.getDocId() == null || !ACTION_READ.equals(action) ? AtlasGraphUtilsV2.findByGuid(entity.getGuid()) : null;
+        LOG.debug("ABAC_DEBUG: Vertex lookup - docId={}, action={}, vertex={}", entity.getDocId(), action, vertex != null ? "found" : "null");
 
+        int policyIndex = 0;
         for (RangerPolicy policy : abacPolicies) {
+            policyIndex++;
+            LOG.debug("ABAC_DEBUG: Evaluating policy[{}]: id={}, name={}, guid={}, priority={}",
+                    policyIndex, policy.getId(), policy.getName(), policy.getGuid(), policy.getPolicyPriority());
+            
             boolean matched = false;
             JsonNode entityFilterCriteriaNode = policy.getPolicyParsedFilterCriteria("entity");
+            LOG.debug("ABAC_DEBUG: Policy[{}] filter criteria node: {}", policyIndex, entityFilterCriteriaNode != null ? "exists" : "null");
+            
             if (entityFilterCriteriaNode != null) {
+                LOG.debug("ABAC_DEBUG: Policy[{}] filter criteria: {}", policyIndex, entityFilterCriteriaNode.toString());
                 matched = validateEntityFilterCriteria(entityFilterCriteriaNode, entity, vertex);
+                LOG.debug("ABAC_DEBUG: Policy[{}] filter criteria match result: {}", policyIndex, matched);
+            } else {
+                LOG.warn("ABAC_DEBUG: Policy[{}] has no entity filter criteria, skipping", policyIndex);
             }
+            
             if (matched) {
                 // result here only means that a matching policy is found, allow and deny needs to be handled by caller
+                LOG.debug("ABAC_DEBUG: Policy[{}] MATCHED! Setting result: policyGuid={}, priority={}",
+                        policyIndex, policy.getGuid(), policy.getPolicyPriority());
                 result = new AtlasAccessResult(true, policy.getGuid(), policy.getPolicyPriority());
                 if (policy.getPolicyPriority() == RangerPolicy.POLICY_PRIORITY_OVERRIDE) {
+                    LOG.debug("ABAC_DEBUG: Policy[{}] has override priority, returning immediately", policyIndex);
                     return result;
                 }
+            } else {
+                LOG.debug("ABAC_DEBUG: Policy[{}] did not match filter criteria", policyIndex);
             }
         }
+        
+        LOG.debug("ABAC_DEBUG: Final evaluation result: isAllowed={}, policyId={}, priority={}",
+                result.isAllowed(), result.getPolicyId(), result.getPolicyPriority());
         return result;
     }
 
@@ -106,37 +156,55 @@ public class EntityAuthorizer {
         String condition = data.get("condition").asText();
         JsonNode criterion = data.get("criterion");
 
+        LOG.debug("ABAC_DEBUG: validateEntityFilterCriteria - Entry: condition={}, criterionCount={}, entityGuid={}",
+                condition, criterion != null && criterion.isArray() ? criterion.size() : 0, entity.getGuid());
+
         if (criterion == null || !criterion.isArray() || criterion.isEmpty() ) {
+            LOG.warn("ABAC_DEBUG: validateEntityFilterCriteria - Invalid criterion: null={}, isArray={}, isEmpty={}",
+                    criterion == null, criterion != null && criterion.isArray(), criterion != null && criterion.isEmpty());
             return false;
         }
         boolean result = true;
 
+        int critIndex = 0;
         for (JsonNode crit : criterion) {
+            critIndex++;
             result = !condition.equals("OR");
 
             boolean evaluation = false;
 
             if (crit.has("condition")) {
+                LOG.debug("ABAC_DEBUG: Criterion[{}] has nested condition, recursing", critIndex);
                 evaluation = validateEntityFilterCriteria(crit, entity, vertex);
+                LOG.debug("ABAC_DEBUG: Criterion[{}] nested condition result: {}", critIndex, evaluation);
             } else {
+                LOG.debug("ABAC_DEBUG: Criterion[{}] evaluating filter: {}", critIndex, crit.toString());
                 evaluation = evaluateFilterCriteriaInMemory(crit, entity, vertex);
+                LOG.debug("ABAC_DEBUG: Criterion[{}] evaluation result: {}", critIndex, evaluation);
             }
 
             if (condition.equals("AND")) {
                 if (!evaluation) {
                     // One of the condition in AND is false, return false
+                    LOG.debug("ABAC_DEBUG: AND condition - Criterion[{}] failed, returning false", critIndex);
+                    RequestContext.get().endMetricRecord(recorder);
                     return false;
                 }
                 result = true;
+                LOG.debug("ABAC_DEBUG: AND condition - Criterion[{}] passed, continuing", critIndex);
             } else {
                 if (evaluation) {
                     // One of the condition in OR is true, return true
+                    LOG.debug("ABAC_DEBUG: OR condition - Criterion[{}] passed, returning true", critIndex);
+                    RequestContext.get().endMetricRecord(recorder);
                     return true;
                 }
                 result = result || evaluation;
+                LOG.debug("ABAC_DEBUG: OR condition - Criterion[{}] failed, result so far: {}", critIndex, result);
             }
         }
 
+        LOG.debug("ABAC_DEBUG: validateEntityFilterCriteria - Final result: {}", result);
         RequestContext.get().endMetricRecord(recorder);
         return result;
     }
@@ -145,69 +213,114 @@ public class EntityAuthorizer {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("evaluateFilterCriteria");
 
         String attributeName = crit.get("attributeName").asText();
+        LOG.debug("ABAC_DEBUG: evaluateFilterCriteria - Entry: attributeName={}, entityGuid={}", attributeName, entity.getGuid());
 
         if (attributeName.endsWith(".text")) {
             attributeName = attributeName.replace(".text", "");
+            LOG.debug("ABAC_DEBUG: Removed .text suffix, attributeName={}", attributeName);
         } else if (attributeName.endsWith(".keyword")) {
             attributeName = attributeName.replace(".keyword", "");
+            LOG.debug("ABAC_DEBUG: Removed .keyword suffix, attributeName={}", attributeName);
         }
 
         List<String> entityAttributeValues = getAttributeValue(entity, attributeName, vertex);
-        entityAttributeValues.addAll(handleSpecialAttributes(entity, attributeName));
+        LOG.debug("ABAC_DEBUG: Entity attribute values from getAttributeValue: attributeName={}, values={}", 
+                attributeName, entityAttributeValues);
+        
+        List<String> specialAttributeValues = handleSpecialAttributes(entity, attributeName);
+        LOG.debug("ABAC_DEBUG: Special attribute values: attributeName={}, values={}", attributeName, specialAttributeValues);
+        
+        entityAttributeValues.addAll(specialAttributeValues);
+        LOG.debug("ABAC_DEBUG: Combined attribute values: attributeName={}, totalValues={}, values={}", 
+                attributeName, entityAttributeValues.size(), entityAttributeValues);
+        
         if (entityAttributeValues.isEmpty()) {
-            LOG.warn("Value for attribute {} not found for {}:{}", attributeName, entity.getTypeName(), entity.getAttribute(ATTR_QUALIFIED_NAME));
+            LOG.warn("ABAC_DEBUG: Value for attribute {} not found for {}:{}", attributeName, entity.getTypeName(), entity.getAttribute(ATTR_QUALIFIED_NAME));
         }
 
         JsonNode attributeValueNode = crit.get("attributeValue");
         String operator = crit.get("operator").asText();
+        LOG.debug("ABAC_DEBUG: Filter criteria - operator={}, attributeValueNode={}", operator, attributeValueNode);
 
         if (ATTR_TAGS.contains(attributeName)) { // handling tag values separately to incorporate multiple values requirement
-            return evaluateTagFilterCriteria(attributeName, attributeValueNode, operator, entityAttributeValues);
+            LOG.debug("ABAC_DEBUG: Evaluating tag filter criteria for attributeName={}", attributeName);
+            boolean tagResult = evaluateTagFilterCriteria(attributeName, attributeValueNode, operator, entityAttributeValues);
+            LOG.debug("ABAC_DEBUG: Tag filter criteria result: {}", tagResult);
+            RequestContext.get().endMetricRecord(recorder);
+            return tagResult;
         }
 
         List<String> attributeValues = new ArrayList<>();
         if (attributeValueNode.isArray()) {
             attributeValueNode.elements().forEachRemaining(node -> attributeValues.add(node.asText()));
+            LOG.debug("ABAC_DEBUG: Attribute value is array, extracted {} values", attributeValues.size());
         } else {
             attributeValues.add(attributeValueNode.asText());
+            LOG.debug("ABAC_DEBUG: Attribute value is single value: {}", attributeValues.get(0));
         }
+        LOG.debug("ABAC_DEBUG: Policy attribute values: {}", attributeValues);
 
+        boolean evaluationResult = false;
         switch (operator) {
             case POLICY_FILTER_CRITERIA_EQUALS -> {
-                return new HashSet<>(entityAttributeValues).containsAll(attributeValues);
+                evaluationResult = new HashSet<>(entityAttributeValues).containsAll(attributeValues);
+                LOG.debug("ABAC_DEBUG: EQUALS operator - entityValues={}, policyValues={}, result={}", 
+                        entityAttributeValues, attributeValues, evaluationResult);
             }
             case POLICY_FILTER_CRITERIA_STARTS_WITH -> {
                 for (String value : attributeValues) {
                     if (AuthorizerCommonUtil.listStartsWith(value, entityAttributeValues)) {
-                        return true;
+                        evaluationResult = true;
+                        LOG.debug("ABAC_DEBUG: STARTS_WITH operator - matched value={}, result=true", value);
+                        break;
                     }
+                }
+                if (!evaluationResult) {
+                    LOG.debug("ABAC_DEBUG: STARTS_WITH operator - no match found, result=false");
                 }
             }
             case POLICY_FILTER_CRITERIA_ENDS_WITH -> {
                 for (String value : attributeValues) {
                     if (AuthorizerCommonUtil.listEndsWith(value, entityAttributeValues)) {
-                        return true;
+                        evaluationResult = true;
+                        LOG.debug("ABAC_DEBUG: ENDS_WITH operator - matched value={}, result=true", value);
+                        break;
                     }
+                }
+                if (!evaluationResult) {
+                    LOG.debug("ABAC_DEBUG: ENDS_WITH operator - no match found, result=false");
                 }
             }
             case POLICY_FILTER_CRITERIA_NOT_EQUALS -> {
-                return Collections.disjoint(entityAttributeValues, attributeValues);
+                evaluationResult = Collections.disjoint(entityAttributeValues, attributeValues);
+                LOG.debug("ABAC_DEBUG: NOT_EQUALS operator - entityValues={}, policyValues={}, result={}", 
+                        entityAttributeValues, attributeValues, evaluationResult);
             }
             case POLICY_FILTER_CRITERIA_IN -> {
                 if (AuthorizerCommonUtil.arrayListContains(attributeValues, entityAttributeValues)) {
-                    return true;
+                    evaluationResult = true;
+                    LOG.debug("ABAC_DEBUG: IN operator - match found, result=true");
+                } else {
+                    LOG.debug("ABAC_DEBUG: IN operator - no match, result=false");
                 }
             }
             case POLICY_FILTER_CRITERIA_NOT_IN -> {
                 if (!AuthorizerCommonUtil.arrayListContains(attributeValues, entityAttributeValues)) {
-                    return true;
+                    evaluationResult = true;
+                    LOG.debug("ABAC_DEBUG: NOT_IN operator - match found, result=true");
+                } else {
+                    LOG.debug("ABAC_DEBUG: NOT_IN operator - no match, result=false");
                 }
             }
-            default -> LOG.warn("Found unknown operator {}", operator);
+            default -> {
+                LOG.warn("ABAC_DEBUG: Found unknown operator {}", operator);
+            }
         }
 
+        LOG.debug("ABAC_DEBUG: evaluateFilterCriteria - Final result: attributeName={}, operator={}, result={}", 
+                attributeName, operator, evaluationResult);
         RequestContext.get().endMetricRecord(recorder);
-        return false;
+        return evaluationResult;
     }
 
     private static List<String> handleSpecialAttributes(AtlasEntityHeader entity, String attributeName) {
@@ -292,24 +405,47 @@ public class EntityAuthorizer {
 
     private static List<String> getAttributeValue(AtlasEntityHeader entity, String attributeName, AtlasVertex vertex) {
         List<String> entityAttributeValues = new ArrayList<>();
+        LOG.debug("ABAC_DEBUG: getAttributeValue - Entry: attributeName={}, entityGuid={}, vertex={}", 
+                attributeName, entity.getGuid(), vertex != null ? "exists" : "null");
 
         List<String> relatedAttributes = getRelatedAttributes(attributeName);
+        LOG.debug("ABAC_DEBUG: Related attributes for {}: {}", attributeName, relatedAttributes);
+        
         for (String relatedAttribute : relatedAttributes) {
             Object attrValue = entity.getAttribute(relatedAttribute);
+            LOG.debug("ABAC_DEBUG: Checking attribute {} in entity header: value={}", relatedAttribute, attrValue != null ? "exists" : "null");
+            
             if (attrValue != null) {
                 if (attrValue instanceof Collection) {
-                    entityAttributeValues.addAll((Collection<? extends String>) attrValue);
+                    Collection<? extends String> collection = (Collection<? extends String>) attrValue;
+                    entityAttributeValues.addAll(collection);
+                    LOG.debug("ABAC_DEBUG: Added collection values from entity header: attribute={}, count={}, values={}", 
+                            relatedAttribute, collection.size(), collection);
                 } else {
-                    entityAttributeValues.add(String.valueOf(attrValue));
+                    String strValue = String.valueOf(attrValue);
+                    entityAttributeValues.add(strValue);
+                    LOG.debug("ABAC_DEBUG: Added single value from entity header: attribute={}, value={}", 
+                            relatedAttribute, strValue);
                 }
             } else if (vertex != null) {
                 // try fetching from vertex
+                LOG.debug("ABAC_DEBUG: Attribute not in entity header, trying vertex: attribute={}", relatedAttribute);
                 Collection<?> values = vertex.getPropertyValues(relatedAttribute, String.class);
                 for (Object value : values) {
-                    entityAttributeValues.add(String.valueOf(value));
+                    String strValue = String.valueOf(value);
+                    entityAttributeValues.add(strValue);
+                    LOG.debug("ABAC_DEBUG: Added value from vertex: attribute={}, value={}", relatedAttribute, strValue);
                 }
+                if (values.isEmpty()) {
+                    LOG.debug("ABAC_DEBUG: No values found in vertex for attribute: {}", relatedAttribute);
+                }
+            } else {
+                LOG.debug("ABAC_DEBUG: Attribute not found in entity header and vertex is null: attribute={}", relatedAttribute);
             }
         }
+        
+        LOG.debug("ABAC_DEBUG: getAttributeValue - Final result: attributeName={}, valuesCount={}, values={}", 
+                attributeName, entityAttributeValues.size(), entityAttributeValues);
         return entityAttributeValues;
     }
 
@@ -395,3 +531,4 @@ public class EntityAuthorizer {
         return result;
     }
 }
+
