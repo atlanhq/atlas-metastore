@@ -187,12 +187,17 @@ spec:
         args: {{ .Values.argsOverrides }}
 {{- end }}
 {{- $tierType := .Values.global.Tier_Type | default "" }}
+{{- $isAWSCloud := eq .Values.global.cloud "aws" }}
 {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
         resources:
         {{- if eq .Values.global.Deployment_Type "Lite" }}
 {{ toYaml .Values.resources_dev | indent 10 }}
         {{- else }}
+{{- if $isAWSCloud }}
+{{ toYaml .Values.resources_aws | indent 10 }}
+{{- else }}
 {{ toYaml .Values.resources | indent 10 }}
+{{- end }}
         {{- end }}
 {{- end }}
         env:

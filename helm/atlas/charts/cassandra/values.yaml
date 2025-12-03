@@ -163,6 +163,14 @@ resources:
     memory: 5Gi
     cpu: 3000m
 
+resources_aws:
+  requests:
+    memory: 4Gi
+    cpu: 3000m
+  limits:
+    memory: 5Gi
+    cpu: 3000m
+
 resources_dev:
   requests:
     memory: 4Gi
