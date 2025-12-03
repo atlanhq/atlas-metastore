@@ -100,15 +100,14 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         }
     }
 
-    /**
-     * Validate policy for CREATE (extracted for async reuse)
-     * @return Parent entity for later use
-     */
-    public AtlasEntityWithExtInfo validatePolicyForCreation(AtlasEntity policy) throws AtlasBaseException {
+    private void processCreatePolicy(AtlasStruct entity) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePolicy");
+        AtlasEntity policy = (AtlasEntity) entity;
+
         AtlasEntityWithExtInfo parent = getAccessControlEntity(policy);
-        AtlasEntity parentEntity = parent != null ? parent.getEntity() : null;
-        
-        if (parentEntity != null) {
+        AtlasEntity parentEntity = null;
+        if (parent != null) {
+            parentEntity = parent.getEntity();
             verifyParentTypeName(parentEntity);
         }
 
@@ -116,192 +115,66 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         if (StringUtils.isEmpty(policyCategory)) {
             throw new AtlasBaseException(BAD_REQUEST, "Please provide attribute " + ATTR_POLICY_CATEGORY);
         }
-        
+
+        entity.setAttribute(ATTR_POLICY_IS_ENABLED, entity.getAttributes().getOrDefault(ATTR_POLICY_IS_ENABLED, true));
+
         AuthPolicyValidator validator = new AuthPolicyValidator(entityRetriever);
         if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
             String policySubCategory = getPolicySubCategory(policy);
+
             if (!POLICY_SUB_CATEGORY_DOMAIN.equals(policySubCategory)) {
                 validator.validate(policy, null, parentEntity, CREATE);
                 validateConnectionAdmin(policy);
             } else {
                 validateAndReduce(policy);
             }
+
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+
+            //extract role
+            String roleName = getPersonaRoleName(parentEntity);
+            List<String> roles = Arrays.asList(roleName);
+            policy.setAttribute(ATTR_POLICY_ROLES, roles);
+
+            policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
+            policy.setAttribute(ATTR_POLICY_GROUPS, new ArrayList<>());
+
+            if(parentEntity != null) {
+                policy.setAttribute(ATTR_POLICY_IS_ENABLED, getIsAccessControlEnabled(parentEntity));
+            }
+
+            //create ES alias
+            aliasStore.updateAlias(parent, policy);
+
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+
             validator.validate(policy, null, parentEntity, CREATE);
+
+            //extract tags
+            List<String> purposeTags = getPurposeTags(parentEntity);
+
+            List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
+
+            policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);
+
+            if(parentEntity != null) {
+                policy.setAttribute(ATTR_POLICY_IS_ENABLED, getIsAccessControlEnabled(parentEntity));
+            }
+
+            //create ES alias
+            aliasStore.updateAlias(parent, policy);
+
         } else {
             validator.validate(policy, null, null, CREATE);
         }
-        
-        return parent;
-    }
 
-    /**
-     * Validate policy for UPDATE (extracted for async reuse)
-     */
-    public AtlasEntityWithExtInfo validatePolicyForUpdate(AtlasEntity policy, AtlasEntity existingPolicy) 
-            throws AtlasBaseException {
-        AtlasEntityWithExtInfo parent = getAccessControlEntity(policy);
-        AtlasEntity parentEntity = parent != null ? parent.getEntity() : null;
-        
-        String policyCategory = policy.hasAttribute(ATTR_POLICY_CATEGORY) ? 
-                getPolicyCategory(policy) : getPolicyCategory(existingPolicy);
-        
-        AuthPolicyValidator validator = new AuthPolicyValidator(entityRetriever);
-        
-        if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
-            String policySubCategory = policy.hasAttribute(ATTR_POLICY_SUB_CATEGORY) ?
-                    getPolicySubCategory(policy) : getPolicySubCategory(existingPolicy);
-            if (!POLICY_SUB_CATEGORY_DOMAIN.equals(policySubCategory)) {
-                validator.validate(policy, existingPolicy, parentEntity, UPDATE);
-                validateConnectionAdmin(policy);
-            } else {
-                validateAndReduce(policy);
-            }
-        } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
-            validator.validate(policy, existingPolicy, parentEntity, UPDATE);
-        } else if (POLICY_CATEGORY_DATAMESH.equals(policyCategory)) {
-            validator.validate(policy, existingPolicy, null, UPDATE);
-        } else {
-            validator.validate(policy, null, null, UPDATE);
-        }
-        
-        return parent;
-    }
-
-    /**
-     * Populate persona policy attributes for CREATE
-     */
-    public void populatePersonaPolicyAttributes(AtlasEntity policy, AtlasEntity parentEntity) throws AtlasBaseException {
-        if (parentEntity == null) {
-            throw new AtlasBaseException(BAD_REQUEST, "Parent entity is required for persona policy");
-        }
-        
-        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
-        String roleName = getPersonaRoleName(parentEntity);
-        policy.setAttribute(ATTR_POLICY_ROLES, Arrays.asList(roleName));
-        policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
-        policy.setAttribute(ATTR_POLICY_GROUPS, new ArrayList<>());
-        
-        // Safely get boolean value from parent
-        boolean isEnabled = true; // default
-        if (parentEntity.hasAttribute(ATTR_ACCESS_CONTROL_ENABLED)) {
-            Object enabledValue = parentEntity.getAttribute(ATTR_ACCESS_CONTROL_ENABLED);
-            if (enabledValue instanceof Boolean) {
-                isEnabled = (Boolean) enabledValue;
-            } else if (enabledValue != null) {
-                isEnabled = Boolean.parseBoolean(String.valueOf(enabledValue));
-            }
-        }
-        policy.setAttribute(ATTR_POLICY_IS_ENABLED, isEnabled);
-    }
-
-    /**
-     * Update persona policy attributes for UPDATE
-     */
-    public void updatePersonaPolicyAttributes(AtlasEntity policy, AtlasEntity existingPolicy, AtlasEntity parentEntity) throws AtlasBaseException {
-        if (parentEntity == null) {
-            throw new AtlasBaseException(BAD_REQUEST, "Parent entity is required for persona policy");
-        }
-        
-        String qName = getEntityQualifiedName(existingPolicy);
-        policy.setAttribute(QUALIFIED_NAME, qName);
-        String roleName = getPersonaRoleName(parentEntity);
-        policy.setAttribute(ATTR_POLICY_ROLES, Arrays.asList(roleName));
-        policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
-        policy.setAttribute(ATTR_POLICY_GROUPS, new ArrayList<>());
-    }
-
-    /**
-     * Populate purpose policy attributes for CREATE
-     */
-    public void populatePurposePolicyAttributes(AtlasEntity policy, AtlasEntity parentEntity) throws AtlasBaseException {
-        if (parentEntity == null) {
-            throw new AtlasBaseException(BAD_REQUEST, "Parent entity is required for purpose policy");
-        }
-        
-        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
-        List<String> purposeTags = getPurposeTags(parentEntity);
-        List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
-        policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);
-        
-        // Safely get boolean value from parent
-        boolean isEnabled = true; // default
-        if (parentEntity.hasAttribute(ATTR_ACCESS_CONTROL_ENABLED)) {
-            Object enabledValue = parentEntity.getAttribute(ATTR_ACCESS_CONTROL_ENABLED);
-            if (enabledValue instanceof Boolean) {
-                isEnabled = (Boolean) enabledValue;
-            } else if (enabledValue != null) {
-                isEnabled = Boolean.parseBoolean(String.valueOf(enabledValue));
-            }
-        }
-        policy.setAttribute(ATTR_POLICY_IS_ENABLED, isEnabled);
-    }
-
-    /**
-     * Update purpose policy attributes for UPDATE
-     */
-    public void updatePurposePolicyAttributes(AtlasEntity policy, AtlasEntity existingPolicy, AtlasEntity parentEntity) throws AtlasBaseException {
-        if (parentEntity == null) {
-            throw new AtlasBaseException(BAD_REQUEST, "Parent entity is required for purpose policy");
-        }
-        
-        String qName = getEntityQualifiedName(existingPolicy);
-        policy.setAttribute(QUALIFIED_NAME, qName);
-        List<String> purposeTags = getPurposeTags(parentEntity);
-        List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
-        policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);
-    }
-
-    /**
-     * Update ES alias for policy
-     */
-    public void updateESAliasForPolicy(AtlasEntityWithExtInfo parent, AtlasEntity policy) throws AtlasBaseException {
-        aliasStore.updateAlias(parent, policy);
-    }
-
-    private void processCreatePolicy(AtlasStruct entity) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePolicy");
-        AtlasEntity policy = (AtlasEntity) entity;
-        
-        // Set default isPolicyEnabled if not provided, ensuring proper boolean type
-        if (!entity.hasAttribute(ATTR_POLICY_IS_ENABLED)) {
-            entity.setAttribute(ATTR_POLICY_IS_ENABLED, true);
-        }
-        
-        // STEP 1: Validate (extracted method - REUSED)
-        AtlasEntityWithExtInfo parent = validatePolicyForCreation(policy);
-        AtlasEntity parentEntity = parent != null ? parent.getEntity() : null;
-        
-        String policyCategory = getPolicyCategory(policy);
-        
-        // STEP 2: Populate attributes (extracted methods - REUSED)
-        if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
-            populatePersonaPolicyAttributes(policy, parentEntity);
-            if (parent != null) {
-                updateESAliasForPolicy(parent, policy);
-            } else {
-                throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for persona policy");
-            }
-        } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
-            populatePurposePolicyAttributes(policy, parentEntity);
-            if (parent != null) {
-                updateESAliasForPolicy(parent, policy);
-            } else {
-                throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for purpose policy");
-            }
-        }
-        
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
 
     private void validateAndReduce(AtlasEntity policy) {
         List<String> resources = (List<String>) policy.getAttribute(ATTR_POLICY_RESOURCES);
-        
-        if (resources == null || resources.isEmpty()) {
-            return;  // Nothing to validate/reduce
-        }
-        
         boolean hasAllDomainPattern = resources.stream().anyMatch(resource ->
                 resource.equals("entity:*") ||
                         resource.equals("entity:*/super") ||
@@ -318,33 +191,66 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processUpdatePolicy");
         AtlasEntity policy = (AtlasEntity) entity;
         AtlasEntity existingPolicy = entityRetriever.toAtlasEntityWithExtInfo(vertex).getEntity();
-        
-        // STEP 1: Validate (extracted method - REUSED)
-        AtlasEntityWithExtInfo parent = validatePolicyForUpdate(policy, existingPolicy);
-        AtlasEntity parentEntity = parent != null ? parent.getEntity() : null;
-        
-        String policyCategory = policy.hasAttribute(ATTR_POLICY_CATEGORY) ? 
-                getPolicyCategory(policy) : getPolicyCategory(existingPolicy);
-        
-        // STEP 2: Update attributes (extracted methods - REUSED)
+
+        String policyCategory = policy.hasAttribute(ATTR_POLICY_CATEGORY) ? getPolicyCategory(policy) : getPolicyCategory(existingPolicy);
+
+        AuthPolicyValidator validator = new AuthPolicyValidator(entityRetriever);
         if (POLICY_CATEGORY_PERSONA.equals(policyCategory)) {
-            updatePersonaPolicyAttributes(policy, existingPolicy, parentEntity);
-            if (parent != null) {
-                parent.addReferredEntity(policy);
-                aliasStore.updateAlias(parent, null);
+            AtlasEntityWithExtInfo parent = getAccessControlEntity(policy);
+            AtlasEntity parentEntity = parent.getEntity();
+
+            String policySubCategory = getPolicySubCategory(policy);
+
+            if (!POLICY_SUB_CATEGORY_DOMAIN.equals(policySubCategory)) {
+                validator.validate(policy, existingPolicy, parentEntity, UPDATE);
+                validateConnectionAdmin(policy);
             } else {
-                throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for persona policy update");
+                validateAndReduce(policy);
             }
+
+            String qName = getEntityQualifiedName(existingPolicy);
+            policy.setAttribute(QUALIFIED_NAME, qName);
+
+            //extract role
+            String roleName = getPersonaRoleName(parentEntity);
+            List<String> roles = Arrays.asList(roleName);
+
+            policy.setAttribute(ATTR_POLICY_ROLES, roles);
+
+            policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
+            policy.setAttribute(ATTR_POLICY_GROUPS, new ArrayList<>());
+
+
+            //create ES alias
+            parent.addReferredEntity(policy);
+            aliasStore.updateAlias(parent, null);
+
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
-            updatePurposePolicyAttributes(policy, existingPolicy, parentEntity);
-            if (parent != null) {
-                parent.addReferredEntity(policy);
-                // Note: No ES alias update for PURPOSE policy updates (matches original behavior)
-            } else {
-                throw new AtlasBaseException(BAD_REQUEST, "Access control parent entity is required for purpose policy update");
-            }
+
+            AtlasEntityWithExtInfo parent = getAccessControlEntity(policy);
+            AtlasEntity parentEntity = parent.getEntity();
+
+            validator.validate(policy, existingPolicy, parentEntity, UPDATE);
+
+            String qName = getEntityQualifiedName(existingPolicy);
+            policy.setAttribute(QUALIFIED_NAME, qName);
+
+            //extract tags
+            List<String> purposeTags = getPurposeTags(parentEntity);
+
+            List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
+
+            policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);
+
+            //create ES alias
+            parent.addReferredEntity(policy);
+
+        } else if (POLICY_CATEGORY_DATAMESH.equals(policyCategory)) {
+            validator.validate(policy, existingPolicy, null, UPDATE);
+        } else {
+            validator.validate(policy, null, null, UPDATE);
         }
-        
+
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -432,10 +338,8 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         if (ret != null) {
             List<AtlasObjectId> policies = (List<AtlasObjectId>) ret.getEntity().getRelationshipAttribute(REL_ATTR_POLICIES);
 
-            if (policies != null) {
-                for (AtlasObjectId policy : policies) {
-                    ret.addReferredEntity(entityRetriever.toAtlasEntity(policy));
-                }
+            for (AtlasObjectId policy : policies) {
+                ret.addReferredEntity(entityRetriever.toAtlasEntity(policy));
             }
         }
 
