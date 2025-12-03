@@ -194,4 +194,13 @@ atlas.graph.storage.hbase.regions-per-server=1
     </build>
 
     <!--Add a dependency here to ensure this module is the final one built-->
+    <dependencies>
+        <!-- Adds WAR dependency for parallel building-->
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-webapp</artifactId>
+            <version>${project.version}</version>
+            <type>war</type>
+        </dependency>
+    </dependencies>
 </project>
