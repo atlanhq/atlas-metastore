@@ -112,9 +112,10 @@ public class PoliciesStore {
                 LOG.debug("ABAC_DEBUG: User groups: {}", groups);
 
                 RangerRoles allRoles = usersStore.getAllRoles();
-                List<String> roles = usersStore.getRolesForUser(user, allRoles);
+                // Pass userGroups to getRolesForUser to check both direct user membership and group membership
+                List<String> roles = usersStore.getRolesForUser(user, groups, allRoles);
                 roles.addAll(usersStore.getNestedRolesForUser(roles, allRoles));
-                LOG.debug("ABAC_DEBUG: User roles: {}", roles);
+                LOG.debug("ABAC_DEBUG: User roles (including group-based): {}", roles);
 
                 filteredPolicies = getFilteredPoliciesForUser(filteredPolicies, user, groups, roles, policyType);
                 LOG.debug("ABAC_DEBUG: After user filtering: {} policies", filteredPolicies.size());
