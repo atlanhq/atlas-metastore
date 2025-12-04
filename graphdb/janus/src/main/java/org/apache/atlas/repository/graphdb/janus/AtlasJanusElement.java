@@ -193,7 +193,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     public void removeAllPropertyValue(String propertyName, Object propertyValue) {
         List<Object> finalValues = new ArrayList<>();
 
-        if (LEAN_GRAPH_ENABLED) {
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
             AtlasJanusVertex vertex = (AtlasJanusVertex) this;
             if ( vertex.getDynamicVertex().hasProperty(propertyName)) {
                 Collection allValues = vertex.getDynamicVertex().getProperty(propertyName, Collection.class);
