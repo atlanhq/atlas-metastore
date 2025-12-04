@@ -63,127 +63,86 @@ public class PoliciesStore {
 
     public List<RangerPolicy> getRelevantPolicies(String persona, String purpose, String serviceName, List<String> actions, String policyType, boolean ignoreUser) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getRelevantPolicies");
-        LOG.warn("ABAC_DEBUG: getRelevantPolicies - Entry: persona={}, purpose={}, serviceName={}, actions={}, policyType={}, ignoreUser={}",
-                persona, purpose, serviceName, actions, policyType, ignoreUser);
-        
         String policyQualifiedNamePrefix = null;
         if (persona != null && !persona.isEmpty()) {
             policyQualifiedNamePrefix = persona;
-            LOG.warn("ABAC_DEBUG: Using persona as qualified name prefix: {}", policyQualifiedNamePrefix);
         } else if (purpose != null && !purpose.isEmpty()) {
             policyQualifiedNamePrefix = purpose;
-            LOG.warn("ABAC_DEBUG: Using purpose as qualified name prefix: {}", policyQualifiedNamePrefix);
-        } else {
-            LOG.warn("ABAC_DEBUG: No persona or purpose specified, will not filter by qualified name prefix");
         }
 
         List<RangerPolicy> policies = new ArrayList<>();
         if ("atlas".equals(serviceName)) {
             policies = getResourcePolicies();
-            LOG.warn("ABAC_DEBUG: Retrieved {} resource policies", policies != null ? policies.size() : 0);
         } else if ("atlas_tag".equals(serviceName)) {
             policies = getTagPolicies();
-            LOG.warn("ABAC_DEBUG: Retrieved {} tag policies", policies != null ? policies.size() : 0);
         } else if ("atlas_abac".equals(serviceName)) {
             policies = getAbacPolicies();
-            LOG.warn("ABAC_DEBUG: Retrieved {} ABAC policies", policies != null ? policies.size() : 0);
-        } else {
-            LOG.warn("ABAC_DEBUG: Unknown service name: {}", serviceName);
         }
 
         List<RangerPolicy> filteredPolicies = null;
         if (CollectionUtils.isNotEmpty(policies)) {
             filteredPolicies = new ArrayList<>(policies);
-            LOG.warn("ABAC_DEBUG: Starting with {} policies before filtering", filteredPolicies.size());
-            
             filteredPolicies = getFilteredPoliciesForQualifiedName(filteredPolicies, policyQualifiedNamePrefix);
-            LOG.warn("ABAC_DEBUG: After qualified name filtering: {} policies", filteredPolicies.size());
-            
             filteredPolicies = getFilteredPoliciesForActions(filteredPolicies, actions, policyType);
-            LOG.warn("ABAC_DEBUG: After action filtering: {} policies", filteredPolicies.size());
 
             if (!ignoreUser) {
                 String user = AuthorizerCommonUtil.getCurrentUserName();
-                LOG.warn("ABAC_DEBUG: Current user: {}", user);
 
                 UsersStore usersStore = UsersStore.getInstance();
                 RangerUserStore userStore = usersStore.getUserStore();
                 List<String> groups = usersStore.getGroupsForUser(user, userStore);
-                LOG.warn("ABAC_DEBUG: User groups: {}", groups);
 
                 RangerRoles allRoles = usersStore.getAllRoles();
                 // Pass userGroups to getRolesForUser to check both direct user membership and group membership
                 List<String> roles = usersStore.getRolesForUser(user, groups, allRoles);
                 roles.addAll(usersStore.getNestedRolesForUser(roles, allRoles));
-                LOG.warn("ABAC_DEBUG: User roles (including group-based): {}", roles);
 
                 filteredPolicies = getFilteredPoliciesForUser(filteredPolicies, user, groups, roles, policyType);
-                LOG.warn("ABAC_DEBUG: After user filtering: {} policies", filteredPolicies.size());
-            } else {
-                LOG.warn("ABAC_DEBUG: Skipping user filtering (ignoreUser=true)");
             }
         } else {
             filteredPolicies = new ArrayList<>(0);
-            LOG.warn("ABAC_DEBUG: No policies found for serviceName={}, returning empty list", serviceName);
         }
 
-        LOG.warn("ABAC_DEBUG: getRelevantPolicies - Final result: {} policies", filteredPolicies.size());
         RequestContext.get().endMetricRecord(recorder);
         return filteredPolicies;
     }
 
     private List<RangerPolicy> getFilteredPoliciesForQualifiedName(List<RangerPolicy> policies, String qualifiedNamePrefix) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getFilteredPoliciesForQualifiedName");
-        LOG.warn("ABAC_DEBUG: getFilteredPoliciesForQualifiedName - Entry: policiesCount={}, prefix={}", 
-                policies.size(), qualifiedNamePrefix);
-        
         if (qualifiedNamePrefix != null && !qualifiedNamePrefix.isEmpty()) {
             List<RangerPolicy> filteredPolicies = new ArrayList<>();
             for(RangerPolicy policy : policies) {
-                boolean matches = policy.getName().startsWith(qualifiedNamePrefix);
-                LOG.warn("ABAC_DEBUG: Policy name={}, prefix={}, matches={}", 
-                        policy.getName(), qualifiedNamePrefix, matches);
-                if (matches) {
+                if (policy.getName().startsWith(qualifiedNamePrefix)) {
                     filteredPolicies.add(policy);
                 }
             }
-            LOG.warn("ABAC_DEBUG: getFilteredPoliciesForQualifiedName - Result: {} policies matched", filteredPolicies.size());
             RequestContext.get().endMetricRecord(recorder);
             return filteredPolicies;
         }
 
-        LOG.warn("ABAC_DEBUG: getFilteredPoliciesForQualifiedName - No prefix filter, returning all {} policies", policies.size());
         RequestContext.get().endMetricRecord(recorder);
         return policies;
     }
 
     private static List<RangerPolicy> getFilteredPoliciesForActions(List<RangerPolicy> policies, List<String> actions, String type) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getFilteredPoliciesForActions");
-        LOG.warn("ABAC_DEBUG: getFilteredPoliciesForActions - Entry: policiesCount={}, actions={}, type={}", 
-                policies.size(), actions, type);
-        
         List<RangerPolicy> filteredPolicies = new ArrayList<>();
 
-        int policyIndex = 0;
+
         for(RangerPolicy policy : policies) {
-            policyIndex++;
             RangerPolicy.RangerPolicyItem policyItem = null;
 
             if (StringUtils.isNotEmpty(type)) {
                 if (POLICY_TYPE_ALLOW.equals(type) && !policy.getPolicyItems().isEmpty()) {
                     policyItem = policy.getPolicyItems().get(0);
-                    LOG.warn("ABAC_DEBUG: Policy[{}] using allow policy item", policyIndex);
                 } else if (POLICY_TYPE_DENY.equals(type) && !policy.getDenyPolicyItems().isEmpty()) {
                     policyItem = policy.getDenyPolicyItems().get(0);
-                    LOG.warn("ABAC_DEBUG: Policy[{}] using deny policy item", policyIndex);
                 }
             } else {
                 if (!policy.getPolicyItems().isEmpty()) {
                     policyItem = policy.getPolicyItems().get(0);
-                    LOG.warn("ABAC_DEBUG: Policy[{}] using allow policy item (no type specified)", policyIndex);
                 } else if (!policy.getDenyPolicyItems().isEmpty()) {
                     policyItem = policy.getDenyPolicyItems().get(0);
-                    LOG.warn("ABAC_DEBUG: Policy[{}] using deny policy item (no type specified)", policyIndex);
                 }
             }
 
@@ -192,37 +151,21 @@ public class PoliciesStore {
                 if (!policyItem.getAccesses().isEmpty()) {
                     policyActions = policyItem.getAccesses().stream().map(x -> x.getType()).collect(Collectors.toList());
                 }
-                LOG.warn("ABAC_DEBUG: Policy[{}] actions: {}, requested actions: {}", 
-                        policyIndex, policyActions, actions);
-                
-                boolean actionMatches = AuthorizerCommonUtil.arrayListContains(policyActions, actions);
-                LOG.warn("ABAC_DEBUG: Policy[{}] action match: {}", policyIndex, actionMatches);
-                
-                if (actionMatches) {
+                if (AuthorizerCommonUtil.arrayListContains(policyActions, actions)) {
                     filteredPolicies.add(policy);
-                    LOG.warn("ABAC_DEBUG: Policy[{}] added to filtered list", policyIndex);
-                } else {
-                    LOG.warn("ABAC_DEBUG: Policy[{}] action mismatch, not added", policyIndex);
                 }
-            } else {
-                LOG.warn("ABAC_DEBUG: Policy[{}] has no policy items (allow or deny)", policyIndex);
             }
         }
 
-        LOG.warn("ABAC_DEBUG: getFilteredPoliciesForActions - Result: {} policies matched actions", filteredPolicies.size());
         RequestContext.get().endMetricRecord(recorder);
         return filteredPolicies;
     }
 
     private static List<RangerPolicy> getFilteredPoliciesForUser(List<RangerPolicy> policies, String user, List<String> groups, List<String> roles, String type) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getFilteredPoliciesForUser");
-        LOG.warn("ABAC_DEBUG: getFilteredPoliciesForUser - Entry: policiesCount={}, user={}, groups={}, roles={}, type={}", 
-                policies.size(), user, groups, roles, type);
 
         List<RangerPolicy> filterPolicies = new ArrayList<>();
-        int policyIndex = 0;
         for(RangerPolicy policy : policies) {
-            policyIndex++;
             RangerPolicy.RangerPolicyItem policyItem = null;
 
             if (StringUtils.isNotEmpty(type)) {
@@ -243,30 +186,15 @@ public class PoliciesStore {
                 List<String> policyUsers = policyItem.getUsers();
                 List<String> policyGroups = policyItem.getGroups();
                 List<String> policyRoles = policyItem.getRoles();
-                
-                LOG.warn("ABAC_DEBUG: Policy[{}] user matching - policyUsers={}, policyGroups={}, policyRoles={}", 
-                        policyIndex, policyUsers, policyGroups, policyRoles);
-                
-                boolean userMatch = policyUsers.contains(user);
-                boolean publicGroupMatch = policyGroups.contains("public");
-                boolean groupMatch = AuthorizerCommonUtil.arrayListContains(policyGroups, groups);
-                boolean roleMatch = AuthorizerCommonUtil.arrayListContains(policyRoles, roles);
-                
-                LOG.warn("ABAC_DEBUG: Policy[{}] match results - userMatch={}, publicGroupMatch={}, groupMatch={}, roleMatch={}", 
-                        policyIndex, userMatch, publicGroupMatch, groupMatch, roleMatch);
-                
-                if (userMatch || publicGroupMatch || groupMatch || roleMatch) {
+                if (policyUsers.contains(user)
+                        || policyGroups.contains("public")
+                        || AuthorizerCommonUtil.arrayListContains(policyGroups, groups)
+                        || AuthorizerCommonUtil.arrayListContains(policyRoles, roles)) {
                     filterPolicies.add(policy);
-                    LOG.warn("ABAC_DEBUG: Policy[{}] matched user/groups/roles, added to filtered list", policyIndex);
-                } else {
-                    LOG.warn("ABAC_DEBUG: Policy[{}] did not match user/groups/roles, not added", policyIndex);
                 }
-            } else {
-                LOG.warn("ABAC_DEBUG: Policy[{}] has no policy items for type={}", policyIndex, type);
             }
         }
 
-        LOG.warn("ABAC_DEBUG: getFilteredPoliciesForUser - Result: {} policies matched user/groups/roles", filterPolicies.size());
         RequestContext.get().endMetricRecord(recorder);
         return filterPolicies;
     }
