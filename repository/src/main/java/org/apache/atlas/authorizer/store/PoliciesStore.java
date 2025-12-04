@@ -93,7 +93,8 @@ public class PoliciesStore {
                 List<String> groups = usersStore.getGroupsForUser(user, userStore);
 
                 RangerRoles allRoles = usersStore.getAllRoles();
-                List<String> roles = usersStore.getRolesForUser(user, allRoles);
+                // Pass userGroups to getRolesForUser to check both direct user membership and group membership
+                List<String> roles = usersStore.getRolesForUser(user, groups, allRoles);
                 roles.addAll(usersStore.getNestedRolesForUser(roles, allRoles));
 
                 filteredPolicies = getFilteredPoliciesForUser(filteredPolicies, user, groups, roles, policyType);
@@ -115,6 +116,7 @@ public class PoliciesStore {
                     filteredPolicies.add(policy);
                 }
             }
+            RequestContext.get().endMetricRecord(recorder);
             return filteredPolicies;
         }
 
