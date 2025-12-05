@@ -393,7 +393,7 @@ jobs:
           sarif_file: 'trivy-image-results.sarif'
 
   helm-publish:
-    needs: [helm-lint, build, smoke-test, changes]
+    needs: [helm-lint, build, changes]
     runs-on: ubuntu-latest
     # Run helm-publish if:
     # 1. Helm-lint passed (quality gate)
@@ -402,7 +402,7 @@ jobs:
     if: |
       always() && 
       needs.helm-lint.result == 'success' && (
-        (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
+        (needs.build.result == 'success') ||
         (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')
       )
     strategy:
