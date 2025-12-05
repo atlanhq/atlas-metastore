@@ -1,0 +1,757 @@
+---
+description: Entity bulk request flow
+globs: 
+alwaysApply: false
+---
+# Atlas Metastore: POST entity/bulk Flow Documentation
+
+## Overview
+
+This document provides a comprehensive breakdown of the `POST entity/bulk` flow in Atlas Metastore, detailing all functions, interactions, and code snippets involved in the process from the REST API endpoint to the graph database operations.
+
+## Table of Contents
+
+1. [Entry Point: EntityREST](#entry-point-entityrest)
+2. [Core Processing: AtlasEntityStoreV2](#core-processing-atlasentitystorev2)
+3. [Context Preparation: preCreateOrUpdate](#context-preparation-precreateupdate)
+4. [Entity Mapping: EntityGraphMapper](#entity-mapping-entitygraphmapper)
+5. [Relationship Handling: AtlasRelationshipStoreV2](#relationship-handling-atlasrelationshipstorev2)
+6. [Low-Level Graph Operations: GraphHelper](#low-level-graph-operations-graphhelper)
+7. [Transaction and Notification: EntityChangeNotifier](#transaction-and-notification-entitychangenotifier)
+8. [Performance Optimizations and Error Handling](#performance-optimizations-and-error-handling)
+
+## Entry Point: EntityREST
+
+The flow begins with the `createOrUpdate` method in the `EntityREST` class, which handles the `POST /api/atlas/v2/entity/bulk` endpoint.
+
+```java
+@POST
+@Path("/bulk")
+public EntityMutationResponse createOrUpdate(AtlasEntitiesWithExtInfo entities,
+                                           @DefaultValue("false") @QueryParam("replaceClassifications") boolean replaceClassifications,
+                                           @DefaultValue("false") @QueryParam("replaceTags") boolean replaceTags,
+                                           @DefaultValue("false") @QueryParam("replaceBusinessAttributes") boolean replaceBusinessAttributes,
+                                           @DefaultValue("false") @QueryParam("overwriteBusinessAttributes") boolean overwriteBusinessAttributes) throws AtlasBaseException {
+    // Validate that only one of replaceClassifications or replaceTags is true
+    if (replaceClassifications && replaceTags) {
+        throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, 
+            "Both replaceClassifications and replaceTags cannot be true");
+    }
+
+    // Check if the number of entities exceeds the configured limit
+    List<AtlasEntity> atlasEntities = entities != null ? entities.getEntities() : null;
+    if (atlasEntities != null && atlasEntities.size() > ENTITIES_ALLOWED_IN_BULK) {
+        throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, 
+            "Number of entities exceeds the allowed limit: " + ENTITIES_ALLOWED_IN_BULK);
+    }
+
+    // Validate attribute length for all entities
+    validateAttributeLength(atlasEntities);
+
+    // Create an AtlasEntityStream to process the entities
+    AtlasEntityStream entityStream = new AtlasEntityStream(entities);
+    
+    // Create a BulkRequestContext with flags for classifications/tags/business attributes handling
+    BulkRequestContext bulkRequestContext = new BulkRequestContext(
+        replaceClassifications, replaceTags, replaceBusinessAttributes, overwriteBusinessAttributes);
+
+    // Call the entity store to process the entity stream with the context
+    return entitiesStore.createOrUpdate(entityStream, bulkRequestContext);
+}
+```
+
+The `validateAttributeLength` method checks string attribute lengths against defined limits:
+
+```java
+public static void validateAttributeLength(final List<AtlasEntity> entities) throws AtlasBaseException {
+    List<String> errorMessages = new ArrayList<>();
+
+    for (final AtlasEntity atlasEntity : entities) {
+        for (Map.Entry<String, Object> attribute : atlasEntity.getAttributes().entrySet()) {
+            if (attribute.getValue() instanceof String && ((String) attribute.getValue()).length() > HUNDRED_THOUSAND) {
+                if (ATTRS_WITH_TWO_MILLION_LIMIT.contains(attribute.getKey())) {
+                    if (((String) attribute.getValue()).length() > TWO_MILLION) {
+                        errorMessages.add("Attribute " + attribute.getKey() + " exceeds limit of " + TWO_MILLION + " characters");
+                    }
+                } else {
+                    errorMessages.add("Attribute " + attribute.getKey() + " exceeds limit of " + HUNDRED_THOUSAND + " characters");
+                }
+            }
+        }
+
+        if (errorMessages.size() > 0) {
+            throw new AtlasBaseException(AtlasType.toJson(errorMessages));
+        }
+    }
+}
+```
+
+## Core Processing: AtlasEntityStoreV2
+
+The `createOrUpdate` method in `AtlasEntityStoreV2` handles the bulk entity creation/update:
+
+```java
+@GraphTransaction
+public EntityMutationResponse createOrUpdate(EntityStream entityStream, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    if (LOG.isDebugEnabled()) {
+        LOG.debug("==> AtlasEntityStoreV2.createOrUpdate()");
+    }
+
+    // Prepare the entity mutation context
+    EntityMutationContext context = preCreateOrUpdate(entityStream, bulkRequestContext);
+    
+    // Perform authorization checks
+    if (!bulkRequestContext.isImportInProgress()) {
+        for (AtlasEntity entity : context.getCreatedEntities()) {
+            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(
+                typeRegistry, AtlasPrivilege.ENTITY_CREATE, entity), "create entity: type=", entity.getTypeName());
+        }
+
+        for (AtlasEntity entity : context.getUpdatedEntities()) {
+            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(
+                typeRegistry, AtlasPrivilege.ENTITY_UPDATE, entity), "update entity: type=", entity.getTypeName());
+        }
+    }
+
+    // Map attributes and classifications for created entities
+    for (AtlasEntity entity : context.getCreatedEntities()) {
+        String          guid       = entity.getGuid();
+        AtlasVertex     vertex     = context.getVertex(guid);
+        String          typeName   = entity.getTypeName();
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+
+        // Map attributes and classifications
+        mapAttributesAndClassifications(context, entity, entityType, vertex, CREATE, bulkRequestContext);
+    }
+
+    // Map attributes and classifications for updated entities
+    for (AtlasEntity entity : context.getUpdatedEntities()) {
+        String          guid       = entity.getGuid();
+        AtlasVertex     vertex     = context.getVertex(guid);
+        String          typeName   = entity.getTypeName();
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+
+        // Map attributes and classifications
+        mapAttributesAndClassifications(context, entity, entityType, vertex, UPDATE, bulkRequestContext);
+    }
+
+    // Notify entity change listeners
+    for (EntityPreProcessor preProcessor : entityPreProcessors) {
+        preProcessor.onEntitiesMutated(context, bulkRequestContext);
+    }
+
+    // Create the entity mutation response
+    EntityMutationResponse ret = new EntityMutationResponse();
+    
+    // Add created entities to the response
+    for (AtlasEntity entity : context.getCreatedEntities()) {
+        String          guid       = entity.getGuid();
+        AtlasVertex     vertex     = context.getVertex(guid);
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+        
+        ret.addEntity(CREATE, constructHeader(entityType, vertex));
+    }
+
+    // Add updated entities to the response
+    for (AtlasEntity entity : context.getUpdatedEntities()) {
+        String          guid       = entity.getGuid();
+        AtlasVertex     vertex     = context.getVertex(guid);
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+        
+        ret.addEntity(UPDATE, constructHeader(entityType, vertex));
+    }
+
+    // Notify entity change listeners
+    entityChangeNotifier.onEntitiesMutated(ret, context, bulkRequestContext.isImportInProgress());
+
+    if (LOG.isDebugEnabled()) {
+        LOG.debug("<== AtlasEntityStoreV2.createOrUpdate()");
+    }
+
+    return ret;
+}
+```
+
+## Context Preparation: preCreateOrUpdate
+
+The `preCreateOrUpdate` method prepares the `EntityMutationContext`:
+
+```java
+private EntityMutationContext preCreateOrUpdate(EntityStream entityStream, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // Create an EntityGraphDiscovery to discover entities and their relationships
+    EntityGraphDiscovery        graphDiscovery        = new EntityGraphDiscovery(typeRegistry, entityStream, bulkRequestContext);
+    EntityGraphDiscoveryContext discoveryContext      = graphDiscovery.discoverEntities();
+    EntityMutationContext       context               = new EntityMutationContext(discoveryContext);
+    RequestContext              requestContext        = RequestContext.get();
+    Collection<AtlasEntity>     createdEntities       = discoveryContext.getCreatedEntities();
+    Collection<AtlasEntity>     updatedEntities       = discoveryContext.getUpdatedEntities();
+    
+    // Process created entities
+    if (CollectionUtils.isNotEmpty(createdEntities)) {
+        for (AtlasEntity entity : createdEntities) {
+            String          guid       = entity.getGuid();
+            AtlasVertex     vertex     = discoveryContext.getResolvedEntityVertex(guid);
+            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+
+            if (vertex == null) {
+                vertex = createVertex(entity, bulkRequestContext);
+            }
+
+            // Update system attributes during import
+            if (bulkRequestContext.isImportInProgress()) {
+                setSystemAttributes(vertex, entity);
+            }
+
+            // Record the vertex in the context
+            context.addCreated(guid, entity, vertex);
+        }
+    }
+
+    // Process updated entities
+    if (CollectionUtils.isNotEmpty(updatedEntities)) {
+        for (AtlasEntity entity : updatedEntities) {
+            String      guid   = entity.getGuid();
+            AtlasVertex vertex = discoveryContext.getResolvedEntityVertex(guid);
+
+            if (vertex == null) {
+                if (bulkRequestContext.isImportInProgress()) {
+                    vertex = createVertex(entity, bulkRequestContext);
+                } else {
+                    throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+                }
+            }
+
+            // Handle entity state changes
+            String entityState = getStatus(vertex);
+            if (entityState == DELETED.name() && !bulkRequestContext.isImportInProgress()) {
+                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_DELETED, guid);
+            }
+
+            // Update system attributes during import
+            if (bulkRequestContext.isImportInProgress()) {
+                setSystemAttributes(vertex, entity);
+            }
+
+            // Record the vertex in the context
+            context.addUpdated(guid, entity, vertex);
+        }
+    }
+
+    return context;
+}
+```
+
+## Entity Mapping: EntityGraphMapper
+
+The `mapAttributesAndClassifications` method maps entity attributes and classifications to the graph:
+
+```java
+public void mapAttributesAndClassifications(EntityMutationContext context, AtlasEntity entity, AtlasEntityType entityType,
+                                           AtlasVertex vertex, EntityOperation operation, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // Map regular attributes
+    mapAttributes(context, entity, entityType, vertex, operation, bulkRequestContext);
+
+    // Map relationship attributes
+    mapRelationshipAttributes(context, entity, entityType, vertex, operation, bulkRequestContext);
+
+    // Add classifications
+    if (entity.getClassifications() != null) {
+        addClassifications(context, vertex, entity.getClassifications(), bulkRequestContext);
+    }
+
+    // Add business attributes
+    if (entity.getBusinessAttributes() != null) {
+        addOrUpdateBusinessAttributes(vertex, entity.getBusinessAttributes(), bulkRequestContext);
+    }
+
+    // Update custom attributes
+    if (entity.getCustomAttributes() != null) {
+        setCustomAttributes(vertex, entity.getCustomAttributes());
+    }
+
+    // Update labels
+    if (entity.getLabels() != null) {
+        setLabels(vertex, entity.getLabels());
+    }
+
+    // Update system attributes
+    updateSystemAttributes(vertex, entity);
+}
+```
+
+The `mapAttributes` method maps entity attributes to the graph:
+
+```java
+private void mapAttributes(EntityMutationContext context, AtlasEntity entity, AtlasEntityType entityType,
+                          AtlasVertex vertex, EntityOperation operation, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // Map attributes based on operation type
+    if (operation == CREATE) {
+        // For CREATE operations, map all attributes
+        for (AtlasAttribute attribute : entityType.getAllAttributes().values()) {
+            Object attrValue = entity.getAttribute(attribute.getName());
+            
+            if (attrValue == null && attribute.getAttributeDef().getDefaultValue() != null) {
+                attrValue = attribute.getAttributeDef().getDefaultValue();
+            }
+            
+            mapAttribute(context, entity, attribute, attrValue, vertex, operation, bulkRequestContext);
+        }
+    } else if (operation == UPDATE) {
+        // For UPDATE operations, map only the attributes present in the update request
+        for (String attrName : entity.getAttributes().keySet()) {
+            AtlasAttribute attribute = entityType.getAttribute(attrName);
+            
+            if (attribute != null) {
+                Object attrValue = entity.getAttribute(attrName);
+                mapAttribute(context, entity, attribute, attrValue, vertex, operation, bulkRequestContext);
+            }
+        }
+    }
+}
+```
+
+The `mapRelationshipAttributes` method maps relationship attributes:
+
+```java
+private void mapRelationshipAttributes(EntityMutationContext context, AtlasEntity entity, AtlasEntityType entityType,
+                                      AtlasVertex vertex, EntityOperation operation, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // Map relationship attributes based on operation type
+    if (operation == CREATE) {
+        // For CREATE operations, map all relationship attributes
+        for (String attrName : entityType.getRelationshipAttributes().keySet()) {
+            AtlasAttribute attribute = entityType.getAttribute(attrName);
+            Object         attrValue = entity.getRelationshipAttribute(attrName);
+            
+            mapAttribute(context, entity, attribute, attrValue, vertex, operation, bulkRequestContext);
+        }
+    } else if (operation == UPDATE) {
+        // For UPDATE operations, map only the relationship attributes present in the update request
+        for (String attrName : entity.getRelationshipAttributes().keySet()) {
+            AtlasAttribute attribute = entityType.getAttribute(attrName);
+            
+            if (attribute != null) {
+                Object attrValue = entity.getRelationshipAttribute(attrName);
+                mapAttribute(context, entity, attribute, attrValue, vertex, operation, bulkRequestContext);
+            }
+        }
+    }
+}
+```
+
+The `mapObjectIdValueUsingRelationship` method handles relationship mapping:
+
+```java
+private void mapObjectIdValueUsingRelationship(AttributeMutationContext ctx, Object value) throws AtlasBaseException {
+    String      guid            = getGuidFromObjectId(value);
+    AtlasVertex attributeVertex = getVertexFromObjectId(value);
+    
+    if (attributeVertex == null) {
+        if (RequestContext.get().isImportInProgress()) {
+            return;
+        }
+        
+        throw new AtlasBaseException(AtlasErrorCode.INVALID_OBJECT_ID, guid);
+    }
+    
+    AtlasVertex       entityVertex        = ctx.getReferringVertex();
+    String            relationshipType    = ctx.getRelationshipType();
+    AtlasRelationship relationship        = getRelationshipFromValue(ctx.getAttributeDef(), value);
+    AtlasVertex       end1Vertex          = ctx.getAttribute().getRelationshipEdgeDirection() == IN ? attributeVertex : entityVertex;
+    AtlasVertex       end2Vertex          = ctx.getAttribute().getRelationshipEdgeDirection() == OUT ? attributeVertex : entityVertex;
+    
+    // Create or update the relationship
+    AtlasEdge edge = getOrCreateRelationship(end1Vertex, end2Vertex, relationship);
+    
+    // Record the update
+    recordEntityUpdate(attributeVertex);
+    
+    // Set relationship GUID if applicable
+    String relationshipGuid = getRelationshipGuid(value);
+    if (relationshipGuid != null) {
+        AtlasGraphUtilsV2.setEncodedProperty(edge, RELATIONSHIP_GUID_PROPERTY_KEY, relationshipGuid);
+    }
+}
+```
+
+## Relationship Handling: AtlasRelationshipStoreV2
+
+The `getOrCreate` method creates or retrieves a relationship:
+
+```java
+public AtlasEdge getOrCreate(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean skipAuth) throws AtlasBaseException {
+    AtlasEdge ret = getRelationship(end1Vertex, end2Vertex, relationship);
+    
+    if (ret == null) {
+        ret = createRelationship(end1Vertex, end2Vertex, relationship, false, skipAuth);
+        recordRelationshipMutation(RelationshipMutation.RELATIONSHIP_CREATE, ret, entityRetriever);
+    }
+    
+    return ret;
+}
+```
+
+The `createRelationship` method creates a relationship edge:
+
+```java
+private AtlasEdge createRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean existingRelationshipCheck, boolean skipAuth) throws AtlasBaseException {
+    AtlasEdge ret;
+    
+    try {
+        validateRelationship(end1Vertex, end2Vertex, relationship);
+        
+        String relationshipLabel = getRelationshipEdgeLabel(end1Vertex, end2Vertex, relationship.getTypeName());
+        
+        // Check for existing relationship if required
+        if (existingRelationshipCheck) {
+            AtlasEdge edge = getRelationshipEdge(end1Vertex, end2Vertex, relationshipLabel);
+            if (edge != null) {
+                throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_ALREADY_EXISTS, relationship.getTypeName(),
+                                           AtlasGraphUtilsV2.getIdFromVertex(end1Vertex), AtlasGraphUtilsV2.getIdFromVertex(end2Vertex));
+            }
+        }
+        
+        // Authorization check
+        if (!skipAuth) {
+            AtlasEntityHeader end1Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(end1Vertex);
+            AtlasEntityHeader end2Entity = entityRetriever.toAtlasEntityHeaderWithClassifications(end2Vertex);
+            
+            AtlasAuthorizationUtils.verifyAccess(new AtlasRelationshipAccessRequest(typeRegistry, AtlasPrivilege.RELATIONSHIP_ADD,
+                    relationship.getTypeName(), end1Entity, end2Entity));
+        }
+        
+        // Create the edge
+        if (existingRelationshipCheck) {
+            ret = graphHelper.getOrCreateEdge(end1Vertex, end2Vertex, relationshipLabel);
+        } else {
+            ret = graphHelper.addEdge(end1Vertex, end2Vertex, relationshipLabel);
+        }
+        
+        // Set edge properties
+        if (ret != null) {
+            String        relationshipGuid = relationship.getGuid();
+            PropagateTags tagPropagation   = getRelationshipTagPropagation(end1Vertex, end2Vertex, relationship);
+            final String  guid             = AtlasTypeUtil.isAssignedGuid(relationshipGuid) ? relationshipGuid : UUID.randomUUID().toString();
+            
+            AtlasGraphUtilsV2.setEncodedProperty(ret, ENTITY_TYPE_PROPERTY_KEY, relationship.getTypeName());
+            AtlasGraphUtilsV2.setEncodedProperty(ret, RELATIONSHIP_GUID_PROPERTY_KEY, guid);
+            AtlasGraphUtilsV2.setEncodedProperty(ret, HOME_ID_KEY, relationship.getHomeId());
+            AtlasGraphUtilsV2.setEncodedProperty(ret, VERSION_PROPERTY_KEY, getRelationshipVersion(relationship));
+            AtlasGraphUtilsV2.setEncodedProperty(ret, PROVENANCE_TYPE_KEY, relationship.getProvenanceType());
+            AtlasGraphUtilsV2.setEncodedProperty(ret, RELATIONSHIPTYPE_TAG_PROPAGATION_KEY, tagPropagation.name());
+            
+            // Handle blocked classifications and tag propagation
+            deleteDelegate.getHandler().handleBlockedClassifications(ret, relationship.getBlockedPropagatedClassifications());
+            deleteDelegate.getHandler().addTagPropagation(ret, tagPropagation);
+            
+            // Set relationship attributes
+            AtlasRelationshipType relationType = typeRegistry.getRelationshipTypeByName(relationship.getTypeName());
+            if (MapUtils.isNotEmpty(relationType.getAllAttributes())) {
+                for (AtlasAttribute attr : relationType.getAllAttributes().values()) {
+                    String attrName           = attr.getName();
+                    String attrVertexProperty = attr.getVertexPropertyName();
+                    Object attrValue          = relationship.getAttribute(attrName);
+                    
+                    AtlasGraphUtilsV2.setEncodedProperty(ret, attrVertexProperty, attrValue);
+                }
+            }
+        }
+    } catch (RepositoryException e) {
+        throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+    }
+    
+    return ret;
+}
+```
+
+## Low-Level Graph Operations: GraphHelper
+
+The `addEdge` method creates an edge between two vertices:
+
+```java
+public AtlasEdge addEdge(AtlasVertex fromVertex, AtlasVertex toVertex, String edgeLabel) throws AtlasBaseException {
+    AtlasEdge ret;
+    
+    if (LOG.isDebugEnabled()) {
+        LOG.debug("Adding edge for {} -> label {} -> {}", string(fromVertex), edgeLabel, string(toVertex));
+    }
+    
+    String fromGuid = getGuid(fromVertex);
+    if (fromGuid != null && fromGuid.equals(getGuid(toVertex))) {
+        LOG.error("Attempting to create a relationship between same vertex with guid {}", fromGuid);
+        throw new AtlasBaseException(RELATIONSHIP_CREATE_INVALID_PARAMS, fromGuid);
+    }
+    
+    ret = graph.addEdge(fromVertex, toVertex, edgeLabel);
+    
+    if (ret != null) {
+        AtlasGraphUtilsV2.setEncodedProperty(ret, STATE_PROPERTY_KEY, ACTIVE.name());
+        AtlasGraphUtilsV2.setEncodedProperty(ret, TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+        AtlasGraphUtilsV2.setEncodedProperty(ret, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
+        AtlasGraphUtilsV2.setEncodedProperty(ret, CREATED_BY_KEY, RequestContext.get().getUser());
+        AtlasGraphUtilsV2.setEncodedProperty(ret, MODIFIED_BY_KEY, RequestContext.get().getUser());
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Added {}", string(ret));
+        }
+    }
+    
+    return ret;
+}
+```
+
+The `getOrCreateEdge` method retrieves or creates an edge:
+
+```java
+public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws RepositoryException, AtlasBaseException {
+    AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getOrCreateEdge");
+    boolean skipRetry = false;
+    
+    for (int numRetries = 0; numRetries < maxRetries; numRetries++) {
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Running edge creation attempt {}", numRetries);
+            }
+            
+            if (inVertex.hasEdges(AtlasEdgeDirection.IN, edgeLabel) && outVertex.hasEdges(AtlasEdgeDirection.OUT, edgeLabel)) {
+                AtlasEdge edge = graph.getEdgeBetweenVertices(outVertex, inVertex, edgeLabel);
+                if (edge != null) {
+                    return edge;
+                }
+            }
+            
+            try {
+                return addEdge(outVertex, inVertex, edgeLabel);
+            } catch (AtlasBaseException abe) {
+                if (abe.getAtlasErrorCode().getErrorCode().equals(RELATIONSHIP_CREATE_INVALID_PARAMS.getErrorCode())) {
+                    skipRetry = true;
+                    throw abe;
+                }
+            }
+        } catch (Exception e) {
+            if (skipRetry) {
+                throw e;
+            }
+            
+            LOG.warn(String.format("Exception while trying to create edge from %s to %s with label %s. Retrying",
+                    vertexString(outVertex), vertexString(inVertex), edgeLabel), e);
+            
+            if (numRetries == (maxRetries - 1)) {
+                LOG.error("Max retries exceeded for edge creation {} {} {} ", outVertex, inVertex, edgeLabel, e);
+                throw new RepositoryException("Edge creation failed after retries", e);
+            }
+            
+            try {
+                LOG.info("Retrying with delay of {} ms ", retrySleepTimeMillis);
+                Thread.sleep(retrySleepTimeMillis);
+            } catch(InterruptedException ie) {
+                LOG.warn("Retry interrupted during edge creation ");
+                throw new RepositoryException("Retry interrupted during edge creation", ie);
+            }
+        }
+    }
+    
+    RequestContext.get().endMetricRecord(metric);
+    return null;
+}
+```
+
+## Transaction and Notification: EntityChangeNotifier
+
+The `onEntitiesMutated` method notifies listeners about entity changes:
+
+```java
+public void onEntitiesMutated(EntityMutationResponse entityMutationResponse, EntityMutationContext entityMutationContext,
+                             boolean isImport) throws AtlasBaseException {
+    if (LOG.isDebugEnabled()) {
+        LOG.debug("==> EntityChangeNotifier.onEntitiesMutated()");
+    }
+    
+    // Skip notification if disabled
+    if (!notificationsEnabled) {
+        return;
+    }
+    
+    // Notify entity mutation listeners
+    for (EntityMutationListener listener : entityMutationListeners) {
+        listener.onEntitiesMutated(entityMutationResponse, entityMutationContext);
+    }
+    
+    // Create entity notifications
+    List<AtlasEntityHeader> createdEntities          = entityMutationResponse.getCreatedEntities();
+    List<AtlasEntityHeader> updatedEntities          = entityMutationResponse.getUpdatedEntities();
+    List<AtlasEntityHeader> partiallyUpdatedEntities = entityMutationResponse.getPartialUpdatedEntities();
+    List<AtlasEntityHeader> deletedEntities          = entityMutationResponse.getDeletedEntities();
+    
+    // Create notification messages
+    List<EntityNotification> messages = new ArrayList<>();
+    
+    // Add created entities to notifications
+    if (CollectionUtils.isNotEmpty(createdEntities)) {
+        for (AtlasEntityHeader entity : createdEntities) {
+            messages.add(new EntityNotification(entity, OperationType.ENTITY_CREATE, entityMutationContext.getCreatedEntity(entity.getGuid())));
+        }
+    }
+    
+    // Add updated entities to notifications
+    if (CollectionUtils.isNotEmpty(updatedEntities)) {
+        for (AtlasEntityHeader entity : updatedEntities) {
+            messages.add(new EntityNotification(entity, OperationType.ENTITY_UPDATE, entityMutationContext.getUpdatedEntity(entity.getGuid())));
+        }
+    }
+    
+    // Add partially updated entities to notifications
+    if (CollectionUtils.isNotEmpty(partiallyUpdatedEntities)) {
+        for (AtlasEntityHeader entity : partiallyUpdatedEntities) {
+            messages.add(new EntityNotification(entity, OperationType.ENTITY_PARTIAL_UPDATE, entityMutationContext.getUpdatedEntity(entity.getGuid())));
+        }
+    }
+    
+    // Add deleted entities to notifications
+    if (CollectionUtils.isNotEmpty(deletedEntities)) {
+        for (AtlasEntityHeader entity : deletedEntities) {
+            messages.add(new EntityNotification(entity, OperationType.ENTITY_DELETE, entityMutationContext.getUpdatedEntity(entity.getGuid())));
+        }
+    }
+    
+    // Send notifications
+    notifyOfEntityEvent(messages);
+    
+    if (LOG.isDebugEnabled()) {
+        LOG.debug("<== EntityChangeNotifier.onEntitiesMutated()");
+    }
+}
+```
+
+## Performance Optimizations and Error Handling
+
+### Performance Optimizations
+
+#### Bulk Processing
+
+```java
+@GraphTransaction
+public EntityMutationResponse createOrUpdate(EntityStream entityStream, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // Process multiple entities in a single transaction
+    // ...
+}
+```
+
+#### Differential Updates
+
+```java
+private void mapAttributes(EntityMutationContext context, AtlasEntity entity, AtlasEntityType entityType,
+                          AtlasVertex vertex, EntityOperation operation, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // For UPDATE operations, map only the attributes present in the update request
+    if (operation == UPDATE) {
+        for (String attrName : entity.getAttributes().keySet()) {
+            AtlasAttribute attribute = entityType.getAttribute(attrName);
+            
+            if (attribute != null) {
+                Object attrValue = entity.getAttribute(attrName);
+                mapAttribute(context, entity, attribute, attrValue, vertex, operation, bulkRequestContext);
+            }
+        }
+    }
+    // ...
+}
+```
+
+#### Retry Mechanism
+
+```java
+public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws RepositoryException, AtlasBaseException {
+    // Implement retry logic with configurable retry count and delay
+    for (int numRetries = 0; numRetries < maxRetries; numRetries++) {
+        try {
+            // Attempt to get or create edge
+            // ...
+        } catch (Exception e) {
+            // Retry logic with exponential backoff
+            // ...
+        }
+    }
+    // ...
+}
+```
+
+#### Metrics Recording
+
+```java
+public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws RepositoryException, AtlasBaseException {
+    AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getOrCreateEdge");
+    // ...
+    RequestContext.get().endMetricRecord(metric);
+    return null;
+}
+```
+
+### Error Handling
+
+#### Validation Checks
+
+```java
+public static void validateAttributeLength(final List<AtlasEntity> entities) throws AtlasBaseException {
+    List<String> errorMessages = new ArrayList<>();
+    
+    for (final AtlasEntity atlasEntity : entities) {
+        for (Map.Entry<String, Object> attribute : atlasEntity.getAttributes().entrySet()) {
+            if (attribute.getValue() instanceof String && ((String) attribute.getValue()).length() > HUNDRED_THOUSAND) {
+                // Validate attribute length
+                // ...
+            }
+        }
+        
+        if (errorMessages.size() > 0) {
+            throw new AtlasBaseException(AtlasType.toJson(errorMessages));
+        }
+    }
+}
+```
+
+#### Transaction Management
+
+```java
+@GraphTransaction
+public EntityMutationResponse createOrUpdate(EntityStream entityStream, BulkRequestContext bulkRequestContext) throws AtlasBaseException {
+    // Use @GraphTransaction annotation to ensure atomicity
+    // ...
+}
+```
+
+#### Exception Propagation
+
+```java
+private void mapObjectIdValueUsingRelationship(AttributeMutationContext ctx, Object value) throws AtlasBaseException {
+    String      guid            = getGuidFromObjectId(value);
+    AtlasVertex attributeVertex = getVertexFromObjectId(value);
+    
+    if (attributeVertex == null) {
+        if (RequestContext.get().isImportInProgress()) {
+            return;
+        }
+        
+        throw new AtlasBaseException(AtlasErrorCode.INVALID_OBJECT_ID, guid);
+    }
+    // ...
+}
+```
+
+#### Concurrency Handling
+
+```java
+public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws RepositoryException, AtlasBaseException {
+    // Detect and handle concurrent modification conflicts
+    for (int numRetries = 0; numRetries < maxRetries; numRetries++) {
+        try {
+            // Attempt to get or create edge
+            // ...
+        } catch (Exception e) {
+            // Handle exception and retry if appropriate
+            // ...
+        }
+    }
+    // ...
+}
+```
+
+This document provides a comprehensive breakdown of the `POST entity/bulk` flow in Atlas Metastore, detailing all functions, interactions, and code snippets involved in the process from the REST API endpoint to the graph database operations.
