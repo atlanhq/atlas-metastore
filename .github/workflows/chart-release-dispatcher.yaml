@@ -37,7 +37,7 @@ jobs:
           echo "branch=${{ github.event.workflow_run.head_branch }}" >> $GITHUB_OUTPUT
 
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
         with:
           token: ${{ secrets.ORG_PAT_GITHUB }}
           ref: ${{ steps.extract_branch.outputs.branch }}
