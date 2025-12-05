@@ -256,22 +256,124 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationPropagationsAdded(List<AtlasEntity> entities, List<AtlasClassification> classifications, boolean forceInline) throws AtlasBaseException {
+        String taskGuid = getTaskGuidOrNA();
+        
+        LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: ENTRY - entitiesCount={}, classificationsCount={}, forceInline={}", 
+            taskGuid, entities != null ? entities.size() : 0, classifications != null ? classifications.size() : 0, forceInline);
+        
+        // Log validation issues but don't change flow
+        if (entities == null) {
+            LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: ERROR - entities list is NULL", taskGuid);
+        }
+        if (entities != null && entities.isEmpty()) {
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: NO_ENTITIES - entities list is empty", taskGuid);
+        }
+        if (CollectionUtils.isEmpty(classifications)) {
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: NO_CLASSIFICATIONS - classifications is empty", taskGuid);
+        }
+        
         if (CollectionUtils.isNotEmpty(classifications)) {
             MetricRecorder metric = RequestContext.get().startMetricRecord("onClassificationPropagationsAdded");
             FixedBufferList<EntityAuditEventV2> events = getAuditEventsList();
+            
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: Entity GUIDs: {}", 
+                taskGuid, entities.stream().map(AtlasEntity::getGuid).collect(Collectors.joining(", ")));
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: Tag types: {}", 
+                taskGuid, classifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.joining(", ")));
 
+            int auditEventCount = 0;
+            int failedEventCount = 0;
+            
             for (AtlasClassification classification : classifications) {
+                if (classification == null) {
+                    LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: ERROR - NULL classification in list", taskGuid);
+                    failedEventCount++;
+                    continue;
+                }
+                
+                String tagTypeName = classification.getTypeName();
+                if (StringUtils.isEmpty(tagTypeName)) {
+                    LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: ERROR - classification has empty typeName", taskGuid);
+                    failedEventCount++;
+                    continue;
+                }
+                
                 for (AtlasEntity entity : entities) {
-                    createEvent(events.next(), entity, PROPAGATED_CLASSIFICATION_ADD, "Added propagated classification: " + AtlasType.toJson(classification));
+                    auditEventCount++;
+                    
+                    if (entity == null) {
+                        LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: AUDIT_EVENT_{} - FAILED - NULL entity, audit will NOT be created for this entity", 
+                            taskGuid, auditEventCount);
+                        failedEventCount++;
+                        continue;
+                    }
+                    
+                    String entityGuid = entity.getGuid();
+                    if (StringUtils.isEmpty(entityGuid)) {
+                        LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: AUDIT_EVENT_{} - FAILED - entity has empty GUID, typeName={}, audit will NOT be created for this entity", 
+                            taskGuid, auditEventCount, entity.getTypeName());
+                        failedEventCount++;
+                        continue;
+                    }
+                    
+                    try {
+                        LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: AUDIT_EVENT_{} - Creating audit event for entityGuid={}, tagType={}", 
+                            taskGuid, auditEventCount, entityGuid, tagTypeName);
+                        createEvent(events.next(), entity, PROPAGATED_CLASSIFICATION_ADD, "Added propagated classification: " + AtlasType.toJson(classification));
+                        LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: AUDIT_EVENT_{} - SUCCESS - Audit event created for entityGuid={}, tagType={}", 
+                            taskGuid, auditEventCount, entityGuid, tagTypeName);
+                    } catch (Exception e) {
+                        LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: AUDIT_EVENT_{} - FAILED - entityGuid={} WILL NOT GET AUDIT LOG, tagType={}, error={}", 
+                            taskGuid, auditEventCount, entityGuid, tagTypeName, e.getMessage(), e);
+                        failedEventCount++;
+                    }
                 }
             }
+            
+            if (failedEventCount > 0) {
+                LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: FAILED_EVENTS - {} audit events failed to create", 
+                    taskGuid, failedEventCount);
+            }
+            
+            List<EntityAuditEventV2> eventsList = events.toList();
+            if (eventsList.isEmpty()) {
+                LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: ERROR - No audit events were created (expected {})", 
+                    taskGuid, entities != null ? entities.size() * classifications.size() : 0);
+            }
+            
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: WRITING_AUDIT_EVENTS - Writing {} audit events to {} repositories (expected {}, failed {})", 
+                taskGuid, eventsList.size(), auditRepositories.size(), entities != null ? entities.size() * classifications.size() : 0, failedEventCount);
 
-            for (EntityAuditRepository auditRepository: auditRepositories) {
-                auditRepository.putEventsV2(events.toList());
+            if (auditRepositories.isEmpty()) {
+                LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: ERROR - No audit repositories configured!", taskGuid);
             }
 
+            int repoCount = 0;
+            for (EntityAuditRepository auditRepository: auditRepositories) {
+                repoCount++;
+                String repoName = auditRepository.getClass().getSimpleName();
+                try {
+                    LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: REPO_{} - Writing {} events to {} audit repository", 
+                        taskGuid, repoCount, eventsList.size(), repoName);
+                    auditRepository.putEventsV2(eventsList);
+                    LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: REPO_{} - {} write SUCCESS", 
+                        taskGuid, repoCount, repoName);
+                } catch (Exception e) {
+                    LOG.error("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: REPO_{} - ERROR writing to {} repository, error={}", 
+                        taskGuid, repoCount, repoName, e.getMessage(), e);
+                }
+            }
+            
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: AUDIT_WRITE_COMPLETE - {} audit events written to {} repositories", 
+                taskGuid, eventsList.size(), auditRepositories.size());
+
             RequestContext.get().endMetricRecord(metric);
+        } else {
+            LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: NO_CLASSIFICATIONS - classifications is empty, no audit events created", 
+                taskGuid);
         }
+        
+        LOG.info("[TaskGuid: {}] EntityAuditListenerV2.onClassificationPropagationsAdded: COMPLETE", taskGuid);
     }
 
     @Override
@@ -864,5 +966,14 @@ public class EntityAuditListenerV2 implements EntityChangeListenerV2 {
         ret.reset();
         return ret;
 
+    }
+
+    /**
+     * Helper method to get task GUID from request context headers.
+     * For non-task flows, returns "N/A".
+     */
+    private String getTaskGuidOrNA() {
+        String taskGuid = RequestContext.get().getRequestContextHeaders().get("x-atlan-task-guid");
+        return StringUtils.isNotEmpty(taskGuid) ? taskGuid : "N/A";
     }
 }

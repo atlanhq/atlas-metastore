@@ -230,11 +230,48 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     @Override
     @Async
     public void onClassificationPropagationAddedToEntitiesV2(Set<AtlasVertex> vertices, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
-        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
-        List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
-        setRequestContext(requestContext);
-        for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
-            listener.onClassificationPropagationsAdded(entities, addedClassifications, forceInline);
+        String taskGuid = getTaskGuidOrNA(requestContext);
+        LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: ENTRY - verticesCount={}, classificationsCount={}, forceInline={}", 
+            taskGuid, vertices.size(), addedClassifications.size(), forceInline);
+        LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: Entity GUIDs to notify: {}", 
+            taskGuid, vertices.stream().map(v -> GraphHelper.getGuid(v)).collect(Collectors.joining(", ")));
+        LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: Tag types: {}", 
+            taskGuid, addedClassifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.joining(", ")));
+        
+        try {
+            Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
+            LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: Retrieved {} primitive attributes", 
+                taskGuid, primitiveAttributes.size());
+            
+            List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
+            LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: Converted to {} enriched entities", 
+                taskGuid, entities.size());
+            
+            if (entities.size() != vertices.size()) {
+                LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: ENTITY_COUNT_MISMATCH - Input vertices: {}, Output entities: {}",
+                    taskGuid, vertices.size(), entities.size());
+            }
+            
+            setRequestContext(requestContext);
+            LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: Notifying {} listeners", 
+                taskGuid, entityChangeListenersV2.size());
+            
+            int listenerCount = 0;
+            for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
+                listenerCount++;
+                String listenerName = listener.getClass().getSimpleName();
+                LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: LISTENER_{} - Calling {} with {} entities", 
+                    taskGuid, listenerCount, listenerName, entities.size());
+                listener.onClassificationPropagationsAdded(entities, addedClassifications, forceInline);
+                LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: LISTENER_{} - {} invoked successfully", 
+                    taskGuid, listenerCount, listenerName);
+            }
+            
+            LOG.info("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: COMPLETE - All listeners notified", taskGuid);
+        } catch (Exception e) {
+            LOG.error("[TaskGuid: {}] onClassificationPropagationAddedToEntitiesV2: ERROR - Failed to notify listeners. error={}", 
+                taskGuid, e.getMessage(), e);
+            throw e;
         }
     }
 
@@ -1188,5 +1225,14 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
                 diffEntity.getGuid(), e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Helper method to get task GUID from request context headers.
+     * For non-task flows, returns "N/A".
+     */
+    private String getTaskGuidOrNA(RequestContext requestContext) {
+        String taskGuid = requestContext.getRequestContextHeaders().get("x-atlan-task-guid");
+        return StringUtils.isNotEmpty(taskGuid) ? taskGuid : "N/A";
     }
 }

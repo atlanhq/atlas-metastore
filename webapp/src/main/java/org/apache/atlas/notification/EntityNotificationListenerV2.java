@@ -49,6 +49,7 @@ import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2.OperationType.*;
 import static org.apache.atlas.repository.Constants.*;
@@ -109,7 +110,32 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
 
     @Override
     public void onClassificationPropagationsAdded(List<AtlasEntity> entities, List<AtlasClassification> classifications, boolean forceInline) throws AtlasBaseException {
+        String taskGuid = getTaskGuidOrNA();
+        LOG.info("[TaskGuid: {}] onClassificationPropagationsAdded: ENTRY - entitiesCount={}, classificationsCount={}, forceInline={}", 
+            taskGuid, entities != null ? entities.size() : 0, classifications != null ? classifications.size() : 0, forceInline);
+        
+        // Log validation issues but don't change flow
+        if (entities == null) {
+            LOG.error("[TaskGuid: {}] onClassificationPropagationsAdded: ERROR - entities is NULL", taskGuid);
+        }
+        if (entities != null && entities.isEmpty()) {
+            LOG.info("[TaskGuid: {}] onClassificationPropagationsAdded: NO_ENTITIES - entities list is empty", taskGuid);
+        }
+        if (classifications == null) {
+            LOG.error("[TaskGuid: {}] onClassificationPropagationsAdded: ERROR - classifications is NULL", taskGuid);
+        }
+        if (classifications != null && classifications.isEmpty()) {
+            LOG.info("[TaskGuid: {}] onClassificationPropagationsAdded: NO_CLASSIFICATIONS - classifications list is empty", taskGuid);
+        }
+        
+        LOG.info("[TaskGuid: {}] onClassificationPropagationsAdded: Entity GUIDs: {}", 
+            taskGuid, entities.stream().map(AtlasEntity::getGuid).collect(Collectors.joining(", ")));
+        LOG.info("[TaskGuid: {}] onClassificationPropagationsAdded: Tag types: {}", 
+            taskGuid, classifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.joining(", ")));
+        
         notifyClassificationEvents(entities, CLASSIFICATION_ADD, classifications, forceInline);
+        
+        LOG.info("[TaskGuid: {}] onClassificationPropagationsAdded: COMPLETE - Notification events dispatched", taskGuid);
     }
 
     @Override
@@ -205,21 +231,101 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
 
     private void notifyClassificationEvents(List<AtlasEntity> entities, OperationType operationType, Object mutatedObj, boolean forceInline) throws AtlasBaseException {
         MetricRecorder metric = RequestContext.get().startMetricRecord("classificationNotification");
+        String taskGuid = getTaskGuidOrNA();
+        
+        LOG.info("[TaskGuid: {}] notifyClassificationEvents: ENTRY - entitiesCount={}, operationType={}, forceInline={}", 
+            taskGuid, entities != null ? entities.size() : 0, operationType, forceInline);
+        
+        // Log validation issues but don't change flow
+        if (entities == null) {
+            LOG.error("[TaskGuid: {}] notifyClassificationEvents: ERROR - entities list is NULL", taskGuid);
+        }
+        if (entities != null && entities.isEmpty()) {
+            LOG.info("[TaskGuid: {}] notifyClassificationEvents: NO_ENTITIES - entities list is empty", taskGuid);
+        }
+        
         List<EntityNotificationV2> messages = new ArrayList<>();
         Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
 
+        int skippedInternalTypes = 0;
+        int skippedNullEntities = 0;
+        int skippedEmptyGuid = 0;
+        int skippedNullHeader = 0;
+        int processedEntities = 0;
+        
         for (AtlasEntity entity : entities) {
-            if (isInternalType(entity.getTypeName())) {
+            processedEntities++;
+            
+            if (entity == null) {
+                skippedNullEntities++;
+                LOG.error("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - FAILED - NULL entity, notification will NOT be sent for this entity", 
+                    taskGuid, processedEntities);
+                continue;
+            }
+            
+            String entityGuid = entity.getGuid();
+            String typeName = entity.getTypeName();
+            
+            if (org.apache.commons.lang3.StringUtils.isEmpty(entityGuid)) {
+                skippedEmptyGuid++;
+                LOG.error("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - FAILED - entity has empty GUID, typeName={}, notification will NOT be sent for this entity", 
+                    taskGuid, processedEntities, typeName);
+                continue;
+            }
+            
+            LOG.info("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - Processing entityGuid={}, typeName={}", 
+                taskGuid, processedEntities, entityGuid, typeName);
+            
+            if (isInternalType(typeName)) {
+                skippedInternalTypes++;
+                LOG.info("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - SKIPPED_INTERNAL_TYPE - entityGuid={}, typeName={} (expected, no notification sent)", 
+                    taskGuid, processedEntities, entityGuid, typeName);
                 continue;
             }
 
-            messages.add(new EntityNotificationV2(toNotificationHeader(entity), mutatedObj, operationType,
-                    RequestContext.get().getRequestTime(), requestContextHeaders));
+            try {
+                AtlasEntityHeaderWithRelations header = toNotificationHeader(entity);
+                if (header == null) {
+                    skippedNullHeader++;
+                    LOG.error("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - FAILED - entityGuid={} WILL NOT GET NOTIFICATION, toNotificationHeader returned NULL, typeName={}", 
+                        taskGuid, processedEntities, entityGuid, typeName);
+                    continue;
+                }
+                
+                EntityNotificationV2 notification = new EntityNotificationV2(header, mutatedObj, operationType,
+                        RequestContext.get().getRequestTime(), requestContextHeaders);
+                messages.add(notification);
+                LOG.info("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - SUCCESS - Notification created for entityGuid={}, typeName={}", 
+                    taskGuid, processedEntities, entityGuid, typeName);
+            } catch (Exception e) {
+                LOG.error("[TaskGuid: {}] notifyClassificationEvents: ENTITY_{} - FAILED - entityGuid={} WILL NOT GET NOTIFICATION, typeName={}, error={}", 
+                    taskGuid, processedEntities, entityGuid, typeName, e.getMessage(), e);
+                throw e;
+            }
         }
 
-        sendNotifications(operationType, messages, forceInline);
+        LOG.info("[TaskGuid: {}] notifyClassificationEvents: MESSAGES_PREPARED - totalEntities={}, messagesCreated={}, skippedInternalTypes={}, skippedNullEntities={}, skippedEmptyGuid={}, skippedNullHeader={}", 
+            taskGuid, entities != null ? entities.size() : 0, messages.size(), skippedInternalTypes, skippedNullEntities, skippedEmptyGuid, skippedNullHeader);
+
+        if (messages.isEmpty()) {
+            LOG.info("[TaskGuid: {}] notifyClassificationEvents: NO_MESSAGES - No notifications to send (total={}, internal={}, null={}, emptyGuid={}, nullHeader={})", 
+                taskGuid, entities != null ? entities.size() : 0, skippedInternalTypes, skippedNullEntities, skippedEmptyGuid, skippedNullHeader);
+        } else {
+            try {
+                LOG.info("[TaskGuid: {}] notifyClassificationEvents: SENDING_NOTIFICATIONS - Sending {} messages to Kafka", 
+                    taskGuid, messages.size());
+                sendNotifications(operationType, messages, forceInline);
+                LOG.info("[TaskGuid: {}] notifyClassificationEvents: NOTIFICATIONS_SENT - {} messages dispatched successfully", 
+                    taskGuid, messages.size());
+            } catch (Exception e) {
+                LOG.error("[TaskGuid: {}] notifyClassificationEvents: ERROR_SENDING_NOTIFICATIONS - Failed to send {} messages, error={}", 
+                    taskGuid, messages.size(), e.getMessage(), e);
+                throw e;
+            }
+        }
 
         RequestContext.get().endMetricRecord(metric);
+        LOG.info("[TaskGuid: {}] notifyClassificationEvents: COMPLETE", taskGuid);
     }
 
     private void notifyRelationshipEvents(List<AtlasRelationship> relationships, OperationType operationType) throws AtlasBaseException {
@@ -444,6 +550,15 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
     @Override
     public void onClassificationsDeletedV2(AtlasEntity entity, List<AtlasClassification> deletedClassifications, boolean forceInline) throws AtlasBaseException {
         notifyClassificationEvents(Collections.singletonList(entity), CLASSIFICATION_DELETE, deletedClassifications, forceInline);
+    }
+
+    /**
+     * Helper method to get task GUID from request context headers.
+     * For non-task flows, returns "N/A".
+     */
+    private String getTaskGuidOrNA() {
+        String taskGuid = RequestContext.get().getRequestContextHeaders().get("x-atlan-task-guid");
+        return org.apache.commons.lang3.StringUtils.isNotEmpty(taskGuid) ? taskGuid : "N/A";
     }
 
 }

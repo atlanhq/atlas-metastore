@@ -4292,79 +4292,119 @@ public class EntityGraphMapper {
                                                     String entityGuid,
                                                     String tagTypeName, String parentEntityGuid, String toVertexGuid) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("propagateClassificationV2_new");
+        String taskGuid = getTaskGuidOrNA();
 
         final int BATCH_SIZE_FOR_ADD_PROPAGATION = 200;
 
         try {
             if (StringUtils.isEmpty(toVertexGuid)) {
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Entry - entityGuid={}, tagTypeName={}, parentEntityGuid={}", 
+                    taskGuid, entityGuid, tagTypeName, parentEntityGuid);
+                
                 if (StringUtils.isEmpty(entityGuid) || StringUtils.isEmpty(tagTypeName)) {
-                    LOG.error("propagateClassificationV2_Optimised(entityGuid={}, tagTypeName={}): entityGuid and/or classification vertex id is empty", entityGuid, tagTypeName);
+                    LOG.error("[TaskGuid: {}] propagateClassificationV2_Optimised: VALIDATION_FAILED - entityGuid and/or tagTypeName is empty", taskGuid);
                     throw new AtlasBaseException(String.format("propagateClassificationV2_Optimised(entityGuid=%s, tagTypeName=%s): entityGuid and/or classification vertex id is empty", entityGuid, tagTypeName));
                 }
 
                 AtlasVertex entityVertex = graphHelper.getVertexForGUID(entityGuid);
                 if (entityVertex == null) {
-                    String warningMessage = String.format("propagateClassificationV2_Optimised(entityGuid=%s, tagTypeName=%s): entity vertex not found, skipping task execution", entityGuid, tagTypeName);
-                    LOG.warn(warningMessage);
+                    LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: ENTITY_VERTEX_NOT_FOUND - entityGuid={}, skipping task execution",
+                        taskGuid, entityGuid);
                     return 0;
                 }
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Entity vertex found - vertexId={}", 
+                    taskGuid, entityVertex.getIdForDisplay());
 
                 AtlasClassification tag = tagDAO.findDirectTagByVertexIdAndTagTypeName(entityVertex.getIdForDisplay(), tagTypeName, false);
                 if (tag == null) {
+                    LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: TAG_NOT_FOUND_ON_ENTITY - attempting fallback to parentEntityGuid={}", 
+                        taskGuid, parentEntityGuid);
+                    
                     if (StringUtils.isNotEmpty(parentEntityGuid) && !parentEntityGuid.equals(entityGuid)) {
                         //fallback only to get tag
                         AtlasVertex parentEntityVertex = graphHelper.getVertexForGUID(parentEntityGuid);
                         if (parentEntityVertex == null) {
-                            String warningMessage = String.format("propagateClassificationV2_Optimised(parentEntityGuid=%s, tagTypeName=%s): parentEntityVertex vertex not found, skipping task execution", parentEntityGuid, tagTypeName);
-                            LOG.warn(warningMessage);
+                            LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: PARENT_ENTITY_VERTEX_NOT_FOUND - parentEntityGuid={}, skipping task execution",
+                                taskGuid, parentEntityGuid);
                             return 0;
                         }
+                        LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Parent entity vertex found - parentVertexId={}", 
+                            taskGuid, parentEntityVertex.getIdForDisplay());
+                        
                         tag = tagDAO.findDirectTagByVertexIdAndTagTypeName(parentEntityVertex.getIdForDisplay(), tagTypeName, false);
                     }
                     if (tag == null) {
-                        String warningMessage = String.format("propagateClassificationV2_Optimised(entityGuid=%s,parentEntityGuid=%s, tagTypeName=%s): tag not found, skipping task execution", entityGuid, parentEntityGuid, tagTypeName);
-                        LOG.warn(warningMessage);
+                        LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: TAG_NOT_FOUND - tagTypeName={}, entityGuid={}, parentEntityGuid={}, skipping task execution",
+                            taskGuid, tagTypeName, entityGuid, parentEntityGuid);
                         return 0;
                     }
                 }
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Tag found - tagTypeName={}, restrictLineage={}, restrictHierarchy={}", 
+                    taskGuid, tagTypeName, tag.getRestrictPropagationThroughLineage(), tag.getRestrictPropagationThroughHierarchy());
 
-                LOG.info("propagateClassificationV2_Optimised: Starting 'Add' propagation for tag '{}' from source {}", tagTypeName, entityGuid);
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Starting 'Add' propagation for tag '{}' from source {}", taskGuid, tagTypeName, entityGuid);
                 // 1. Calculate the full set of impacted vertices directly from the graph.
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: TRAVERSAL_START - Calculating impacted vertices", taskGuid);
                 Set<String> impactedVerticeIds = new HashSet<>();
                 String propagationMode = entityRetriever.determinePropagationMode(tag.getRestrictPropagationThroughLineage(), tag.getRestrictPropagationThroughHierarchy());
                 Boolean toExclude = Objects.equals(propagationMode, CLASSIFICATION_PROPAGATION_MODE_RESTRICT_LINEAGE);
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Propagation mode determined - mode={}, excludeLineage={}", 
+                    taskGuid, propagationMode, toExclude);
 
                 // The traversal to find out impacted vertices
                 entityRetriever.traverseImpactedVerticesByLevelV2(entityVertex, null, null, impactedVerticeIds, CLASSIFICATION_PROPAGATION_MODE_LABELS_MAP.get(propagationMode), toExclude, null, null);
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: TRAVERSAL_COMPLETE - Found {} impacted vertex IDs", 
+                    taskGuid, impactedVerticeIds.size());
 
                 if (parentEntityGuid != null && !entityGuid.equals(parentEntityGuid)) {
                     impactedVerticeIds.add(entityVertex.getIdForDisplay());
+                    LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: Added current entity to impacted list (parentEntityGuid differs) - vertexId={}", 
+                        taskGuid, entityVertex.getIdForDisplay());
                 }
 
                 if (CollectionUtils.isEmpty(impactedVerticeIds)) {
-                    LOG.info("propagateClassificationV2_Optimised: No entities found to propagate the classification to.");
+                    LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: NO_IMPACTED_ENTITIES - No entities found to propagate the classification to", taskGuid);
                     return 0;
                 }
 
                 // 2. Process additions in batches.
-                LOG.info("propagateClassificationV2_Optimised: Found {} total vertices for propagation. Processing in batches.", impactedVerticeIds.size());
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_PROCESSING_START - Total vertices to propagate: {}, batch size: {}", 
+                    taskGuid, impactedVerticeIds.size(), BATCH_SIZE_FOR_ADD_PROPAGATION);
                 List<String> vertexIdsToAdd = new ArrayList<>(impactedVerticeIds);
                 int assetsAffected = 0;
+                int batchNumber = 0;
                 for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE_FOR_ADD_PROPAGATION) {
+                    batchNumber++;
                     int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
+                    LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_{} - Processing vertex IDs from index {} to {}, count={}", 
+                        taskGuid, batchNumber, i, end, batchIds.size());
 
                     List<AtlasVertex> impactedVertices = batchIds.stream()
                             .map(x -> graph.getVertex(x))
                             .filter(Objects::nonNull)
                             .collect(Collectors.toList());
+                    
+                    int nullVerticesCount = batchIds.size() - impactedVertices.size();
+                    if (nullVerticesCount > 0) {
+                        LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_{} - NULL_VERTICES_FOUND - {} vertices returned null from graph.getVertex()",
+                            taskGuid, batchNumber, nullVerticesCount);
+                    }
 
                     if (!impactedVertices.isEmpty()) {
                         assetsAffected += impactedVertices.size();
-                        LOG.info("propagateClassificationV2_Optimised: Processing batch of {} assets for tag addition.", impactedVertices.size());
+                        LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_{} - Processing {} vertices for tag addition. Vertex IDs: {}", 
+                            taskGuid, batchNumber, impactedVertices.size(), 
+                            impactedVertices.stream().map(v -> GraphHelper.getGuid(v)).collect(Collectors.joining(", ")));
                         processClassificationPropagationAdditionV2(parameters, entityVertex.getIdForDisplay(), impactedVertices, tag);
+                        LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_{} - COMPLETE", taskGuid, batchNumber);
+                    } else {
+                        LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_{} - SKIPPED - No valid vertices in batch",
+                            taskGuid, batchNumber);
                     }
                 }
+                LOG.info("[TaskGuid: {}] propagateClassificationV2_Optimised: BATCH_PROCESSING_COMPLETE - Total assets affected: {}", 
+                    taskGuid, assetsAffected);
                 return assetsAffected;
             } else {
                 // "Add on Relationship Change" Flow, this logic processes all tags on the `fromVertex`.
@@ -4499,35 +4539,72 @@ public class EntityGraphMapper {
                                                            List<AtlasVertex> verticesToPropagate,
                                                            AtlasClassification classification) throws AtlasBaseException{
         AtlasPerfMetrics.MetricRecorder classificationPropagationMetricRecorder = RequestContext.get().startMetricRecord("processClassificationPropagationAddition");
+        String taskGuid = getTaskGuidOrNA();
         int impactedVerticesSize = verticesToPropagate.size();
 
         int offset = 0;
         int toIndex;
-        LOG.info(String.format("Total number of vertices to propagate: %d", impactedVerticesSize));
+        LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: ENTRY - sourceEntityVertexId={}, tagTypeName={}, totalVerticesToPropagate={}, chunkSize={}", 
+            taskGuid, entityVertexId, classification.getTypeName(), impactedVerticesSize, CHUNK_SIZE);
 
         try {
+            int chunkNumber = 0;
             do {
+                chunkNumber++;
                 toIndex = Math.min(offset + CHUNK_SIZE, impactedVerticesSize);
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 Set<AtlasVertex> chunkedVerticesToPropagateSet = new HashSet<>(chunkedVerticesToPropagate);
+                
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - Processing vertices from offset {} to {}, count={}", 
+                    taskGuid, chunkNumber, offset, toIndex, chunkedVerticesToPropagate.size());
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - Entity GUIDs in chunk: {}", 
+                    taskGuid, chunkNumber, 
+                    chunkedVerticesToPropagate.stream().map(v -> GraphHelper.getGuid(v)).collect(Collectors.joining(", ")));
+                
                 Map<String, Map<String, Object>> deNormAttributesMap = new HashMap<>();
                 Map<String, Map<String, Object>> assetMinAttrsMap = new HashMap<>();
 
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - UPDATE_CLASSIFICATION_TEXT_START", taskGuid, chunkNumber);
                 List<AtlasEntity> propagatedEntitiesChunked = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - UPDATE_CLASSIFICATION_TEXT_COMPLETE - propagatedEntitiesCount={}, deNormAttributesMapSize={}", 
+                    taskGuid, chunkNumber, propagatedEntitiesChunked.size(), deNormAttributesMap.size());
 
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - CASSANDRA_WRITE_START - Writing to tagDAO", taskGuid, chunkNumber);
                 tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), deNormAttributesMap.keySet(), assetMinAttrsMap, classification);
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - CASSANDRA_WRITE_COMPLETE - Wrote {} records to Cassandra", 
+                    taskGuid, chunkNumber, deNormAttributesMap.size());
+                
                 if (MapUtils.isNotEmpty(deNormAttributesMap)) {
+                    LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - ES_WRITE_START - Writing {} records to Elasticsearch", 
+                        taskGuid, chunkNumber, deNormAttributesMap.size());
+                    LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - ES records to write: {}", 
+                        taskGuid, chunkNumber, String.join(", ", deNormAttributesMap.keySet()));
                     ESConnector.writeTagProperties(deNormAttributesMap);
+                    LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - ES_WRITE_COMPLETE", taskGuid, chunkNumber);
+                } else {
+                    LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - ES_WRITE_SKIPPED - deNormAttributesMap is empty",
+                        taskGuid, chunkNumber);
                 }
+                
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - NOTIFICATION_START - Sending notifications for {} entities", 
+                    taskGuid, chunkNumber, chunkedVerticesToPropagateSet.size());
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - Notification entity GUIDs: {}", 
+                    taskGuid, chunkNumber, 
+                    chunkedVerticesToPropagateSet.stream().map(v -> GraphHelper.getGuid(v)).collect(Collectors.joining(", ")));
                 entityChangeNotifier.onClassificationPropagationAddedToEntitiesV2(chunkedVerticesToPropagateSet, Collections.singletonList(classification), true, RequestContext.get()); // Async call
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - NOTIFICATION_DISPATCHED (Async)", taskGuid, chunkNumber);
+                
                 offset += CHUNK_SIZE;
-                LOG.info("offset {}, impactedVerticesSize: {}", offset, impactedVerticesSize);
+                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - COMPLETE - Next offset: {}", 
+                    taskGuid, chunkNumber, offset);
             } while (offset < impactedVerticesSize);
-            LOG.info(String.format("Total number of vertices propagated: %d", impactedVerticesSize));
+            
+            LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: ALL_CHUNKS_COMPLETE - Total vertices propagated: {}", 
+                taskGuid, impactedVerticesSize);
             return impactedVerticesSize;
         } catch (Exception exception) {
-            LOG.error("Error occurred while adding classification propagation for classification with source entity id {}",
-                    entityVertexId, exception);
+            LOG.error("[TaskGuid: {}] processClassificationPropagationAdditionV2: ERROR - Error occurred while adding classification propagation. sourceEntityVertexId={}, tagTypeName={}, error={}", 
+                taskGuid, entityVertexId, classification.getTypeName(), exception.getMessage(), exception);
             throw exception;
         } finally {
             RequestContext.get().endMetricRecord(classificationPropagationMetricRecorder);
@@ -6039,56 +6116,89 @@ public class EntityGraphMapper {
                                                  Map<String, Map<String, Object>> assetMinAttrsMap) throws AtlasBaseException {
         List<AtlasEntity> propagatedEntities = new ArrayList<>();
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
+        String taskGuid = getTaskGuidOrNA();
+
+        LOG.info("[TaskGuid: {}] updateClassificationTextV2: ENTRY - tagTypeName={}, verticesToProcess={}", 
+            taskGuid, currentTag.getTypeName(), propagatedVertices.size());
 
         if(CollectionUtils.isNotEmpty(propagatedVertices)) {
+            int processedCount = 0;
             for(AtlasVertex vertex : propagatedVertices) {
-                Map<String, Object> assetMinAttrs = getMinimalAssetMap(vertex);
-                assetMinAttrsMap.put(vertex.getIdForDisplay(), assetMinAttrs);
+                processedCount++;
+                String vertexId = vertex.getIdForDisplay();
+                String entityGuid = GraphHelper.getGuid(vertex);
+                
+                LOG.info("[TaskGuid: {}] updateClassificationTextV2: PROCESSING_VERTEX_{} - entityGuid={}, vertexId={}", 
+                    taskGuid, processedCount, entityGuid, vertexId);
+                
+                try {
+                    Map<String, Object> assetMinAttrs = getMinimalAssetMap(vertex);
+                    assetMinAttrsMap.put(vertexId, assetMinAttrs);
+                    LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - Retrieved minimal asset map - entityName={}, qualifiedName={}", 
+                        taskGuid, processedCount, assetMinAttrs.get(NAME), assetMinAttrs.get(QUALIFIED_NAME));
 
-                //get current associated tags to asset ONLY from Cassandra namespace
-                List<Tag> tags = tagDAO.getAllTagsByVertexId(vertex.getIdForDisplay());
-                List<AtlasClassification> finalClassifications = tags.stream().map(t -> {
-                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                }).collect(Collectors.toList());
+                    //get current associated tags to asset ONLY from Cassandra namespace
+                    List<Tag> tags = tagDAO.getAllTagsByVertexId(vertexId);
+                    LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - Retrieved {} existing tags from Cassandra", 
+                        taskGuid, processedCount, tags.size());
+                    
+                    List<AtlasClassification> finalClassifications = tags.stream().map(t -> {
+                        return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
+                    }).collect(Collectors.toList());
 
-                tags = tags.stream().filter(Tag::isPropagated).toList();
-                List<AtlasClassification> finalPropagatedClassifications = tags.stream().map(t -> {
-                    return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
-                }).collect(Collectors.toList());
+                    tags = tags.stream().filter(Tag::isPropagated).toList();
+                    List<AtlasClassification> finalPropagatedClassifications = tags.stream().map(t -> {
+                        return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
+                    }).collect(Collectors.toList());
+                    LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - Existing propagated tags count={}", 
+                        taskGuid, processedCount, finalPropagatedClassifications.size());
 
-                AtlasClassification copiedPropagatedClassification = new AtlasClassification(currentTag);
-                copiedPropagatedClassification.setEntityGuid((String) assetMinAttrs.get(GUID_PROPERTY_KEY));
-                finalClassifications.add(copiedPropagatedClassification);
-                finalPropagatedClassifications.add(copiedPropagatedClassification);
+                    AtlasClassification copiedPropagatedClassification = new AtlasClassification(currentTag);
+                    copiedPropagatedClassification.setEntityGuid((String) assetMinAttrs.get(GUID_PROPERTY_KEY));
+                    finalClassifications.add(copiedPropagatedClassification);
+                    finalPropagatedClassifications.add(copiedPropagatedClassification);
+                    LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - Added new tag to classifications. Total classifications={}, Total propagated={}", 
+                        taskGuid, processedCount, finalClassifications.size(), finalPropagatedClassifications.size());
 
-                AtlasEntity entity = new AtlasEntity();
-                entity.setClassifications(finalClassifications);
+                    AtlasEntity entity = new AtlasEntity();
+                    entity.setClassifications(finalClassifications);
+                    entity.setGuid((String) assetMinAttrs.get(GUID_PROPERTY_KEY));
+                    entity.setTypeName((String) assetMinAttrs.get(TYPE_NAME_PROPERTY_KEY));
+                    entity.setCreatedBy((String) assetMinAttrs.get(CREATED_BY_KEY));
+                    entity.setUpdatedBy((String) assetMinAttrs.get(MODIFIED_BY_KEY));
+                    entity.setCreateTime((Date) assetMinAttrs.get(TIMESTAMP_PROPERTY_KEY));
+                    entity.setUpdateTime((Date) assetMinAttrs.get(MODIFICATION_TIMESTAMP_PROPERTY_KEY));
+                    entity.setAttribute(NAME, assetMinAttrs.get(NAME));
+                    entity.setAttribute(QUALIFIED_NAME, assetMinAttrs.get(QUALIFIED_NAME));
+                    LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - Constructed AtlasEntity", taskGuid, processedCount);
 
-                entity.setGuid((String) assetMinAttrs.get(GUID_PROPERTY_KEY));
+                    Map<String, Object> deNormAttributes;
+                    if (CollectionUtils.isEmpty(finalClassifications)) {
+                        deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
+                        LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - NO_TAGS - Generated deNorm attributes for no tags", 
+                            taskGuid, processedCount);
+                    } else {
+                        deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
+                        LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - Generated deNorm attributes. Keys: {}", 
+                            taskGuid, processedCount, String.join(", ", deNormAttributes.keySet()));
+                    }
 
-                entity.setTypeName((String) assetMinAttrs.get(TYPE_NAME_PROPERTY_KEY));
-
-                entity.setCreatedBy((String) assetMinAttrs.get(CREATED_BY_KEY));
-                entity.setUpdatedBy((String) assetMinAttrs.get(MODIFIED_BY_KEY));
-
-                entity.setCreateTime((Date) assetMinAttrs.get(TIMESTAMP_PROPERTY_KEY));
-                entity.setUpdateTime((Date) assetMinAttrs.get(MODIFICATION_TIMESTAMP_PROPERTY_KEY));
-
-                entity.setAttribute(NAME, assetMinAttrs.get(NAME));
-                entity.setAttribute(QUALIFIED_NAME, assetMinAttrs.get(QUALIFIED_NAME));
-
-
-                Map<String, Object> deNormAttributes;
-                if (CollectionUtils.isEmpty(finalClassifications)) {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
-                } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributesMap.put(vertexId, deNormAttributes);
+                    propagatedEntities.add(entity);
+                    LOG.info("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - COMPLETE - Added to propagatedEntities and deNormAttributesMap", 
+                        taskGuid, processedCount);
+                } catch (Exception e) {
+                    LOG.error("[TaskGuid: {}] updateClassificationTextV2: VERTEX_{} - ERROR - Failed to process vertex. entityGuid={}, vertexId={}, error={}", 
+                        taskGuid, processedCount, entityGuid, vertexId, e.getMessage(), e);
+                    throw e;
                 }
-
-                deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
-                propagatedEntities.add(entity);
             }
+            LOG.info("[TaskGuid: {}] updateClassificationTextV2: ALL_VERTICES_PROCESSED - Successfully processed {}/{} vertices", 
+                taskGuid, propagatedEntities.size(), propagatedVertices.size());
+        } else {
+            LOG.info("[TaskGuid: {}] updateClassificationTextV2: NO_VERTICES - propagatedVertices is empty", taskGuid);
         }
+        
         RequestContext.get().endMetricRecord(metricRecorder);
         return propagatedEntities;
     }
@@ -6919,6 +7029,16 @@ public class EntityGraphMapper {
 
         RequestContext requestContext = RequestContext.get();
         requestContext.cacheDifferentialEntity(diffEntity);
+    }
+
+    /**
+     * Helper method to get task GUID from request context headers.
+     * Task GUID is set by AbstractTask when classification propagation tasks are executed.
+     * For non-task flows (direct API calls), returns "N/A".
+     */
+    private String getTaskGuidOrNA() {
+        String taskGuid = RequestContext.get().getRequestContextHeaders().get("x-atlan-task-guid");
+        return StringUtils.isNotEmpty(taskGuid) ? taskGuid : "N/A";
     }
 
 }
