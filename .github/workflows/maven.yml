@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - fifa-qa-tag-incons
 
 jobs:
   # Detect what changed to optimize workflow execution
