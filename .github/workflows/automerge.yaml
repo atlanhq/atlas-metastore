@@ -55,7 +55,7 @@ jobs:
           base: ${{ github.event.inputs.target_branch }}
           branch: merge-master-into-${{ github.event.inputs.target_branch }}
           branch-suffix: timestamp
-          title: ${{ steps.conflict_check.outputs.conflicts == 'true' && '⚠️ Conflicts detected merging master → ' || '✅ Auto-merge: master → ' }}${{ github.event.inputs.target_branch }}
+          title: "automerge"
           commit-message: "Merge master into ${{ github.event.inputs.target_branch }}"
           body: |
             Automated merge from master to ${{ github.event.inputs.target_branch }}.
