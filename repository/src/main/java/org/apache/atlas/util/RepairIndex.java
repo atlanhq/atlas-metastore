@@ -18,17 +18,19 @@
 
 package org.apache.atlas.util;
 
+import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.AtlanElasticSearchIndex;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
-import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
+import org.apache.atlas.type.AtlasTypeRegistry;
 import org.janusgraph.core.JanusGraph;
+import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.indexing.IndexEntry;
 import org.janusgraph.graphdb.database.IndexSerializer;
@@ -41,17 +43,20 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
 import javax.inject.Inject;
+import javax.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
-import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
 import static org.apache.atlas.type.Constants.INDEX_NAME_EDGE_INDEX;
 import static org.apache.atlas.type.Constants.INDEX_NAME_VERTEX_INDEX;
+
 
 @Component
 public class RepairIndex {
@@ -60,14 +65,63 @@ public class RepairIndex {
     private static final int  MAX_TRIES_ON_FAILURE = 3;
 
     private JanusGraph graph;
+    private AtlasGraph atlasGraph;
     private AtlanElasticSearchIndex searchIndex;
     private EntityMutationService entityMutationService;
+    private AtlasTypeRegistry typeRegistry;
     private GraphHelper graphHelper;
 
     @Inject
-    public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph) {
+    public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph,
+                       AtlasTypeRegistry typeRegistry) {
         this.entityMutationService = entityMutationService;
+        this.typeRegistry = typeRegistry;
+        this.atlasGraph = atlasGraph;
         graphHelper = new GraphHelper(atlasGraph);
+    }
+
+    /**
+     * Used by DLQ replay service
+     * @param indexName
+     * @param vertexIds
+     * @throws Exception
+     */
+    public void reindexVerticesByIds(String indexName, Set<String> vertexIds) throws Exception {
+        Set<AtlasVertex> vertices = graphHelper.getVertices(vertexIds);
+        Set<String> guids = vertices.stream().map(GraphHelper::getGuid).collect(Collectors.toSet());
+
+        if (LEAN_GRAPH_ENABLED) {
+            Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) atlasGraph).getESPropertiesForUpdateFromVertices(vertices, this.typeRegistry);
+            try {
+                ESConnector.syncToEs(toReIndex, true, null);
+            } catch (Exception e){
+                LOG.info("Exception: " + e.getMessage());
+            }
+        } else {
+
+            Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
+            StandardJanusGraphTx tx = null;
+            try {
+                tx = (StandardJanusGraphTx) graph.newTransaction();
+                JanusGraphSchemaVertex indexV = tx.getSchemaVertex(JanusGraphSchemaCategory.GRAPHINDEX.getSchemaName(indexName));
+                MixedIndexType indexType = (MixedIndexType) indexV.asIndexType();
+                StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
+                IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
+
+                for (AtlasVertex vertex : vertices) {
+                    indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
+                }
+                searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
+
+            } catch (BackendException e) {
+                throw e;
+            } finally {
+                if (tx != null && tx.isOpen()) {
+                    tx.rollback();
+                }
+            }
+        }
+        entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
     }
 
     @PostConstruct
@@ -80,38 +134,6 @@ public class RepairIndex {
             throw new RuntimeException(e);
         }
         LOG.info("Graph Initialized!");
-    }
-
-    /**
-     * Used by DLQ replay service
-     * @param indexName
-     * @param vertexIds
-     * @throws Exception
-     */
-    public void reindexVerticesByIds(String indexName, Set<Long> vertexIds) throws Exception {
-        Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
-        StandardJanusGraphTx tx = null;
-        try {
-            tx = (StandardJanusGraphTx) graph.newTransaction();
-            JanusGraphSchemaVertex indexV = tx.getSchemaVertex(JanusGraphSchemaCategory.GRAPHINDEX.getSchemaName(indexName));
-            MixedIndexType indexType = (MixedIndexType) indexV.asIndexType();
-            Set<AtlasVertex> vertices = graphHelper.getVertices(vertexIds);
-            StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
-            IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
-            Set<String> guids = new HashSet<>();
-            for (AtlasVertex vertex : vertices) {
-                indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
-                guids.add(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
-            }
-            searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
-            entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
-        } catch (BackendException | AtlasBaseException e) {
-            throw e;
-        } finally {
-            if (tx != null && tx.isOpen()) {
-                tx.rollback();
-            }
-        }
     }
 
     public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
@@ -128,8 +150,6 @@ public class RepairIndex {
 
             LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
         }
-
-        referencedGUIDs.add(guid);
         entityMutationService.repairClassificationMappings(new ArrayList<>(referencedGUIDs));
     }
 
@@ -146,7 +166,6 @@ public class RepairIndex {
             LOG.info(": Time taken: " + (System.currentTimeMillis() - startTime) + " ms");
             LOG.info(": Done!");
         }
-
         entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
     }
 
@@ -158,32 +177,59 @@ public class RepairIndex {
         Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
         StandardJanusGraphTx tx = null;
 
-        try {
-            tx = (StandardJanusGraphTx) graph.newTransaction();
-            JanusGraphSchemaVertex indexV = tx.getSchemaVertex(JanusGraphSchemaCategory.GRAPHINDEX.getSchemaName(indexName));
-            MixedIndexType indexType = (MixedIndexType) indexV.asIndexType();
+        if (LEAN_GRAPH_ENABLED) {
+            int chunkSize = 100;
 
-            for (String entityGuid : entityGUIDs) {
-                for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
-                    AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
+            Iterator<String> iterator = entityGUIDs.iterator();
+            while (iterator.hasNext()) {
+
+                Set<AtlasVertex> currentChunk = new HashSet<>(chunkSize);
+                int count = 0;
+
+                while (iterator.hasNext() && count < chunkSize) {
+                    AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(iterator.next());
                     if (vertex != null) {
-                        try {
-                            indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
-                            break;
-                        } catch (Exception e) {
-                            LOG.info("Exception: " + e.getMessage());
-                            LOG.info("Pausing before retry..");
-                            Thread.sleep(2000 * attemptCount);
+                        currentChunk.add(vertex);
+                        count++;
+                    }
+                }
+
+                Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) atlasGraph).getESPropertiesForUpdateFromVertices(currentChunk, this.typeRegistry);
+                try {
+                    ESConnector.syncToEs(toReIndex, true, null);
+                } catch (Exception e){
+                    LOG.info("Exception: " + e.getMessage());
+                }
+            }
+        } else {
+
+            try {
+                tx = (StandardJanusGraphTx) graph.newTransaction();
+                JanusGraphSchemaVertex indexV = tx.getSchemaVertex(JanusGraphSchemaCategory.GRAPHINDEX.getSchemaName(indexName));
+                MixedIndexType indexType = (MixedIndexType) indexV.asIndexType();
+
+                for (String entityGuid : entityGUIDs) {
+                    for (int attemptCount = 1; attemptCount <= MAX_TRIES_ON_FAILURE; attemptCount++) {
+                        AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(entityGuid);
+                        if (vertex != null) {
+                            try {
+                                indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
+                                break;
+                            } catch (Exception e) {
+                                LOG.info("Exception: " + e.getMessage());
+                                LOG.info("Pausing before retry..");
+                                Thread.sleep(2000 * attemptCount);
+                            }
                         }
                     }
                 }
-            }
-            searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
-        } catch (InterruptedException | BackendException e) {
-            throw e;
-        } finally {
-            if (tx != null && tx.isOpen()) {
-                tx.rollback();
+                searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
+            } catch (InterruptedException | BackendException e) {
+                throw e;
+            } finally {
+                if (tx != null && tx.isOpen()) {
+                    tx.rollback();
+                }
             }
         }
     }

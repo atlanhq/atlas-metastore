@@ -62,6 +62,7 @@ import java.util.concurrent.Future;
 import java.util.stream.Stream;
 
 import static org.apache.atlas.AtlasErrorCode.INDEX_NOT_FOUND;
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
 
 
 public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex, AtlasJanusEdge> {
@@ -728,8 +729,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(hit.getId());
+            String vertexId = getVertexId();
             return graph.getVertex(String.valueOf(vertexId));
+        }
+
+        @Override
+        public String getVertexId() {
+            String docId = String.valueOf(hit.getId());
+            return docId.substring(1);
         }
 
         @Override
@@ -772,8 +779,13 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
-            return graph.getVertex(String.valueOf(vertexId));
+            if (LEAN_GRAPH_ENABLED) {
+                String vertexId = getVertexId();
+                return graph.getVertex(vertexId);
+            } else {
+                long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
+                return graph.getVertex(String.valueOf(vertexId));
+            }
         }
 
         @Override
@@ -802,6 +814,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
                 return result;
             }
             return null;
+        }
+
+        @Override
+        public String getVertexId() {
+            // Discard prefix "S" from doc id
+            // TODO: This should not fail in case of migrated vertices
+            String docId = String.valueOf(hit.get("_id"));
+            return docId.substring(1);
         }
 
         @Override
