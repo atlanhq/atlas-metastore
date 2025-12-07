@@ -79,11 +79,20 @@ public class FeatureFlagStore implements ApplicationContextAware {
                 preloadAllFlags();
                 initialized = true;
 
-                // Add version tracking metric
+                // Add version tracking metric - use instance method to avoid circular dependency
                 MeterRegistry meterRegistry = org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
                 Gauge.builder(METRIC_COMPONENT + "_atlas_version_enabled", 
                             this,
-                            ref -> isTagV2Enabled() ? 2.0 : 1.0)
+                            ref -> {
+                                // Use instance method instead of static to avoid ApplicationContext lookup during initialization
+                                try {
+                                    String flag = ref.getFlagInternal(FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey());
+                                    return "false".equals(flag) ? 1.0 : 2.0;
+                                } catch (Exception e) {
+                                    LOG.warn("Could not determine Tags version for metric, defaulting to v1", e);
+                                    return 1.0;
+                                }
+                            })
                     .description("Indicates which Tag propagation version is enabled (2.0 = v2, 1.0 = v1)")
                     .tag("component", "version")
                     .register(meterRegistry);
@@ -212,8 +221,11 @@ public class FeatureFlagStore implements ApplicationContextAware {
     }
 
     private static String getDefaultValue(String key) {
-        if (FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey().equals(key))
-            throw new RuntimeException("Cannot return default value for critical Tags FF: " + key);
+        // During initialization, allow default values even for critical flags
+        // Log a warning instead of throwing exception to prevent initialization failures
+        if (FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey().equals(key)) {
+            LOG.warn("Using default value for critical Tags FF: {}. This should only happen during initialization.", key);
+        }
         FeatureFlag flag = FeatureFlag.fromKey(key);
         return flag != null ? String.valueOf(flag.getDefaultValue()) : "false";
     }

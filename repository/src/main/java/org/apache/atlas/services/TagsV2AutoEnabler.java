@@ -11,6 +11,7 @@ import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.typesystem.types.DataTypes;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import javax.annotation.PostConstruct;
@@ -24,6 +25,7 @@ import java.util.Iterator;
  * latest tag propagation version by default.
  */
 @Component
+@DependsOn("featureFlagStore")  // Ensure FeatureFlagStore is fully initialized before this bean
 public class TagsV2AutoEnabler {
     private static final Logger LOG = LoggerFactory.getLogger(TagsV2AutoEnabler.class);
 
@@ -35,18 +37,29 @@ public class TagsV2AutoEnabler {
     private static final String VERTEX_TYPE = AtlasGraphUtilsV2.VERTEX_TYPE; // "typeSystem"
 
     private final AtlasGraph graph;
+    private final FeatureFlagStore featureFlagStore;
 
     @Inject
-    public TagsV2AutoEnabler(AtlasGraph graph) {
+    public TagsV2AutoEnabler(AtlasGraph graph, FeatureFlagStore featureFlagStore) {
         this.graph = graph;
+        this.featureFlagStore = featureFlagStore;
     }
 
     @PostConstruct
-    public void checkAndEnableJanusOptimisation() throws AtlasBaseException {
+    public void checkAndEnableJanusOptimisation() {
         try {
             LOG.info("Starting auto-enable check for Janus optimization...");
 
-            boolean isTagV2Enabled = FeatureFlagStore.isTagV2Enabled();
+            // Check if FeatureFlagStore is fully initialized
+            if (!featureFlagStore.isInitialized()) {
+                LOG.warn("FeatureFlagStore not fully initialized yet, skipping auto-enable check");
+                return;
+            }
+
+            // Use instance method instead of static method to avoid ApplicationContext lookup issues
+            String flagValue = featureFlagStore.getFlagInternal(ENABLE_JANUS_OPTIMISATION_KEY);
+            boolean isTagV2Enabled = !"false".equals(flagValue);
+            
             if (isTagV2Enabled) {
                 LOG.info("Tags v2 optimization is already enabled, skipping auto-enable check");
                 return;
@@ -57,15 +70,16 @@ public class TagsV2AutoEnabler {
 
             if (!hasClassificationTypes) {
                 LOG.info("No classification types found - enabling Tags V2 for new tenant");
-                FeatureFlagStore.setFlag(ENABLE_JANUS_OPTIMISATION_KEY, "true");
+                featureFlagStore.setFlagInternal(ENABLE_JANUS_OPTIMISATION_KEY, "true");
                 LOG.info("Successfully enabled Tags V2 feature flag");
             } else {
                 LOG.info("Classification types found - keeping existing configuration (Tags v2 disabled)");
             }
 
         } catch (Exception e) {
-            LOG.error("Error during auto-enable check for Tags v2 optimization", e);
-            throw e;
+            // Don't prevent Atlas startup if auto-enable check fails
+            LOG.error("Error during auto-enable check for Tags v2 optimization, skipping auto-enable", e);
+            // DO NOT re-throw - allow startup to continue
         }
     }
 
