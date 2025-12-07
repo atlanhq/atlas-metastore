@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - papayafix
 
 jobs:
   # Detect what changed to optimize workflow execution
