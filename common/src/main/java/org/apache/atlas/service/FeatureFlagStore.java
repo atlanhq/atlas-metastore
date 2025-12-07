@@ -234,7 +234,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
         return FeatureFlag.isValidFlag(key);
     }
 
-    String getFlagInternal(String key) {
+    public String getFlagInternal(String key) {
         if (!initialized) {
             LOG.warn("FeatureFlagStore not fully initialized yet, attempting to get flag: {}", key);
             throw new IllegalStateException("FeatureFlagStore not initialized");
@@ -342,7 +342,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
         instance.setFlagInternal(key, value);
     }
 
-    synchronized void setFlagInternal(String key, String value) {
+    public synchronized void setFlagInternal(String key, String value) {
         if (StringUtils.isEmpty(key) || StringUtils.isEmpty(value)) {
             return;
         }
@@ -373,7 +373,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
         instance.deleteFlagInternal(key);
     }
 
-    synchronized void deleteFlagInternal(String key) {
+    public synchronized void deleteFlagInternal(String key) {
         if (StringUtils.isEmpty(key)) {
             return;
         }
