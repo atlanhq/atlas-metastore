@@ -225,11 +225,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         this.esUiClusterClient = esUiClusterClient;
         this.esNonUiClusterClient = esNonUiClusterClient;
 
-        if (LEAN_GRAPH_ENABLED) {
-            initializeSchema();
-            this.cqlSession = initializeCassandraSession();
-            this.dynamicVertexService = new DynamicVertexService(cqlSession);
-        }
+        initializeSchema();
+        this.cqlSession = initializeCassandraSession();
+        this.dynamicVertexService = new DynamicVertexService(cqlSession);
     }
 
     private CqlSession initializeCassandraSession() {
