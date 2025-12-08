@@ -221,11 +221,6 @@ public class FeatureFlagStore implements ApplicationContextAware {
     }
 
     private static String getDefaultValue(String key) {
-        // During initialization, allow default values even for critical flags
-        // Log a warning instead of throwing exception to prevent initialization failures
-        if (FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey().equals(key)) {
-            LOG.warn("Using default value for critical Tags FF: {}. This should only happen during initialization.", key);
-        }
         FeatureFlag flag = FeatureFlag.fromKey(key);
         return flag != null ? String.valueOf(flag.getDefaultValue()) : "false";
     }
