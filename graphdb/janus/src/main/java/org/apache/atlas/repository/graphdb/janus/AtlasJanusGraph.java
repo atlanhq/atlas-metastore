@@ -112,6 +112,7 @@ import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -453,65 +454,90 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
             try {
                 AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertVertices");
-                // Extract updated vertices
-                Set<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
-                        .map(x -> ((AtlasVertex) RequestContext.get().getDifferentialVertex(x)))
-                        .filter(Objects::nonNull)
-                        .filter(AtlasVertex::isAssetVertex)
-                        .collect(Collectors.toSet());
+                
+                // Extract updated vertices - use a local variable that can be cleared
+                Set<AtlasVertex> updatedVertexList = new HashSet<>();
+                
+                // Process differential vertices
+                for (String guid : RequestContext.get().getDifferentialGUIDS()) {
+                    AtlasVertex vertex = (AtlasVertex) RequestContext.get().getDifferentialVertex(guid);
+                    if (vertex != null && vertex.isAssetVertex()) {
+                        updatedVertexList.add(vertex);
+                    }
+                }
 
                 // Extract SOFT deleted vertices
-                updatedVertexList.addAll(RequestContext.get().getVerticesToSoftDelete().stream()
-                        .map(x -> ((AtlasVertex) x))
-                        .filter(Objects::nonNull)
-                        .filter(AtlasVertex::isAssetVertex)
-                        .collect(Collectors.toSet()));
+                for (Object obj : RequestContext.get().getVerticesToSoftDelete()) {
+                    AtlasVertex vertex = (AtlasVertex) obj;
+                    if (vertex != null && vertex.isAssetVertex()) {
+                        updatedVertexList.add(vertex);
+                    }
+                }
 
                 // Extract restored vertices
-                if (!RequestContext.get().getRestoredVertices().isEmpty()) {
-                    updatedVertexList.addAll(RequestContext.get().getRestoredVertices().stream()
-                            .map(x -> ((AtlasVertex) x))
-                            .filter(Objects::nonNull)
-                            .filter(AtlasVertex::isAssetVertex)
-                            .collect(Collectors.toSet()));
+                for (Object obj : RequestContext.get().getRestoredVertices()) {
+                    AtlasVertex vertex = (AtlasVertex) obj;
+                    if (vertex != null && vertex.isAssetVertex()) {
+                        updatedVertexList.add(vertex);
+                    }
                 }
 
-                Map<String, Map<String, Object>> normalisedAttributes = normalizeAttributes(updatedVertexList, typeRegistry);
-
+                // Normalize and insert to Cassandra
+                Map<String, Map<String, Object>> normalisedAttributes = null;
                 if (CollectionUtils.isNotEmpty(updatedVertexList)) {
+                    normalisedAttributes = normalizeAttributes(updatedVertexList, typeRegistry);
                     dynamicVertexService.insertVertices(normalisedAttributes);
                 }
+                
+                // Clear updatedVertexList early to free memory before ES operations
+                updatedVertexList.clear();
+                updatedVertexList = null; // Help GC
+                
                 RequestContext.get().endMetricRecord(recorder);
 
                 recorder = RequestContext.get().startMetricRecord("commitIdOnly.callDropVertices");
 
                 // Extract HARD/PURGE vertex Ids
-
                 // Skipping isAssetVertex check as it already performed when adding item in verticesToHardDelete
                 // This is done to avoid "Vertex with id <> was removed" error as isAssetVertex on purged vertex fails
                 // Though Janus vertex is purged, still we can use cached Atlas vertex to get vertexId & docId
-                List<AtlasVertex> hardDeletedVertices = RequestContext.get().getVerticesToHardDelete().stream()
-                        .map(x -> (AtlasVertex) x)
-                        .filter(Objects::nonNull)
-                        .toList();
-
-                List<String> purgedVertexIdsList = hardDeletedVertices.stream()
-                        .map(AtlasElement::getIdForDisplay)
-                        .toList();
+                List<String> purgedVertexIdsList = new ArrayList<>();
+                List<String> docIdsToDelete = new ArrayList<>();
+                
+                for (Object obj : RequestContext.get().getVerticesToHardDelete()) {
+                    AtlasVertex vertex = (AtlasVertex) obj;
+                    if (vertex != null) {
+                        purgedVertexIdsList.add(vertex.getIdForDisplay());
+                        docIdsToDelete.add(vertex.getDocId());
+                    }
+                }
+                
                 dynamicVertexService.dropVertices(purgedVertexIdsList);
+                
+                // Clear purgedVertexIdsList early
+                purgedVertexIdsList.clear();
+                purgedVertexIdsList = null;
 
                 RequestContext.get().endMetricRecord(recorder);
 
-
                 recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertES");
-                List<String> docIdsToDelete = hardDeletedVertices.stream()
-                        .map(AtlasVertex::getDocId)
-                        .toList();
-
-                ESConnector.syncToEs(
-                        getESPropertiesForUpdateFromMap(normalisedAttributes, typeRegistry),
-                        true,
-                        docIdsToDelete);
+                
+                // Get ES properties for update - reuse normalisedAttributes if available
+                Map<String, Map<String, Object>> esProperties = null;
+                if (normalisedAttributes != null && !normalisedAttributes.isEmpty()) {
+                    esProperties = getESPropertiesForUpdateFromMap(normalisedAttributes, typeRegistry);
+                    // Clear normalisedAttributes after getting ES properties
+                    normalisedAttributes.clear();
+                    normalisedAttributes = null;
+                }
+                
+                ESConnector.syncToEs(esProperties, true, docIdsToDelete);
+                
+                // Clear ES-related collections
+                if (esProperties != null) {
+                    esProperties.clear();
+                }
+                docIdsToDelete.clear();
 
                 RequestContext.get().endMetricRecord(recorder);
             } catch (AtlasBaseException e) {

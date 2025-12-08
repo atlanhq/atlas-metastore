@@ -45,9 +45,7 @@ public class ESConnector {
 
     private static Set<String> DENORM_ATTRS;
     private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
-    public static final String JG_ES_DOC_ID_PREFIX = "S"; // S fot string type custom vertex ID
-
-
+    public static final String JG_ES_DOC_ID_PREFIX = "S"; // S for string type custom vertex ID
 
     public static final String INDEX_BACKEND_CONF = "atlas.graph.index.search.hostname";
 
@@ -92,26 +90,26 @@ public class ESConnector {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
 
         if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
+            RequestContext.get().endMetricRecord(recorder);
             return;
         }
+        
         try {
             StringBuilder bulkRequestBody = new StringBuilder();
 
             if (!MapUtils.isEmpty(entitiesMapForUpdate)) {
                 for (String assetVertexId : entitiesMapForUpdate.keySet()) {
-                    Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetVertexId));
+                    Map<String, Object> toUpdate = entitiesMapForUpdate.get(assetVertexId);
 
-                    String docId =  JG_ES_DOC_ID_PREFIX + assetVertexId;
-
-                    bulkRequestBody.append("{\"update\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",\"_id\":\"" + docId + "\" }}\n");
-
+                    String docId = JG_ES_DOC_ID_PREFIX + assetVertexId;
+                    bulkRequestBody.append("{\"update\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",\"_id\":\"").append(docId).append("\" }}\n");
                     bulkRequestBody.append("{");
 
                     String attrsToUpdate = AtlasType.toJson(toUpdate);
-                    bulkRequestBody.append("\"doc\":" + attrsToUpdate);
+                    bulkRequestBody.append("\"doc\":").append(attrsToUpdate);
 
                     if (upsert) {
-                        bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
+                        bulkRequestBody.append(",\"upsert\":").append(attrsToUpdate);
                     }
 
                     bulkRequestBody.append("}\n");
@@ -119,56 +117,60 @@ public class ESConnector {
             }
 
             if (!CollectionUtils.isEmpty(docIdsToDelete)) {
-                for (String docId: docIdsToDelete) {
+                for (String docId : docIdsToDelete) {
                     bulkRequestBody.append("{\"delete\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",");
-                    bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}");
-                    bulkRequestBody.append("}\n");
+                    bulkRequestBody.append("\"_id\":\"").append(docId).append("\"}}\n");
                 }
             }
 
-            Request request = new Request("POST", "/_bulk");
-            request.setEntity(new StringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON));
-
-            int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
-            long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
-
-            for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
-                try {
-                    Response response = lowLevelClient.performRequest(request); // Capture the response
-                    int statusCode = response.getStatusLine().getStatusCode();
-
-                    if (statusCode >= 200 && statusCode < 300) {
-                        // Check response body for partial failures if necessary
-                        return; // Success
-                    }
-
-                    // Add logic to retry on 5xx or throw on 4xx
-                    if (statusCode >= 500) {
-                        LOG.warn("Failed to update ES doc due to server error ({}). Retrying...", statusCode);
-                    } else {
-                        // Not a retryable error
-                        String responseBody = EntityUtils.toString(response.getEntity());
-                        throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
-                    }
-                } catch (IOException e) {
-                    LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
-                }
-
-                if (retryCount < maxRetries - 1) {
-                    try {
-                        long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount);
-                        Thread.sleep(exponentialBackoffDelay);
-                    } catch (InterruptedException interruptedException) {
-                        Thread.currentThread().interrupt();
-                        throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
-                    }
-                }
+            if (bulkRequestBody.length() > 0) {
+                executeEsBulkRequest(bulkRequestBody.toString());
             }
-            // If the loop completes, all retries have failed. Throw an exception.
-            throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries + " retries");
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+    
+    /**
+     * Executes an ES bulk request with retry logic.
+     */
+    private static void executeEsBulkRequest(String bulkRequestBody) {
+        Request request = new Request("POST", "/_bulk");
+        request.setEntity(new StringEntity(bulkRequestBody, ContentType.APPLICATION_JSON));
+
+        int maxRetries = AtlasConfiguration.ES_MAX_RETRIES.getInt();
+        long initialRetryDelay = AtlasConfiguration.ES_RETRY_DELAY_MS.getLong();
+
+        for (int retryCount = 0; retryCount < maxRetries; retryCount++) {
+            try {
+                Response response = lowLevelClient.performRequest(request);
+                int statusCode = response.getStatusLine().getStatusCode();
+
+                if (statusCode >= 200 && statusCode < 300) {
+                    return; // Success
+                }
+
+                if (statusCode >= 500) {
+                    LOG.warn("Failed to update ES doc due to server error ({}). Retrying...", statusCode);
+                } else {
+                    String responseBody = EntityUtils.toString(response.getEntity());
+                    throw new RuntimeException("Failed to update ES doc. Status: " + statusCode + ", Body: " + responseBody);
+                }
+            } catch (IOException e) {
+                LOG.warn("Failed to update ES doc for denorm attributes. Retrying... ({}/{})", retryCount + 1, maxRetries, e);
+            }
+
+            if (retryCount < maxRetries - 1) {
+                try {
+                    long exponentialBackoffDelay = initialRetryDelay * (long) Math.pow(2, retryCount);
+                    Thread.sleep(exponentialBackoffDelay);
+                } catch (InterruptedException interruptedException) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("ES update interrupted during retry delay", interruptedException);
+                }
+            }
+        }
+        throw new RuntimeException("Failed to update ES doc for denorm attributes after " + maxRetries + " retries");
     }
 
     /**
