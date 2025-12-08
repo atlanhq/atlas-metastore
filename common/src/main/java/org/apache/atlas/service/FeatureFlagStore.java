@@ -87,7 +87,9 @@ public class FeatureFlagStore implements ApplicationContextAware {
                                 // Use instance method instead of static to avoid ApplicationContext lookup during initialization
                                 try {
                                     String flag = ref.getFlagInternal(FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey());
-                                    return "false".equals(flag) ? 1.0 : 2.0;
+                                    // Safe default: require explicit "true" for v2, otherwise default to v1
+                                    // This prevents incorrect v2 indication for unexpected values like empty strings, "TRUE", or corrupted data
+                                    return "true".equals(flag) ? 2.0 : 1.0;
                                 } catch (Exception e) {
                                     LOG.warn("Could not determine Tags version for metric, defaulting to v1", e);
                                     return 1.0;
