@@ -1,8 +1,8 @@
-{{- if and .Values.nginx.enabled (or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled)) }}
+{{- if and .Values.global.leangraph.enabled .Values.nginx.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: rate-limit-nginx-config-read
+  name: atlas-leangraph-nginx-config
   namespace: {{ .Values.Namespace }}
 data:
   nginx.conf: |-
@@ -105,7 +105,7 @@ data:
           default                         "other_paths";
       }
 
-      vhost_traffic_status_zone shared:vhost_traffic_status:32m;
+      vhost_traffic_status_zone shared:vhost_traffic_status:{{ .Values.nginx.vts.zoneMemory | default "32m" }};
       vhost_traffic_status_filter_by_set_key $status $url_group; 
 
       server {
@@ -141,19 +141,12 @@ data:
           }
       }
 
+      upstream atlas_leangraph_backend {
+        server atlas-leangraph-service.{{ .Values.Namespace }}.svc.cluster.local:{{ .Values.atlas.service.port }};
+      }
+
       server {
         listen 8080;
-        {{- if .Values.global.leangraph.enabled }}
-        set $atlas_upstream http://atlas-read-service-atlas.{{ .Values.Namespace }}.svc.cluster.local:{{ .Values.atlas.service.port }};
-        {{- else }}
-        set $atlas_upstream http://127.0.0.1:21000;
-        {{- end }}
-
-        location /nginx_health {
-          access_log off;
-          return 200 "healthy\n";
-          add_header Content-Type text/plain;
-        }
 
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
@@ -172,36 +165,17 @@ data:
         proxy_set_header x-atlan-client-origin $http_x_atlan_client_origin;
         proxy_set_header x-atlan-route $http_x_atlan_route;
 
-        {{- if .Values.global.leangraph.enabled }}
-        location @mirror_leangraph {
-          internal;
-          proxy_pass http://{{ .Values.global.leangraph.service }}$request_uri;
-          proxy_connect_timeout 1s;
-          proxy_read_timeout 1s;
-          proxy_set_header Host $host;
-          proxy_set_header X-Real-IP $remote_addr;
-          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-          proxy_set_header X-Forwarded-Proto $scheme;
-          proxy_set_header x-atlan-agent $http_x_atlan_agent;
-          proxy_set_header x-atlan-agent-id $http_x_atlan_agent_id;
-          proxy_set_header x-atlan-package-name $http_x_atlan_package_name;
-          proxy_set_header x-atlan-agent-workflow-id $http_x_atlan_agent_workflow_id;
-          proxy_set_header x-atlan-via-ui $http_x_atlan_via_ui;
-          proxy_set_header x-atlan-request-id $atlan_request_id;
-          proxy_set_header x-atlan-client-origin $http_x_atlan_client_origin;
-          proxy_set_header x-atlan-route $http_x_atlan_route;
+        location /nginx_health {
+          access_log off;
+          return 200 "healthy\n";
+          add_header Content-Type text/plain;
         }
-        {{- end }}
 
         location = /api/meta/search/indexsearch {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=indexsearch_limit_zone burst={{ .Values.nginx.indexsearch.burst }} nodelay;
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri; 
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -209,14 +183,10 @@ data:
         }
 
         location = /api/atlas/v2/search/indexsearch {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=indexsearch_limit_zone burst={{ .Values.nginx.indexsearch.burst }} nodelay;
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri; 
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -224,14 +194,10 @@ data:
         }
 
         location = /api/meta/entity/bulk {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=entity_bulk_limit_zone burst={{ .Values.nginx.bulk.burst }} nodelay;
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri; 
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -239,14 +205,10 @@ data:
         }
 
         location = /api/atlas/v2/entity/bulk { 
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=entity_bulk_limit_zone burst={{ .Values.nginx.bulk.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri; 
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -254,14 +216,10 @@ data:
         }
 
         location = /api/meta/entity/auditSearch {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -269,14 +227,10 @@ data:
         }
 
         location = /api/atlas/v2/entity/auditSearch {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -284,14 +238,10 @@ data:
         }
 
         location = /api/meta/types/typedefs {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -299,14 +249,10 @@ data:
         }
 
         location = /api/atlas/v2/types/typedefs {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -314,14 +260,10 @@ data:
         }
 
         location = /api/meta/lineage/list {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -329,14 +271,10 @@ data:
         }
 
         location = /api/atlas/v2/lineage/list {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream$request_uri;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -344,14 +282,10 @@ data:
         }
 
         location /api/meta/ {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay;
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -359,14 +293,10 @@ data:
         }
 
         location /api/atlas/ {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
           limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay;
           limit_req_status 429;
           add_header Retry-After 1 always;
-          proxy_pass $atlas_upstream;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -374,11 +304,7 @@ data:
         }
 
         location / {
-          {{- if .Values.global.leangraph.enabled }}
-          mirror @mirror_leangraph;
-          mirror_request_body on;
-          {{- end }}
-          proxy_pass $atlas_upstream;
+          proxy_pass http://atlas_leangraph_backend;
           proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
           proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
           proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
@@ -386,3 +312,4 @@ data:
       }
     }
 {{- end }}
+
