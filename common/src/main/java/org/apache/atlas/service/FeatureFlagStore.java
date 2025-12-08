@@ -18,6 +18,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 
@@ -39,6 +40,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
     private final FeatureFlagConfig config;
     private final FeatureFlagCacheStore cacheStore;
     private static ApplicationContext context;
+    private static final CountDownLatch initLatch = new CountDownLatch(1);
 
     private volatile boolean initialized = false;
     private static final String METRIC_COMPONENT = "atlas_classification";
@@ -56,14 +58,43 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
     private static FeatureFlagStore getStore() {
         try {
-            if (context == null) {
-                LOG.error("ApplicationContext not initialized yet");
-                return null;
+            // Check if already initialized (fast path)
+            if (initLatch.getCount() == 0) {
+                return context.getBean(FeatureFlagStore.class);
             }
-            return context.getBean(FeatureFlagStore.class);
+            
+            // Log that we're waiting
+            LOG.info("Waiting for FeatureFlagStore initialization to complete...");
+            long startWait = System.currentTimeMillis();
+            
+            // Wait with periodic logging every 5 seconds
+            int waitIntervalSeconds = 5;
+            int maxWaitSeconds = 60;
+            int elapsed = 0;
+            
+            while (elapsed < maxWaitSeconds) {
+                if (initLatch.await(waitIntervalSeconds, TimeUnit.SECONDS)) {
+                    long waitDuration = System.currentTimeMillis() - startWait;
+                    LOG.info("FeatureFlagStore initialization completed, waited {}ms", waitDuration);
+                    return context.getBean(FeatureFlagStore.class);
+                }
+                elapsed += waitIntervalSeconds;
+                LOG.warn("Still waiting for FeatureFlagStore initialization... ({}s elapsed)", elapsed);
+            }
+            
+            // Timeout reached
+            LOG.error("Timeout waiting for FeatureFlagStore initialization after {}s", maxWaitSeconds);
+            throw new IllegalStateException("FeatureFlagStore initialization timed out after " + maxWaitSeconds + " seconds");
+            
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            LOG.error("Interrupted while waiting for FeatureFlagStore initialization", e);
+            throw new IllegalStateException("Interrupted waiting for FeatureFlagStore", e);
+        } catch (IllegalStateException e) {
+            throw e; // Re-throw timeout exception
         } catch (Exception e) {
             LOG.error("Failed to get FeatureFlagStore from Spring context", e);
-            return null;
+            throw new IllegalStateException("Failed to get FeatureFlagStore", e);
         }
     }
 
@@ -90,6 +121,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
                 long duration = System.currentTimeMillis() - startTime;
                 LOG.info("FeatureFlagStore initialization completed successfully in {}ms", duration);
+                initLatch.countDown();  // Signal that initialization is complete
                 break; // Success! Exit the loop.
 
             } catch (Exception e) {
