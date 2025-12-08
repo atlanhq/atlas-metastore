@@ -1,4 +1,6 @@
 {{- if and .Values.global.leangraph.enabled .Values.nginx.enabled }}
+---
+# Atlas Nginx Deployment - proxies to atlas service with leangraph mirroring
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -11,7 +13,7 @@ metadata:
   annotations:
     configmap.reloader.stakater.com/reload: "rate-limit-nginx-config"
 spec:
-  replicas: 2
+  replicas: {{ .Values.nginx.replicaCount | default 2 }}
   selector:
     matchLabels:
       app: atlas-nginx
@@ -33,12 +35,7 @@ spec:
             - containerPort: 8080
               protocol: TCP
           resources:
-            limits:
-              cpu: 200m
-              memory: 256Mi
-            requests:
-              cpu: 100m
-              memory: 128Mi
+            {{- toYaml .Values.nginx.resources | nindent 12 }}
           volumeMounts:
             - name: nginx-config
               mountPath: /etc/nginx/nginx.conf
@@ -71,5 +68,144 @@ spec:
         - name: nginx-config
           configMap:
             name: rate-limit-nginx-config
+---
+# Atlas Leangraph Nginx Deployment - proxies to atlas-leangraph-service (no mirroring)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-leangraph-nginx
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: atlas-leangraph-nginx
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "atlas-leangraph-nginx-config"
+spec:
+  replicas: {{ .Values.nginx.leangraph.replicaCount | default 2 }}
+  selector:
+    matchLabels:
+      app: atlas-leangraph-nginx
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: atlas-leangraph-nginx
+        release: {{ .Release.Name }}
+    spec:
+      {{- with .Values.atlas.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nginx
+          image: ghcr.io/atlanhq/nginx-vts-atlan-v2:1.27.5.1-multiarch
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.nginx.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: nginx-log-volume
+              mountPath: /var/log/nginx
+          livenessProbe:
+            httpGet:
+              path: /nginx_health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /nginx_health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      {{- if .Values.atlas.imagePullSecrets }}
+      imagePullSecrets:
+      {{- toYaml .Values.atlas.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: nginx-log-volume
+          emptyDir: {}
+        - name: nginx-config
+          configMap:
+            name: atlas-leangraph-nginx-config
 {{- end }}
-
+{{- if and .Values.global.leangraph.enabled .Values.nginx.enabled (or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled)) }}
+---
+# Atlas Read Nginx Deployment - proxies to atlas-read-service with leangraph mirroring
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-read-nginx
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: atlas-read-nginx
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "rate-limit-nginx-config-read"
+spec:
+  replicas: {{ .Values.nginx.read.replicaCount | default 2 }}
+  selector:
+    matchLabels:
+      app: atlas-read-nginx
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: atlas-read-nginx
+        release: {{ .Release.Name }}
+    spec:
+      {{- with .Values.atlas.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nginx
+          image: ghcr.io/atlanhq/nginx-vts-atlan-v2:1.27.5.1-multiarch
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            {{- toYaml .Values.nginx.resources | nindent 12 }}
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: nginx-log-volume
+              mountPath: /var/log/nginx
+          livenessProbe:
+            httpGet:
+              path: /nginx_health
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /nginx_health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      {{- if .Values.atlas.imagePullSecrets }}
+      imagePullSecrets:
+      {{- toYaml .Values.atlas.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      volumes:
+        - name: nginx-log-volume
+          emptyDir: {}
+        - name: nginx-config
+          configMap:
+            name: rate-limit-nginx-config-read
+{{- end }}

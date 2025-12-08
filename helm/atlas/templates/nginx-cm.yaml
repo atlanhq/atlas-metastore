@@ -1,3 +1,6 @@
+{{- if and .Values.global.leangraph.enabled .Values.nginx.enabled }}
+---
+# Atlas Nginx ConfigMap - proxies to atlas service with leangraph mirroring
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -104,7 +107,7 @@ data:
           default                         "other_paths";
       }
 
-      vhost_traffic_status_zone shared:vhost_traffic_status:32m;
+      vhost_traffic_status_zone shared:vhost_traffic_status:{{ .Values.nginx.vts.zoneMemory | default "32m" }};
       vhost_traffic_status_filter_by_set_key $status $url_group; 
 
       server {
@@ -384,3 +387,708 @@ data:
         }
       }
     }
+---
+# Atlas Leangraph Nginx ConfigMap - proxies to atlas-leangraph-service (no mirroring)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: atlas-leangraph-nginx-config
+  namespace: {{ .Values.Namespace }}
+data:
+  nginx.conf: |-
+    load_module /etc/nginx/modules/ngx_http_vhost_traffic_status_module.so;
+
+    user nginx;
+    worker_processes auto;
+    error_log /dev/stderr warn;
+    pid /var/run/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+
+      client_max_body_size {{ .Values.nginx.clientMaxBodySize | default "512m" }};
+      client_body_buffer_size {{ .Values.nginx.clientBodyBufferSize | default "512k" }};
+
+      client_body_timeout {{ .Values.nginx.clientBodyTimeout | default "600s" }};
+
+      map $http_x_atlan_request_id $atlan_request_id {
+          default $http_x_atlan_request_id;
+          ""      $request_id;
+      }
+
+      map $http_x_atlan_client_origin $effective_agent_id_key {
+          default {{ .Values.nginx.default.header }};
+          "product_webapp" "";
+      }
+
+      map $http_x_atlan_client_origin $bulk_path_key {
+          default {{ .Values.nginx.bulk.header }};
+          "product_webapp" "";
+      }
+
+      map $http_x_atlan_client_origin $indexsearch_path_key {
+          default {{ .Values.nginx.indexsearch.header }};
+          "product_webapp" "";
+      }
+
+      log_format ratelimit_json escape=json '{'
+        '"time_local": "$time_local", '
+        '"remote_addr": "$remote_addr", '
+        '"remote_user": "$remote_user", '
+        '"request_method": "$request_method", '
+        '"request_uri": "$request_uri", '
+        '"request_protocol": "$server_protocol", '
+        '"request_length": "$request_length", '
+        '"status": "$status", '
+        '"body_bytes_sent": "$body_bytes_sent", '
+        '"bytes_sent": "$bytes_sent", '
+        '"http_referer": "$http_referer", '
+        '"http_user_agent": "$http_user_agent", '
+        '"http_x_forwarded_for": "$http_x_forwarded_for", '
+        '"http_x_atlan_client_origin": "$http_x_atlan_client_origin", '
+        '"http_x_atlan_agent": "$http_x_atlan_agent", '
+        '"http_x_atlan_agent_id": "$http_x_atlan_agent_id", '
+        '"http_x_atlan_package_name": "$http_x_atlan_package_name", '
+        '"http_x_atlan_agent_workflow_id": "$http_x_atlan_agent_workflow_id", '
+        '"http_x_atlan_via_ui": "$http_x_atlan_via_ui", '
+        '"http_x_atlan_request_id": "$atlan_request_id", '
+        '"http_x_atlan_google_sheets_id": "$http_x_atlan_google_sheets_id", '
+        '"http_x_atlan_microsoft_excel_id": "$http_x_atlan_microsoft_excel_id", '
+        '"http_x_atlan_task_guid": "$http_x_atlan_task_guid", '
+        '"http_x_atlan_route": "$http_x_atlan_route", '
+        '"effective_agent_id_key_used": "$effective_agent_id_key", '
+        '"bulk_path_key_used": "$bulk_path_key", '
+        '"indexsearch_path_key_used": "$indexsearch_path_key", '
+        '"limit_req_status": "$limit_req_status", '
+        '"request_time": "$request_time", '
+        '"upstream_addr": "$upstream_addr", '
+        '"upstream_status": "$upstream_status", '
+        '"upstream_response_time": "$upstream_response_time", '
+        '"upstream_connect_time": "$upstream_connect_time", '
+        '"upstream_header_time": "$upstream_header_time"'
+      '}';
+
+      access_log /dev/stdout ratelimit_json;
+
+      limit_req_zone $effective_agent_id_key zone=agent_id_zone:{{ .Values.nginx.default.zoneMemory | default "10m" }} rate={{ .Values.nginx.default.rate | default "500r" }}/{{ .Values.nginx.default.rateUnit | default "m" }}; 
+      limit_req_zone $indexsearch_path_key zone=indexsearch_limit_zone:{{ .Values.nginx.indexsearch.zoneMemory | default "10m" }} rate={{ .Values.nginx.indexsearch.rate | default "500r" }}/{{ .Values.nginx.indexsearch.rateUnit | default "m" }};
+      limit_req_zone $bulk_path_key zone=entity_bulk_limit_zone:{{ .Values.nginx.bulk.zoneMemory | default "10m" }} rate={{ .Values.nginx.bulk.rate | default "200r" }}/{{ .Values.nginx.bulk.rateUnit | default "m" }};
+
+      map $request_uri $url_group {
+          "~*^/api/atlas/v2/search/indexsearch" "api_atlas_v2_indexsearch";
+          "~*^/api/meta/search/indexsearch" "api_meta_indexsearch";
+          "~*^/api/atlas/v2/entity/bulk"    "api_atlas_v2_entitybulk";
+          "~*^/api/meta/entity/bulk"    "api_meta_entitybulk";
+          "~*^/api/meta/entity/auditSearch" "api_meta_entity_auditsearch";
+          "~*^/api/atlas/v2/entity/auditSearch" "api_atlas_v2_entity_auditsearch";
+          "~*^/api/meta/types/typedefs" "api_meta_types_typedefs";
+          "~*^/api/atlas/v2/types/typedefs" "api_atlas_v2_types_typedefs";
+          "~*^/api/meta/lineage/list"   "api_meta_lineage_list";
+          "~*^/api/atlas/v2/lineage/list" "api_atlas_v2_lineage_list";
+          "~*^/api/atlas"                "api_atlas_other";
+          "~*^/api/meta"                 "api_meta_other";
+          default                         "other_paths";
+      }
+
+      vhost_traffic_status_zone shared:vhost_traffic_status:{{ .Values.nginx.vts.zoneMemory | default "32m" }};
+      vhost_traffic_status_filter_by_set_key $status $url_group; 
+
+      server {
+          listen 127.0.0.1:8081;
+          server_name localhost;
+          location /nginx_status {
+              stub_status;
+              access_log off; 
+              vhost_traffic_status_bypass_stats on;
+              allow 127.0.0.1;
+              deny all;
+          }
+      }
+
+      server {
+          listen 127.0.0.1:8082;
+          server_name localhost;
+          location /vts_status { 
+              vhost_traffic_status_display;
+              vhost_traffic_status_display_format prometheus;
+              access_log off; 
+              vhost_traffic_status_bypass_stats on;
+              allow 127.0.0.1;
+              deny all;
+          }
+          location /vts_status_html { 
+              vhost_traffic_status_display;
+              vhost_traffic_status_display_format html;
+              access_log off; 
+              vhost_traffic_status_bypass_stats on;
+              allow 127.0.0.1;
+              deny all;
+          }
+      }
+
+      upstream atlas_leangraph_backend {
+        server atlas-leangraph-service.{{ .Values.Namespace }}.svc.cluster.local:{{ .Values.atlas.service.port }};
+      }
+
+      server {
+        listen 8080;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header x-atlan-agent $http_x_atlan_agent;
+        proxy_set_header x-atlan-agent-id $http_x_atlan_agent_id;
+        proxy_set_header x-atlan-package-name $http_x_atlan_package_name;
+        proxy_set_header x-atlan-agent-workflow-id $http_x_atlan_agent_workflow_id;
+        proxy_set_header x-atlan-via-ui $http_x_atlan_via_ui;
+        proxy_set_header x-atlan-request-id $atlan_request_id;
+        proxy_set_header x-atlan-google-sheets-id $http_x_atlan_google_sheets_id;
+        proxy_set_header x-atlan-microsoft-excel-id $http_x_atlan_microsoft_excel_id;
+        proxy_set_header x-atlan-task-guid $http_x_atlan_task_guid;
+        proxy_set_header x-atlan-client-origin $http_x_atlan_client_origin;
+        proxy_set_header x-atlan-route $http_x_atlan_route;
+
+        location /nginx_health {
+          access_log off;
+          return 200 "healthy\n";
+          add_header Content-Type text/plain;
+        }
+
+        location = /api/meta/search/indexsearch {
+          limit_req zone=indexsearch_limit_zone burst={{ .Values.nginx.indexsearch.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/search/indexsearch {
+          limit_req zone=indexsearch_limit_zone burst={{ .Values.nginx.indexsearch.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/entity/bulk {
+          limit_req zone=entity_bulk_limit_zone burst={{ .Values.nginx.bulk.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/entity/bulk { 
+          limit_req zone=entity_bulk_limit_zone burst={{ .Values.nginx.bulk.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/entity/auditSearch {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/entity/auditSearch {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/types/typedefs {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/types/typedefs {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/lineage/list {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/lineage/list {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location /api/meta/ {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location /api/atlas/ {
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location / {
+          proxy_pass http://atlas_leangraph_backend;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+        }
+      }
+    }
+{{- end }}
+{{- if and .Values.nginx.enabled (or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled)) }}
+---
+# Atlas Read Nginx ConfigMap - proxies to atlas-read-service with leangraph mirroring
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rate-limit-nginx-config-read
+  namespace: {{ .Values.Namespace }}
+data:
+  nginx.conf: |-
+    load_module /etc/nginx/modules/ngx_http_vhost_traffic_status_module.so;
+
+    user nginx;
+    worker_processes auto;
+    error_log /dev/stderr warn;
+    pid /var/run/nginx.pid;
+
+    events {
+      worker_connections 1024;
+    }
+
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+
+      client_max_body_size {{ .Values.nginx.clientMaxBodySize | default "512m" }};
+      client_body_buffer_size {{ .Values.nginx.clientBodyBufferSize | default "512k" }};
+
+      client_body_timeout {{ .Values.nginx.clientBodyTimeout | default "600s" }};
+
+      map $http_x_atlan_request_id $atlan_request_id {
+          default $http_x_atlan_request_id;
+          ""      $request_id;
+      }
+
+      map $http_x_atlan_client_origin $effective_agent_id_key {
+          default {{ .Values.nginx.default.header }};
+          "product_webapp" "";
+      }
+
+      map $http_x_atlan_client_origin $bulk_path_key {
+          default {{ .Values.nginx.bulk.header }};
+          "product_webapp" "";
+      }
+
+      map $http_x_atlan_client_origin $indexsearch_path_key {
+          default {{ .Values.nginx.indexsearch.header }};
+          "product_webapp" "";
+      }
+
+      log_format ratelimit_json escape=json '{'
+        '"time_local": "$time_local", '
+        '"remote_addr": "$remote_addr", '
+        '"remote_user": "$remote_user", '
+        '"request_method": "$request_method", '
+        '"request_uri": "$request_uri", '
+        '"request_protocol": "$server_protocol", '
+        '"request_length": "$request_length", '
+        '"status": "$status", '
+        '"body_bytes_sent": "$body_bytes_sent", '
+        '"bytes_sent": "$bytes_sent", '
+        '"http_referer": "$http_referer", '
+        '"http_user_agent": "$http_user_agent", '
+        '"http_x_forwarded_for": "$http_x_forwarded_for", '
+        '"http_x_atlan_client_origin": "$http_x_atlan_client_origin", '
+        '"http_x_atlan_agent": "$http_x_atlan_agent", '
+        '"http_x_atlan_agent_id": "$http_x_atlan_agent_id", '
+        '"http_x_atlan_package_name": "$http_x_atlan_package_name", '
+        '"http_x_atlan_agent_workflow_id": "$http_x_atlan_agent_workflow_id", '
+        '"http_x_atlan_via_ui": "$http_x_atlan_via_ui", '
+        '"http_x_atlan_request_id": "$atlan_request_id", '
+        '"http_x_atlan_google_sheets_id": "$http_x_atlan_google_sheets_id", '
+        '"http_x_atlan_microsoft_excel_id": "$http_x_atlan_microsoft_excel_id", '
+        '"http_x_atlan_task_guid": "$http_x_atlan_task_guid", '
+        '"http_x_atlan_route": "$http_x_atlan_route", '
+        '"effective_agent_id_key_used": "$effective_agent_id_key", '
+        '"bulk_path_key_used": "$bulk_path_key", '
+        '"indexsearch_path_key_used": "$indexsearch_path_key", '
+        '"limit_req_status": "$limit_req_status", '
+        '"request_time": "$request_time", '
+        '"upstream_addr": "$upstream_addr", '
+        '"upstream_status": "$upstream_status", '
+        '"upstream_response_time": "$upstream_response_time", '
+        '"upstream_connect_time": "$upstream_connect_time", '
+        '"upstream_header_time": "$upstream_header_time"'
+      '}';
+
+      access_log /dev/stdout ratelimit_json;
+
+      limit_req_zone $effective_agent_id_key zone=agent_id_zone:{{ .Values.nginx.default.zoneMemory | default "10m" }} rate={{ .Values.nginx.default.rate | default "500r" }}/{{ .Values.nginx.default.rateUnit | default "m" }}; 
+      limit_req_zone $indexsearch_path_key zone=indexsearch_limit_zone:{{ .Values.nginx.indexsearch.zoneMemory | default "10m" }} rate={{ .Values.nginx.indexsearch.rate | default "500r" }}/{{ .Values.nginx.indexsearch.rateUnit | default "m" }};
+      limit_req_zone $bulk_path_key zone=entity_bulk_limit_zone:{{ .Values.nginx.bulk.zoneMemory | default "10m" }} rate={{ .Values.nginx.bulk.rate | default "200r" }}/{{ .Values.nginx.bulk.rateUnit | default "m" }};
+
+      map $request_uri $url_group {
+          "~*^/api/atlas/v2/search/indexsearch" "api_atlas_v2_indexsearch";
+          "~*^/api/meta/search/indexsearch" "api_meta_indexsearch";
+          "~*^/api/atlas/v2/entity/bulk"    "api_atlas_v2_entitybulk";
+          "~*^/api/meta/entity/bulk"    "api_meta_entitybulk";
+          "~*^/api/meta/entity/auditSearch" "api_meta_entity_auditsearch";
+          "~*^/api/atlas/v2/entity/auditSearch" "api_atlas_v2_entity_auditsearch";
+          "~*^/api/meta/types/typedefs" "api_meta_types_typedefs";
+          "~*^/api/atlas/v2/types/typedefs" "api_atlas_v2_types_typedefs";
+          "~*^/api/meta/lineage/list"   "api_meta_lineage_list";
+          "~*^/api/atlas/v2/lineage/list" "api_atlas_v2_lineage_list";
+          "~*^/api/atlas"                "api_atlas_other";
+          "~*^/api/meta"                 "api_meta_other";
+          default                         "other_paths";
+      }
+
+      vhost_traffic_status_zone shared:vhost_traffic_status:{{ .Values.nginx.vts.zoneMemory | default "32m" }};
+      vhost_traffic_status_filter_by_set_key $status $url_group; 
+
+      server {
+          listen 127.0.0.1:8081;
+          server_name localhost;
+          location /nginx_status {
+              stub_status;
+              access_log off; 
+              vhost_traffic_status_bypass_stats on;
+              allow 127.0.0.1;
+              deny all;
+          }
+      }
+
+      server {
+          listen 127.0.0.1:8082;
+          server_name localhost;
+          location /vts_status { 
+              vhost_traffic_status_display;
+              vhost_traffic_status_display_format prometheus;
+              access_log off; 
+              vhost_traffic_status_bypass_stats on;
+              allow 127.0.0.1;
+              deny all;
+          }
+          location /vts_status_html { 
+              vhost_traffic_status_display;
+              vhost_traffic_status_display_format html;
+              access_log off; 
+              vhost_traffic_status_bypass_stats on;
+              allow 127.0.0.1;
+              deny all;
+          }
+      }
+
+      server {
+        listen 8080;
+        {{- if .Values.global.leangraph.enabled }}
+        set $atlas_upstream http://atlas-read-service-atlas.{{ .Values.Namespace }}.svc.cluster.local:{{ .Values.atlas.service.port }};
+        {{- else }}
+        set $atlas_upstream http://127.0.0.1:21000;
+        {{- end }}
+
+        location /nginx_health {
+          access_log off;
+          return 200 "healthy\n";
+          add_header Content-Type text/plain;
+        }
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        proxy_set_header x-atlan-agent $http_x_atlan_agent;
+        proxy_set_header x-atlan-agent-id $http_x_atlan_agent_id;
+        proxy_set_header x-atlan-package-name $http_x_atlan_package_name;
+        proxy_set_header x-atlan-agent-workflow-id $http_x_atlan_agent_workflow_id;
+        proxy_set_header x-atlan-via-ui $http_x_atlan_via_ui;
+        proxy_set_header x-atlan-request-id $atlan_request_id;
+        proxy_set_header x-atlan-google-sheets-id $http_x_atlan_google_sheets_id;
+        proxy_set_header x-atlan-microsoft-excel-id $http_x_atlan_microsoft_excel_id;
+        proxy_set_header x-atlan-task-guid $http_x_atlan_task_guid;
+        proxy_set_header x-atlan-client-origin $http_x_atlan_client_origin;
+        proxy_set_header x-atlan-route $http_x_atlan_route;
+
+        {{- if .Values.global.leangraph.enabled }}
+        location @mirror_leangraph {
+          internal;
+          proxy_pass http://{{ .Values.global.leangraph.service }}$request_uri;
+          proxy_connect_timeout 1s;
+          proxy_read_timeout 1s;
+          proxy_set_header Host $host;
+          proxy_set_header X-Real-IP $remote_addr;
+          proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+          proxy_set_header X-Forwarded-Proto $scheme;
+          proxy_set_header x-atlan-agent $http_x_atlan_agent;
+          proxy_set_header x-atlan-agent-id $http_x_atlan_agent_id;
+          proxy_set_header x-atlan-package-name $http_x_atlan_package_name;
+          proxy_set_header x-atlan-agent-workflow-id $http_x_atlan_agent_workflow_id;
+          proxy_set_header x-atlan-via-ui $http_x_atlan_via_ui;
+          proxy_set_header x-atlan-request-id $atlan_request_id;
+          proxy_set_header x-atlan-client-origin $http_x_atlan_client_origin;
+          proxy_set_header x-atlan-route $http_x_atlan_route;
+        }
+        {{- end }}
+
+        location = /api/meta/search/indexsearch {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=indexsearch_limit_zone burst={{ .Values.nginx.indexsearch.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri; 
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/search/indexsearch {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=indexsearch_limit_zone burst={{ .Values.nginx.indexsearch.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri; 
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/entity/bulk {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=entity_bulk_limit_zone burst={{ .Values.nginx.bulk.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri; 
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/entity/bulk { 
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=entity_bulk_limit_zone burst={{ .Values.nginx.bulk.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri; 
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/entity/auditSearch {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/entity/auditSearch {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/types/typedefs {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/types/typedefs {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/meta/lineage/list {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location = /api/atlas/v2/lineage/list {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay; 
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream$request_uri;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location /api/meta/ {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location /api/atlas/ {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          limit_req zone=agent_id_zone burst={{ .Values.nginx.default.burst }} nodelay;
+          limit_req_status 429;
+          add_header Retry-After 1 always;
+          proxy_pass $atlas_upstream;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+          add_header X-Debug-Agent-Id $http_x_atlan_agent_id;
+        }
+
+        location / {
+          {{- if .Values.global.leangraph.enabled }}
+          mirror @mirror_leangraph;
+          mirror_request_body on;
+          {{- end }}
+          proxy_pass $atlas_upstream;
+          proxy_connect_timeout {{ .Values.nginx.proxyConnectTimeout | default "60s" }};
+          proxy_read_timeout {{ .Values.nginx.proxyReadTimeout | default "7200s" }};
+          proxy_next_upstream error timeout invalid_header http_500 http_502 http_503 http_504;
+        }
+      }
+    }
+{{- end }}
