@@ -143,9 +143,24 @@ public class FeatureFlagStore implements ApplicationContextAware {
                 cacheStore.putInBothCaches(namespacedKey, value);
                 LOG.debug("Preloaded flag '{}' with Redis value: {}", flagKey, value);
             } else {
-                String defaultValue = String.valueOf(flag.getDefaultValue());
-                cacheStore.putInBothCaches(namespacedKey, defaultValue);
-                LOG.debug("Preloaded flag '{}' with default value: {} (not found in Redis)", flagKey, defaultValue);
+                // CRITICAL: For ENABLE_JANUS_OPTIMISATION, persist the default to Redis
+                // to ensure existing tenants maintain Tags V1 behavior on first startup
+                if (FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey().equals(flagKey)) {
+                    String defaultValue = "false"; // Explicit safe default for existing tenants
+                    try {
+                        redisService.putValue(namespacedKey, defaultValue);
+                        LOG.info("CRITICAL: Initialized Tags feature flag '{}' in Redis with safe default value: {} (prevents unintended Tags V2 enablement)", 
+                                flagKey, defaultValue);
+                    } catch (Exception e) {
+                        LOG.error("Failed to persist critical flag '{}' to Redis during preload", flagKey, e);
+                        throw new RuntimeException("Failed to initialize critical feature flag in Redis", e);
+                    }
+                    cacheStore.putInBothCaches(namespacedKey, defaultValue);
+                } else {
+                    String defaultValue = String.valueOf(flag.getDefaultValue());
+                    cacheStore.putInBothCaches(namespacedKey, defaultValue);
+                    LOG.debug("Preloaded flag '{}' with default value: {} (not found in Redis)", flagKey, defaultValue);
+                }
             }
         }
         LOG.info("All feature flags preloaded.");
@@ -221,6 +236,12 @@ public class FeatureFlagStore implements ApplicationContextAware {
     }
 
     private static String getDefaultValue(String key) {
+        // Fail-safe: ENABLE_JANUS_OPTIMISATION must be explicitly set in Redis
+        // This prevents accidental Tags V2 enablement for existing tenants
+        if (FeatureFlag.ENABLE_JANUS_OPTIMISATION.getKey().equals(key)) {
+            throw new RuntimeException("Cannot return default value for critical Tags FF: " + key + 
+                    ". This flag must be explicitly set in Redis to prevent unintended behavior changes.");
+        }
         FeatureFlag flag = FeatureFlag.fromKey(key);
         return flag != null ? String.valueOf(flag.getDefaultValue()) : "false";
     }
