@@ -157,7 +157,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
         } else {
 
             if (!vertexName.equals(termName)) {
-                termExists(termName, newGlossaryQualifiedName);
+                termExists(termName, newGlossaryQualifiedName, termGuid);
             }
 
             entity.setAttribute(QUALIFIED_NAME, termQualifiedName);
@@ -204,8 +204,8 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
                                            String targetGlossaryQualifiedName,
                                            String currentTermQualifiedName) throws AtlasBaseException {
 
-        //check duplicate term name
-        termExists((String) entity.getAttribute(NAME), targetGlossaryQualifiedName);
+        //check duplicate term name (exclude the current term being moved)
+        termExists((String) entity.getAttribute(NAME), targetGlossaryQualifiedName, entity.getGuid());
 
 
         String updatedQualifiedName = currentTermQualifiedName.replace(sourceGlossaryQualifiedName, targetGlossaryQualifiedName);

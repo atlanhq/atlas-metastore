@@ -32,6 +32,7 @@ import org.apache.atlas.model.glossary.relations.AtlasTermCategorizationHeader;
 import org.apache.atlas.model.instance.AtlasRelatedObjectId;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graph.AtlasGraphProvider;
+import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.ogm.DataAccess;
@@ -1110,6 +1111,13 @@ public class GlossaryService {
         String glossaryQName = extractGlossaryQualifiedName(term.getQualifiedName());
 
         List<AtlasVertex> vertexList = AtlasGraphUtilsV2.glossaryFindChildByTypeAndPropertyName(entityType, term.getName(), glossaryQName);
+
+        // Exclude the term being updated (if it has a guid)
+        if (CollectionUtils.isNotEmpty(vertexList) && StringUtils.isNotEmpty(term.getGuid())) {
+            vertexList = vertexList.stream()
+                    .filter(vertex -> !term.getGuid().equals(GraphHelper.getGuid(vertex)))
+                    .collect(Collectors.toList());
+        }
 
         return CollectionUtils.isNotEmpty(vertexList);
     }

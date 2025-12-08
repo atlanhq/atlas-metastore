@@ -182,7 +182,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         } else {
             String vertexName = vertex.getProperty(NAME, String.class);
             if (!vertexName.equals(catName)) {
-                categoryExists(catName, newGlossaryQualifiedName);
+                categoryExists(catName, newGlossaryQualifiedName, entity.getGuid());
             }
             validateChildren(entity, storedCategory);
             validateParent(newGlossaryQualifiedName);
@@ -210,7 +210,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
             LOG.info("Moving category {} to Glossary {}", categoryName, targetGlossaryQualifiedName);
 
-            categoryExists(categoryName , targetGlossaryQualifiedName);
+            categoryExists(categoryName , targetGlossaryQualifiedName, category.getGuid());
             validateParentForGlossaryChange(category, categoryVertex, targetGlossaryQualifiedName);
 
             String updatedQualifiedName = currentCategoryQualifiedName.replace(sourceGlossaryQualifiedName, targetGlossaryQualifiedName);
@@ -296,8 +296,8 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
             LOG.info("Moving child term {} to Glossary {}", termName, targetGlossaryQualifiedName);
 
-            //check duplicate term name
-            termExists(termName, targetGlossaryQualifiedName);
+            //check duplicate term name (exclude the current term being moved)
+            termExists(termName, targetGlossaryQualifiedName, termGuid);
 
             String currentTermQualifiedName = termVertex.getProperty(QUALIFIED_NAME, String.class);
             String updatedTermQualifiedName = currentTermQualifiedName.replace(sourceGlossaryQualifiedName, targetGlossaryQualifiedName);
@@ -359,6 +359,10 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
     }
 
     private void categoryExists(String categoryName, String glossaryQualifiedName) throws AtlasBaseException {
+        categoryExists(categoryName, glossaryQualifiedName, null);
+    }
+
+    private void categoryExists(String categoryName, String glossaryQualifiedName, String excludeGuid) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("categoryExists");
 
         boolean exists = false;
@@ -388,6 +392,10 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
 
             if (CollectionUtils.isNotEmpty(categories)) {
                 for (AtlasEntityHeader category : categories) {
+                    // Exclude the category being updated (if excludeGuid is provided)
+                    if (excludeGuid != null && excludeGuid.equals(category.getGuid())) {
+                        continue;
+                    }
                     String name = (String) category.getAttribute(NAME);
                     if (categoryName.equals(name)) {
                         exists = true;

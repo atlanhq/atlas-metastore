@@ -92,6 +92,10 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
     }
 
     public void termExists(String termName, String glossaryQName) throws AtlasBaseException {
+        termExists(termName, glossaryQName, null);
+    }
+
+    public void termExists(String termName, String glossaryQName, String excludeGuid) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("termExists");
         boolean ret = false;
 
@@ -107,7 +111,11 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
             List<AtlasEntityHeader> terms = indexSearchPaginated(dsl, null, this.discovery);
 
             if (CollectionUtils.isNotEmpty(terms)) {
-                ret = terms.stream().map(term -> (String) term.getAttribute(NAME)).anyMatch(name -> termName.equals(name));
+                // Filter out the term being updated (if excludeGuid is provided)
+                ret = terms.stream()
+                        .filter(term -> excludeGuid == null || !excludeGuid.equals(term.getGuid()))
+                        .map(term -> (String) term.getAttribute(NAME))
+                        .anyMatch(name -> termName.equals(name));
             }
 
             if (ret) {
