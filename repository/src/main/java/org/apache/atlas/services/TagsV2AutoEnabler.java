@@ -58,7 +58,8 @@ public class TagsV2AutoEnabler {
 
             // Use instance method instead of static method to avoid ApplicationContext lookup issues
             String flagValue = featureFlagStore.getFlagInternal(ENABLE_JANUS_OPTIMISATION_KEY);
-            boolean isTagV2Enabled = !"false".equals(flagValue);
+            // Safe default: treat null (missing/failed flag) as disabled to prevent unintended v2 enablement
+            boolean isTagV2Enabled = "true".equals(flagValue);
             
             if (isTagV2Enabled) {
                 LOG.info("Tags v2 optimization is already enabled, skipping auto-enable check");

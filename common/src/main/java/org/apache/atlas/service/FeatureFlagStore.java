@@ -302,8 +302,11 @@ public class FeatureFlagStore implements ApplicationContextAware {
             return value;
         }
 
-        LOG.warn("No value found for flag '{}' in any cache or Redis", key);
-        return null;
+        // 5. Final fallback: return the default value defined in the enum
+        // This should rarely happen since flags are preloaded during initialization
+        String defaultValue = getDefaultValue(key);
+        LOG.warn("No value found for flag '{}' in any cache or Redis, returning default value: {}", key, defaultValue);
+        return defaultValue;
     }
 
     private String fetchFromRedisAndCache(String namespacedKey, String key) {
