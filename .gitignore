@@ -26,6 +26,9 @@ pom.xml.releaseBackup
 *.iws
 .idea
 
+# VS Code
+.vscode/
+
 # gemini
 gemini.md
 
