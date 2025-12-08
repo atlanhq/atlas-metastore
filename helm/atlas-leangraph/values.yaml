@@ -1,0 +1,324 @@
+multiarch:
+  enabled: false
+  image: {}
+
+global:
+  Tier_Type: ""
+  Deployment_Type: ""
+  cloud: ""
+  tenantName: ""
+  leangraph:
+    enabled: false
+    service: "atlas-leangraph-nginx-service.atlas.svc.cluster.local"
+
+Namespace: atlas
+multitenant: false
+
+atlas:
+  name: atlas-leangraph
+  maintenanceMode: false
+  cache:
+    enabled: false
+  podAntiAffinity: true
+  custom_deployment:
+    enabled: false
+    instance_type:
+      - m6a.2xlarge
+  sentry:
+    sampleRate: 0.5
+  ranger:
+    RANGER_PASSWORD: '{{repl ConfigOption "RangerPassword"}}'
+    RANGER_SERVICE_URL: "http://ranger-service.ranger.svc.cluster.local:80/api/policy"
+  config:
+    entities_allowed_large_attributes: "rawQueryText,variablesSchemaBase64,visualBuilderSchemaBase64,dataContractSpec,dataContractJson"
+  multitenant: ''
+  Deployment_Type: ''
+  replicaCount: 2
+  janusgraph:
+    atomic_mutation: true
+    janusgraph_tx_buffer_size: 8192
+  indexsearch:
+    enable_api_limit: false
+    query_size_max_limit: 100000
+    enable_async: true
+    request_timeout_in_secs: 60
+    enable_janus_optimization: true
+    enable_request_isolation: false
+    enable_janus_optimization_for_relationship: true
+    enable_janus_optimization_extended: true
+    enable_janus_optimization_for_classifications: true
+  jg:
+    super:
+      vertex:
+        min:
+          edge:
+            count: 200
+  bulk:
+    max_entities_allowed: 10000
+  lineage:
+    optimised_calculation: false
+  authorizer:
+    enable_delta_based_refresh: true
+    enable_abac: true
+  index:
+    audit_index_field_limit: 10000
+    audit_index_refresh_interval: 1s
+  distributed_task:
+    enabled: false
+    cleanup_supported_asset_types: "Process,AirflowTask"
+    cleanup_supported_relationship_labels: "__Process.inputs,__Process.outputs,__AirflowTask.inputs,__AirflowTask.outputs"
+  types_update:
+    async_enable: true
+    thread_count: 5
+
+  leangraph:
+    tag_table_name: "leangraph_tags_by_id"
+    propagated_tag_table_name: "leangraph_propagated_tags_by_source"
+    new_keyspace: "leangraph_tags"
+    cql_keyspace: "leangraph_atlas"
+    index_name: "janus_leangraph"
+
+  podAnnotations:
+    backup.velero.io/backup-volumes-excludes: master
+
+  image:
+    repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
+    tag: ATLAS_LATEST_IMAGE_TAG
+    pullPolicy: IfNotPresent
+  imagePullSecrets: {}
+  tolerations: []
+
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: lifecycle
+            operator: In
+            values:
+            - ondemand
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: cloud.google.com/gke-provisioning
+            operator: In
+            values:
+            - standard
+
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: eks.amazonaws.com/capacityType
+            operator: In
+            values:
+            - ON_DEMAND
+        - matchExpressions:
+          - key: lifecycle
+            operator: In
+            values:
+            - ondemand
+        - matchExpressions:
+          - key: cloud.google.com/gke-provisioning
+            operator: In
+            values:
+            - standard 
+    
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              app: atlas-leangraph
+          topologyKey: kubernetes.io/hostname
+
+  service:
+    portName: atlas-leangraph
+    type: ClusterIP
+    path: /api/atlas/v2/
+    port: 80
+    targetPort: 21000
+
+  lifecycle:
+    preStop:
+      exec:
+        command:
+        - /bin/sh
+        - -c
+        - curl -X GET http://localhost:21000/api/atlas/admin/killtheleader
+
+  nodeSelector: {}
+  priorityClassName: ""
+  initContainers:
+    - name: init-container-bundle
+      image: ghcr.io/atlanhq/alpine-python-atlan-v2:3.9.21
+      imagePullPolicy: IfNotPresent
+      volumeMounts:
+        - name: atlas-leangraph-init-script
+          mountPath: /tmp/atlas-init.sh
+          subPath: atlas-init.sh
+        - name: atlas-leangraph-config
+          mountPath: /tmp/configfile/atlas-application.properties
+          subPath: atlas-application.properties
+        - name: atlas-config-map-rw-vol
+          mountPath: /tmp/newconfigfile
+        - name: atlas-leangraph-audit-index
+          mountPath: /scripts/atlas-audit.sh
+          subPath: atlas-audit.sh
+        - name: atlas-leangraph-init-container-script
+          mountPath: /scripts/atlas-init-container.sh
+          subPath: atlas-init-container.sh
+      env:
+        - name: ATLAS_SERVICE_NAME
+          value: 'atlas-leangraph'
+        - name: RANGER_SERVICE_URL
+          value: "http://ranger-service.ranger.svc.cluster.local:80/api/policy"
+        - name: RANGER_USERNAME
+          value: ''
+        - name: RANGER_PASSWORD
+          value: ''
+        - name: KEYCLOAK_ADDRESS
+          value: 'http://keycloak-http.keycloak.svc.cluster.local/auth'
+      command:
+      - /scripts/atlas-init-container.sh
+
+  resources:
+    limits:
+      cpu: 3000m
+      memory: 8Gi
+    requests:
+      cpu: 3000m
+      memory: 8Gi
+
+  resources_basic:
+    limits:
+      memory: 4Gi
+    requests:
+      memory: 20Mi
+
+  resources_standard:
+    limits:
+      memory: 6Gi
+    requests:
+      memory: 20Mi
+
+  livenessProbe:
+    failureThreshold: 3
+    httpGet:
+      path: /api/atlas/admin/health
+      port: 21000
+      scheme: HTTP
+    initialDelaySeconds: 720
+    periodSeconds: 60
+    successThreshold: 1
+    timeoutSeconds: 5
+  readinessProbe:
+    httpGet:
+      path: /api/atlas/admin/health
+      port: 21000
+      scheme: HTTP
+    failureThreshold: 3
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    successThreshold: 1
+    timeoutSeconds: 5
+
+  env:
+    - name: ATLAS_SERVER_OPTS
+      value: '-XX:MaxRAMPercentage=80.0 -XX:InitialRAMPercentage=50.0'
+    - name: MAVEN_OPTS
+      value: '-Xmx4g -Xms4g'
+    - name: ATLAS_CLIENT_OPTS
+      value: '-Xmx1g -Xms1g'
+    - name: RANGER_SERVICE_URL
+      value: 'http://ranger-service.ranger.svc.cluster.local:80/api/policy'
+    - name: ATLAS_REPOSITORY_NAME
+      value: "atlas-leangraph"
+    - name: ATLAS_USE_LEGACY_SEARCH
+      value: "false"
+
+  secrets:
+    AUTH_SERVER_URL: ''
+    KEYCLOAK_REALM: ''
+    KEYCLOAK_CLIENT_ID: ''
+    KEYCLOAK_CLIENT_SECRET: ''
+    SENTRY_DSN_SECRET: ''
+    SENTRY_DSN_DEV: ''
+    SENTRY_DSN_PROD: ''
+    INSTANCE_NAME: ''
+
+  redis:
+    enabled: true
+    host: ${USER_REDIS_HOST}
+    port: ${USER_REDIS_PORT}
+    sentinel_urls: ${USER_REDIS_SENTINEL_HOSTS}
+    master_name: ${USER_REDIS_MASTER_SET_NAME}
+    password: ${MASTER_PASSWORD}
+    username: ${USER_REDIS}
+    maxConnections: 100
+    timeout: 100000
+
+  telegraf:
+    enabled: true
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 256Mi
+
+  notification:
+    slackWebhook: ''
+    differential_entity_changes_enabled: true
+
+cassandra:
+  config:
+    cluster_domain: cluster.local
+    cluster_name: cassandra
+    cluster_size: 3
+    seed_size: 3
+    start_rpc: true
+    ports:
+      cql: 9042
+
+atlas_ha: false
+atlas_auth: false
+
+nginx:
+  enabled: true
+  replicaCount: 2
+  clientMaxBodySize: "512m"
+  clientBodyBufferSize: "512k"
+  clientBodyTimeout: "600s"
+  proxyReadTimeout: "10800s"
+  proxyConnectTimeout: "60s"
+  ratelimit:
+    enabled: true
+  default:
+    zoneMemory: "20m"
+    rate: "500r"
+    rateUnit: "m"
+    burst: 20
+    header: "$http_x_atlan_agent_id"
+  indexsearch:
+    zoneMemory: "20m"
+    rate: "500r"
+    rateUnit: "m"
+    burst: 100
+    header: "$http_x_atlan_agent_id"
+  bulk:
+    zoneMemory: "20m"
+    rate: "1000r"
+    rateUnit: "m"
+    burst: 100
+    header: "$http_x_atlan_agent_id"
+  vts:
+    zoneMemory: "32m"
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+

@@ -1,0 +1,19 @@
+apiVersion: v2
+name: atlas-leangraph
+description: Apache Atlas Leangraph - Lightweight Graph Database for Metadata Management
+type: application
+version: 1.0.0
+appVersion: "3.0.0"
+maintainers:
+  - name: Atlan Engineering
+    email: engineering@atlan.com
+keywords:
+  - atlas
+  - leangraph
+  - metadata
+  - governance
+  - data-catalog
+sources:
+  - https://github.com/atlanhq/atlas-metastore
+home: https://github.com/atlanhq/atlas-metastore
+

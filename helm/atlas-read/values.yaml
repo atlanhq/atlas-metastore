@@ -26,6 +26,9 @@ global:
     enabled: false
   esIsolation:
     enabled: false
+  leangraph:
+    enabled: false
+    service: "atlas-leangraph-nginx-service.atlas.svc.cluster.local"
 hpa:
   enabled: false
   name: atlas-read
