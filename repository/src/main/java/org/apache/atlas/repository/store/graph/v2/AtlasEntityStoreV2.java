@@ -39,6 +39,9 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
 import org.apache.atlas.repository.Constants;
+import org.apache.atlas.repository.store.graph.v2.async.AuthPolicyAsyncHandler;
+import org.apache.atlas.service.FeatureFlag;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.repository.RepositoryException;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -122,6 +125,7 @@ import static org.apache.atlas.repository.store.graph.v2.EntityGraphMapper.valid
 import static org.apache.atlas.repository.store.graph.v2.EntityGraphMapper.validateProductStatus;
 import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory.UPDATE_ENTITY_MEANINGS_ON_TERM_HARD_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory.UPDATE_ENTITY_MEANINGS_ON_TERM_SOFT_DELETE;
+import static org.apache.atlas.repository.util.AccessControlUtils.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
 import static org.apache.atlas.type.Constants.*;
 
@@ -153,6 +157,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
     private final AtlasObservabilityService observabilityService;
+    
+    // AuthPolicy async processing handler (setter-injected to avoid circular dependencies)
+    private AuthPolicyAsyncHandler authPolicyAsyncHandler;
 
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
@@ -186,6 +193,18 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             e.printStackTrace();
         }
 
+    }
+
+    /**
+     * Setter injection for AuthPolicyAsyncHandler to avoid circular dependencies.
+     * The handler is optional - if not available, async processing is disabled.
+     */
+    @Inject
+    public void setAuthPolicyAsyncHandler(AuthPolicyAsyncHandler authPolicyAsyncHandler) {
+        this.authPolicyAsyncHandler = authPolicyAsyncHandler;
+        if (authPolicyAsyncHandler != null) {
+            LOG.info("AuthPolicyAsyncHandler injected successfully");
+        }
     }
 
     @VisibleForTesting
@@ -1668,6 +1687,18 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             final EntityMutationContext context = preCreateOrUpdate(entityStream, entityGraphMapper, isPartialUpdate);
             long preCreateTime = System.currentTimeMillis() - preCreateStart;
             observabilityData.setValidationTime(preCreateTime);
+
+            // Check for async AuthPolicy processing - BEFORE authorization checks
+            // If async processing is triggered, it handles validation, stub creation, and returns early
+            if (shouldProcessAuthPolicyAsync(context)) {
+                EntityMutationResponse asyncResponse = processAuthPolicyAsync(context, observabilityData);
+                if (asyncResponse != null) {
+                    observabilityService.recordOperationEnd("createOrUpdate", "async_authpolicy");
+                    operationRecorded = true;
+                    return asyncResponse;
+                }
+                // If null returned, fall through to sync processing (fallback enabled)
+            }
 
             // Check if authorized to create entities
             if (!RequestContext.get().isImportInProgress() && !RequestContext.get().isSkipAuthorizationCheck()) {
@@ -3288,6 +3319,177 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             AtlasEntityStream atlasEntityStream = (AtlasEntityStream) entityStream;
             PayloadAnalyzer payloadAnalyzer = new PayloadAnalyzer();
             payloadAnalyzer.analyzePayload(atlasEntityStream.getEntitiesWithExtInfo(), observabilityData);
+        }
+    }
+
+    // ===== AuthPolicy Async Processing Methods =====
+
+    /**
+     * Check if AuthPolicy entities should be processed asynchronously.
+     * 
+     * Conditions:
+     * - Feature flag is enabled
+     * - Handler is available
+     * - Context contains ONLY AuthPolicy creates OR updates (not mixed)
+     * - Not in import mode
+     * 
+     * @param context EntityMutationContext from preCreateOrUpdate
+     * @return true if async processing should be used
+     */
+    private boolean shouldProcessAuthPolicyAsync(EntityMutationContext context) {
+        // 1. Check if handler is available
+        if (authPolicyAsyncHandler == null) {
+            return false;
+        }
+
+        // 2. Check feature flag
+        boolean asyncEnabled = FeatureFlagStore.evaluate(
+                FeatureFlag.ENABLE_ASYNC_AUTHPOLICY_PROCESSING.getKey(), "true");
+        if (!asyncEnabled) {
+            return false;
+        }
+
+        // 3. Check not in import mode
+        if (RequestContext.get().isImportInProgress()) {
+            return false;
+        }
+
+        // 4. Check if context contains ONLY AuthPolicy entities
+        boolean hasAuthPolicyOps = false;
+        boolean hasOtherEntities = false;
+
+        // Check created entities
+        if (CollectionUtils.isNotEmpty(context.getCreatedEntities())) {
+            for (AtlasEntity entity : context.getCreatedEntities()) {
+                if (POLICY_ENTITY_TYPE.equals(entity.getTypeName())) {
+                    hasAuthPolicyOps = true;
+                } else {
+                    hasOtherEntities = true;
+                }
+            }
+        }
+
+        // Check updated entities
+        if (CollectionUtils.isNotEmpty(context.getUpdatedEntities())) {
+            for (AtlasEntity entity : context.getUpdatedEntities()) {
+                if (POLICY_ENTITY_TYPE.equals(entity.getTypeName())) {
+                    hasAuthPolicyOps = true;
+                } else {
+                    hasOtherEntities = true;
+                }
+            }
+        }
+
+        // Only process async if we have AuthPolicy operations AND no other entity types
+        if (hasAuthPolicyOps && !hasOtherEntities) {
+            LOG.info("Routing to async AuthPolicy processing [creates: {}, updates: {}]",
+                    CollectionUtils.size(context.getCreatedEntities()),
+                    CollectionUtils.size(context.getUpdatedEntities()));
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Process AuthPolicy entities asynchronously.
+     * 
+     * @param context EntityMutationContext containing AuthPolicy entities
+     * @param observabilityData Observability tracking
+     * @return EntityMutationResponse if async processing succeeds, null if fallback to sync
+     * @throws AtlasBaseException if async fails and fallback is disabled
+     */
+    private EntityMutationResponse processAuthPolicyAsync(EntityMutationContext context,
+                                                           AtlasObservabilityData observabilityData)
+            throws AtlasBaseException {
+        
+        LOG.info("Processing {} AuthPolicy entities asynchronously",
+                CollectionUtils.size(context.getCreatedEntities()) +
+                CollectionUtils.size(context.getUpdatedEntities()));
+
+        try {
+            EntityMutationResponse response = new EntityMutationResponse();
+
+            // Process CREATEs
+            if (CollectionUtils.isNotEmpty(context.getCreatedEntities())) {
+                EntityMutationResponse createResp = authPolicyAsyncHandler.handleAsync(
+                        context.getCreatedEntities(),
+                        RequestContext.get(),
+                        EntityMutations.EntityOperation.CREATE,
+                        Collections.emptyMap()
+                );
+                mergeEntityMutationResponses(response, createResp);
+            }
+
+            // Process UPDATEs
+            if (CollectionUtils.isNotEmpty(context.getUpdatedEntities())) {
+                // Build map of existing entities for UPDATE validation
+                Map<String, AtlasEntity> existingEntities = new HashMap<>();
+                for (AtlasEntity entity : context.getUpdatedEntities()) {
+                    AtlasVertex vertex = context.getVertex(entity.getGuid());
+                    if (vertex != null) {
+                        try {
+                            AtlasEntity existing = entityRetriever.toAtlasEntity(vertex);
+                            existingEntities.put(entity.getGuid(), existing);
+                        } catch (AtlasBaseException e) {
+                            LOG.warn("Failed to retrieve existing entity for guid: {}", entity.getGuid(), e);
+                        }
+                    }
+                }
+
+                EntityMutationResponse updateResp = authPolicyAsyncHandler.handleAsync(
+                        context.getUpdatedEntities(),
+                        RequestContext.get(),
+                        EntityMutations.EntityOperation.UPDATE,
+                        existingEntities
+                );
+                mergeEntityMutationResponses(response, updateResp);
+            }
+
+            // Set GUID assignments from context
+            response.setGuidAssignments(context.getGuidAssignments());
+
+            LOG.info("Async AuthPolicy processing completed successfully [creates: {}, updates: {}]",
+                    CollectionUtils.size(response.getCreatedEntities()),
+                    CollectionUtils.size(response.getUpdatedEntities()));
+
+            return response;
+
+        } catch (Exception e) {
+            LOG.error("Async AuthPolicy processing failed, checking fallback option", e);
+
+            // Check fallback flag
+            boolean fallbackEnabled = FeatureFlagStore.evaluate(
+                    FeatureFlag.ASYNC_AUTHPOLICY_FALLBACK_TO_SYNC.getKey(), "true");
+
+            if (fallbackEnabled) {
+                LOG.warn("Falling back to sync processing due to async failure: {}", e.getMessage());
+                return null; // Signal to continue with sync processing
+            } else {
+                throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR,
+                        "Async AuthPolicy processing failed: " + e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Merge source EntityMutationResponse into target.
+     */
+    private void mergeEntityMutationResponses(EntityMutationResponse target, EntityMutationResponse source) {
+        if (source == null) {
+            return;
+        }
+
+        if (CollectionUtils.isNotEmpty(source.getCreatedEntities())) {
+            for (AtlasEntityHeader header : source.getCreatedEntities()) {
+                target.addEntity(EntityMutations.EntityOperation.CREATE, header);
+            }
+        }
+
+        if (CollectionUtils.isNotEmpty(source.getUpdatedEntities())) {
+            for (AtlasEntityHeader header : source.getUpdatedEntities()) {
+                target.addEntity(EntityMutations.EntityOperation.UPDATE, header);
+            }
         }
     }
 }

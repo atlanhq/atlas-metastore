@@ -9,7 +9,10 @@ public enum FeatureFlag {
     ENABLE_JANUS_OPTIMISATION("ENABLE_JANUS_OPTIMISATION", false),
     ENABLE_PERSONA_HIERARCHY_FILTER("enable_persona_hierarchy_filter", false),
     DISABLE_WRITE_FLAG("disable_writes", false),
-    USE_TEMP_ES_INDEX("use_temp_es_index", false);
+    USE_TEMP_ES_INDEX("use_temp_es_index", false),
+    // AuthPolicy async processing feature flags
+    ENABLE_ASYNC_AUTHPOLICY_PROCESSING("enable_async_authpolicy_processing", false),
+    ASYNC_AUTHPOLICY_FALLBACK_TO_SYNC("async_authpolicy_fallback_to_sync", true);
 
     private final String key;
     private final boolean defaultValue;
