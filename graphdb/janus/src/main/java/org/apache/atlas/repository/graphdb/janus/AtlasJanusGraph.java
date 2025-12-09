@@ -547,13 +547,14 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     private Map<String, Map<String, Object>> normalizeAttributes(Set<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
-        Map<String, Map<String, Object>> rt = new HashMap<>();
+        Map<String, Map<String, Object>> rt = new HashMap<>(vertices.size());
 
         for (AtlasVertex vertex : vertices) {
             String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
             AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
 
-            Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
+            // Get properties directly without creating intermediate HashMap
+            Map<String, Object> allProperties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
 
             type.normalizeAttributeValuesForUpdate(allProperties);
 
