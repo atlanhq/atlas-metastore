@@ -503,9 +503,9 @@ data:
 
     ######### Atlas Leangraph configs #########
     OTEL_RESOURCE_ATTRIBUTES="service.name=leangraph_atlas"
-    OTEL_SERVICE_NAME="leangraph_atlas"
-    atlas.graph.tag.table.name="leangraph_tags_by_id"
-    atlas.graph.propagated.tag.table.name="leangraph_propagated_tags_by_source"
-    atlas.graph.new.keyspace="leangraph_tags"
-    atlas.graph.storage.cql.keyspace="leangraph_atlas"
-    atlas.graph.index.search.index-name="janus_leangraph"
+    OTEL_SERVICE_NAME=leangraph_atlas
+    atlas.graph.tag.table.name=leangraph_tags_by_id
+    atlas.graph.propagated.tag.table.name=leangraph_propagated_tags_by_source
+    atlas.graph.new.keyspace=leangraph_tags
+    atlas.graph.storage.cql.keyspace=leangraph_atlas
+    atlas.graph.index.search.index-name=janus_leangraph
