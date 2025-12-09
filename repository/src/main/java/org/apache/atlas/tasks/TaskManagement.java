@@ -107,6 +107,10 @@ public class TaskManagement implements Service, ActiveStateChangeHandler {
         return watcherThread != null;
     }
 
+    public boolean isProcessingTasks() {
+        return taskExecutor != null && taskExecutor.isProcessingTasks();
+    }
+
     @Override
     public void stop() throws AtlasException {
         stopQueueWatcher();
