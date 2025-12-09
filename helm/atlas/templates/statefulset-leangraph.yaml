@@ -73,8 +73,8 @@ spec:
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
       initContainers:
-      {{- if .Values.atlas.leangraph.initContainers }}
-        {{- toYaml .Values.atlas.leangraph.initContainers | nindent 8 }}
+      {{- if .Values.atlas.initContainers }}
+        {{- toYaml .Values.atlas.initContainers | nindent 8 }}
       {{- end }}
       serviceAccountName: cinv-sa
       containers:
