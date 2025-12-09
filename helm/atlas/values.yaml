@@ -107,40 +107,6 @@ atlas:
       path: /api/atlas/v2/
       port: 80
       targetPort: 21000
-    initContainers:
-      - name: init-container-bundle-leangraph
-        image: ghcr.io/atlanhq/alpine-python-atlan-v2:3.9.21
-        imagePullPolicy: IfNotPresent
-        volumeMounts:
-          - name: atlas-init-script
-            mountPath: /tmp/atlas-init.sh
-            subPath: atlas-init.sh
-          - name: atlas-leangraph-config
-            mountPath: /tmp/configfile/atlas-application.properties
-            subPath: atlas-application.properties
-          - name: atlas-config-map-rw-vol
-            mountPath: /tmp/newconfigfile
-          - name: atlas-audit-index
-            mountPath: /scripts/atlas-audit.sh
-            subPath: atlas-audit.sh
-          - name: atlas-init-container-script
-            mountPath: /scripts/atlas-init-container.sh
-            subPath: atlas-init-container.sh
-        env:
-          - name: ATLAS_SERVICE_NAME
-            value: 'leangraph_atlas'
-          - name: RANGER_SERVICE_URL
-            value: "http://ranger-service.ranger.svc.cluster.local:80/api/policy"
-          - name: RANGER_USERNAME
-            value: ''
-          - name: RANGER_PASSWORD
-            value: ''
-          - name: KEYCLOAK_ADDRESS
-            value: 'http://keycloak-http.keycloak.svc.cluster.local/auth'
-        command:
-        - /scripts/atlas-init-container.sh
-
-
   podAnnotations:
     backup.velero.io/backup-volumes-excludes: master
 

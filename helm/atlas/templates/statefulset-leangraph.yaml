@@ -151,7 +151,7 @@ spec:
           {{- toYaml .Values.atlas.resources | nindent 12 }}
           {{- end }}
           volumeMounts:
-            - name: atlas-leangraph-config
+            - name: atlas-config
               mountPath: /opt/apache-atlas/conf/atlas-application.properties
               subPath: atlas-application.properties
             - name: atlas-logback-config
@@ -230,7 +230,7 @@ spec:
           configMap:
             name: rate-limit-nginx-config
         {{- end }}
-        - name: atlas-leangraph-config
+        - name: atlas-config
           configMap:
             name: atlas-leangraph-config
         - name: atlas-logback-config
