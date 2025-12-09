@@ -184,7 +184,7 @@ spec:
           volumeMounts:
             - name: telegraf-conf
               mountPath: /etc/telegraf/
-            {{- if .Values.nginx.enabled }}
+            {{- if and .Values.nginx.enabled (not .Values.atlas.leangraph.enabled) }}
             - name: nginx-log-volume
               mountPath: /var/log/nginx
               readOnly: true
@@ -193,7 +193,7 @@ spec:
             - name: telegrafd
               containerPort: 9273
         {{- end }}
-        {{- if .Values.nginx.enabled }}
+        {{- if and .Values.nginx.enabled (not .Values.atlas.leangraph.enabled) }}
         - name: nginx-ratelimit
           image: ghcr.io/atlanhq/nginx-vts-atlan-v2:1.27.5.1-multiarch
           ports:
@@ -222,7 +222,7 @@ spec:
           emptyDir: {}
         - name: atlas-config-map-rw-vol
           emptyDir: {}
-        {{- if .Values.nginx.enabled }}
+        {{- if and .Values.nginx.enabled (not .Values.atlas.leangraph.enabled) }}
         - name: nginx-log-volume
           emptyDir: {}
         - name: nginx-config

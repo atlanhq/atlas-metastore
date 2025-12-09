@@ -1,0 +1,75 @@
+{{- if and .Values.nginx.enabled .Values.atlas.leangraph.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-nginx-mirror
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: atlas-nginx-mirror
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  annotations:
+    configmap.reloader.stakater.com/reload: "nginx-mirror-config"
+spec:
+  replicas: {{ .Values.atlas.replicaCount | default 2 }}
+  selector:
+    matchLabels:
+      app: atlas-nginx-mirror
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: atlas-nginx-mirror
+        release: {{ .Release.Name }}
+    spec:
+      {{- with .Values.atlas.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if .Values.atlas.imagePullSecrets }}
+      imagePullSecrets:
+      {{- toYaml .Values.atlas.imagePullSecrets | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: nginx-mirror
+          image: ghcr.io/atlanhq/nginx-vts-atlan-v2:1.27.5.1-multiarch
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 200m
+              memory: 256Mi
+          volumeMounts:
+            - name: nginx-mirror-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: nginx-log-volume
+              mountPath: /var/log/nginx
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+      volumes:
+        - name: nginx-mirror-config
+          configMap:
+            name: nginx-mirror-config
+        - name: nginx-log-volume
+          emptyDir: {}
+{{- end }}
+
