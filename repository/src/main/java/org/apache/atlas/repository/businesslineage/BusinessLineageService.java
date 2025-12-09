@@ -19,7 +19,6 @@
 package org.apache.atlas.repository.businesslineage;
 
 
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -32,8 +31,6 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.*;
-import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.util.AtlasGremlinQueryProvider;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -43,6 +40,7 @@ import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.GraphHelper.updateModificationMetadata;
@@ -53,10 +51,6 @@ import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcess
 public class BusinessLineageService implements AtlasBusinessLineageService {
     private static final Logger LOG = LoggerFactory.getLogger(BusinessLineageService.class);
 
-    private static final boolean LINEAGE_USING_GREMLIN = AtlasConfiguration.LINEAGE_USING_GREMLIN.getBoolean();
-    private static final String TYPE_GLOSSARY= "AtlasGlossary";
-    private static final String TYPE_CATEGORY= "AtlasGlossaryCategory";
-    private static final String TYPE_TERM = "AtlasGlossaryTerm";
     private static final String TYPE_PRODUCT = "DataProduct";
     private static final String TYPE_DOMAIN = "DataDomain";
 
@@ -66,7 +60,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
     private final GraphHelper graphHelper;
     private final AtlasRelationshipStoreV2 relationshipStoreV2;
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
-    private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
+    private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_PRODUCT, TYPE_DOMAIN));
 
 
 
@@ -113,16 +107,20 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                             assetGuid, productGuid, operation, edgeLabel);
                 }
 
+                AtomicBoolean isAssetUpdated = new AtomicBoolean(false);
+
                 if (StringUtils.isEmpty(edgeLabel)) {
-                    AtlasVertex updatedVertex = processProductAssetLink(assetGuid, productGuid, operation, assetDenormAttribute);
-                    if (!updatedVertices.contains(updatedVertex) && updatedVertex != null) {
+                    AtlasVertex updatedVertex = processProductAssetLink(assetGuid, productGuid, operation, assetDenormAttribute, isAssetUpdated);
+                    if (!updatedVertices.contains(updatedVertex) && updatedVertex != null && isAssetUpdated.get()) {
                         updatedVertices.add(updatedVertex);
                     }
                 } else {
                     processProductAssetInputRelation(assetGuid, productGuid, operation, edgeLabel);
                 }
             }
-            handleEntityMutation(updatedVertices);
+            if (!updatedVertices.isEmpty()) {
+                handleEntityMutation(updatedVertices);
+            }
             commitChanges();
         } catch (AtlasBaseException | RepositoryException e){
             LOG.error("Error while creating lineage", e);
@@ -132,7 +130,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         }
     }
 
-    public AtlasVertex processProductAssetLink (String assetGuid, String productGuid, BusinessLineageRequest.OperationType operation, String assetDenormAttribute) throws AtlasBaseException {
+    public AtlasVertex  processProductAssetLink (String assetGuid, String productGuid, BusinessLineageRequest.OperationType operation, String assetDenormAttribute, AtomicBoolean isAssetUpdated) throws AtlasBaseException {
         try {
             AtlasVertex assetVertex;
             AtlasVertex productVertex;
@@ -149,6 +147,11 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                         LOG.warn("Product not found for productGuid: {}", productGuid);
                         return null;
                     }
+
+                    if (!TYPE_PRODUCT.equals(productVertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class))) {
+                        LOG.warn("Entity with guid: {} is not of type DataProduct", productGuid);
+                        return null;
+                    }
                 }
                 // For REMOVE operation, we are not fetching the product vertex because we are also handling DataProduct hard deletion in REMOVE flow.
             } catch (AtlasBaseException e){
@@ -158,10 +161,10 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
 
             switch (operation) {
                 case ADD:
-                    linkProductToAsset (assetVertex, productGuid, assetDenormAttribute);
+                    linkProductToAsset (assetVertex, productGuid, assetDenormAttribute, isAssetUpdated);
                     break;
                 case REMOVE:
-                    unlinkProductFromAsset (assetVertex, productGuid, assetDenormAttribute);
+                    unlinkProductFromAsset (assetVertex, productGuid, assetDenormAttribute, isAssetUpdated);
                     break;
                 default:
                     throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Invalid operation type");
@@ -190,6 +193,11 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                     LOG.warn("Product not found for productGuid: {}", productGuid);
                     return;
                 }
+
+                if (!TYPE_PRODUCT.equals(productVertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class))) {
+                    LOG.warn("Entity with guid: {} is not of type DataProduct", productGuid);
+                    return;
+                }
             } catch (AtlasBaseException e){
                 LOG.warn("Entity Vertex not found", e);
                 return;
@@ -211,11 +219,12 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         }
     }
 
-    public void linkProductToAsset (AtlasVertex assetVertex, String productGuid, String assetDenormAttribute) throws AtlasBaseException {
+    public void linkProductToAsset (AtlasVertex assetVertex, String productGuid, String assetDenormAttribute, AtomicBoolean isAssetUpdated) throws AtlasBaseException {
         try {
             String typeName = assetVertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
             if (excludedTypes.contains(typeName)){
                 LOG.warn("Type {} is not allowed to link with PRODUCT entity", typeName);
+                return;
             }
             Set<String> existingValues = assetVertex.getMultiValuedSetProperty(assetDenormAttribute, String.class);
 
@@ -227,6 +236,8 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
 
                 cacheDifferentialMeshEntity(assetVertex, existingValues, assetDenormAttribute);
 
+                isAssetUpdated.set(true);
+
             }
         } catch (Exception e){
             LOG.error("Error while linking product to asset", e);
@@ -234,7 +245,7 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
         }
     }
 
-    public void unlinkProductFromAsset (AtlasVertex assetVertex, String productGuid, String assetDenormAttribute) throws AtlasBaseException {
+    public void unlinkProductFromAsset (AtlasVertex assetVertex, String productGuid, String assetDenormAttribute, AtomicBoolean isAssetUpdated) throws AtlasBaseException {
         try {
             Set<String> existingValues = assetVertex.getMultiValuedSetProperty(assetDenormAttribute, String.class);
 
@@ -245,6 +256,8 @@ public class BusinessLineageService implements AtlasBusinessLineageService {
                 updateModificationMetadata(assetVertex);
 
                 cacheDifferentialMeshEntity(assetVertex, existingValues, assetDenormAttribute);
+
+                isAssetUpdated.set(true);
             }
         } catch (Exception e){
             LOG.error("Error while unlinking product from asset", e);
