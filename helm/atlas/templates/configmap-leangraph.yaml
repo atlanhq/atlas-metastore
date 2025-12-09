@@ -510,3 +510,7 @@ data:
     atlas.graph.storage.cql.keyspace=leangraph_atlas
     atlas.graph.index.search.index-name=janus_leangraph
     atlas.graph.lean.graph.enabled=true
+    atlas.graph.graph.set-vertex-id=true
+    atlas.graph.graph.allow-custom-vid-types=true
+    atlas.cassandra.vanilla.keyspace=leangraph_atlas
+    atlas.cassandra.vertex.table=assets
