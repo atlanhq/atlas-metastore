@@ -117,6 +117,12 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
         String termName = (String) entity.getAttribute(NAME);
         String vertexName = vertex.getProperty(NAME, String.class);
         String termGuid = entity.getGuid();
+        String vertexQualifiedName = vertex.getProperty(QUALIFIED_NAME, String.class);
+        String vertexUniqueQualifiedName = vertex.getProperty(UNIQUE_QUALIFIED_NAME, String.class);
+
+        LOG.info("[TERM_DUP_DEBUG] processUpdateTerm START: termGuid='{}', termName='{}', vertexName='{}', " +
+                "vertex.qualifiedName='{}', vertex.__u_qualifiedName='{}'",
+                termGuid, termName, vertexName, vertexQualifiedName, vertexUniqueQualifiedName);
 
         if (StringUtils.isEmpty(termName) || isNameInvalid(termName)) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_DISPLAY_NAME);
@@ -141,6 +147,10 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
         }
 
         if (!currentGlossaryQualifiedName.equals(newGlossaryQualifiedName)){
+            LOG.info("[TERM_DUP_DEBUG] GLOSSARY CHANGE DETECTED - Moving term between glossaries: " +
+                    "termGuid='{}', termName='{}', currentGlossary='{}', newGlossary='{}'",
+                    termGuid, termName, currentGlossaryQualifiedName, newGlossaryQualifiedName);
+            
             //Auth check
             isAuthorized(currentGlossaryHeader, anchor);
 
@@ -155,9 +165,16 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
             }
 
         } else {
+            LOG.info("[TERM_DUP_DEBUG] SAME GLOSSARY - Term update within same glossary: " +
+                    "termGuid='{}', oldName='{}', newName='{}', glossary='{}'",
+                    termGuid, vertexName, termName, newGlossaryQualifiedName);
 
             if (!vertexName.equals(termName)) {
+                LOG.info("[TERM_DUP_DEBUG] NAME CHANGE DETECTED - Checking if new name '{}' already exists in glossary '{}'", 
+                        termName, newGlossaryQualifiedName);
                 termExists(termName, newGlossaryQualifiedName);
+            } else {
+                LOG.info("[TERM_DUP_DEBUG] NO NAME CHANGE - Term name stays '{}', no duplicate check needed", termName);
             }
 
             entity.setAttribute(QUALIFIED_NAME, termQualifiedName);
@@ -204,14 +221,33 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
                                            String targetGlossaryQualifiedName,
                                            String currentTermQualifiedName) throws AtlasBaseException {
 
+        String termGuid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+        String termName = (String) entity.getAttribute(NAME);
+        String vertexQualifiedName = vertex.getProperty(QUALIFIED_NAME, String.class);
+        String vertexUniqueQualifiedName = vertex.getProperty(UNIQUE_QUALIFIED_NAME, String.class);
+        
+        LOG.info("[TERM_DUP_DEBUG] BEFORE moveTermToAnotherGlossary: termGuid='{}', termName='{}', " +
+                "sourceGlossary='{}', targetGlossary='{}', " +
+                "currentTermQualifiedName='{}', " +
+                "vertex.qualifiedName='{}', vertex.__u_qualifiedName='{}'",
+                termGuid, termName, sourceGlossaryQualifiedName, targetGlossaryQualifiedName,
+                currentTermQualifiedName, vertexQualifiedName, vertexUniqueQualifiedName);
+        
         //check duplicate term name
         termExists((String) entity.getAttribute(NAME), targetGlossaryQualifiedName);
 
 
         String updatedQualifiedName = currentTermQualifiedName.replace(sourceGlossaryQualifiedName, targetGlossaryQualifiedName);
+        
+        LOG.info("[TERM_DUP_DEBUG] Calculated updatedQualifiedName='{}' (replacing source with target)", updatedQualifiedName);
 
         //qualifiedName
         entity.setAttribute(QUALIFIED_NAME, updatedQualifiedName);
+        
+        LOG.info("[TERM_DUP_DEBUG] AFTER setAttribute: entity.qualifiedName updated to '{}'. " +
+                "NOTE: vertex.__u_qualifiedName is NOT updated here - this may cause data inconsistency! " +
+                "Current vertex.__u_qualifiedName still='{}', should be='{}'",
+                updatedQualifiedName, vertexUniqueQualifiedName, updatedQualifiedName);
 
         // __categories
         /*  if category is not passed in relationshipAttributes, check

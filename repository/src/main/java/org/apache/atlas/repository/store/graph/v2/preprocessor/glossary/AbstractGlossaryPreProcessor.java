@@ -57,7 +57,9 @@ import java.util.stream.Collectors;
 import static org.apache.atlas.repository.Constants.ATLAS_GLOSSARY_TERM_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.ELASTICSEARCH_PAGINATION_SIZE;
 import static org.apache.atlas.repository.Constants.NAME;
+import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.STATE_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.UNIQUE_QUALIFIED_NAME;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.indexSearchPaginated;
 import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 import static org.apache.atlas.type.Constants.MEANINGS_PROPERTY_KEY;
@@ -96,6 +98,8 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
         boolean ret = false;
 
         try {
+            LOG.info("[TERM_DUP_DEBUG] Checking if term exists: termName='{}', glossaryQName='{}'", termName, glossaryQName);
+            
             List mustClauseList = new ArrayList();
             mustClauseList.add(mapOf("term", mapOf("__glossary", glossaryQName)));
             mustClauseList.add(mapOf("term", mapOf("__typeName.keyword", ATLAS_GLOSSARY_TERM_ENTITY_TYPE)));
@@ -103,15 +107,78 @@ public abstract class AbstractGlossaryPreProcessor implements PreProcessor {
             mustClauseList.add(mapOf("term", mapOf("name.keyword", termName)));
 
             Map<String, Object> dsl = mapOf("query", mapOf("bool", mapOf("must", mustClauseList)));
+            
+            LOG.info("[TERM_DUP_DEBUG] ElasticSearch query: __glossary='{}', name='{}', __typeName='AtlasGlossaryTerm', __state='ACTIVE'", glossaryQName, termName);
 
             List<AtlasEntityHeader> terms = indexSearchPaginated(dsl, null, this.discovery);
+            
+            LOG.info("[TERM_DUP_DEBUG] ES query returned {} term(s)", terms != null ? terms.size() : 0);
 
             if (CollectionUtils.isNotEmpty(terms)) {
+                LOG.info("[TERM_DUP_DEBUG] Analyzing {} term(s) returned from ElasticSearch to check for exact name match", terms.size());
+                
+                for (AtlasEntityHeader term : terms) {
+                    String foundName = (String) term.getAttribute(NAME);
+                    String foundGuid = term.getGuid();
+                    String foundQualifiedName = (String) term.getAttribute(QUALIFIED_NAME);
+                    Object foundGlossary = term.getAttribute("__glossary");
+                    
+                    LOG.info("[TERM_DUP_DEBUG] Found term via ES: guid='{}', name='{}', qualifiedName='{}', __glossary='{}'", 
+                            foundGuid, foundName, foundQualifiedName, foundGlossary);
+                    
+                    // Try to get __u_qualifiedName from vertex to detect data inconsistency
+                    try {
+                        AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(foundGuid);
+                        if (vertex != null) {
+                            String vertexQualifiedName = vertex.getProperty(QUALIFIED_NAME, String.class);
+                            String vertexUniqueQualifiedName = vertex.getProperty(UNIQUE_QUALIFIED_NAME, String.class);
+                            
+                            if (vertexQualifiedName != null && vertexUniqueQualifiedName != null && 
+                                !vertexQualifiedName.equals(vertexUniqueQualifiedName)) {
+                                LOG.info("[TERM_DUP_DEBUG] ⚠️  DATA INCONSISTENCY in found term guid='{}': " +
+                                        "vertex.qualifiedName='{}' != vertex.__u_qualifiedName='{}'. " +
+                                        "This term likely was moved between glossaries and __u_qualifiedName was not updated. " +
+                                        "This data inconsistency may be causing false duplicate detection!",
+                                        foundGuid, vertexQualifiedName, vertexUniqueQualifiedName);
+                            } else {
+                                LOG.info("[TERM_DUP_DEBUG] Found term guid='{}' has consistent data: qualifiedName matches __u_qualifiedName", foundGuid);
+                            }
+                        }
+                    } catch (Exception e) {
+                        LOG.debug("[TERM_DUP_DEBUG] Could not fetch vertex details for guid='{}': {}", foundGuid, e.getMessage());
+                    }
+                }
                 ret = terms.stream().map(term -> (String) term.getAttribute(NAME)).anyMatch(name -> termName.equals(name));
             }
 
             if (ret) {
+                StringBuilder dupDetails = new StringBuilder();
+                dupDetails.append(String.format("Term '%s' already exists in glossary '%s'. ", termName, glossaryQName));
+                dupDetails.append(String.format("ElasticSearch found %d term(s) in this glossary with matching criteria. ", terms.size()));
+                dupDetails.append("Duplicate detection grounds: ");
+                dupDetails.append("(1) ES indexed term(s) with __glossary='").append(glossaryQName).append("' AND ");
+                dupDetails.append("(2) name.keyword='").append(termName).append("' AND ");
+                dupDetails.append("(3) __typeName='AtlasGlossaryTerm' AND ");
+                dupDetails.append("(4) __state='ACTIVE'. ");
+                
+                // List all matching terms
+                if (terms != null && !terms.isEmpty()) {
+                    dupDetails.append("Conflicting term GUIDs: [");
+                    for (int i = 0; i < terms.size(); i++) {
+                        if (i > 0) dupDetails.append(", ");
+                        dupDetails.append(terms.get(i).getGuid());
+                    }
+                    dupDetails.append("]. ");
+                }
+                
+                dupDetails.append("Check logs above for data inconsistency warnings (__u_qualifiedName mismatch) which may indicate false positive.");
+                
+                LOG.info("[TERM_DUP_DEBUG] DUPLICATE DETECTED - {} Throwing ATLAS-409.", dupDetails.toString());
                 throw new AtlasBaseException(AtlasErrorCode.GLOSSARY_TERM_ALREADY_EXISTS, termName);
+            } else {
+                LOG.info("[TERM_DUP_DEBUG] No duplicate found - Term '{}' does not exist in glossary '{}'. " +
+                        "ES returned {} term(s) but none had exact name match after filtering.", 
+                        termName, glossaryQName, terms != null ? terms.size() : 0);
             }
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);

@@ -53,21 +53,7 @@ import org.slf4j.MDC;
 import java.text.SimpleDateFormat;
 import java.util.*;
 
-import static org.apache.atlas.repository.Constants.ATLAS_GLOSSARY_ENTITY_TYPE;
-import static org.apache.atlas.repository.Constants.ATTRIBUTE_NAME_TYPENAME;
-import static org.apache.atlas.repository.Constants.CLASSIFICATION_NAMES_KEY;
-import static org.apache.atlas.repository.Constants.ENTITY_TYPE_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.GLOSSARY_TERMS_EDGE_LABEL;
-import static org.apache.atlas.repository.Constants.INDEX_SEARCH_VERTEX_PREFIX_DEFAULT;
-import static org.apache.atlas.repository.Constants.INDEX_SEARCH_VERTEX_PREFIX_PROPERTY;
-import static org.apache.atlas.repository.Constants.NAME;
-import static org.apache.atlas.repository.Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY;
-import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
-import static org.apache.atlas.repository.Constants.STATE_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.SUPER_TYPES_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.TYPENAME_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.TYPE_NAME_PROPERTY_KEY;
-import static org.apache.atlas.repository.Constants.UNIQUE_QUALIFIED_NAME;
+import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.repository.graph.AtlasGraphProvider.getGraphInstance;
 import static org.apache.atlas.repository.graphdb.AtlasGraphQuery.SortOrder.ASC;
 import static org.apache.atlas.repository.graphdb.AtlasGraphQuery.SortOrder.DESC;
@@ -120,11 +106,11 @@ public class AtlasGraphUtilsV2 {
     }
 
     public static String getIdFromVertex(AtlasVertex vertex) {
-        return vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
+        return vertex.getProperty(GUID_PROPERTY_KEY, String.class);
     }
 
     public static String getIdFromEdge(AtlasEdge edge) {
-        return edge.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
+        return edge.getProperty(GUID_PROPERTY_KEY, String.class);
     }
 
     public static String getTypeName(AtlasElement element) {
@@ -411,7 +397,7 @@ public class AtlasGraphUtilsV2 {
         AtlasVertex ret = GraphTransactionInterceptor.getVertexFromCache(guid);
 
         if (ret == null) {
-            AtlasGraphQuery query = graph.query().has(Constants.GUID_PROPERTY_KEY, guid);
+            AtlasGraphQuery query = graph.query().has(GUID_PROPERTY_KEY, guid);
 
             Iterator<AtlasVertex> results = query.vertices().iterator();
 
@@ -431,7 +417,7 @@ public class AtlasGraphUtilsV2 {
 
         if (ret == null) {
             AtlasGraphQuery query = graph.query()
-                    .has(Constants.GUID_PROPERTY_KEY, guid)
+                    .has(GUID_PROPERTY_KEY, guid)
                     .has(STATE_PROPERTY_KEY, Status.DELETED.name());
 
             Iterator<AtlasVertex> results = query.vertices().iterator();
@@ -601,6 +587,7 @@ public class AtlasGraphUtilsV2 {
         String          typePropertyKey = isSuperType ? SUPER_TYPES_PROPERTY_KEY : ENTITY_TYPE_PROPERTY_KEY;
         AtlasGraphQuery query           = graph.query().has(typePropertyKey, typeName);
         String uniqueQualifiedName = "";
+        String regularQualifiedName = "";
 
         for (Map.Entry<String, Object> entry : attributeValues.entrySet()) {
             String attrName  = entry.getKey();
@@ -610,12 +597,38 @@ public class AtlasGraphUtilsV2 {
                 query.has(attrName, attrValue);
                 if (UNIQUE_QUALIFIED_NAME.equals(attrName)){
                     uniqueQualifiedName =  (String) attrValue;
+                } else if (QUALIFIED_NAME.equals(attrName)) {
+                    regularQualifiedName = (String) attrValue;
                 }
             }
+        }
+        
+        if (StringUtils.isNotEmpty(uniqueQualifiedName) && typeName != null && typeName.contains("GlossaryTerm")) {
+            LOG.info("[TERM_DUP_DEBUG] JanusGraph vertex query by __u_qualifiedName: typeName='{}', __u_qualifiedName='{}'", 
+                    typeName, uniqueQualifiedName);
         }
 
         Iterator<AtlasVertex> results = query.vertices().iterator();
         AtlasVertex           vertex  = results.hasNext() ? results.next() : null;
+        
+        if (vertex != null && StringUtils.isNotEmpty(uniqueQualifiedName) && typeName != null && typeName.contains("GlossaryTerm")) {
+            String foundGuid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+            String foundQualifiedName = vertex.getProperty(QUALIFIED_NAME, String.class);
+            String foundUniqueQualifiedName = vertex.getProperty(UNIQUE_QUALIFIED_NAME, String.class);
+            
+            LOG.info("[TERM_DUP_DEBUG] JanusGraph vertex FOUND: guid='{}', qualifiedName='{}', __u_qualifiedName='{}'. " +
+                    "Query used __u_qualifiedName='{}'",
+                    foundGuid, foundQualifiedName, foundUniqueQualifiedName, uniqueQualifiedName);
+            
+            if (!foundQualifiedName.equals(foundUniqueQualifiedName)) {
+                LOG.info("[TERM_DUP_DEBUG] DATA INCONSISTENCY DETECTED! Vertex has mismatched qualifiedNames: " +
+                        "qualifiedName='{}' != __u_qualifiedName='{}'. This indicates the bug exists! " +
+                        "Term was likely moved between glossaries and __u_qualifiedName was not updated.",
+                        foundQualifiedName, foundUniqueQualifiedName);
+            }
+        } else if (vertex == null && StringUtils.isNotEmpty(uniqueQualifiedName) && typeName != null && typeName.contains("GlossaryTerm")) {
+            LOG.info("[TERM_DUP_DEBUG] JanusGraph vertex NOT FOUND for __u_qualifiedName='{}'", uniqueQualifiedName);
+        }
 
         RequestContext.get().endMetricRecord(metric);
 
@@ -627,7 +640,7 @@ public class AtlasGraphUtilsV2 {
             return vertex;
         }
 
-        if (vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class) != null &&
+        if (vertex.getProperty(GUID_PROPERTY_KEY, String.class) != null &&
                 vertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class) != null &&
                 vertex.getProperty(UNIQUE_QUALIFIED_NAME, String.class) != null) {
             return vertex;
