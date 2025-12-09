@@ -509,3 +509,4 @@ data:
     atlas.graph.new.keyspace=leangraph_tags
     atlas.graph.storage.cql.keyspace=leangraph_atlas
     atlas.graph.index.search.index-name=janus_leangraph
+    atlas.graph.lean.graph.enabled=true
