@@ -1,3 +1,4 @@
+{{ if .Values.atlas.leangraph.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -514,3 +515,4 @@ data:
     atlas.graph.graph.allow-custom-vid-types=true
     atlas.cassandra.vanilla.keyspace=leangraph_atlas
     atlas.cassandra.vertex.table=assets
+{{- end }}

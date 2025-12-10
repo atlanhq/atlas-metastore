@@ -118,7 +118,7 @@ spec:
                 fieldRef:
                   fieldPath: status.hostIP
             - name: OTEL_SERVICE_NAME
-              value: atlas
+              value: atlas_leangraph
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://$(HOST_IP):4317
             - name: OTEL_RESOURCE_ATTRIBUTES
