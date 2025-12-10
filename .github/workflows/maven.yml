@@ -395,7 +395,7 @@ jobs:
   # Smoke test on vclusters (parallel with single VPN)
 
   helm-publish:
-    needs: [helm-lint, build, smoke-test, changes]
+    needs: [helm-lint, build, changes]
     runs-on: ubuntu-latest
     # Run helm-publish if:
     # 1. Helm-lint passed (quality gate)
