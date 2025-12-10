@@ -404,7 +404,7 @@ jobs:
     if: |
       always() && 
       needs.helm-lint.result == 'success' && (
-        (needs.build.result == 'success' ||
+        needs.build.result == 'success' ||
         (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')
       )
     strategy:
