@@ -55,7 +55,7 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
     private static final String SOLR_STATUS_CHECK_RETRY_INTERVAL          = "atlas.graph.index.status.check.frequency";
     private static final String SOLR_INDEX_RECOVERY_CONFIGURED_START_TIME = "atlas.graph.index.recovery.start.time";
     private static final long   SOLR_STATUS_RETRY_DEFAULT_MS              = 30000; // 30 secs default
-    private static final String ATLAS_INDEX_RECOVERY_LOCK = "atlas:index-recovery:lock";
+    private static final String ATLAS_INDEX_RECOVERY_LOCK = "index_recovery";
 
     private final Thread                 indexHealthMonitor;
     private final RecoveryInfoManagement recoveryInfoManagement;
