@@ -1658,13 +1658,13 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         RequestContext requestContext = RequestContext.get();
         AtlasObservabilityData observabilityData = new AtlasObservabilityData(
                 requestContext.getTraceId(),
-                requestContext.getRequestContextHeaders().get("x-atlan-agent-id"),
+                requestContext.getRequestContextHeaders().get(TASK_HEADER_ATLAN_AGENT_ID),
                 requestContext.getClientOrigin()
         );
         analyzePayload(entityStream, observabilityData);
         try {
             // Record operation start
-            observabilityService.recordOperationStart("createOrUpdate", requestContext.getClientOrigin());
+            observabilityService.recordOperationStart("createOrUpdate", requestContext.getClientOrigin(), observabilityData.getXAtlanAgentId());
 
             // Timing: preCreateOrUpdate (includes validation)
             long preCreateStart = System.currentTimeMillis();
@@ -1785,7 +1785,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             entityChangeNotifier.notifyDifferentialEntityChanges(ret, RequestContext.get().isImportInProgress());
             atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
 
-            observabilityService.recordOperationEnd("createOrUpdate", "success", requestContext.getClientOrigin());
+            observabilityService.recordOperationEnd("createOrUpdate", "success", requestContext.getClientOrigin(), observabilityData.getXAtlanAgentId());
             operationRecorded = true;
 
             if (LOG.isDebugEnabled()) {
@@ -1797,7 +1797,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             // Record operation failure
             if (!operationRecorded) {
                 String errorCode = e.getAtlasErrorCode() != null ? e.getAtlasErrorCode().name() : "UNKNOWN_ERROR";
-                observabilityService.recordOperationFailure("createOrUpdate", errorCode, requestContext.getClientOrigin());
+                observabilityService.recordOperationFailure("createOrUpdate", errorCode, requestContext.getClientOrigin(), observabilityData.getXAtlanAgentId());
                 observabilityService.logErrorDetails(observabilityData, "Unchecked exception in createOrUpdate", e);
             }
             throw e;
@@ -1805,7 +1805,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             // Record operation failure for unchecked exceptions (RuntimeException, NullPointerException, etc.)
             if (!operationRecorded) {
                 String errorType = e.getClass().getSimpleName();
-                observabilityService.recordOperationFailure("createOrUpdate", errorType, requestContext.getClientOrigin());
+                observabilityService.recordOperationFailure("createOrUpdate", errorType, requestContext.getClientOrigin(), observabilityData.getXAtlanAgentId());
                 observabilityService.logErrorDetails(observabilityData, "Unchecked exception in createOrUpdate", e);
             }
             throw e;

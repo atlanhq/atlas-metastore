@@ -20,6 +20,7 @@ public class AtlasObservabilityService {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasEntityStoreV2.class);
     private static final String METRIC_COMPONENT = "atlas_observability_bulk";
     private static final String UNKNOWN_CLIENT_ORIGIN = "unknown";
+    private static final String UNKNOWN_AGENT_ID = "unknown";
     private final MeterRegistry meterRegistry;
 
     private final Map<String, Counter> counterCache = new ConcurrentHashMap<>();
@@ -67,52 +68,71 @@ public class AtlasObservabilityService {
         return clientOrigin != null ? clientOrigin : UNKNOWN_CLIENT_ORIGIN;
     }
     
+    /**
+     * Normalizes agent ID by replacing numeric segments with a single placeholder to reduce cardinality.
+     * Examples:
+     * - "atlan-snowflake-miner-1708514534-cron-1764734400" -> "atlan-snowflake-miner-X-cron-X"
+     * - "atlan-dbt-1743112562-cron-1764748800" -> "atlan-dbt-X-cron-X"
+     * - "atlan-snowflake-miner-cron" -> "atlan-snowflake-miner-cron" (unchanged)
+     * - null -> "unknown"
+     */
+    private String normalizeAgentId(String agentId) {
+        if (agentId == null || agentId.isEmpty()) {
+            return UNKNOWN_AGENT_ID;
+        }
+        // Replace sequences of digits with a single X to normalize timestamps/IDs while preserving structure
+        // This reduces cardinality while keeping the agent type pattern visible
+        return agentId.replaceAll("\\d+", "X");
+    }
+    
     public void recordCreateOrUpdateDuration(AtlasObservabilityData data) {
-        Timer timer = getOrCreateTimer("duration", normalizeClientOrigin(data.getXAtlanClientOrigin()));
+        Timer timer = getOrCreateTimer("duration", data.getXAtlanClientOrigin(), data.getXAtlanAgentId());
         timer.record(data.getDuration(), TimeUnit.MILLISECONDS);
     }
     
     public void recordPayloadSize(AtlasObservabilityData data) {
-        DistributionSummary summary = getOrCreateDistributionSummary("payload_size", normalizeClientOrigin(data.getXAtlanClientOrigin()));
+        DistributionSummary summary = getOrCreateDistributionSummary("payload_size", data.getXAtlanClientOrigin(), data.getXAtlanAgentId());
         summary.record(data.getPayloadAssetSize());
     }
     
     public void recordPayloadBytes(AtlasObservabilityData data) {
-        DistributionSummary summary = getOrCreateDistributionSummary("payload_bytes", normalizeClientOrigin(data.getXAtlanClientOrigin()));
+        DistributionSummary summary = getOrCreateDistributionSummary("payload_bytes", data.getXAtlanClientOrigin(), data.getXAtlanAgentId());
         summary.record(data.getPayloadRequestBytes());
     }
     
     public void recordArrayRelationships(AtlasObservabilityData data) {
-        String clientOrigin = normalizeClientOrigin(data.getXAtlanClientOrigin());
+        String clientOrigin = data.getXAtlanClientOrigin();
+        String agentId = data.getXAtlanAgentId();
         // Record total count
-        DistributionSummary summary = getOrCreateDistributionSummary("array_relationships", clientOrigin);
+        DistributionSummary summary = getOrCreateDistributionSummary("array_relationships", clientOrigin, agentId);
         summary.record(data.getTotalArrayRelationships());
         
         // Record individual relationship types and counts
-        recordRelationshipMap("relationship_attributes", data.getRelationshipAttributes(), clientOrigin);
-        recordRelationshipMap("append_relationship_attributes", data.getAppendRelationshipAttributes(), clientOrigin);
-        recordRelationshipMap("remove_relationship_attributes", data.getRemoveRelationshipAttributes(), clientOrigin);
+        recordRelationshipMap("relationship_attributes", data.getRelationshipAttributes(), clientOrigin, agentId);
+        recordRelationshipMap("append_relationship_attributes", data.getAppendRelationshipAttributes(), clientOrigin, agentId);
+        recordRelationshipMap("remove_relationship_attributes", data.getRemoveRelationshipAttributes(), clientOrigin, agentId);
     }
     
     public void recordArrayAttributes(AtlasObservabilityData data) {
-        String clientOrigin = normalizeClientOrigin(data.getXAtlanClientOrigin());
+        String clientOrigin = data.getXAtlanClientOrigin();
+        String agentId = data.getXAtlanAgentId();
         // Record total count
-        DistributionSummary summary = getOrCreateDistributionSummary("array_attributes", clientOrigin);
+        DistributionSummary summary = getOrCreateDistributionSummary("array_attributes", clientOrigin, agentId);
         summary.record(data.getTotalArrayAttributes());
         // Record individual attribute types and counts
         if (data.getArrayAttributes() != null && !data.getArrayAttributes().isEmpty()) {
             for (Map.Entry<String, Integer> entry : data.getArrayAttributes().entrySet()) {
-                Counter counter = getOrCreateCounter("attributes", clientOrigin,
+                Counter counter = getOrCreateCounter("attributes", clientOrigin, agentId,
                     "attribute_name", entry.getKey());
                 counter.increment(entry.getValue());
             }
         }
     }
     
-    private void recordRelationshipMap(String metricName, Map<String, Integer> relationshipMap, String clientOrigin) {
+    private void recordRelationshipMap(String metricName, Map<String, Integer> relationshipMap, String clientOrigin, String agentId) {
         if (relationshipMap != null && !relationshipMap.isEmpty()) {
             for (Map.Entry<String, Integer> entry : relationshipMap.entrySet()) {
-                Counter counter = getOrCreateCounter(metricName, clientOrigin,
+                Counter counter = getOrCreateCounter(metricName, clientOrigin, agentId,
                     "relationship_name", entry.getKey());
                 counter.increment(entry.getValue());
             }
@@ -122,20 +142,21 @@ public class AtlasObservabilityService {
     
     
     public void recordTimingMetrics(AtlasObservabilityData data) {
-        String clientOrigin = normalizeClientOrigin(data.getXAtlanClientOrigin());
-        recordTimingMetric("diff_calc", data.getDiffCalcTime(), clientOrigin);
-        recordTimingMetric("lineage_calc", data.getLineageCalcTime(), clientOrigin);
-        recordTimingMetric("validation", data.getValidationTime(), clientOrigin);
-        recordTimingMetric("ingestion", data.getIngestionTime(), clientOrigin);
+        String clientOrigin = data.getXAtlanClientOrigin();
+        String agentId = data.getXAtlanAgentId();
+        recordTimingMetric("diff_calc", data.getDiffCalcTime(), clientOrigin, agentId);
+        recordTimingMetric("lineage_calc", data.getLineageCalcTime(), clientOrigin, agentId);
+        recordTimingMetric("validation", data.getValidationTime(), clientOrigin, agentId);
+        recordTimingMetric("ingestion", data.getIngestionTime(), clientOrigin, agentId);
     }
     
-    private void recordTimingMetric(String operation, long durationMs, String clientOrigin) {
-        Timer timer = getOrCreateTimer(operation + "_time", clientOrigin);
+    private void recordTimingMetric(String operation, long durationMs, String clientOrigin, String agentId) {
+        Timer timer = getOrCreateTimer(operation + "_time", clientOrigin, agentId);
         timer.record(durationMs, TimeUnit.MILLISECONDS);
     }
     
-    public void recordOperationCount(String operation, String status, String clientOrigin) {
-        Counter counter = getOrCreateCounter("operations", normalizeClientOrigin(clientOrigin), 
+    public void recordOperationCount(String operation, String status, String clientOrigin, String agentId) {
+        Counter counter = getOrCreateCounter("operations", clientOrigin, agentId, 
             "operation", operation, "status", status);
         counter.increment();
         // Note: totalOperations is incremented by recordOperationEnd/recordOperationFailure, not here
@@ -144,30 +165,29 @@ public class AtlasObservabilityService {
     /**
      * Record operation start - increments operations in progress
      */
-    public void recordOperationStart(String operation, String clientOrigin) {
+    public void recordOperationStart(String operation, String clientOrigin, String agentId) {
         operationsInProgress.incrementAndGet();
     }
     
     /**
      * Record operation end - decrements operations in progress and increments total
      */
-    public void recordOperationEnd(String operation, String status, String clientOrigin) {
+    public void recordOperationEnd(String operation, String status, String clientOrigin, String agentId) {
         operationsInProgress.decrementAndGet();
         totalOperations.incrementAndGet();
-        recordOperationCount(operation, status, clientOrigin);
+        recordOperationCount(operation, status, clientOrigin, agentId);
     }
     
     /**
      * Record operation failure - decrements operations in progress and records failure
      */
-    public void recordOperationFailure(String operation, String errorType, String clientOrigin) {
-        String normalizedClientOrigin = normalizeClientOrigin(clientOrigin);
+    public void recordOperationFailure(String operation, String errorType, String clientOrigin, String agentId) {
         operationsInProgress.decrementAndGet();
         totalOperations.incrementAndGet();
-        recordOperationCount(operation, "failure", clientOrigin);
+        recordOperationCount(operation, "failure", clientOrigin, agentId);
         
         // Record specific error type
-        Counter errorCounter = getOrCreateCounter("operation_errors", normalizedClientOrigin,
+        Counter errorCounter = getOrCreateCounter("operation_errors", clientOrigin, agentId,
             "operation", operation, "error_type", errorType);
         errorCounter.increment();
     }
@@ -191,21 +211,23 @@ public class AtlasObservabilityService {
         }
     }
     
-    private Timer getOrCreateTimer(String metricName, String clientOrigin, String... additionalTags) {
+    private Timer getOrCreateTimer(String metricName, String clientOrigin, String agentId, String... additionalTags) {
         String normalizedClientOrigin = normalizeClientOrigin(clientOrigin);
+        String normalizedAgentId = normalizeAgentId(agentId);
         String key;
         if (additionalTags != null && additionalTags.length > 0) {
-            // Include clientOrigin in cache key to prevent collisions
-            String[] allTags = new String[additionalTags.length + 1];
+            // Include clientOrigin and agentId in cache key to prevent collisions
+            String[] allTags = new String[additionalTags.length + 2];
             allTags[0] = normalizedClientOrigin;
-            System.arraycopy(additionalTags, 0, allTags, 1, additionalTags.length);
+            allTags[1] = normalizedAgentId;
+            System.arraycopy(additionalTags, 0, allTags, 2, additionalTags.length);
             key = getMetricKey(metricName, allTags);
         } else {
-            key = getMetricKey(metricName, normalizedClientOrigin);
+            key = getMetricKey(metricName, normalizedClientOrigin, normalizedAgentId);
         }
         
         return timerCache.computeIfAbsent(key, k -> {
-            Tags tags = Tags.of("client_origin", normalizedClientOrigin);
+            Tags tags = Tags.of("client_origin", normalizedClientOrigin, "agent_id", normalizedAgentId);
             if (additionalTags != null && additionalTags.length > 0) {
                 tags = tags.and(Tags.of(additionalTags));
             }
@@ -238,21 +260,23 @@ public class AtlasObservabilityService {
         });
     }
 
-    private Counter getOrCreateCounter(String metricName, String clientOrigin, String... additionalTags) {
+    private Counter getOrCreateCounter(String metricName, String clientOrigin, String agentId, String... additionalTags) {
         String normalizedClientOrigin = normalizeClientOrigin(clientOrigin);
+        String normalizedAgentId = normalizeAgentId(agentId);
         String key;
         if (additionalTags != null && additionalTags.length > 0) {
-            // Include clientOrigin in cache key to prevent collisions
-            String[] allTags = new String[additionalTags.length + 1];
+            // Include clientOrigin and agentId in cache key to prevent collisions
+            String[] allTags = new String[additionalTags.length + 2];
             allTags[0] = normalizedClientOrigin;
-            System.arraycopy(additionalTags, 0, allTags, 1, additionalTags.length);
+            allTags[1] = normalizedAgentId;
+            System.arraycopy(additionalTags, 0, allTags, 2, additionalTags.length);
             key = getMetricKey(metricName, allTags);
         } else {
-            key = getMetricKey(metricName, normalizedClientOrigin);
+            key = getMetricKey(metricName, normalizedClientOrigin, normalizedAgentId);
         }
         
         return counterCache.computeIfAbsent(key, k -> {
-            Tags tags = Tags.of("client_origin", normalizedClientOrigin);
+            Tags tags = Tags.of("client_origin", normalizedClientOrigin, "agent_id", normalizedAgentId);
             if (additionalTags != null && additionalTags.length > 0) {
                 tags = tags.and(Tags.of(additionalTags));
             }
@@ -265,21 +289,23 @@ public class AtlasObservabilityService {
     }
 
     
-    private DistributionSummary getOrCreateDistributionSummary(String metricName, String clientOrigin, String... additionalTags) {
+    private DistributionSummary getOrCreateDistributionSummary(String metricName, String clientOrigin, String agentId, String... additionalTags) {
         String normalizedClientOrigin = normalizeClientOrigin(clientOrigin);
+        String normalizedAgentId = normalizeAgentId(agentId);
         String key;
         if (additionalTags != null && additionalTags.length > 0) {
-            // Include clientOrigin in cache key to prevent collisions
-            String[] allTags = new String[additionalTags.length + 1];
+            // Include clientOrigin and agentId in cache key to prevent collisions
+            String[] allTags = new String[additionalTags.length + 2];
             allTags[0] = normalizedClientOrigin;
-            System.arraycopy(additionalTags, 0, allTags, 1, additionalTags.length);
+            allTags[1] = normalizedAgentId;
+            System.arraycopy(additionalTags, 0, allTags, 2, additionalTags.length);
             key = getMetricKey(metricName, allTags);
         } else {
-            key = getMetricKey(metricName, normalizedClientOrigin);
+            key = getMetricKey(metricName, normalizedClientOrigin, normalizedAgentId);
         }
         
         return distributionSummaryCache.computeIfAbsent(key, k -> {
-            Tags tags = Tags.of("client_origin", normalizedClientOrigin);
+            Tags tags = Tags.of("client_origin", normalizedClientOrigin, "agent_id", normalizedAgentId);
             if (additionalTags != null && additionalTags.length > 0) {
                 tags = tags.and(Tags.of(additionalTags));
             }
