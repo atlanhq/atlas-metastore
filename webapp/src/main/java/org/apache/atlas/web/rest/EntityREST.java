@@ -28,7 +28,6 @@ import org.apache.atlas.authorize.*;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.CassandraTagOperation;
 import org.apache.atlas.model.TypeCategory;
 import org.apache.atlas.model.audit.AuditSearchParams;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
@@ -40,17 +39,16 @@ import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.audit.ESBasedAuditRepository;
-import org.apache.atlas.repository.converters.AtlasInstanceConverter;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.*;
 import org.apache.atlas.repository.store.graph.v2.repair.AtlasRepairAttributeService;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.FileUtils;
 import org.apache.atlas.util.RepairIndex;
+import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
@@ -79,8 +77,6 @@ import java.util.stream.Stream;
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.AtlasErrorCode.DEPRECATED_API;
 import static org.apache.atlas.authorize.AtlasPrivilege.*;
-import static org.apache.atlas.repository.Constants.ATTR_CONTRACT;
-import static org.apache.atlas.repository.Constants.ATTR_CONTRACT_JSON;
 
 
 /**
@@ -853,6 +849,9 @@ public class EntityREST {
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
                     .build();
             return entityMutationService.createOrUpdate(entityStream, context);
+        } catch (Throwable e) {
+            LOG.info("Error processing payload: {} ", AtlasJson.toJson(entities));
+            throw e;
         } finally {
             AtlasPerfTracer.log(perf);
         }
