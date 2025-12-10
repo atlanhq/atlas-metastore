@@ -870,6 +870,7 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
                     ).collect(Collectors.toSet());
             VERTEX_CORE_PROPERTIES.addAll(uniqueProperties);
         } finally {
+            LOG.info("updateLeanGraphRegistry : VERTEX_CORE_PROPERTIES size : {}", VERTEX_CORE_PROPERTIES.size());
             RequestContext.get().endMetricRecord(recorder);
         }
     }
@@ -897,6 +898,9 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
                             .collect(Collectors.toSet());
                     eligibleAttributes.addAll(eligibleBMAttributes);
                 }
+                LOG.info("updateLeanGraphRegistry : eligibleAttributes size for {} : {}", type.getTypeName(), eligibleAttributes.size());
+
+
                 type.setAttributesForESSync(eligibleAttributes);
             }
         } finally {
