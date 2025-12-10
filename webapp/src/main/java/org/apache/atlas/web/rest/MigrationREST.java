@@ -566,6 +566,11 @@ public class MigrationREST {
     }
 
     private void updateCompositeRole(RoleRepresentation role, List<String> users, List<String> groups, List<String> roles) throws AtlasBaseException {
+        if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateCompositeRole for role: {}", role.getName());
+            return;
+        }
+
         List<UserRepresentation> currentUsers = getKeycloakClient().getRoleUserMembers(role.getName()).stream().collect(Collectors.toList());
         List<GroupRepresentation> currentGroups = getKeycloakClient().getRoleGroupMembers(role.getName()).stream().collect(Collectors.toList());
         List<RoleRepresentation> currentRoles = getKeycloakClient().getRoleComposites(role.getName()).stream().collect(Collectors.toList());
@@ -623,6 +628,11 @@ public class MigrationREST {
     }
 
     private void createCompositeRole(String roleName, List<String> users, List<String> groups, List<String> roles) throws AtlasBaseException {
+        if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping createCompositeRole for role: {}", roleName);
+            return;
+        }
+
         List<UserRepresentation> roleUsers = new ArrayList<>();
         List<GroupRepresentation> roleGroups = new ArrayList<>();
         List<RoleRepresentation> roleRoles = new ArrayList<>();
