@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - vsco
 
 jobs:
   # Detect what changed to optimize workflow execution
