@@ -882,6 +882,8 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
                     .filter(x -> x instanceof AtlasEntityType)
                     .map(x -> ((AtlasEntityType) x))
                     .toList();
+
+            LOG.info("updateLeanGraphRegistry : allEntityTypes size : {}", allEntityTypes.size());
             for (AtlasEntityType type : allEntityTypes) {
                 Set<String> eligibleAttributes = type.getAllAttributes().keySet().stream()
                         .filter(x -> type.getAttribute(x).isSyncToESRequired())
