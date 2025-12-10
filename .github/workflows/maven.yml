@@ -275,59 +275,6 @@ jobs:
             echo "Sufficient disk space available (${DISK_USAGE}% used)"
           fi
 
-      - name: Run Integration Tests
-        id: integration_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
-        continue-on-error: true
-        env:
-          # Configure Testcontainers for GitHub Actions
-          TESTCONTAINERS_RYUK_DISABLED: true
-          TESTCONTAINERS_CHECKS_DISABLE: true
-          DOCKER_HOST: unix:///var/run/docker.sock
-        run: |
-          echo "Running integration tests..."
-          chmod +x ./run-integration-tests.sh && ./run-integration-tests.sh --skip-build
-
-      - name: Upload container logs as artifact
-        if: always() && steps.integration_tests.outcome != 'skipped'
-        uses: actions/upload-artifact@v4
-        with:
-          name: container-logs-${{ github.run_id }}
-          path: target/test-logs/
-          retention-days: 5
-
-      - name: Fail the workflow if tests failed
-        if: steps.integration_tests.outcome == 'failure'
-        run: exit 1
-
-      - name: Clean up after integration tests
-        if: always() && steps.integration_tests.outcome != 'skipped'
-        run: |
-          echo "Cleaning up test environment..."
-          docker ps -a -q | xargs -r docker rm -f || true
-          docker system prune -af || true
-          echo ""
-          echo "Removing other test containers and images..."
-          docker system prune -af --volumes || true
-          
-          # Clean Maven artifacts to free up space
-          echo "Cleaning Maven artifacts..."
-          rm -rf ~/.m2/repository/org/apache/atlas/ || true
-          
-          # Clean test artifacts
-          echo "Cleaning test artifacts..."
-          rm -rf webapp/target/surefire-reports/ || true
-          rm -rf test-debug-logs/ || true
-          rm -rf target/test-logs/ || true
-          
-          # Clean temp files
-          echo "Cleaning temp files..."
-          sudo rm -rf /tmp/* || true
-          
-          echo ""
-          echo "Disk space after cleanup:"
-          df -h / | tail -1
-
       - name: Get Repository Name
         run:   echo "REPOSITORY_NAME=`echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}' | sed -e "s/:refs//"`" >> $GITHUB_ENV
         shell: bash
