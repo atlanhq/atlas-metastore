@@ -1,4 +1,4 @@
-{{- if and not .Values.global.atlasNginx.enabled (not .Values.atlas.leangraph.enabled) }}
+{{- if and (not .Values.global.atlasNginx.enabled) (not .Values.atlas.leangraph.enabled) }}
 apiVersion: v1
 kind: Service
 metadata:
