@@ -3,6 +3,7 @@ package org.apache.atlas.service.redis;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.ArrayUtils;
@@ -267,9 +268,12 @@ public abstract class AbstractRedisService implements RedisService {
     }
 
     private String convertToNamespace(String key){
-        // Append key with configurable namespace prefix
-        String namespace = AtlasConfiguration.REDIS_NAMESPACE.getString();
-        return namespace + ":" + key;
+        // Append key with configurable namespace prefix only when lean graph is enabled
+        if (Constants.LEAN_GRAPH_ENABLED) {
+            String namespace = AtlasConfiguration.REDIS_NAMESPACE.getString();
+            return namespace + ":" + key;
+        }
+        return key;
     }
 
     Config getLocalConfig() throws AtlasException {

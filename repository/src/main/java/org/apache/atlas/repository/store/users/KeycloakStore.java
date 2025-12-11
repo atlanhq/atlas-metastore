@@ -18,8 +18,8 @@
 
 package org.apache.atlas.repository.store.users;
 
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -49,12 +49,8 @@ public class KeycloakStore {
         this.saveGroupsToAttributes  = saveGroupsToAttributes;
     }
 
-    /**
-     * Check if Keycloak mutations are enabled via configuration.
-     * When disabled, all write operations become no-ops.
-     */
     public static boolean isKeycloakMutationsEnabled() {
-        return AtlasConfiguration.KEYCLOAK_MUTATIONS_ENABLED.getBoolean();
+        return Constants.LEAN_GRAPH_ENABLED;
     }
 
     public RoleRepresentation createRole(String name) throws AtlasBaseException {
