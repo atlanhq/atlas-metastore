@@ -83,7 +83,7 @@ public class TypesREST {
         this.typeDefStore = typeDefStore;
         this.redisService = redisService;
         this.typeCacheRefresher = typeCacheRefresher;
-        this.typeDefLock = configuration.getString(ApplicationProperties.TYPEDEF_LOCK_NAME, "atlas:type-def:lock");
+        this.typeDefLock = configuration.getString(ApplicationProperties.TYPEDEF_LOCK_NAME, "type_def_lock");
         LOG.info("TypeDef lock name: {}", this.typeDefLock);
     }
 

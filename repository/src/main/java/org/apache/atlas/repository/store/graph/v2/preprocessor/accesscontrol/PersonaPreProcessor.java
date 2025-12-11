@@ -213,6 +213,11 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
     }
 
     protected String createKeycloakRole(AtlasEntity entity) throws AtlasBaseException {
+        if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping createKeycloakRole for persona: {}", entity.getGuid());
+            return null;
+        }
+
         String roleName = getPersonaRoleName(entity);
         List<String> users = getPersonaUsers(entity);
         List<String> groups = getPersonaGroups(entity);
@@ -228,10 +233,15 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
         RoleRepresentation role = keycloakStore.createRole(roleName, users, groups, null);
 
-        return role.getId();
+        return role != null ? role.getId() : null;
     }
 
     protected void updateKeycloakRole(AtlasEntity newPersona, AtlasEntity existingPersona) throws AtlasBaseException {
+        if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateKeycloakRole for persona: {}", newPersona.getGuid());
+            return;
+        }
+
         String roleId = getPersonaRoleId(existingPersona);
         String roleName = getPersonaRoleName(existingPersona);
 
