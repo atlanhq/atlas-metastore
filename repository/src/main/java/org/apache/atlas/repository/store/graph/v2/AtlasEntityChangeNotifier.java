@@ -221,9 +221,35 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     @Override
     @Async
     public void onClassificationPropagationAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
-        setRequestContext(requestContext);
-        for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
-            listener.onClassificationPropagationsAdded(entities, addedClassifications, forceInline);
+        String taskGuid = getTaskGuidOrNA(requestContext);
+        LOG.info("[TaskGuid: {}] ClassificationPropagation: ASYNC_ENTRY - entitiesCount={}, classificationsCount={}, forceInline={}", 
+            taskGuid, entities.size(), addedClassifications.size(), forceInline);
+        
+        try {
+            setRequestContext(requestContext);
+            
+            int listenerCount = 0;
+            for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
+                listenerCount++;
+                String listenerName = listener.getClass().getSimpleName();
+                try {
+                    LOG.info("[TaskGuid: {}] ClassificationPropagation: LISTENER_{} - Calling {} with {} entities", 
+                        taskGuid, listenerCount, listenerName, entities.size());
+                    listener.onClassificationPropagationsAdded(entities, addedClassifications, forceInline);
+                    LOG.info("[TaskGuid: {}] ClassificationPropagation: LISTENER_{} - {} SUCCESS", 
+                        taskGuid, listenerCount, listenerName);
+                } catch (Exception e) {
+                    LOG.error("[TaskGuid: {}] ClassificationPropagation: LISTENER_{} - {} FAILED - error={}", 
+                        taskGuid, listenerCount, listenerName, e.getMessage(), e);
+                    // Continue with other listeners even if one fails
+                }
+            }
+            
+            LOG.info("[TaskGuid: {}] ClassificationPropagation: ASYNC_COMPLETE - All {} listeners notified", taskGuid, listenerCount);
+        } catch (Exception e) {
+            LOG.error("[TaskGuid: {}] ClassificationPropagation: ASYNC_ERROR - Failed to notify listeners. error={}", 
+                taskGuid, e.getMessage(), e);
+            throw e;
         }
     }
 

@@ -90,6 +90,7 @@ import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
 import static org.apache.atlas.model.TypeCategory.CLASSIFICATION;
+import static org.apache.atlas.model.TypeCategory.PRIMITIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.ACTIVE;
 import static org.apache.atlas.model.instance.AtlasEntity.Status.DELETED;
 import static org.apache.atlas.model.instance.AtlasObjectId.KEY_TYPENAME;
@@ -4586,13 +4587,22 @@ public class EntityGraphMapper {
                         taskGuid, chunkNumber);
                 }
                 
-                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - NOTIFICATION_START - Sending notifications for {} entities", 
+                LOG.info("[TaskGuid: {}] ClassificationPropagation: CHUNK_{} - NOTIFICATION_START - Sending notifications for {} entities", 
                     taskGuid, chunkNumber, chunkedVerticesToPropagateSet.size());
-                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - Notification entity GUIDs: {}", 
+                LOG.info("[TaskGuid: {}] ClassificationPropagation: CHUNK_{} - Notification entity GUIDs: {}", 
                     taskGuid, chunkNumber, 
                     chunkedVerticesToPropagateSet.stream().map(v -> GraphHelper.getGuid(v)).collect(Collectors.joining(", ")));
-                entityChangeNotifier.onClassificationPropagationAddedToEntitiesV2(chunkedVerticesToPropagateSet, Collections.singletonList(classification), true, RequestContext.get()); // Async call
-                LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - NOTIFICATION_DISPATCHED (Async)", taskGuid, chunkNumber);
+                
+                // Extract data from vertices into entities WITHIN active transaction (safe from transaction closure)
+                LOG.info("[TaskGuid: {}] ClassificationPropagation: CHUNK_{} - Converting vertices to entities", taskGuid, chunkNumber);
+                Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(chunkedVerticesToPropagateSet);
+                List<AtlasEntity> notificationEntities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(chunkedVerticesToPropagateSet, primitiveAttributes);
+                LOG.info("[TaskGuid: {}] ClassificationPropagation: CHUNK_{} - Converted {} vertices to {} entities", 
+                    taskGuid, chunkNumber, chunkedVerticesToPropagateSet.size(), notificationEntities.size());
+                
+                // Pass entities instead of vertices to async method (no transaction dependency)
+                entityChangeNotifier.onClassificationPropagationAddedToEntities(notificationEntities, Collections.singletonList(classification), true, RequestContext.get());
+                LOG.info("[TaskGuid: {}] ClassificationPropagation: CHUNK_{} - NOTIFICATION_DISPATCHED (Async)", taskGuid, chunkNumber);
                 
                 offset += CHUNK_SIZE;
                 LOG.info("[TaskGuid: {}] processClassificationPropagationAdditionV2: CHUNK_{} - COMPLETE - Next offset: {}", 
@@ -7029,6 +7039,32 @@ public class EntityGraphMapper {
 
         RequestContext requestContext = RequestContext.get();
         requestContext.cacheDifferentialEntity(diffEntity);
+    }
+
+    /**
+     * Extracts primitive attributes from vertices for notification conversion.
+     * This method reads vertex properties WITHIN the active transaction to avoid
+     * transaction closure issues when async notifications are delayed.
+     */
+    private Set<AtlasStructType.AtlasAttribute> getEntityTypeAttributes(Set<AtlasVertex> vertices) {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = new HashSet<>();
+        for (AtlasVertex vertex : vertices) {
+            String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+            if (typeName != null) {
+                AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+                if (entityType != null) {
+                    Map<String, AtlasStructType.AtlasAttribute> attributes = entityType.getAllAttributes();
+                    if (MapUtils.isNotEmpty(attributes)) {
+                        for (AtlasStructType.AtlasAttribute attribute : attributes.values()) {
+                            if (TypeCategory.PRIMITIVE.equals(attribute.getAttributeType().getTypeCategory())) {
+                                primitiveAttributes.add(attribute);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return primitiveAttributes;
     }
 
     /**
