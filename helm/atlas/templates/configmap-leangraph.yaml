@@ -515,4 +515,5 @@ data:
     atlas.graph.graph.allow-custom-vid-types=true
     atlas.cassandra.vanilla.keyspace=leangraph_atlas
     atlas.cassandra.vertex.table=assets
+    atlas.graph.lean.graph.enabled={{ .Values.atlas.leangraph.enabled }}
 {{- end }}
