@@ -43,6 +43,6 @@ spec:
       name: {{ .Values.atlas.leangraph.service.portName }}
     {{- end }}
   selector:
-    app: {{ template "name" . }}
+    app: {{ template "name" . }}-leangraph
     release: {{ .Release.Name }}
 {{- end }}

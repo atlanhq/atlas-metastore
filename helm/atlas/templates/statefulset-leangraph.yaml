@@ -17,7 +17,7 @@ spec:
       app: {{ template "name" . }}-leangraph
       release: {{ .Release.Name }}
   replicas: {{ .Values.atlas.replicaCount }}
-  serviceName: "atlas-service-atlas"
+  serviceName: "atlas-service-leangraph"
   template:
     metadata:
       labels:
