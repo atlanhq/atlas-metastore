@@ -14,6 +14,7 @@ public class AtlasObservabilityData {
     private String xAtlanClientOrigin;
     private long timestamp;
     private long duration;
+    private String implementation = "v1"; // v1 or v2
     
     // Payload info
     private int payloadAssetSize;
@@ -39,6 +40,17 @@ public class AtlasObservabilityData {
     private long notificationTime;
     private long auditLogTime;
     
+    // Delete Timing
+    private long lookupVerticesTime;
+    private long authorizationCheckTime;
+    private long preprocessingTime;
+    private long removeHasLineageTime;
+    private long deleteEntitiesTime;
+    private long deleteTypeVertexTime;
+    private long termCleanupTime;
+    private long esIndexingTime;
+    private int deleteEntitiesCount;
+
     public AtlasObservabilityData() {
         this.timestamp = System.currentTimeMillis();
     }
@@ -52,19 +64,17 @@ public class AtlasObservabilityData {
     
     // Getters and setters
     public String getTraceId() { return traceId; }
-    public void setTraceId(String traceId) { this.traceId = traceId; }
-    
-    public String getXAtlanAgentId() { return xAtlanAgentId; }
-    public void setXAtlanAgentId(String xAtlanAgentId) { this.xAtlanAgentId = xAtlanAgentId; }
     
     public String getXAtlanClientOrigin() { return xAtlanClientOrigin; }
-    public void setXAtlanClientOrigin(String xAtlanClientOrigin) { this.xAtlanClientOrigin = xAtlanClientOrigin; }
-    
+
     public long getTimestamp() { return timestamp; }
     public void setTimestamp(long timestamp) { this.timestamp = timestamp; }
     
     public long getDuration() { return duration; }
     public void setDuration(long duration) { this.duration = duration; }
+
+    public String getImplementation() { return implementation; }
+    public void setImplementation(String implementation) { this.implementation = implementation; }
     
     public int getPayloadAssetSize() { return payloadAssetSize; }
     public void setPayloadAssetSize(int payloadAssetSize) { this.payloadAssetSize = payloadAssetSize; }
@@ -113,4 +123,33 @@ public class AtlasObservabilityData {
     
     public int getTotalArrayAttributes() { return totalArrayAttributes; }
     public void setTotalArrayAttributes(int totalArrayAttributes) { this.totalArrayAttributes = totalArrayAttributes; }
+
+    // Delete metrics getters and setters
+    public long getLookupVerticesTime() { return lookupVerticesTime; }
+    public void setLookupVerticesTime(long lookupVerticesTime) { this.lookupVerticesTime = lookupVerticesTime; }
+
+    public long getAuthorizationCheckTime() { return authorizationCheckTime; }
+    public void setAuthorizationCheckTime(long authorizationCheckTime) { this.authorizationCheckTime = authorizationCheckTime; }
+
+    public long getPreprocessingTime() { return preprocessingTime; }
+    public void setPreprocessingTime(long preprocessingTime) { this.preprocessingTime = preprocessingTime; }
+
+    public long getRemoveHasLineageTime() { return removeHasLineageTime; }
+    public void setRemoveHasLineageTime(long removeHasLineageTime) { this.removeHasLineageTime = removeHasLineageTime; }
+
+    public long getDeleteEntitiesTime() { return deleteEntitiesTime; }
+    public void setDeleteEntitiesTime(long deleteEntitiesTime) { this.deleteEntitiesTime = deleteEntitiesTime; }
+
+    public long getDeleteTypeVertexTime() { return deleteTypeVertexTime; }
+    public void setDeleteTypeVertexTime(long deleteTypeVertexTime) { this.deleteTypeVertexTime = deleteTypeVertexTime; }
+    public void addDeleteTypeVertexTime(long time) { this.deleteTypeVertexTime += time; }
+
+    public long getTermCleanupTime() { return termCleanupTime; }
+    public void setTermCleanupTime(long termCleanupTime) { this.termCleanupTime = termCleanupTime; }
+
+    public long getEsIndexingTime() { return esIndexingTime; }
+    public void setEsIndexingTime(long esIndexingTime) { this.esIndexingTime = esIndexingTime; }
+
+    public int getDeleteEntitiesCount() { return deleteEntitiesCount; }
+    public void setDeleteEntitiesCount(int deleteEntitiesCount) { this.deleteEntitiesCount = deleteEntitiesCount; }
 }

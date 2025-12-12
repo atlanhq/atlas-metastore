@@ -84,6 +84,8 @@ public class RequestContext {
     
     // Observability timing fields
     private final AtomicLong lineageCalcTime = new AtomicLong(0L);
+    private final AtomicLong deleteTypeVertexTime = new AtomicLong(0L);
+    private final AtomicLong preprocessingTime = new AtomicLong(0L);
 
     private String user;
     private Set<String> userGroups;
@@ -122,6 +124,7 @@ public class RequestContext {
     private boolean skipHasLineageCalculation = false;
     private boolean isInvokedByIndexSearch = false;
     private boolean isInvokedByLineage = false;
+    private boolean isDeleteRequested = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
     private Map<AtlasClassification, Collection<Object>> addedClassificationAndVertices = new HashMap<>();
 
@@ -202,6 +205,8 @@ public class RequestContext {
 
         // Reset observability timing fields
         this.lineageCalcTime.set(0L);
+        this.deleteTypeVertexTime.set(0L);
+        this.preprocessingTime.set(0L);
 
         if (metrics != null && !metrics.isEmpty()) {
             METRICS.debug(metrics.toString());
@@ -848,6 +853,14 @@ public class RequestContext {
         return isInvokedByLineage;
     }
 
+    public void setDeleteRequested(boolean isDeleteRequested) {
+        this.isDeleteRequested = isDeleteRequested;
+    }
+
+    public boolean isDeleteRequested() {
+        return isDeleteRequested;
+    }
+
     public Map<String, Map<String, Object>> getAllInternalAttributesMap() {
         return allInternalAttributesMap;
     }
@@ -951,5 +964,22 @@ public class RequestContext {
     public long getLineageCalcTime() {
         return this.lineageCalcTime.get();
     }
+
+    public void incrementDeleteTypeVertexTime(long time) {
+        this.deleteTypeVertexTime.addAndGet(time);
+    }
+
+    public long getDeleteTypeVertexTime() {
+        return this.deleteTypeVertexTime.get();
+    }
+
+    public void addPreprocessingTime(long time) {
+        this.preprocessingTime.addAndGet(time);
+    }
+
+    public long getPreprocessingTime() {
+        return this.preprocessingTime.get();
+    }
+
 
 }
