@@ -30,6 +30,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.AtlasVertexQuery;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.utils.IteratorToIterableAdapter;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.ArrayUtils;
@@ -42,11 +43,26 @@ import org.apache.tinkerpop.gremlin.structure.VertexProperty;
 
 import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphVertex;
+import org.janusgraph.util.encoding.LongEncoding;
+
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
+import static org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService.VERTEX_CORE_PROPERTIES;
+import static org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector.JG_ES_DOC_ID_PREFIX;
+
 /**
  * Janus implementation of AtlasVertex.
  */
 public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> {
 
+    private DynamicVertex dynamicVertex;
+
+    public DynamicVertex getDynamicVertex() {
+        return dynamicVertex;
+    }
+
+    public void setDynamicVertex(DynamicVertex dynamicVertex) {
+        this.dynamicVertex = dynamicVertex;
+    }
 
     public AtlasJanusVertex(AtlasJanusGraph graph, Vertex source) {
         super(graph, source);
@@ -55,7 +71,16 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     @Override
     public <T> void addProperty(String propertyName, T value) {
         try {
-            getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+            if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+                this.getDynamicVertex().addSetProperty(propertyName, value);
+
+                if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                    getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+                }
+            } else {
+                getWrappedElement().property(VertexProperty.Cardinality.set, propertyName, value);
+            }
+
             recordInternalAttributeIncrementalAdd(propertyName, Set.class);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
@@ -65,7 +90,16 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     @Override
     public <T> void addListProperty(String propertyName, T value) {
         try {
-            getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
+            if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+                this.getDynamicVertex().addListProperty(propertyName, value);
+
+                if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                    getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
+                }
+            } else {
+                getWrappedElement().property(VertexProperty.Cardinality.list, propertyName, value);
+            }
+
             recordInternalAttributeIncrementalAdd(propertyName, List.class);
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
@@ -75,18 +109,29 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
 
     @Override
     public Iterable<AtlasEdge<AtlasJanusVertex, AtlasJanusEdge>> getEdges(AtlasEdgeDirection dir, String edgeLabel) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.getEdges");
 
-        Direction d = AtlasJanusObjectFactory.createDirection(dir);
-        Iterator<Edge> edges = getWrappedElement().edges(d, edgeLabel);
-        return graph.wrapEdges(edges);
+        try {
+            Direction d = AtlasJanusObjectFactory.createDirection(dir);
+            Iterator<Edge> edges = getWrappedElement().edges(d, edgeLabel);
+            return graph.wrapEdges(edges);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     @Override
     public Iterable<AtlasEdge<AtlasJanusVertex, AtlasJanusEdge>> getEdges(AtlasEdgeDirection dir, String[] edgeLabels) {
-        Direction      direction = AtlasJanusObjectFactory.createDirection(dir);
-        Iterator<Edge> edges     = getWrappedElement().edges(direction, edgeLabels);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.labelsarray");
 
-        return graph.wrapEdges(edges);
+        try {
+            Direction      direction = AtlasJanusObjectFactory.createDirection(dir);
+            Iterator<Edge> edges     = getWrappedElement().edges(direction, edgeLabels);
+
+            return graph.wrapEdges(edges);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     public Set<AtlasJanusEdge> getInEdges(String[] edgeLabelsToExclude) {
@@ -113,14 +158,9 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
 
     @Override
     public boolean hasEdges(AtlasEdgeDirection dir, String edgeLabel) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("hasEdges");
-        try {
-            Direction      direction = AtlasJanusObjectFactory.createDirection(dir);
-            Iterator<Edge> edges     = getWrappedElement().edges(direction, edgeLabel);
-            return edges.hasNext();
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
+        Direction      direction = AtlasJanusObjectFactory.createDirection(dir);
+        Iterator<Edge> edges     = getWrappedElement().edges(direction, edgeLabel);
+        return edges.hasNext();
     }
 
     private JanusGraphVertex getAsJanusVertex() {
@@ -129,17 +169,29 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
 
     @Override
     public Iterable<AtlasEdge<AtlasJanusVertex, AtlasJanusEdge>> getEdges(AtlasEdgeDirection in) {
-        Direction d = AtlasJanusObjectFactory.createDirection(in);
-        Iterator<Edge> edges = getWrappedElement().edges(d);
-        return graph.wrapEdges(edges);
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.onlydirection");
+        try {
+            Direction d = AtlasJanusObjectFactory.createDirection(in);
+            Iterator<Edge> edges = getWrappedElement().edges(d);
+            return graph.wrapEdges(edges);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
     @Override
     public <T> Collection<T> getPropertyValues(String propertyName, Class<T> clazz) {
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            try {
+                return (Collection<T>) getProperty(propertyName, clazz);
+            } catch (ClassCastException cce){
+                throw new RuntimeException(cce);
+            }
+        }
 
         Collection<T> result = new ArrayList<T>();
         Iterator<VertexProperty<T>> it = getWrappedElement().properties(propertyName);
-        while(it.hasNext()) {
+        while (it.hasNext()) {
             result.add(it.next().value());
         }
 
@@ -148,8 +200,13 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
 
     @Override
     public AtlasVertexQuery<AtlasJanusVertex, AtlasJanusEdge> query() {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("AtlasJanusVertex.query");
 
-        return new AtlasJanusVertexQuery(graph, getAsJanusVertex().query());
+        try {
+            return new AtlasJanusVertexQuery(graph, getAsJanusVertex().query());
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
     }
 
 
@@ -158,6 +215,12 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
         return this;
     }
 
-
-
+    @Override
+    public String getDocId() {
+        if (LEAN_GRAPH_ENABLED) {
+            return JG_ES_DOC_ID_PREFIX + this.getIdForDisplay();
+        } else {
+            return LongEncoding.encode(Long.parseLong(this.getIdForDisplay()));
+        }
+    }
 }

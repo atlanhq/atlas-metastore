@@ -5,6 +5,7 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.CassandraTagOperation;
 import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.Tag;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -15,6 +16,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
+
+import static org.apache.atlas.utils.AtlasEntityUtil.calculateBucket;
 
 @Component
 public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutationPostProcessor {
@@ -132,7 +135,7 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
         tag.setVertexId(op.getVertexId());
         tag.setTagTypeName(op.getTagTypeName());
         tag.setSourceVertexId(op.getVertexId());
-        tag.setBucket(TagDAOCassandraImpl.calculateBucket(op.getVertexId()));
+        tag.setBucket(calculateBucket(op.getVertexId()));
         return tag;
     }
 

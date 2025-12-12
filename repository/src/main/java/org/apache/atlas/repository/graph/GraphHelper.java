@@ -35,6 +35,7 @@ import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.repository.VertexEdgePropertiesCache;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.repository.graphdb.janus.*;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
@@ -88,6 +89,7 @@ import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelation
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE_VALID;
+import static org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal.Symbols.element;
 
 /**
  * Utility class for graph operations.
@@ -134,6 +136,7 @@ public final class GraphHelper {
     }
 
     public AtlasEdge addEdge(AtlasVertex fromVertex, AtlasVertex toVertex, String edgeLabel) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("GraphHelper.addEdge");
         AtlasEdge ret;
 
         if (LOG.isDebugEnabled()) {
@@ -160,6 +163,7 @@ public final class GraphHelper {
             }
         }
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -1260,6 +1264,11 @@ public final class GraphHelper {
         return ret;
     }
 
+    public static Boolean isEntityIncomplete(DynamicVertex dynamicVertex) {
+        Integer value = (Integer) dynamicVertex.getAllProperties().get(Constants.IS_INCOMPLETE_PROPERTY_KEY);
+        return value != null && value.equals(INCOMPLETE_ENTITY_VALUE) ? Boolean.TRUE : Boolean.FALSE;
+    }
+
     public static Boolean getEntityHasLineage(AtlasElement element) {
         if (element.getPropertyKeys().contains(HAS_LINEAGE)) {
             return element.getProperty(HAS_LINEAGE, Boolean.class);
@@ -1304,6 +1313,11 @@ public final class GraphHelper {
         return state == null ? null : Id.EntityState.valueOf(state);
     }
 
+    public static Id.EntityState getState(DynamicVertex dynamicVertex) {
+        String state = (String) dynamicVertex.getAllProperties().get(STATE_PROPERTY_KEY);
+        return state == null ? null : Id.EntityState.valueOf(state);
+    }
+
     public static Long getVersion(AtlasElement element) {
         return element.getProperty(Constants.VERSION_PROPERTY_KEY, Long.class);
     }
@@ -1323,6 +1337,10 @@ public final class GraphHelper {
         }
 
         return ret;
+    }
+
+    public static Status getStatus(DynamicVertex dynamicVertex) {
+        return  (Id.EntityState.DELETED == getState(dynamicVertex)) ? Status.DELETED : Status.ACTIVE;
     }
 
     public static Status getStatus(AtlasEdge edge) {
@@ -1431,12 +1449,40 @@ public final class GraphHelper {
         }
     }
 
+    public static long getCreatedTime(DynamicVertex dynamicVertex, String vertexId){
+        try {
+            Object value = dynamicVertex.getAllProperties().get(TIMESTAMP_PROPERTY_KEY);
+            if (value instanceof Long) {
+                return (Long) value;
+            } else {
+                return Long.parseLong((String) value);
+            }
+        } catch (Exception e) {
+            LOG.warn("Exception while extracting {} for dynamic vertex {}", TIMESTAMP_PROPERTY_KEY, vertexId);
+            return 0l;
+        }
+    }
+
     public static long getModifiedTime(AtlasElement element){
         try {
             return element.getProperty(MODIFICATION_TIMESTAMP_PROPERTY_KEY, Long.class);
         } catch (Exception e) {
             LOG.warn("Failed to get modified time for vertex {}. Error: {}", element.getIdForDisplay(), e.getMessage());
             return getCreatedTime(element);
+        }
+    }
+
+    public static long getModifiedTime(DynamicVertex dynamicVertex, String vertexId){
+        try {
+            Object value = dynamicVertex.getAllProperties().get(MODIFICATION_TIMESTAMP_PROPERTY_KEY);
+            if (value instanceof Long) {
+                return (Long) value;
+            } else {
+                return Long.parseLong((String) value);
+            }
+        } catch (Exception e) {
+            LOG.warn("Exception while extracting {} for dynamic vertex {}", MODIFICATION_TIMESTAMP_PROPERTY_KEY, vertexId);
+            return 0l;
         }
     }
 
@@ -1817,6 +1863,7 @@ public final class GraphHelper {
 
 
     public static List<AtlasEdge> getCollectionElementsUsingRelationship(AtlasVertex vertex, AtlasAttribute attribute, String edgeLabel) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getCollectionElementsUsingRelationship");
         List<AtlasEdge>                ret;
         AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
         Iterator<AtlasEdge>            edgesForLabel = getEdgesForLabel(vertex, edgeLabel, edgeDirection);
@@ -1825,6 +1872,7 @@ public final class GraphHelper {
 
         sortCollectionElements(attribute, ret);
 
+        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -2346,9 +2394,9 @@ public final class GraphHelper {
             .blockingGet();
     }
 
-    public Set<AtlasVertex> getVertices(Set<Long> vertexIds) {
+    public Set<AtlasVertex> getVertices(Set<String> vertexIds) {
         if (CollectionUtils.isEmpty(vertexIds)) return Collections.emptySet();
-        Set<String> uniqueVertexIds = vertexIds.stream().map(String::valueOf).collect(Collectors.toSet());
+        Set<String> uniqueVertexIds = new HashSet<>(vertexIds);
         return graph.getVertices(uniqueVertexIds.toArray(new String[0]));
     }
 }
