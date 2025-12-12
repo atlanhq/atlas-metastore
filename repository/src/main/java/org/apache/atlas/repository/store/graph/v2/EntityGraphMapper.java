@@ -1066,7 +1066,12 @@ public class EntityGraphMapper {
 
             if (op.equals(CREATE)) {
                 for (AtlasAttribute attribute : structType.getAllAttributes().values()) {
+                    if (shouldSkipAttributeMapping(attribute, struct)) {
+                        continue;
+                    }
+
                     Object attrValue = struct.getAttribute(attribute.getName());
+
                     Object attrOldValue = null;
                     boolean isArrayOfPrimitiveType = false;
                     boolean isArrayOfEnum = false;
@@ -1093,6 +1098,10 @@ public class EntityGraphMapper {
                     AtlasAttribute attribute = structType.getAttribute(attrName);
 
                     if (attribute != null) {
+                        if (shouldSkipAttributeMapping(attribute, struct)) {
+                            continue;
+                        }
+
                         Object attrValue = struct.getAttribute(attrName);
                         Object attrOldValue = null;
                         boolean isArrayOfPrimitiveType = false;
@@ -1140,6 +1149,14 @@ public class EntityGraphMapper {
         }
     }
 
+    private boolean shouldSkipAttributeMapping(AtlasAttribute attribute, AtlasStruct struct) {
+        boolean isPresentInPayload = struct.hasAttribute(attribute.getName());
+        AtlasAttributeDef attributeDef = attribute.getAttributeDef();
+
+        return !isPresentInPayload && attributeDef.getIsOptional() && attributeDef.getDefaultValue() == null
+                && !attributeDef.getIsDefaultValueNull();
+    }
+
     private void addValuesToAutoUpdateAttributesList(AtlasAttribute attribute, List<String> userAutoUpdateAttributes, List<String> timestampAutoUpdateAttributes) {
         HashMap<String, ArrayList> autoUpdateAttributes =  attribute.getAttributeDef().getAutoUpdateAttributes();
         if (autoUpdateAttributes != null) {
@@ -1169,16 +1186,24 @@ public class EntityGraphMapper {
                     String         relationType = AtlasEntityUtil.getRelationshipType(attrValue);
                     AtlasAttribute attribute    = entityType.getRelationshipAttribute(attrName, relationType);
 
+                    if (shouldSkipAttributeMapping(attribute, entity)) {
+                        continue;
+                    }
+
                     mapAttribute(attribute, attrValue, vertex, op, context);
                 }
 
             } else if (op.equals(UPDATE) || op.equals(PARTIAL_UPDATE)) {
                 // relationship attributes mapping
                 for (String attrName : entityType.getRelationshipAttributes().keySet()) {
+
                     if (entity.hasRelationshipAttribute(attrName)) {
                         Object         attrValue    = entity.getRelationshipAttribute(attrName);
                         String         relationType = AtlasEntityUtil.getRelationshipType(attrValue);
                         AtlasAttribute attribute    = entityType.getRelationshipAttribute(attrName, relationType);
+                        if (shouldSkipAttributeMapping(attribute, entity)) {
+                            continue;
+                        }
 
                         mapAttribute(attribute, attrValue, vertex, op, context);
                     }
@@ -3762,13 +3787,26 @@ public class EntityGraphMapper {
 
 
     private AtlasEntityHeader constructHeader(AtlasEntity entity, AtlasVertex vertex, AtlasEntityType entityType) throws AtlasBaseException {
-        Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, attributeMap.keySet());
+        Set<String> writtenAttrs = getWrittenAttributeNames(entity, entityType);
+
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, writtenAttrs);
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
         }
 
         return header;
+    }
+
+    private Set<String> getWrittenAttributeNames(AtlasEntity entity, AtlasEntityType entityType) {
+        Set<String> names = new HashSet<>();
+        Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
+        for (Map.Entry<String, AtlasAttribute> entry : attributeMap.entrySet()) {
+            if (!shouldSkipAttributeMapping(entry.getValue(), entity)) {
+                names.add(entry.getKey());
+            }
+        }
+
+        return names;
     }
 
     private void updateInConsistentOwnedMapVertices(AttributeMutationContext ctx, AtlasMapType mapType, Object val) {
