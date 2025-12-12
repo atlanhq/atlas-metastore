@@ -26,6 +26,7 @@ on:
       - master
       - staging
       - idonlymasterrefreshfiles
+      - idonlymasterrefreshfiles-jgv1.1
 
 jobs:
   # Detect what changed to optimize workflow execution

@@ -16,48 +16,23 @@ package org.apache.atlas.repository.graphdb.janus.graphv3;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.Iterables;
-import com.google.common.collect.ListMultimap;
 import org.apache.tinkerpop.gremlin.jsr223.GremlinScriptEngine;
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 import org.apache.tinkerpop.gremlin.process.traversal.strategy.verification.ReadOnlyStrategy;
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Graph;
-import org.janusgraph.core.Cardinality;
-import org.janusgraph.core.JanusGraphException;
-import org.janusgraph.core.JanusGraphTransaction;
-import org.janusgraph.core.JanusGraphVertex;
-import org.janusgraph.core.Multiplicity;
-import org.janusgraph.core.VertexLabel;
+import org.janusgraph.core.*;
 import org.janusgraph.core.schema.ConsistencyModifier;
 import org.janusgraph.core.schema.JanusGraphManagement;
-import org.janusgraph.core.schema.SchemaStatus;
-import org.janusgraph.diskstorage.Backend;
-import org.janusgraph.diskstorage.BackendException;
-import org.janusgraph.diskstorage.BackendTransaction;
-import org.janusgraph.diskstorage.Entry;
-import org.janusgraph.diskstorage.EntryList;
-import org.janusgraph.diskstorage.EntryMetaData;
-import org.janusgraph.diskstorage.StaticBuffer;
+import org.janusgraph.diskstorage.*;
 import org.janusgraph.diskstorage.configuration.BasicConfiguration;
 import org.janusgraph.diskstorage.configuration.Configuration;
 import org.janusgraph.diskstorage.configuration.ModifiableConfiguration;
-import org.janusgraph.diskstorage.indexing.IndexEntry;
-import org.janusgraph.diskstorage.indexing.IndexTransaction;
-import org.janusgraph.diskstorage.keycolumnvalue.KeyColumnValueStore;
-import org.janusgraph.diskstorage.keycolumnvalue.KeyIterator;
-import org.janusgraph.diskstorage.keycolumnvalue.KeyRangeQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.KeySliceQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.KeysQueriesGroup;
-import org.janusgraph.diskstorage.keycolumnvalue.MultiKeysQueryGroups;
-import org.janusgraph.diskstorage.keycolumnvalue.MultiQueriesByKeysGroupsContext;
-import org.janusgraph.diskstorage.keycolumnvalue.SliceQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.StoreFeatures;
-import org.janusgraph.diskstorage.keycolumnvalue.cache.KCVSCache;
+import org.janusgraph.diskstorage.keycolumnvalue.*;
 import org.janusgraph.diskstorage.log.Log;
 import org.janusgraph.diskstorage.log.ReadMarker;
 import org.janusgraph.diskstorage.util.RecordIterator;
-import org.janusgraph.diskstorage.util.StaticArrayEntry;
 import org.janusgraph.diskstorage.util.time.TimestampProvider;
 import org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration;
 import org.janusgraph.graphdb.database.EdgeSerializer;
@@ -68,13 +43,7 @@ import org.janusgraph.graphdb.database.cache.KCVSCacheInvalidationService;
 import org.janusgraph.graphdb.database.cache.SchemaCache;
 import org.janusgraph.graphdb.database.idassigner.VertexIDAssigner;
 import org.janusgraph.graphdb.database.idhandling.IDHandler;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphHasStepStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphLocalQueryOptimizerStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphUnusedMultiQueryRemovalStrategy;
-import org.janusgraph.graphdb.util.MultiSliceQueriesGroupingUtil;
-import org.janusgraph.util.IDUtils;
 import org.janusgraph.graphdb.database.index.IndexInfoRetriever;
-import org.janusgraph.graphdb.database.index.IndexUpdate;
 import org.janusgraph.graphdb.database.management.ManagementLogger;
 import org.janusgraph.graphdb.database.management.ManagementSystem;
 import org.janusgraph.graphdb.database.serialize.Serializer;
@@ -87,46 +56,31 @@ import org.janusgraph.graphdb.query.QueryUtil;
 import org.janusgraph.graphdb.query.index.IndexSelectionStrategy;
 import org.janusgraph.graphdb.relations.EdgeDirection;
 import org.janusgraph.graphdb.tinkerpop.JanusGraphFeatures;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.AdjacentVertexFilterOptimizerStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.AdjacentVertexHasIdOptimizerStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.AdjacentVertexHasUniquePropertyOptimizerStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.AdjacentVertexIsOptimizerStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphIoRegistrationStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphMixedIndexAggStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphMixedIndexCountStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphMultiQueryStrategy;
-import org.janusgraph.graphdb.tinkerpop.optimize.strategy.JanusGraphStepStrategy;
+import org.janusgraph.graphdb.tinkerpop.optimize.strategy.*;
 import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.janusgraph.graphdb.transaction.StandardTransactionBuilder;
 import org.janusgraph.graphdb.transaction.TransactionConfiguration;
 import org.janusgraph.graphdb.types.CompositeIndexType;
-import org.janusgraph.graphdb.types.MixedIndexType;
 import org.janusgraph.graphdb.types.system.BaseKey;
 import org.janusgraph.graphdb.types.system.BaseRelationType;
 import org.janusgraph.graphdb.types.vertices.JanusGraphSchemaVertex;
 import org.janusgraph.graphdb.util.ExceptionFactory;
+import org.janusgraph.graphdb.util.MultiSliceQueriesGroupingUtil;
+import org.janusgraph.util.IDUtils;
 import org.janusgraph.util.system.IOUtils;
 import org.janusgraph.util.system.TXUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.script.Bindings;
+import javax.script.ScriptException;
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Predicate;
-import javax.script.Bindings;
-import javax.script.ScriptException;
 
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.REGISTRATION_TIME;
-import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.REPLACE_INSTANCE_IF_EXISTS;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.SCRIPT_EVAL_ENABLED;
 
 public class AtlasStandardJanusGraph extends StandardJanusGraph {
@@ -211,9 +165,10 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {
 
         this.serializer = config.getSerializer();
         StoreFeatures storeFeatures = backend.getStoreFeatures();
-        this.indexSerializer = new AtlasIndexSerializer(configuration.getConfiguration(), this.serializer,
-                this.backend.getIndexInformation(), storeFeatures.isDistributed() && storeFeatures.isKeyOrdered());
+
         this.edgeSerializer = new EdgeSerializer(this.serializer);
+        this.indexSerializer = new AtlasIndexSerializer(configuration.getConfiguration(), this.edgeSerializer, this.serializer,
+                this.backend.getIndexInformation(), storeFeatures.isDistributed() && storeFeatures.isKeyOrdered());
         this.vertexExistenceQuery = edgeSerializer.getQuery(BaseKey.VertexExists, Direction.OUT, new EdgeSerializer.TypedInterval[0]).setLimit(1);
         this.queryCache = new RelationQueryCache(this.edgeSerializer);
         this.schemaCache = configuration.getTypeCache(typeCacheRetrieval);
@@ -663,102 +618,6 @@ public class AtlasStandardJanusGraph extends StandardJanusGraph {
             this.hasModifications = hasModifications;
             this.has2iModifications = has2iModifications;
         }
-    }
-
-
-    /**
-     * Acquire index locks (deletions first)
-     */
-    private void prepareCommitAcquireIndexLocks(final List<IndexUpdate> indexUpdates,
-                                                final BackendTransaction mutator,
-                                                final boolean acquireLocks) throws BackendException {
-        for (IndexUpdate update : indexUpdates) {
-            if (!update.isCompositeIndex() || !update.isDeletion()) continue;
-            CompositeIndexType iIndex = (CompositeIndexType) update.getIndex();
-            if (acquireLock(iIndex,acquireLocks)) {
-                mutator.acquireIndexLock((StaticBuffer)update.getKey(), (Entry)update.getEntry());
-            }
-        }
-        for (IndexUpdate update : indexUpdates) {
-            if (!update.isCompositeIndex() || !update.isAddition()) continue;
-            CompositeIndexType iIndex = (CompositeIndexType) update.getIndex();
-            if (acquireLock(iIndex,acquireLocks)) {
-                mutator.acquireIndexLock((StaticBuffer)update.getKey(), ((Entry)update.getEntry()).getColumn());
-            }
-        }
-    }
-
-    /**
-     * Add relation mutations
-     */
-    private void prepareCommitAddRelationMutations(final ListMultimap<Object, InternalRelation> mutations,
-                                                   final BackendTransaction mutator,
-                                                   final StandardJanusGraphTx tx) throws BackendException {
-        for (Object vertexId : mutations.keySet()) {
-            IDUtils.checkId(vertexId);
-            final List<InternalRelation> edges = mutations.get(vertexId);
-            final List<Entry> additions = new ArrayList<>(edges.size());
-            final List<Entry> deletions = new ArrayList<>(Math.max(10, edges.size() / 10));
-            for (final InternalRelation edge : edges) {
-                final InternalRelationType baseType = (InternalRelationType) edge.getType();
-                assert baseType.getBaseType()==null;
-
-                for (InternalRelationType type : baseType.getRelationIndexes()) {
-                    if (type.getStatus()== SchemaStatus.DISABLED) continue;
-                    for (int pos = 0; pos < edge.getArity(); pos++) {
-                        if (!type.isUnidirected(Direction.BOTH) && !type.isUnidirected(EdgeDirection.fromPosition(pos)))
-                            continue; //Directionality is not covered
-                        if (edge.getVertex(pos).id().equals(vertexId)) {
-                            StaticArrayEntry entry = edgeSerializer.writeRelation(edge, type, pos, tx);
-                            if (edge.isRemoved()) {
-                                deletions.add(entry);
-                            } else {
-                                Preconditions.checkArgument(edge.isNew());
-                                int ttl = getTTL(edge);
-                                if (ttl > 0) {
-                                    entry.setMetaData(EntryMetaData.TTL, ttl);
-                                }
-                                additions.add(entry);
-                            }
-                        }
-                    }
-                }
-            }
-
-            StaticBuffer vertexKey = idManager.getKey(vertexId);
-            mutator.mutateEdges(vertexKey, additions, deletions);
-        }
-    }
-
-    /**
-     * Add index updates
-     *
-     * @return `true` if there was any mixed index update
-     */
-    private boolean prepareCommitIndexUpdatesAndCheckIfAnyMixedIndexUsed(final List<IndexUpdate> indexUpdates,
-                                                                         final BackendTransaction mutator) throws BackendException {
-        boolean has2iMods = false;
-        for (IndexUpdate indexUpdate : indexUpdates) {
-            assert indexUpdate.isAddition() || indexUpdate.isDeletion();
-            if (indexUpdate.isCompositeIndex()) {
-                final IndexUpdate<StaticBuffer,Entry> update = indexUpdate;
-                if (update.isAddition())
-                    mutator.mutateIndex(update.getKey(), Collections.singletonList(update.getEntry()), KCVSCache.NO_DELETIONS);
-                else
-                    mutator.mutateIndex(update.getKey(), KeyColumnValueStore.NO_ADDITIONS, Collections.singletonList(update.getEntry()));
-            } else {
-                final IndexUpdate<String,IndexEntry> update = indexUpdate;
-                has2iMods = true;
-                IndexTransaction itx = mutator.getIndexTransaction(update.getIndex().getBackingIndexName());
-                String indexStore = ((MixedIndexType)update.getIndex()).getStoreName();
-                if (update.isAddition())
-                    itx.add(indexStore, update.getKey(), update.getEntry(), update.getElement().isNew());
-                else
-                    itx.delete(indexStore,update.getKey(),update.getEntry().field,update.getEntry().value,update.getElement().isRemoved());
-            }
-        }
-
-        return has2iMods;
     }
 
     private static final Predicate<InternalRelation> SCHEMA_FILTER =
