@@ -49,7 +49,9 @@ import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.observability.AtlasObservabilityData;
+import org.apache.atlas.observability.DeleteObservabilityData;
 import org.apache.atlas.observability.AtlasObservabilityService;
+import org.apache.atlas.observability.DeleteObservabilityService;
 import org.apache.atlas.observability.PayloadAnalyzer;
 import org.apache.atlas.repository.store.aliasstore.ESAliasStore;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
@@ -155,6 +157,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private final IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
     private final AtlasObservabilityService observabilityService;
+    private final DeleteObservabilityService deleteObservabilityService;
 
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
@@ -164,7 +167,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
                               AtlasRelationshipStore atlasRelationshipStore, FeatureFlagStore featureFlagStore,
                               IAtlasMinimalChangeNotifier atlasAlternateChangeNotifier, AtlasDistributedTaskNotificationSender taskNotificationSender,
-                              EntityGraphRetriever entityRetriever, AtlasObservabilityService observabilityService) {
+                              EntityGraphRetriever entityRetriever, AtlasObservabilityService observabilityService,
+                              DeleteObservabilityService deleteObservabilityService) {
 
         this.graph                = graph;
         this.deleteDelegate       = deleteDelegate;
@@ -182,6 +186,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
         this.observabilityService = observabilityService;
+        this.deleteObservabilityService = deleteObservabilityService;
         try {
             this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
         } catch (AtlasException e) {
@@ -597,32 +602,97 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
         }
 
+        long start = System.currentTimeMillis();
+        long lookupVerticesTime = 0;
+        long authorizationCheckTime = 0;
+        long deleteEntitiesTime = 0;
+        long termCleanupTime = 0;
+        long notificationTime = 0;
+
         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();
-        AtlasVertex             vertex             = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        
+        long startLookup = System.currentTimeMillis();
+        EntityMutationResponse ret = null;
+        boolean success = false;
+        String failureReason = null;
 
-        if (vertex != null) {
-            AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
+        try {
+            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
 
-            AtlasAuthorizationUtils.verifyDeleteEntityAccess(typeRegistry, entityHeader, "delete entity: guid=" + guid);
+            if (vertex != null) {
+                AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
 
-            deletionCandidates.add(vertex);
-        } else {
-            if (LOG.isDebugEnabled()) {
-                // Entity does not exist - treat as non-error, since the caller
-                // wanted to delete the entity and it's already gone.
-                LOG.debug("Deletion request ignored for non-existent entity with guid " + guid);
+                long startAuth = System.currentTimeMillis();
+                AtlasAuthorizationUtils.verifyDeleteEntityAccess(typeRegistry, entityHeader, "delete entity: guid=" + guid);
+                authorizationCheckTime = System.currentTimeMillis() - startAuth;
+
+                deletionCandidates.add(vertex);
+            } else {
+                if (LOG.isDebugEnabled()) {
+                    // Entity does not exist - treat as non-error, since the caller
+                    // wanted to delete the entity and it's already gone.
+                    LOG.debug("Deletion request ignored for non-existent entity with guid " + guid);
+                }
+            }
+            lookupVerticesTime = System.currentTimeMillis() - startLookup;
+
+            long startDelete = System.currentTimeMillis();
+            ret = deleteVertices(deletionCandidates);
+            deleteEntitiesTime = System.currentTimeMillis() - startDelete;
+
+            long startTerm = System.currentTimeMillis();
+            if(ret.getDeletedEntities()!=null)
+                processTermEntityDeletion(ret.getDeletedEntities());
+            termCleanupTime = System.currentTimeMillis() - startTerm;
+
+            // Notify the change listeners
+            long startNotify = System.currentTimeMillis();
+            entityChangeNotifier.onEntitiesMutated(ret, false);
+            entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
+            atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
+            notificationTime = System.currentTimeMillis() - startNotify;
+            
+            success = true;
+        } catch (Exception e) {
+            if (e instanceof AtlasBaseException) {
+                AtlasErrorCode errorCode = ((AtlasBaseException) e).getAtlasErrorCode();
+                failureReason = errorCode != null ? errorCode.name() : e.getClass().getSimpleName();
+                throw (AtlasBaseException) e;
+            }
+            failureReason = e.getClass().getSimpleName();
+            throw e;
+        } finally {
+            // Record observability
+            if (RequestContext.get().isDeleteRequested()) {
+                try {
+                    DeleteObservabilityData observabilityData = new DeleteObservabilityData();
+                    observabilityData.setTraceId(RequestContext.get().getTraceId());
+                    observabilityData.setXAtlanAgentId(RequestContext.get().getRequestContextHeaders().get(TASK_HEADER_ATLAN_AGENT_ID));
+                    observabilityData.setXAtlanClientOrigin(RequestContext.get().getClientOrigin());
+
+                    observabilityData.setLookupVerticesTime(lookupVerticesTime);
+                    observabilityData.setAuthorizationCheckTime(authorizationCheckTime);
+                    observabilityData.setDeleteEntitiesTime(deleteEntitiesTime);
+                    observabilityData.setDeleteEntitiesCount(deletionCandidates.size());
+                    observabilityData.setTermCleanupTime(termCleanupTime);
+                    observabilityData.setNotificationTime(notificationTime);
+                    observabilityData.setDeleteTypeVertexTime(RequestContext.get().getDeleteTypeVertexTime());
+                    observabilityData.setRemoveHasLineageTime(RequestContext.get().getLineageCalcTime());
+                    observabilityData.setPreprocessingTime(RequestContext.get().getPreprocessingTime());
+
+                    observabilityData.setDuration(System.currentTimeMillis() - start);
+                    observabilityData.setOperationStatus(success ? "success" : "failed");
+                    if (!success && failureReason != null) {
+                        observabilityData.setErrorType(failureReason);
+                    }
+                    observabilityData.setOperationName("delete_bulk");
+                    deleteObservabilityService.record(observabilityData);
+                } catch(Exception e){
+                    LOG.warn("Failed to record observability data", e);
+                }
             }
         }
 
-        EntityMutationResponse ret = deleteVertices(deletionCandidates);
-
-        if(ret.getDeletedEntities()!=null)
-            processTermEntityDeletion(ret.getDeletedEntities());
-
-        // Notify the change listeners
-        entityChangeNotifier.onEntitiesMutated(ret, false);
-        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
-        atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
 
@@ -633,41 +703,104 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "Guid(s) not specified");
         }
 
+        long start = System.currentTimeMillis();
+        long lookupVerticesTime = 0;
+        long authorizationCheckTime = 0;
+        long deleteEntitiesTime = 0;
+        long termCleanupTime = 0;
+        long notificationTime = 0;
+        
+        EntityMutationResponse ret = null;
         Collection<AtlasVertex> deletionCandidates = new ArrayList<>();
+        boolean success = false;
+        String failureReason = null;
 
-        for (String guid : guids) {
-            AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+        try {
+            long startLookup = System.currentTimeMillis();
+            for (String guid : guids) {
+                AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
 
-            if (vertex == null) {
-                if (LOG.isDebugEnabled()) {
-                    // Entity does not exist - treat as non-error, since the caller
-                    // wanted to delete the entity and it's already gone.
-                    LOG.debug("Deletion request ignored for non-existent entity with guid " + guid);
+                if (vertex == null) {
+                    if (LOG.isDebugEnabled()) {
+                        // Entity does not exist - treat as non-error, since the caller
+                        // wanted to delete the entity and it's already gone.
+                        LOG.debug("Deletion request ignored for non-existent entity with guid " + guid);
+                    }
+
+                    continue;
                 }
 
-                continue;
+                AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
+
+                long startAuth = System.currentTimeMillis();
+                AtlasAuthorizationUtils.verifyDeleteEntityAccess(typeRegistry, entityHeader, "delete entity: guid=" + guid);
+                authorizationCheckTime += (System.currentTimeMillis() - startAuth);
+
+                deletionCandidates.add(vertex);
+            }
+            lookupVerticesTime = System.currentTimeMillis() - startLookup;
+
+            if (deletionCandidates.isEmpty()) {
+                LOG.info("No deletion candidate entities were found for guids %s", guids);
             }
 
-            AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex);
+            long startDelete = System.currentTimeMillis();
+            ret = deleteVertices(deletionCandidates);
+            deleteEntitiesTime = System.currentTimeMillis() - startDelete;
 
-            AtlasAuthorizationUtils.verifyDeleteEntityAccess(typeRegistry, entityHeader, "delete entity: guid=" + guid);
+            long startTerm = System.currentTimeMillis();
+            if(ret.getDeletedEntities() != null)
+                processTermEntityDeletion(ret.getDeletedEntities());
+            termCleanupTime = System.currentTimeMillis() - startTerm;
 
-            deletionCandidates.add(vertex);
+            // Notify the change listeners
+            long startNotify = System.currentTimeMillis();
+            entityChangeNotifier.onEntitiesMutated(ret, false);
+            entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
+            atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
+            notificationTime = System.currentTimeMillis() - startNotify;
+            
+            success = true;
+        } catch (Exception e) {
+            failureReason = e.getClass().getSimpleName();
+            if (e instanceof AtlasBaseException) {
+                throw (AtlasBaseException) e;
+            } else if (e instanceof RuntimeException) {
+                throw (RuntimeException) e;
+            }
+            throw new AtlasBaseException(e);
+        } finally {
+            // Record observability
+            if (RequestContext.get().isDeleteRequested()) {
+                try {
+                    DeleteObservabilityData observabilityData = new DeleteObservabilityData();
+                    observabilityData.setTraceId(RequestContext.get().getTraceId());
+                    observabilityData.setXAtlanAgentId(RequestContext.get().getRequestContextHeaders().get("x-atlan-agent-id"));
+                    observabilityData.setXAtlanClientOrigin(RequestContext.get().getClientOrigin());
+
+                    observabilityData.setLookupVerticesTime(lookupVerticesTime);
+                    observabilityData.setAuthorizationCheckTime(authorizationCheckTime);
+                    observabilityData.setDeleteEntitiesTime(deleteEntitiesTime);
+                    observabilityData.setDeleteEntitiesCount(deletionCandidates.size());
+                    observabilityData.setTermCleanupTime(termCleanupTime);
+                    observabilityData.setNotificationTime(notificationTime);
+                    observabilityData.setDeleteTypeVertexTime(RequestContext.get().getDeleteTypeVertexTime());
+                    observabilityData.setRemoveHasLineageTime(RequestContext.get().getLineageCalcTime());
+                    observabilityData.setPreprocessingTime(RequestContext.get().getPreprocessingTime());
+
+                    observabilityData.setDuration(System.currentTimeMillis() - start);
+                    observabilityData.setOperationStatus(success ? "success" : "failed");
+                    if (!success && failureReason != null) {
+                        observabilityData.setErrorType(failureReason);
+                    }
+                    observabilityData.setOperationName("delete_bulk");
+                    deleteObservabilityService.record(observabilityData);
+                } catch(Exception e){
+                    LOG.warn("Failed to record observability data", e);
+                }
+            }
         }
 
-        if (deletionCandidates.isEmpty()) {
-            LOG.info("No deletion candidate entities were found for guids %s", guids);
-        }
-
-        EntityMutationResponse ret = deleteVertices(deletionCandidates);
-
-        if(ret.getDeletedEntities() != null)
-            processTermEntityDeletion(ret.getDeletedEntities());
-
-        // Notify the change listeners
-        entityChangeNotifier.onEntitiesMutated(ret, false);
-        entityChangeNotifier.notifyDifferentialEntityChanges(ret, false);
-        atlasRelationshipStore.onRelationshipsMutated(RequestContext.get().getRelationshipMutationMap());
         return ret;
     }
 
@@ -1658,7 +1791,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         RequestContext requestContext = RequestContext.get();
         AtlasObservabilityData observabilityData = new AtlasObservabilityData(
                 requestContext.getTraceId(),
-                requestContext.getRequestContextHeaders().get("x-atlan-agent-id"),
+                requestContext.getRequestContextHeaders().get(TASK_HEADER_ATLAN_AGENT_ID),
                 requestContext.getClientOrigin()
         );
         try {
@@ -2281,9 +2414,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 }
 
                 List<PreProcessor> preProcessors = getPreProcessor(typeName);
+                long preprocessingStart = System.currentTimeMillis();
                 for(PreProcessor processor : preProcessors){
                     processor.processDelete(vertex);
                 }
+                RequestContext.get().addPreprocessingTime(System.currentTimeMillis() - preprocessingStart);
 
                 if (ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE.equals(typeName)) {
                     categories.add(vertex);

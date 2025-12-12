@@ -471,6 +471,7 @@ public class EntityREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuid(" + guid + ")");
             }
 
+            RequestContext.get().setDeleteRequested(true);
             return entityMutationService.deleteById(guid);
         } finally {
             AtlasPerfTracer.log(perf);
@@ -903,6 +904,7 @@ public class EntityREST {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuids(" + guids  + ")");
             }
 
+            RequestContext.get().setDeleteRequested(true);
             return entityMutationService.deleteByIds(guids);
         } finally {
             AtlasPerfTracer.log(perf);

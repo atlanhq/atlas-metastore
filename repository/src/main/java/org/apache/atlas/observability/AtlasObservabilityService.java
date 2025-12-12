@@ -1,7 +1,6 @@
 package org.apache.atlas.observability;
 
 import io.micrometer.core.instrument.*;
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStoreV2;
 import org.springframework.stereotype.Service;
 import javax.inject.Inject;
@@ -119,8 +118,10 @@ public class AtlasObservabilityService {
         }
     }
     
-    
-    
+    private String normalizeAgentId(String agentId) {
+        return agentId != null ? agentId : "unknown";
+    }
+
     public void recordTimingMetrics(AtlasObservabilityData data) {
         String clientOrigin = normalizeClientOrigin(data.getXAtlanClientOrigin());
         recordTimingMetric("diff_calc", data.getDiffCalcTime(), clientOrigin);
@@ -216,23 +217,24 @@ public class AtlasObservabilityService {
                     .publishPercentileHistogram()
                     .serviceLevelObjectives(
                         // Fast operations (milliseconds)
-                        Duration.ofMillis(100),      // 100ms
-                        Duration.ofMillis(500),      // 500ms
-                        Duration.ofMillis(1000),     // 1s
-                        // Medium operations (seconds)
-                        Duration.ofSeconds(5),       // 5s
-                        Duration.ofSeconds(10),      // 10s
-                        Duration.ofSeconds(30),      // 30s
-                        Duration.ofMinutes(1),       // 1m
-                        Duration.ofMinutes(5),       // 5m
-                        // Long operations (minutes)
-                        Duration.ofMinutes(15),      // 15m
-                        Duration.ofMinutes(30),      // 30m
-                        Duration.ofHours(1),         // 1h
-                        Duration.ofHours(2)          // 2h
+                            // Short tasks
+                            Duration.ofSeconds(1),      // 1s
+                            Duration.ofSeconds(10),     // 10s
+                            Duration.ofSeconds(30),     // 30s
+                            // Medium tasks
+                            Duration.ofMinutes(1),      // 1m
+                            Duration.ofMinutes(5),      // 5m
+                            Duration.ofMinutes(15),     // 15m
+                            Duration.ofMinutes(30),     // 30m
+                            // Long tasks
+                            Duration.ofHours(1),        // 1h
+                            Duration.ofHours(2),        // 2h
+                            Duration.ofHours(4),        // 4h
+                            Duration.ofHours(8),        // 8h
+                            Duration.ofHours(12)        // 12h
                     )
-                    .minimumExpectedValue(Duration.ofMillis(100))
-                    .maximumExpectedValue(Duration.ofHours(4))
+                    .minimumExpectedValue(Duration.ofSeconds(1))
+                    .maximumExpectedValue(Duration.ofHours(24))
                     .register(meterRegistry);
         });
     }
@@ -333,6 +335,4 @@ public class AtlasObservabilityService {
             return builder.register(meterRegistry);
         });
     }
-    
-    
 }
