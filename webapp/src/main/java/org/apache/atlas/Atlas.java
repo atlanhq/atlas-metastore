@@ -43,6 +43,9 @@ import org.apache.commons.lang.StringUtils;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
 import org.elasticsearch.client.RequestOptions;
 import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.client.indices.GetIndexTemplatesRequest;
+import org.elasticsearch.client.indices.GetIndexTemplatesResponse;
+import org.elasticsearch.client.indices.IndexTemplateMetadata;
 import org.elasticsearch.client.indices.IndexTemplatesExistRequest;
 import org.elasticsearch.client.indices.PutIndexTemplateRequest;
 import org.elasticsearch.xcontent.XContentType;
@@ -328,22 +331,56 @@ public final class Atlas {
 
     private static void initElasticsearch() throws IOException {
         RestHighLevelClient esClient = AtlasElasticsearchDatabase.getClient();
+        String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
         IndexTemplatesExistRequest indexTemplateExistsRequest = new IndexTemplatesExistRequest("atlan-template");
         boolean exists = false;
+        boolean needsUpdate = false;
+        List<String> existingPatterns = null;
+        
         try {
             exists = esClient.indices().existsTemplate(indexTemplateExistsRequest, RequestOptions.DEFAULT);
             if (exists) {
                 LOG.info("atlan-template es index template exists!");
+                
+                // Check if the template has the vertex index pattern
+                GetIndexTemplatesRequest getRequest = new GetIndexTemplatesRequest("atlan-template");
+                GetIndexTemplatesResponse getResponse = esClient.indices().getIndexTemplate(getRequest, RequestOptions.DEFAULT);
+                
+                if (!getResponse.getIndexTemplates().isEmpty()) {
+                    IndexTemplateMetadata templateMetadata = getResponse.getIndexTemplates().get(0);
+                    existingPatterns = templateMetadata.patterns();
+                    
+                    if (existingPatterns == null || !existingPatterns.contains(vertexIndex)) {
+                        LOG.warn("atlan-template exists but does not contain vertex index pattern: {}. Will update template.", vertexIndex);
+                        needsUpdate = true;
+                    } else {
+                        LOG.info("atlan-template already contains vertex index pattern: {}", vertexIndex);
+                    }
+                }
             } else {
-                LOG.info("atlan-template es index template does not exists!");
+                LOG.info("atlan-template es index template does not exist!");
+                needsUpdate = true;
             }
         } catch (Exception es) {
-            LOG.error("Caught exception: ", es.toString());
+            LOG.error("Caught exception while checking template: ", es);
+            throw new IOException("Failed to check Elasticsearch template", es);
         }
-        if (!exists) {
-            String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
+        
+        if (!exists || needsUpdate) {
             PutIndexTemplateRequest request = new PutIndexTemplateRequest("atlan-template");
-            request.patterns(Arrays.asList(vertexIndex));
+            
+            // Preserve existing patterns and add vertex index
+            List<String> patterns = new java.util.ArrayList<>();
+            if (existingPatterns != null && !existingPatterns.isEmpty()) {
+                patterns.addAll(existingPatterns);
+                LOG.info("Preserving existing patterns: {}", existingPatterns);
+            }
+            if (!patterns.contains(vertexIndex)) {
+                patterns.add(vertexIndex);
+            }
+            request.patterns(patterns);
+            LOG.info("Setting template patterns to: {}", patterns);
+            
             String atlasHomeDir  = System.getProperty("atlas.home");
             String elasticsearchSettingsFilePath = (org.apache.commons.lang3.StringUtils.isEmpty(atlasHomeDir) ? "." : atlasHomeDir) + File.separator + "elasticsearch" + File.separator + "es-settings.json";
             File elasticsearchSettingsFile  = new File(elasticsearchSettingsFilePath);
@@ -358,12 +395,16 @@ public final class Atlas {
             try {
                 AcknowledgedResponse putTemplateResponse = esClient.indices().putTemplate(request, RequestOptions.DEFAULT);
                 if (putTemplateResponse.isAcknowledged()) {
-                    LOG.info("Atlan index template created.");
+                    if (exists) {
+                        LOG.info("Atlan index template updated successfully with vertex index pattern: {}", vertexIndex);
+                    } else {
+                        LOG.info("Atlan index template created successfully with vertex index pattern: {}", vertexIndex);
+                    }
                 } else {
-                    LOG.error("error creating atlan index template");
+                    LOG.error("Error {} atlan index template", exists ? "updating" : "creating");
                 }
             } catch (Exception e) {
-                LOG.error("Caught exception: ", e.toString());
+                LOG.error("Caught exception while {} template: ", exists ? "updating" : "creating", e);
                 throw e;
             }
         }
