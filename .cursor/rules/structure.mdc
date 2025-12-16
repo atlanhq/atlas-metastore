@@ -1,0 +1,72 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+## Core Components
+
+- [addons/](mdc:addons)  
+  Additional or optional modules for extending project functionality.
+- [auth-agents-common/](mdc:auth-agents-common)  
+  Shared authentication agent code and utilities.
+- [auth-audits/](mdc:auth-audits)  
+  Modules for authentication auditing and logging.
+- [auth-common/](mdc:auth-common)  
+  Common authentication logic and helpers.
+- [auth-plugin-atlas/](mdc:auth-plugin-atlas)  
+  Atlas-specific authentication plugins.
+- [authorization/](mdc:authorization)  
+  Access control and authorization logic.
+- [build-tools/](mdc:build-tools)  
+  Build-related utilities and scripts.
+- [client/](mdc:client)  
+  Client SDK or libraries for interacting with the service.
+- [client-auth/](mdc:client-auth)  
+  Client-side authentication code.
+- [client-heracles/](mdc:client-heracles)  
+  Specialized client module, likely for a specific integration.
+- [common/](mdc:common)  
+  Utility classes, constants, and shared logic.
+- [graphdb/](mdc:graphdb)  
+  Graph database integration and management.
+- [intg/](mdc:intg)  
+  Integration modules with external services or APIs.
+- [notification/](mdc:notification)  
+  Notification system and related logic.
+- [plugin-classloader/](mdc:plugin-classloader)  
+  Plugin system for loading extensions dynamically.
+- [repository/](mdc:repository)  
+  Data access and repository pattern implementations.
+- [server-api/](mdc:server-api)  
+  Server-side API definitions and controllers.
+- [webapp/](mdc:webapp)  
+  Web application frontend or administrative interface.
+
+## API and Configuration
+
+- [pom.xml](mdc:pom.xml)  
+  Maven project configuration, dependencies, and build settings.
+
+- [setup.py](mdc:setup.py)  
+  Python setup script, possibly for auxiliary tooling or integrations.
+
+- [release-build.xml](mdc:release-build.xml)  
+  XML build configuration for releases.
+
+## Infrastructure
+
+- [Dockerfile](mdc:Dockerfile)  
+  Container build configuration.
+
+- [build.sh](mdc:build.sh)  
+  Shell script for building the project.
+
+- [sem-ver-bump.sh](mdc:sem-ver-bump.sh)  
+  Script for semantic versioning.
+
+## Development Tools
+
+- [.github/](mdc:.github)  
+  GitHub Actions, issue templates, and repository configurations.
+
+If you’d like details on any specific module or file, let me know!
