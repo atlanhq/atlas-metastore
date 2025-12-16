@@ -1,0 +1,47 @@
+{{- if and .Values.global.leangraph.enabled .Values.nginx.enabled }}
+---
+# Atlas Leangraph Nginx Service - routes traffic to atlas-leangraph-nginx deployment
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-leangraph-nginx-service
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: atlas-leangraph-nginx
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: atlas-leangraph-nginx
+    release: {{ .Release.Name }}
+{{- end }}
+{{- if and .Values.global.leangraph.enabled .Values.nginx.enabled (or .Values.global.svcIsolation.enabled (or .Values.global.esIsolation.enabled .Values.global.globalSvcIsolation.enabled)) }}
+---
+# Atlas Read Nginx Service - routes traffic to atlas-read-nginx deployment
+apiVersion: v1
+kind: Service
+metadata:
+  name: atlas-read-nginx-service
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: atlas-read-nginx
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: atlas-read-nginx
+    release: {{ .Release.Name }}
+{{- end }}
+
