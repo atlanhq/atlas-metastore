@@ -14,7 +14,7 @@ import static com.google.common.collect.Lists.newArrayList;
 @Component
 public class VertexEdgeCache {
 
-    private final ThreadLocal<Map<CachedVertexEdgesKey, List<AtlasEdge>>> edgeCache = ThreadLocal.withInitial(HashMap::new);
+    private static final ThreadLocal<Map<CachedVertexEdgesKey, List<AtlasEdge>>> edgeCache = ThreadLocal.withInitial(HashMap::new);
 
     public List<AtlasEdge> getEdges(AtlasVertex vertex, AtlasEdgeDirection direction, String edgeLabel) {
         CachedVertexEdgesKey key = new CachedVertexEdgesKey(vertex.getId(), direction, edgeLabel);
@@ -26,5 +26,14 @@ public class VertexEdgeCache {
             cache.put(key, edges);
             return edges;
         }
+    }
+
+    /**
+     * Clears the edge cache for the current thread.
+     * Should be called at the end of each transaction to prevent memory accumulation.
+     */
+    public static void clear() {
+        edgeCache.get().clear();
+        edgeCache.remove();
     }
 }

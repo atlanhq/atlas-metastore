@@ -21,6 +21,7 @@ import com.google.common.annotations.VisibleForTesting;
 import org.aopalliance.intercept.MethodInterceptor;
 import org.aopalliance.intercept.MethodInvocation;
 import org.apache.atlas.annotation.GraphTransaction;
+import org.apache.atlas.discovery.VertexEdgeCache;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.NotFoundException;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -248,10 +249,21 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
     }
 
     public static void clearCache() {
+        // Clear the maps first
         guidVertexCache.get().clear();
         vertexGuidCache.get().clear();
         vertexStateCache.get().clear();
         edgeStateCache.get().clear();
+        
+        // Remove ThreadLocal references entirely to help GC
+        // The ThreadLocal.withInitial() will create new empty maps on next access
+        guidVertexCache.remove();
+        vertexGuidCache.remove();
+        vertexStateCache.remove();
+        edgeStateCache.remove();
+        
+        // Clear the VertexEdgeCache as well
+        VertexEdgeCache.clear();
     }
 
     boolean logException(Throwable t) {

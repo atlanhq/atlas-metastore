@@ -39,8 +39,8 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     private static final Logger LOG = LoggerFactory.getLogger(CassandraVertexDataRepository.class);
 
     // Maximum number of items in an IN clause for Cassandra
-    // make it configurable
     private static final int MAX_IN_CLAUSE_ITEMS = 100;
+    
     private final CqlSession session;
     private final String keyspace;
     private final String tableName;
@@ -72,9 +72,15 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     public void insertVertices(Map<String, String> serialisedVertices) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("insertVertices");
 
+        if (serialisedVertices == null || serialisedVertices.isEmpty()) {
+            RequestContext.get().endMetricRecord(recorder);
+            return;
+        }
+
         try {
             StringBuilder batchQuery = new StringBuilder();
             batchQuery.append("BEGIN BATCH ");
+            long requestTime = RequestContext.get().getRequestTime();
 
             for (String vertexId : serialisedVertices.keySet()) {
                 int bucket = calculateBucket(vertexId);
@@ -84,7 +90,7 @@ class CassandraVertexDataRepository implements VertexDataRepository {
                         bucket,
                         vertexId,
                         serialisedVertices.get(vertexId),
-                        RequestContext.get().getRequestTime());
+                        requestTime);
                 batchQuery.append(insert).append(";");
             }
 
@@ -98,17 +104,24 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     @Override
     public void dropVertices(List<String> vertexIds) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("dropVertices");
+        
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            RequestContext.get().endMetricRecord(recorder);
+            return;
+        }
+        
         try {
             StringBuilder batchQuery = new StringBuilder();
             batchQuery.append("BEGIN BATCH ");
+            
             for (String vertexId : vertexIds) {
                 int bucket = calculateBucket(vertexId);
-                String insert = String.format(DROP_VERTEX,
+                String delete = String.format(DROP_VERTEX,
                         keyspace,
                         tableName,
                         bucket,
                         vertexId);
-                batchQuery.append(insert).append(";");
+                batchQuery.append(delete).append(";");
             }
             batchQuery.append("APPLY BATCH;");
             session.execute(batchQuery.toString());
