@@ -101,6 +101,7 @@ atlas:
   leangraph:
     enabled: true
     replicaCount: 2
+    image: ghcr.io/atlanhq/atlas-metastore-leangraphsts:a36e2efabcd
     service:
       portName: leangraph
       type: ClusterIP

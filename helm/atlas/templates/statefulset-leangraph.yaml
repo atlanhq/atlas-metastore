@@ -87,7 +87,7 @@ spec:
             /opt/apache-atlas/bin/atlas_start.py;
             tail -F /opt/apache-atlas/logs/*.log;"
           ]
-          image: ghcr.io/atlanhq/atlas-metastore-leangraphsts:a36e2efabcd
+          image: "{{.Values.atlas.leangraph.image}}"
           imagePullPolicy: {{ .Values.atlas.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.atlas.service.targetPort }}
