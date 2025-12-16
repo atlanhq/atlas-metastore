@@ -43,6 +43,7 @@ hpa:
     averageUtilization: 85
 
 atlas:
+  primaryImage: ghcr.io/atlanhq/atlas-metastore-master:97e7ca3abcd
   name: atlas
   maintenanceMode: false
   cache:
@@ -101,7 +102,6 @@ atlas:
   leangraph:
     enabled: true
     replicaCount: 2
-    image: ghcr.io/atlanhq/atlas-metastore-leangraphsts:a36e2efabcd
     service:
       portName: leangraph
       type: ClusterIP
