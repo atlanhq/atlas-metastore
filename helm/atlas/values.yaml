@@ -24,6 +24,9 @@ global:
     enabled: false
   leangraph:
     enabled: false
+    dedicated:
+      enabled: false  # Creates dedicated Cassandra and Elasticsearch StatefulSets
+      active: false   # Uses dedicated resources in configmap
     
 Namespace: atlas
 sentry_flag: disable

@@ -62,7 +62,11 @@ data:
     #atlas.graph.storage.clustername=
     #atlas.graph.storage.port=
     atlas.graph.storage.backend=cql
+    {{- if .Values.global.leangraph.dedicated.active }}
+    atlas.graph.storage.hostname=atlas-leangraph-cassandra
+    {{- else }}
     atlas.graph.storage.hostname={{ .Chart.Name }}-cassandra
+    {{- end }}
     # atlas.graph.storage.cql.keyspace={{ .Chart.Name }}
     atlas.graph.storage.cql.replication-factor={{ .Values.cassandra.config.cluster_size }}
     atlas.graph.storage.clustername={{ .Values.cassandra.config.cluster_name  }}
@@ -141,7 +145,11 @@ data:
     # Alternatively, the JanusGraph documentation provides some tips on how to secure Elasticsearch without additional
     # plugins: http://docs.janusgraph.org/latest/elasticsearch.html
     
+    {{- if .Values.global.leangraph.dedicated.active }}
+    atlas.graph.index.search.hostname=atlas-leangraph-elasticsearch-master:9200
+    {{- else }}
     atlas.graph.index.search.hostname=atlas-elasticsearch-master:9200
+    {{- end }}
     atlas.graph.index.search.elasticsearch.client-only=true
     atlas.graph.index.search.elasticsearch.retry_on_conflict=5
     atlas.graph.index.search.max-result-set-size=1000
