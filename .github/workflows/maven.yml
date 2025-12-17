@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - mlh1904-aznhs
 
 jobs:
   # Detect what changed to optimize workflow execution

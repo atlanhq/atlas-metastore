@@ -1329,51 +1329,6 @@ public class EntityGraphMapper {
                         currentEdge = graphHelper.getEdgeForLabel(ctx.getReferringVertex(), edgeLabel, edgeDirection);
                     }
                     
-                    // Safe logging for investigation when edge is found during CREATE/UPDATE
-                    if (currentEdge != null) {
-                        try {
-                            String referringVertexGuid = null;
-                            String referringVertexTypeName = null;
-                            String currentEdgeId = null;
-                            String currentEdgeLabel = null;
-                            String currentEdgeOutVertexId = null;
-                            String currentEdgeOutVertexTypeName = null;
-                            String currentEdgeInVertexId = null;
-                            String currentEdgeInVertexTypeName = null;
-                            String operation = ctx.getOp() != null ? ctx.getOp().name() : "UNKNOWN";
-                            
-                            if (ctx.getReferringVertex() != null) {
-                                referringVertexGuid = String.valueOf(ctx.getReferringVertex().getId());
-                                referringVertexTypeName = AtlasGraphUtilsV2.getTypeName(ctx.getReferringVertex());
-                            }
-                            
-                            if (currentEdge != null) {
-                                currentEdgeId = String.valueOf(currentEdge.getId());
-                                currentEdgeLabel = currentEdge.getLabel();
-                                
-                                AtlasVertex outVertex = currentEdge.getOutVertex();
-                                if (outVertex != null) {
-                                    currentEdgeOutVertexId = String.valueOf(outVertex.getId());
-                                    currentEdgeOutVertexTypeName = AtlasGraphUtilsV2.getTypeName(outVertex);
-                                }
-                                
-                                AtlasVertex inVertex = currentEdge.getInVertex();
-                                if (inVertex != null) {
-                                    currentEdgeInVertexId = String.valueOf(inVertex.getId());
-                                    currentEdgeInVertexTypeName = AtlasGraphUtilsV2.getTypeName(inVertex);
-                                }
-                            }
-                            
-                            LOG.warn("[EDGE_DELETE_INVESTIGATION] Found existing edge during {} - Operation: {}, ReferringVertexGuid: {}, ReferringVertexTypeName: {}, EdgeLabel: {}, CurrentEdgeId: {}, CurrentEdgeLabel: {}, CurrentEdgeOutVertexId: {}, CurrentEdgeOutVertexTypeName: {}, CurrentEdgeInVertexId: {}, CurrentEdgeInVertexTypeName: {}, RelationshipGuid: {}", 
-                                     ctx.getOp() != null && ctx.getOp() == CREATE ? "CREATE" : "UPDATE",
-                                     operation, referringVertexGuid, referringVertexTypeName, edgeLabel, 
-                                     currentEdgeId, currentEdgeLabel, currentEdgeOutVertexId, currentEdgeOutVertexTypeName,
-                                     currentEdgeInVertexId, currentEdgeInVertexTypeName, relationshipGuid);
-                        } catch (Exception e) {
-                            LOG.warn("[EDGE_DELETE_INVESTIGATION] Error logging existing edge details: {}", e.getMessage());
-                        }
-                    }
-
                     AtlasEdge newEdge = null;
 
                     if (ctx.getValue() != null) {
@@ -1416,44 +1371,14 @@ public class EntityGraphMapper {
                             recordEntityUpdate(attrVertex);
                         }
 
-                        // Safe logging before edge deletion for investigation
-                        try {
-                            String edgeToDeleteId = String.valueOf(currentEdge.getId());
-                            String edgeToDeleteLabel = currentEdge.getLabel();
-                            String edgeToDeleteOutVertexId = null;
-                            String edgeToDeleteOutVertexTypeName = null;
-                            String edgeToDeleteInVertexId = null;
-                            String edgeToDeleteInVertexTypeName = null;
-                            String referringVertexGuid = null;
-                            String referringVertexTypeName = null;
-                            String attributeName = ctx.getAttribute() != null ? ctx.getAttribute().getName() : null;
-                            
-                            if (currentEdge.getOutVertex() != null) {
-                                edgeToDeleteOutVertexId = String.valueOf(currentEdge.getOutVertex().getId());
-                                edgeToDeleteOutVertexTypeName = AtlasGraphUtilsV2.getTypeName(currentEdge.getOutVertex());
-                            }
-                            
-                            if (currentEdge.getInVertex() != null) {
-                                edgeToDeleteInVertexId = String.valueOf(currentEdge.getInVertex().getId());
-                                edgeToDeleteInVertexTypeName = AtlasGraphUtilsV2.getTypeName(currentEdge.getInVertex());
-                            }
-                            
-                            if (ctx.getReferringVertex() != null) {
-                                referringVertexGuid = String.valueOf(ctx.getReferringVertex().getId());
-                                referringVertexTypeName = AtlasGraphUtilsV2.getTypeName(ctx.getReferringVertex());
-                            }
-                            
-                            LOG.info("[EDGE_DELETE_INVESTIGATION] Attempting to delete old edge - EdgeToDeleteId: {}, EdgeToDeleteLabel: {}, EdgeToDeleteOutVertexId: {}, EdgeToDeleteOutVertexTypeName: {}, EdgeToDeleteInVertexId: {}, EdgeToDeleteInVertexTypeName: {}, ReferringVertexGuid: {}, ReferringVertexTypeName: {}, AttributeName: {}, Operation: {}", 
-                                     edgeToDeleteId, edgeToDeleteLabel, edgeToDeleteOutVertexId, edgeToDeleteOutVertexTypeName,
-                                     edgeToDeleteInVertexId, edgeToDeleteInVertexTypeName, referringVertexGuid, 
-                                     referringVertexTypeName, attributeName, ctx.getOp() != null ? ctx.getOp().name() : "UNKNOWN");
-                        } catch (Exception e) {
-                            LOG.error("[EDGE_DELETE_INVESTIGATION] Error logging edge deletion details: {}", e.getMessage());
-                        }
-
                         //delete old reference
-                        deleteDelegate.getHandler().deleteEdgeReference(currentEdge, ctx.getAttrType().getTypeCategory(), ctx.getAttribute().isOwnedRef(),
-                                true, ctx.getAttribute().getRelationshipEdgeDirection(), ctx.getReferringVertex());
+                        try {
+                            deleteDelegate.getHandler().deleteEdgeReference(currentEdge, ctx.getAttrType().getTypeCategory(), ctx.getAttribute().isOwnedRef(),
+                                    true, ctx.getAttribute().getRelationshipEdgeDirection(), ctx.getReferringVertex());
+                        } catch (AtlasBaseException ex) {
+                            logEdgeDeletionFailure(currentEdge, ctx, edgeLabel, relationshipGuid, ex);
+                            throw ex;
+                        }
                         if (IN == edgeDirection) {
                             recordEntityUpdate(currentEdge.getOutVertex(), ctx, false);
                         } else {
@@ -7098,6 +7023,54 @@ public class EntityGraphMapper {
             }
         }
         return primitiveAttributes;
+    }
+
+    private void logEdgeDeletionFailure(AtlasEdge edge, AttributeMutationContext ctx, String edgeLabel,
+                                        String relationshipGuid, AtlasBaseException failure) {
+        if (!LOG.isErrorEnabled()) {
+            return;
+        }
+
+        String edgeId = null;
+        String resolvedEdgeLabel = edgeLabel;
+        String outVertexId = null;
+        String outVertexTypeName = null;
+        String inVertexId = null;
+        String inVertexTypeName = null;
+        String referringVertexId = null;
+        String referringVertexTypeName = null;
+        String attributeName = ctx != null && ctx.getAttribute() != null ? ctx.getAttribute().getName() : null;
+        String operation = ctx != null && ctx.getOp() != null ? ctx.getOp().name() : "UNKNOWN";
+
+        try {
+            if (edge != null) {
+                edgeId = String.valueOf(edge.getId());
+                resolvedEdgeLabel = edge.getLabel();
+
+                AtlasVertex outVertex = edge.getOutVertex();
+                if (outVertex != null) {
+                    outVertexId = String.valueOf(outVertex.getId());
+                    outVertexTypeName = AtlasGraphUtilsV2.getTypeName(outVertex);
+                }
+
+                AtlasVertex inVertex = edge.getInVertex();
+                if (inVertex != null) {
+                    inVertexId = String.valueOf(inVertex.getId());
+                    inVertexTypeName = AtlasGraphUtilsV2.getTypeName(inVertex);
+                }
+            }
+
+            if (ctx != null && ctx.getReferringVertex() != null) {
+                referringVertexId = String.valueOf(ctx.getReferringVertex().getId());
+                referringVertexTypeName = AtlasGraphUtilsV2.getTypeName(ctx.getReferringVertex());
+            }
+        } catch (Exception loggingError) {
+            failure.addSuppressed(loggingError);
+        }
+
+        LOG.error("[EDGE_DELETE_INVESTIGATION][2] Failed deleting edge reference - EdgeId: {}, EdgeLabel: {}, OutVertexId: {}, OutVertexTypeName: {}, InVertexId: {}, InVertexTypeName: {}, ReferringVertexId: {}, ReferringVertexTypeName: {}, AttributeName: {}, Operation: {}, RelationshipGuid: {}",
+                  edgeId, resolvedEdgeLabel, outVertexId, outVertexTypeName, inVertexId, inVertexTypeName,
+                  referringVertexId, referringVertexTypeName, attributeName, operation, relationshipGuid, failure);
     }
 
 }
