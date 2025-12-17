@@ -807,26 +807,25 @@ public abstract class DeleteHandlerV1 {
         try {
             if (updateInverseAttribute) {
                 String labelWithoutPrefix = edge.getLabel().substring(GraphHelper.EDGE_LABEL_PREFIX.length());
-                
-                // Safe logging and NPE prevention for investigation
+
                 String outVertexTypeName = null;
                 String edgeId = null;
+                String edgeLabel = null;
                 String outVertexId = null;
                 String inVertexId = null;
                 String inVertexTypeName = null;
-                String edgeLabel = null;
-                
+
                 try {
                     if (edge != null) {
                         edgeId = String.valueOf(edge.getId());
                         edgeLabel = edge.getLabel();
-                        
+
                         AtlasVertex outVertex = edge.getOutVertex();
                         if (outVertex != null) {
                             outVertexId = String.valueOf(outVertex.getId());
                             outVertexTypeName = AtlasGraphUtilsV2.getTypeName(outVertex);
                         }
-                        
+
                         AtlasVertex inVertex = edge.getInVertex();
                         if (inVertex != null) {
                             inVertexId = String.valueOf(inVertex.getId());
@@ -834,28 +833,26 @@ public abstract class DeleteHandlerV1 {
                         }
                     }
                 } catch (Exception e) {
-                    LOG.error("[EDGE_DELETE_INVESTIGATION] Error extracting edge/vertex info for logging: {}", e.getMessage());
+                    LOG.error("[EDGE_DELETE_INVESTIGATION][1] Error extracting edge/vertex info for logging", e);
                 }
-                
+
                 if (outVertexTypeName == null) {
-                    LOG.error("[EDGE_DELETE_INVESTIGATION] OUT vertex missing __typeName - EdgeId: {}, EdgeLabel: {}, OutVertexId: {}, InVertexId: {}, InVertexTypeName: {}, LabelWithoutPrefix: {}", 
+                    LOG.error("[EDGE_DELETE_INVESTIGATION][1] OUT vertex missing __typeName - EdgeId: {}, EdgeLabel: {}, OutVertexId: {}, InVertexId: {}, InVertexTypeName: {}, LabelWithoutPrefix: {}",
                               edgeId, edgeLabel, outVertexId, inVertexId, inVertexTypeName, labelWithoutPrefix);
-                    // Skip inverse attribute update if typeName is null to prevent NPE
-                    return;
-                }
-                
-                AtlasType      parentType = typeRegistry.getType(outVertexTypeName);
+                } else {
+                    AtlasType parentType = typeRegistry.getType(outVertexTypeName);
 
-                if (parentType instanceof AtlasEntityType) {
-                    AtlasEntityType                parentEntityType = (AtlasEntityType) parentType;
-                    AtlasStructType.AtlasAttribute attribute        = parentEntityType.getAttribute(labelWithoutPrefix);
+                    if (parentType instanceof AtlasEntityType) {
+                        AtlasEntityType                parentEntityType = (AtlasEntityType) parentType;
+                        AtlasStructType.AtlasAttribute attribute        = parentEntityType.getAttribute(labelWithoutPrefix);
 
-                    if (attribute == null) {
-                        attribute = parentEntityType.getRelationshipAttribute(labelWithoutPrefix, AtlasGraphUtilsV2.getTypeName(edge));
-                    }
+                        if (attribute == null) {
+                            attribute = parentEntityType.getRelationshipAttribute(labelWithoutPrefix, AtlasGraphUtilsV2.getTypeName(edge));
+                        }
 
-                    if (attribute != null && attribute.getInverseRefAttribute() != null) {
-                        deleteEdgeBetweenVertices(edge.getInVertex(), edge.getOutVertex(), attribute.getInverseRefAttribute());
+                        if (attribute != null && attribute.getInverseRefAttribute() != null) {
+                            deleteEdgeBetweenVertices(edge.getInVertex(), edge.getOutVertex(), attribute.getInverseRefAttribute());
+                        }
                     }
                 }
             }
