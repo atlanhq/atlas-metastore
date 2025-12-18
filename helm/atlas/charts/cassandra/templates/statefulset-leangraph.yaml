@@ -81,7 +81,7 @@ spec:
                   operator: In
                   values:
                   - leangraph-cassandra
-                topologyKey: "kubernetes.io/hostname"
+              topologyKey: "kubernetes.io/hostname"
         {{- end }}
 {{- end }}
 {{- if .Values.tolerations }}
