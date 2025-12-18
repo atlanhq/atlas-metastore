@@ -1,4 +1,4 @@
-{{ if and .Values.global.leangraph.enabled .Values.global.leangraph.dedicated.enabled }}
+{{ if .Values.global.leangraph.dedicated.enabled }}
 {{- $cloud := .Values.global.cloud }}
 ---
 apiVersion: apps/v1
