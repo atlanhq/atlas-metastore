@@ -131,7 +131,7 @@ spec:
         {{- if .Values.esConfig }}
         - name: esconfig
           configMap:
-            name: atlas-leangraph-elasticsearch-config
+            name: atlas-elasticsearch-master-config
         {{- end }}
         - name: elasticsearch-synonym-config
           configMap:

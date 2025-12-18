@@ -101,11 +101,11 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
             - labelSelector:
                 matchExpressions:
-                  - key: "app"
-                    operator: In
-                    values:
-                      - leangraph-cassandra
-              topologyKey: "kubernetes.io/hostname"
+                - key: "app"
+                  operator: In
+                  values:
+                  - leangraph-cassandra
+                topologyKey: "kubernetes.io/hostname"
         {{- end }}
 {{- end }}
 {{- if .Values.tolerations }}
@@ -179,7 +179,7 @@ spec:
 {{ toYaml .Values.resources | indent 10 }}
 {{- end }}
         env:
-        {{- $seed_size := default 1 .Values.config.seed_size | int -}}
+        {{- $seed_size := default 1 .Values.config.seed_size | int }}
         - name: CASSANDRA_SEEDS
           {{- if .Values.hostNetwork }}
           value: {{ required "You must fill \".Values.config.seeds\" with list of Cassandra seeds when hostNetwork is set to true" .Values.config.seeds | quote }}
