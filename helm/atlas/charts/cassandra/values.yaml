@@ -397,11 +397,13 @@ reaper:
     REAPER_HANGING_REPAIR_TIMEOUT_MINS: "10"
     REAPER_REPAIR_INTENSITY: "0.9"
     REAPER_REPAIR_PARALELLISM: "SEQUENTIAL"
+    REAPER_REPAIR_MANAGER_SCHEDULING_INTERVAL_SECONDS: "5"
   restartPolicy: OnFailure
+  shareProcessNamespace: true
   sidecar:
     image:
       repository: ghcr.io/atlanhq/cassandra-reaper-atlan-v2
-      tag: 1.4.0
+      tag: 1.5.0
       pullPolicy: IfNotPresent
     resources:
       requests:
@@ -411,8 +413,10 @@ reaper:
     env:
       REAPER_URL: "http://localhost:8080"
       CLUSTER_SEED_HOST: "atlas-cassandra-0.atlas-cassandra.atlas.svc.cluster.local,atlas-cassandra-1.atlas-cassandra.atlas.svc.cluster.local,atlas-cassandra-2.atlas-cassandra.atlas.svc.cluster.local"
-      KEYSPACE_NAME: "atlas"
+      KEYSPACE_NAME: "all"
       PROMETHEUS_PUSHGATEWAY: "http://prometheus-pushgateway.monitoring.svc.cluster.local:9091"
-      POLLING_FREQUENCY_IN_SECONDS: "900"
+      POLLING_FREQUENCY_IN_SECONDS: "60"
+      SEGMENT_COUNT_PER_NODE: "64"
+      ADAPTIVE_REPAIR: "true"
     
   
