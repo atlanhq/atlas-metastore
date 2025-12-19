@@ -19,6 +19,7 @@ spec:
         backoffLimit: {{ .Values.reaper.backoffLimit }}
         template:
           spec:
+            shareProcessNamespace: {{ .Values.reaper.shareProcessNamespace }}
             restartPolicy: {{ .Values.reaper.restartPolicy }}
             containers:
                 - name: reaper
@@ -28,6 +29,16 @@ spec:
                   image: "{{ .Values.reaper.image.repository }}:{{ .Values.reaper.image.tag }}"
                   {{- end }}
                   imagePullPolicy: {{ .Values.reaper.image.pullPolicy }}
+                  command:
+                    - /bin/bash
+                    - -c
+                  args:
+                    - |
+                      /usr/local/bin/entrypoint.sh cassandra-reaper &
+                      child=$!
+                      wait "$child"
+                      echo "Reaper process exited, exiting wrapper with code 0"
+                      exit 0
                   env:
                   {{- range $key, $value := .Values.reaper.env }}
                     - name: {{ $key }}
