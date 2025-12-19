@@ -712,7 +712,7 @@
         "Asset"
       ],
       "serviceType": "atlan",
-      "typeVersion": "1.2",
+      "typeVersion": "1.4",
       "attributeDefs":
       [
         {
@@ -804,6 +804,28 @@
         },
         {
           "name": "policyActions",
+          "typeName": "array<string>",
+          "indexType": "STRING",
+          "cardinality": "SINGLE",
+          "isIndexable": false,
+          "isOptional": true,
+          "isUnique": false,
+          "skipScrubbing": true,
+          "includeInNotification": true
+        },
+        {
+          "name": "previousPolicyScope",
+          "typeName": "string",
+          "indexType": "STRING",
+          "cardinality": "SINGLE",
+          "isIndexable": false,
+          "isOptional": true,
+          "isUnique": false,
+          "skipScrubbing": true,
+          "includeInNotification": true
+        },
+        {
+          "name": "previousPolicyActions",
           "typeName": "array<string>",
           "indexType": "STRING",
           "cardinality": "SINGLE",
