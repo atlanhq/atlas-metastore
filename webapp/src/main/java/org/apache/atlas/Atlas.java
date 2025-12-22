@@ -166,6 +166,7 @@ public final class Atlas {
         }
 
         if (configuration.getString("atlas.authorizer.impl").equalsIgnoreCase("atlas")) {
+            LOG.info("Initializing Access Audit Elasticsearch indices");
             initAccessAuditElasticSearch(configuration);
         }
 
@@ -332,6 +333,7 @@ public final class Atlas {
     private static void initElasticsearch() throws IOException {
         RestHighLevelClient esClient = AtlasElasticsearchDatabase.getClient();
         String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
+        LOG.info("Checking for atlan-template es index template to include vertex index pattern: {}", vertexIndex);
         IndexTemplatesExistRequest indexTemplateExistsRequest = new IndexTemplatesExistRequest("atlan-template");
         boolean exists = false;
         boolean needsUpdate = false;
@@ -356,6 +358,8 @@ public final class Atlas {
                     } else {
                         LOG.info("atlan-template already contains vertex index pattern: {}", vertexIndex);
                     }
+                } else {
+                    LOG.warn("atlan-template exists but could not retrieve template metadata. Will update template.");
                 }
             } else {
                 LOG.info("atlan-template es index template does not exist!");
@@ -367,6 +371,7 @@ public final class Atlas {
         }
         
         if (!exists || needsUpdate) {
+            LOG.info("Creating/Updating atlan-template es index template to include vertex index pattern: {}", vertexIndex);
             PutIndexTemplateRequest request = new PutIndexTemplateRequest("atlan-template");
             
             // Preserve existing patterns and add vertex index
@@ -407,6 +412,8 @@ public final class Atlas {
                 LOG.error("Caught exception while {} template: ", exists ? "updating" : "creating", e);
                 throw e;
             }
+        } else {
+            LOG.info("No update to atlan-template es index template needed.");
         }
     }
 }
