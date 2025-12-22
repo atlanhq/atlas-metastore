@@ -345,21 +345,29 @@ public final class Atlas {
                 LOG.info("atlan-template es index template exists!");
                 
                 // Check if the template has the vertex index pattern
-                GetIndexTemplatesRequest getRequest = new GetIndexTemplatesRequest("atlan-template");
-                GetIndexTemplatesResponse getResponse = esClient.indices().getIndexTemplate(getRequest, RequestOptions.DEFAULT);
-                
-                if (!getResponse.getIndexTemplates().isEmpty()) {
-                    IndexTemplateMetadata templateMetadata = getResponse.getIndexTemplates().get(0);
-                    existingPatterns = templateMetadata.patterns();
+                try {
+                    GetIndexTemplatesRequest getRequest = new GetIndexTemplatesRequest("atlan-template");
+                    GetIndexTemplatesResponse getResponse = esClient.indices().getIndexTemplate(getRequest, RequestOptions.DEFAULT);
                     
-                    if (existingPatterns == null || !existingPatterns.contains(vertexIndex)) {
-                        LOG.warn("atlan-template exists but does not contain vertex index pattern: {}. Will update template.", vertexIndex);
-                        needsUpdate = true;
+                    if (!getResponse.getIndexTemplates().isEmpty()) {
+                        IndexTemplateMetadata templateMetadata = getResponse.getIndexTemplates().get(0);
+                        existingPatterns = templateMetadata.patterns();
+                        
+                        if (existingPatterns == null || !existingPatterns.contains(vertexIndex)) {
+                            LOG.warn("atlan-template exists but does not contain vertex index pattern: {}. Will update template.", vertexIndex);
+                            needsUpdate = true;
+                        } else {
+                            LOG.info("atlan-template already contains vertex index pattern: {}", vertexIndex);
+                        }
                     } else {
-                        LOG.info("atlan-template already contains vertex index pattern: {}", vertexIndex);
+                        LOG.warn("atlan-template exists but could not retrieve template metadata. Will update template.");
+                        needsUpdate = true;
                     }
-                } else {
-                    LOG.warn("atlan-template exists but could not retrieve template metadata. Will update template.");
+                } catch (NoSuchFieldError | NoClassDefFoundError e) {
+                    // This can happen due to Lucene/ES client version incompatibility (e.g., LUCENE_8_9_0 not found)
+                    // In this case, we'll update the template to ensure it has the correct patterns
+                    LOG.warn("Could not parse template metadata due to version incompatibility: {}. Will update template to ensure correct patterns.", e.getMessage());
+                    needsUpdate = true;
                 }
             } else {
                 LOG.info("atlan-template es index template does not exist!");
