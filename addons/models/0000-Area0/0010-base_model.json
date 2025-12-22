@@ -814,6 +814,17 @@
           "includeInNotification": true
         },
         {
+          "name": "previousPolicyScope",
+          "typeName": "string",
+          "indexType": "STRING",
+          "cardinality": "SINGLE",
+          "isIndexable": false,
+          "isOptional": true,
+          "isUnique": false,
+          "skipScrubbing": true,
+          "includeInNotification": true
+        },
+        {
           "name": "previousPolicyActions",
           "typeName": "array<string>",
           "indexType": "STRING",
