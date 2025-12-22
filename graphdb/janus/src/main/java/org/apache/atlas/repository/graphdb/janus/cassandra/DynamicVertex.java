@@ -70,11 +70,6 @@ public class DynamicVertex {
 
                 } else if (clazz.equals(Map.class) && !(val instanceof Map)) {
                     return (T) AtlasType.fromJson((String) val, Map.class);
-                } else if (clazz.equals(List.class) && val instanceof String) {
-                    // Handle case where List is expected but a single String is stored
-                    List<String> singleValueList = new ArrayList<>();
-                    singleValueList.add((String) val);
-                    return (T) singleValueList;
                 }
             } catch (ClassCastException cce) {
                 String errorMessage = String.format("Can not cast property %s from %s to %s", key, val.getClass().getName(), clazz.getName());

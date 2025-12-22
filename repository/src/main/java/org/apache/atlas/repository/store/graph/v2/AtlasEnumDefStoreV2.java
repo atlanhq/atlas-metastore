@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 import org.apache.atlas.authorize.AtlasPrivilege;
 import org.apache.atlas.authorize.AtlasTypeAccessRequest;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
 
@@ -313,7 +314,20 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
         typeDefStore.vertexToTypeDef(vertex, ret);
 
         List<AtlasEnumElementDef> elements = new ArrayList<>();
-        List<String> elemValues = vertex.getProperty(AtlasGraphUtilsV2.getTypeDefPropertyKey(ret), List.class);
+        
+        // Handle both List and single String values - enum values may be stored as String if there's only one value
+        String propertyKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret);
+        Object elemValuesObj = vertex.getProperty(propertyKey, Object.class);
+        List<String> elemValues;
+        
+        if (elemValuesObj instanceof List) {
+            elemValues = (List<String>) elemValuesObj;
+        } else if (elemValuesObj instanceof String) {
+            elemValues = Collections.singletonList((String) elemValuesObj);
+        } else {
+            elemValues = Collections.emptyList();
+        }
+        
         for (String elemValue : elemValues) {
             String elemKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret, elemValue);
             String descKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(elemKey, "description");
