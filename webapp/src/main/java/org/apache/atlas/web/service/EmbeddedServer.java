@@ -22,30 +22,25 @@ import io.micrometer.core.instrument.binder.jetty.JettyConnectionMetrics;
 import io.micrometer.core.instrument.binder.jetty.JettyServerThreadPoolMetrics;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.util.BeanUtil;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.model.audit.AtlasAuditEntry;
+import org.eclipse.jetty.ee8.webapp.WebAppContext;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.util.thread.ExecutorThreadPool;
-import org.eclipse.jetty.webapp.WebAppContext;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.Date;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 
 /**
  * This class embeds a Jetty server and a connector.
+ * Updated for Jetty 12 with EE8 (javax.servlet) compatibility.
  */
 public class EmbeddedServer {
     public static final Logger LOG = LoggerFactory.getLogger(EmbeddedServer.class);
@@ -55,20 +50,18 @@ public class EmbeddedServer {
     protected final Server server;
 
     public EmbeddedServer(String host, int port, String path) throws IOException {
-        int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
-        LinkedBlockingQueue<Runnable> queue         = new LinkedBlockingQueue<>(queueSize);
-        int                           minThreads    = AtlasConfiguration.WEBSERVER_MIN_THREADS.getInt();
-        int                           maxThreads    = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
-        int                           reservedThreads    = AtlasConfiguration.WEBSERVER_RESERVED_THREADS.getInt();
-        long                          keepAliveTime = AtlasConfiguration.WEBSERVER_KEEPALIVE_SECONDS.getLong();
-        ThreadPoolExecutor            executor      = new ThreadPoolExecutor(maxThreads, maxThreads, keepAliveTime, TimeUnit.SECONDS, queue);
-        ExecutorThreadPool            pool          = new ExecutorThreadPool(executor, reservedThreads);
+        int minThreads    = AtlasConfiguration.WEBSERVER_MIN_THREADS.getInt();
+        int maxThreads    = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
+        int idleTimeout   = (int) AtlasConfiguration.WEBSERVER_KEEPALIVE_SECONDS.getLong() * 1000;
 
-        server = new Server(pool);
+        // Jetty 12 uses QueuedThreadPool instead of ExecutorThreadPool
+        QueuedThreadPool threadPool = new QueuedThreadPool(maxThreads, minThreads, idleTimeout);
+
+        server = new Server(threadPool);
 
         Connector connector = getConnector(host, port);
         connector.addBean(new JettyConnectionMetrics(getMeterRegistry()));
-        new JettyServerThreadPoolMetrics(pool, Collections.emptyList()).bindTo(getMeterRegistry());
+        new JettyServerThreadPoolMetrics(threadPool, Collections.emptyList()).bindTo(getMeterRegistry());
         server.addConnector(connector);
 
         WebAppContext application = getWebAppContext(path);
@@ -76,7 +69,10 @@ public class EmbeddedServer {
     }
 
     protected WebAppContext getWebAppContext(String path) {
-        WebAppContext application = new WebAppContext(path, "/");
+        // Jetty 12 EE8 WebAppContext (javax.servlet compatible)
+        WebAppContext application = new WebAppContext();
+        application.setContextPath("/");
+        application.setWar(path);
         application.setClassLoader(Thread.currentThread().getContextClassLoader());
         // Disable directory listing
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");

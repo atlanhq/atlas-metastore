@@ -345,14 +345,15 @@
             <artifactId>jetty-server</artifactId>
         </dependency>
 
+        <!-- Jetty 12 EE8 (javax.servlet compatible) -->
         <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-servlet</artifactId>
+            <groupId>org.eclipse.jetty.ee8</groupId>
+            <artifactId>jetty-ee8-servlet</artifactId>
         </dependency>
 
         <dependency>
-            <groupId>org.eclipse.jetty</groupId>
-            <artifactId>jetty-webapp</artifactId>
+            <groupId>org.eclipse.jetty.ee8</groupId>
+            <artifactId>jetty-ee8-webapp</artifactId>
         </dependency>
 
         <dependency>
@@ -836,8 +837,9 @@
             </plugin>
 
             <plugin>
-                <groupId>org.eclipse.jetty</groupId>
-                <artifactId>jetty-maven-plugin</artifactId>
+                <groupId>org.eclipse.jetty.ee8</groupId>
+                <artifactId>jetty-ee8-maven-plugin</artifactId>
+                <version>${jetty.version}</version>
                 <configuration>
                     <skip>${skipTests}</skip>
                     <!--only skip int tests -->
@@ -846,62 +848,25 @@
                         <idleTimeout>60000</idleTimeout>
                     </httpConnector>
                     <war>${project.build.directory}/atlas-webapp-${project.version}.war</war>
-                    <daemon>true</daemon>
                     <webAppSourceDirectory>${project.basedir}/src/main/webapp</webAppSourceDirectory>
                     <webApp>
                         <contextPath>/</contextPath>
                         <descriptor>${project.basedir}/src/main/webapp/WEB-INF/web.xml</descriptor>
                         <extraClasspath>${project.build.testOutputDirectory}</extraClasspath>
                     </webApp>
-                    <useTestScope>true</useTestScope>
                     <systemProperties>
-                        <systemProperty>
-                            <name>atlas.home</name>
-                            <value>${project.build.directory}</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <key>atlas.conf</key>
-                            <value>${project.build.directory}/test-classes</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>atlas.data</name>
-                            <value>${project.build.directory}/data</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>atlas.log.dir</name>
-                            <value>${project.build.directory}/logs</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>atlas.log.file</name>
-                            <value>application.log</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>logback.configurationFile</name>
-                            <value>${logback.configurationFile}</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>atlas.graphdb.backend</name>
-                            <value>${graphdb.backend.impl}</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <key>embedded.solr.directory</key>
-                            <value>${project.build.directory}</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>org.eclipse.jetty.annotations.maxWait</name>
-                            <value>5000</value>
-                        </systemProperty>
-                        <systemProperty>
-                            <name>org.eclipse.jetty.annotations.maxWait</name>
-                            <value>5000</value>
-                        </systemProperty>
+                        <atlas.home>${project.build.directory}</atlas.home>
+                        <atlas.conf>${project.build.directory}/test-classes</atlas.conf>
+                        <atlas.data>${project.build.directory}/data</atlas.data>
+                        <atlas.log.dir>${project.build.directory}/logs</atlas.log.dir>
+                        <atlas.log.file>application.log</atlas.log.file>
+                        <logback.configurationFile>${logback.configurationFile}</logback.configurationFile>
+                        <atlas.graphdb.backend>${graphdb.backend.impl}</atlas.graphdb.backend>
+                        <embedded.solr.directory>${project.build.directory}</embedded.solr.directory>
+                        <org.eclipse.jetty.annotations.maxWait>5000</org.eclipse.jetty.annotations.maxWait>
                     </systemProperties>
                     <stopKey>atlas-stop</stopKey>
                     <stopPort>31001</stopPort>
-                    <stopWait>${jetty-maven-plugin.stopWait}</stopWait>
-                    <daemon>${debug.jetty.daemon}</daemon>
-                    <testClassesDirectory>${project.build.testOutputDirectory}</testClassesDirectory>
-                    <useTestClasspath>true</useTestClasspath>
                 </configuration>
                 <executions>
                     <execution>
@@ -910,7 +875,7 @@
                         <goals>
                             <!-- stop any previous instance to free up the port -->
                             <goal>stop</goal>
-                            <goal>deploy-war</goal>
+                            <goal>start</goal>
                         </goals>
                     </execution>
                     <execution>
