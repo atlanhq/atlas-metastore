@@ -105,7 +105,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
     private   static final String         PREFIX                = "atlas.authentication.method";
     private   static final String[]       DEFAULT_PROXY_USERS   = new String[] { "knox" };
     private   static final String         CONF_PROXYUSER_PREFIX = "atlas.proxyuser";
-    protected static final ServletContext nullContext           = new NullServletContext();
+    //protected static final ServletContext nullContext           = new NullServletContext();
     private   static final String         ORIGINAL_URL_QUERY_PARAM = "originalUrl";
 
     private Signer               signer;
@@ -183,7 +183,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                 if (globalConf != null) {
                     return globalConf.getServletContext();
                 } else {
-                    return nullContext;
+                    return null;
                 }
             }
 
@@ -225,17 +225,21 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
     public void initializeSecretProvider(FilterConfig filterConfig) throws ServletException {
         LOG.info("==> AtlasAuthenticationFilter.initializeSecretProvider");
 
-        secretProvider = (SignerSecretProvider) filterConfig.getServletContext().getAttribute(AuthenticationFilter.SIGNER_SECRET_PROVIDER_ATTRIBUTE);
+        ServletContext servletContext = (filterConfig != null) ? filterConfig.getServletContext() : null;
+        
+        if (servletContext != null) {
+            secretProvider = (SignerSecretProvider) servletContext.getAttribute(AuthenticationFilter.SIGNER_SECRET_PROVIDER_ATTRIBUTE);
+        }
 
         if (secretProvider == null) {
             // As tomcat cannot specify the provider object in the configuration.
             // It'll go into this path
-            String configPrefix = filterConfig.getInitParameter(CONFIG_PREFIX);
+            String configPrefix = (filterConfig != null) ? filterConfig.getInitParameter(CONFIG_PREFIX) : null;
 
             configPrefix = (configPrefix != null) ? configPrefix + "." : "";
 
             try {
-                secretProvider = AuthenticationFilter.constructSecretProvider(filterConfig.getServletContext(), super.getConfiguration(configPrefix, filterConfig), false);
+                secretProvider = AuthenticationFilter.constructSecretProvider(servletContext, super.getConfiguration(configPrefix, filterConfig), false);
 
                 this.isInitializedByTomcat = true;
             } catch (Exception ex) {
@@ -537,9 +541,9 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                     }
 
                     if (newToken && !token.isExpired() && token != AuthenticationToken.ANONYMOUS) {
-                        String signedToken = signer.sign(token.toString());
+                        //String signedToken = signer.sign(token.toString());
 
-                        createAtlasAuthCookie(httpResponse, signedToken, getCookieDomain(), getCookiePath(), token.getExpires(), isHttps);
+                        //createAtlasAuthCookie(httpResponse, signedToken, getCookieDomain(), getCookiePath(), token.getExpires(), isHttps);
                     }
 
                     filterChainWrapper.doFilter(httpRequest, httpResponse);
