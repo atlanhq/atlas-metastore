@@ -7064,4 +7064,26 @@ public class EntityGraphMapper {
         RequestContext requestContext = RequestContext.get();
         requestContext.cacheDifferentialEntity(diffEntity, ev);
     }
+
+    private Set<AtlasStructType.AtlasAttribute> getEntityTypeAttributes(Set<AtlasVertex> vertices) {
+        Set<AtlasStructType.AtlasAttribute> primitiveAttributes = new HashSet<>();
+        for (AtlasVertex vertex : vertices) {
+            String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+            if (typeName != null) {
+                AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+                if (entityType != null) {
+                    Map<String, AtlasStructType.AtlasAttribute> attributes = entityType.getAllAttributes();
+                    if (MapUtils.isNotEmpty(attributes)) {
+                        for (AtlasStructType.AtlasAttribute attribute : attributes.values()) {
+                            if (PRIMITIVE.equals(attribute.getAttributeType().getTypeCategory())) {
+                                primitiveAttributes.add(attribute);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return primitiveAttributes;
+    }
+
 }
