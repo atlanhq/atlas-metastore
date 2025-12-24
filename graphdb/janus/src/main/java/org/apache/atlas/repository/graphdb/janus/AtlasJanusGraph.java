@@ -58,6 +58,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
@@ -456,11 +457,18 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             try {
                 AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("commitIdOnly.callInsertVertices");
                 // Extract updated vertices
+                // IMPORTANT: Get vertices directly from context, but ensure we use the same vertex instances
+                // that were updated in addHasLineage, not stale cached copies
                 Set<AtlasVertex> updatedVertexList = RequestContext.get().getDifferentialGUIDS().stream()
                         .map(x -> ((AtlasVertex) RequestContext.get().getDifferentialVertex(x)))
                         .filter(Objects::nonNull)
                         .filter(AtlasVertex::isAssetVertex)
                         .collect(Collectors.toSet());
+
+                LOG.info("commitIdOnly: Found {} vertices from getDifferentialGUIDS", updatedVertexList.size());
+                
+                // NOTE: The fix for ensuring cached vertices have updated __hasLineage is now in addHasLineage method.
+                // This ensures the cached vertex's DynamicVertex is updated at the source when __hasLineage is set.
 
                 // Extract SOFT deleted vertices
                 updatedVertexList.addAll(RequestContext.get().getVerticesToSoftDelete().stream()
@@ -469,6 +477,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                         .filter(AtlasVertex::isAssetVertex)
                         .collect(Collectors.toSet()));
 
+                LOG.info("commitIdOnly: After adding soft deleted vertices, total={}", updatedVertexList.size());
+
                 // Extract restored vertices
                 if (!RequestContext.get().getRestoredVertices().isEmpty()) {
                     updatedVertexList.addAll(RequestContext.get().getRestoredVertices().stream()
@@ -476,6 +486,25 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                             .filter(Objects::nonNull)
                             .filter(AtlasVertex::isAssetVertex)
                             .collect(Collectors.toSet()));
+                }
+
+                LOG.info("commitIdOnly: Final updatedVertexList size={}, about to call normalizeAttributes", updatedVertexList.size());
+                
+                // Log vertex details before normalizeAttributes
+                for (AtlasVertex vertex : updatedVertexList) {
+                    String vertexId = vertex.getIdForDisplay();
+                    String guid = vertex.getProperty("__guid", String.class);
+                    Object hasLineageBeforeNormalize = vertex.getProperty("__hasLineage", Boolean.class);
+                    if (vertex instanceof AtlasJanusVertex) {
+                        AtlasJanusVertex janusVertex = (AtlasJanusVertex) vertex;
+                        DynamicVertex dv = janusVertex.getDynamicVertex();
+                        Object hasLineageInDV = dv != null ? dv.getProperty("__hasLineage", Object.class) : null;
+                        LOG.info("commitIdOnly: Before normalizeAttributes - vertexId={}, guid={}, vertex.getProperty(__hasLineage)={}, dynamicVertex.getProperty(__hasLineage)={}, dynamicVertex instance={}", 
+                                vertexId, guid, hasLineageBeforeNormalize, hasLineageInDV, System.identityHashCode(dv));
+                    } else {
+                        LOG.info("commitIdOnly: Before normalizeAttributes - vertexId={}, guid={}, vertex.getProperty(__hasLineage)={}, NOT AtlasJanusVertex", 
+                                vertexId, guid, hasLineageBeforeNormalize);
+                    }
                 }
 
                 Map<String, Map<String, Object>> normalisedAttributes = normalizeAttributes(updatedVertexList, typeRegistry);
@@ -525,17 +554,47 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     private Map<String, Map<String, Object>> normalizeAttributes(Set<AtlasVertex> vertices, AtlasTypeRegistry typeRegistry) {
         Map<String, Map<String, Object>> rt = new HashMap<>();
 
+        LOG.info("normalizeAttributes: Processing {} vertices", vertices.size());
+
         for (AtlasVertex vertex : vertices) {
+            String vertexId = vertex.getIdForDisplay();
+            String guid = vertex.getProperty("__guid", String.class);
             String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
             AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
 
+            // Log before reading DynamicVertex
+            Object hasLineageBeforeRead = vertex.getProperty("__hasLineage", Boolean.class);
+            AtlasJanusVertex janusVertex = (AtlasJanusVertex) vertex;
+            DynamicVertex dynamicVertex = janusVertex.getDynamicVertex();
+            Object hasLineageInDVBeforeRead = dynamicVertex != null ? dynamicVertex.getProperty("__hasLineage", Object.class) : null;
+            LOG.info("normalizeAttributes: Before getAllProperties - vertexId={}, guid={}, typeName={}, vertex.getProperty(__hasLineage)={}, dynamicVertex.getProperty(__hasLineage)={}, dynamicVertex instance={}", 
+                    vertexId, guid, typeName, hasLineageBeforeRead, hasLineageInDVBeforeRead, System.identityHashCode(dynamicVertex));
+
             Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
 
+            // Log after reading from DynamicVertex
+            Object hasLineageInAllProperties = allProperties.get("__hasLineage");
+            LOG.info("normalizeAttributes: After getAllProperties - vertexId={}, guid={}, allProperties.get(__hasLineage)={}, allProperties size={}", 
+                    vertexId, guid, hasLineageInAllProperties, allProperties.size());
+
+            if (hasLineageInAllProperties == null || !Boolean.TRUE.equals(hasLineageInAllProperties)) {
+                LOG.warn("normalizeAttributes: WARNING - __hasLineage is missing or false in allProperties! vertexId={}, guid={}, hasLineageInAllProperties={}, but vertex.getProperty(__hasLineage)={}, dynamicVertex.getProperty(__hasLineage)={}", 
+                        vertexId, guid, hasLineageInAllProperties, hasLineageBeforeRead, hasLineageInDVBeforeRead);
+            }
+
             type.normalizeAttributeValuesForUpdate(allProperties);
+
+            // Log after normalization
+            Object hasLineageAfterNormalize = allProperties.get("__hasLineage");
+            if (hasLineageAfterNormalize != hasLineageInAllProperties) {
+                LOG.warn("normalizeAttributes: normalizeAttributeValuesForUpdate changed __hasLineage! vertexId={}, guid={}, before={}, after={}", 
+                        vertexId, guid, hasLineageInAllProperties, hasLineageAfterNormalize);
+            }
 
             rt.put(vertex.getIdForDisplay(), allProperties);
         }
 
+        LOG.info("normalizeAttributes: Completed processing {} vertices", vertices.size());
         return rt;
     }
 

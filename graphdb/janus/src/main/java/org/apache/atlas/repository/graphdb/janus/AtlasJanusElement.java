@@ -231,10 +231,34 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             } else {
                 if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
                     AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+                    String vertexId = vertex.getIdForDisplay();
+                    String guid = vertex.getProperty("__guid", String.class);
+                    
+                    // Log __hasLineage property updates
+                    if ("__hasLineage".equals(propertyName)) {
+                        Object existingValue = vertex.getDynamicVertex().getProperty(propertyName, Object.class);
+                        LOG.info("AtlasJanusElement.setProperty: Setting __hasLineage={} on DynamicVertex. vertexId={}, guid={}, existingValue={}, isCoreProperty={}", 
+                                value, vertexId, guid, existingValue, VERTEX_CORE_PROPERTIES.contains(propertyName));
+                    }
+                    
                     vertex.getDynamicVertex().setProperty(propertyName, value);
+                    
+                    // Log after setting to verify DynamicVertex was updated
+                    if ("__hasLineage".equals(propertyName)) {
+                        Object valueAfterSet = vertex.getDynamicVertex().getProperty(propertyName, Object.class);
+                        LOG.info("AtlasJanusElement.setProperty: After setProperty on DynamicVertex, getProperty(__hasLineage)={} for vertexId={}, guid={}", 
+                                valueAfterSet, vertexId, guid);
+                    }
 
                     if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                        LOG.info("AtlasJanusElement.setProperty: Property {} is in VERTEX_CORE_PROPERTIES, also setting on JanusGraph vertex. vertexId={}, guid={}", 
+                                propertyName, vertexId, guid);
                         getWrappedElement().property(propertyName, value);
+                    } else {
+                        if ("__hasLineage".equals(propertyName)) {
+                            LOG.warn("AtlasJanusElement.setProperty: __hasLineage is NOT in VERTEX_CORE_PROPERTIES, only set on DynamicVertex, NOT on JanusGraph vertex. vertexId={}, guid={}", 
+                                    vertexId, guid);
+                        }
                     }
                 } else {
                     // Might be an edge
