@@ -463,8 +463,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                         .filter(AtlasVertex::isAssetVertex)
                         .collect(Collectors.toSet());
 
-                LOG.info("commitIdOnly: Found {} vertices from getDifferentialGUIDS", updatedVertexList.size());
-
                 // Extract SOFT deleted vertices
                 updatedVertexList.addAll(RequestContext.get().getVerticesToSoftDelete().stream()
                         .map(x -> ((AtlasVertex) x))
@@ -533,7 +531,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
 
             Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
+
             type.normalizeAttributeValuesForUpdate(allProperties);
+
             rt.put(vertex.getIdForDisplay(), allProperties);
         }
 
