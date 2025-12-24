@@ -6356,18 +6356,10 @@ public class EntityGraphMapper {
 
                     if (isRestoreEntity) {
                         String oppositeGuid = GraphHelper.getGuid(oppositeEdgeAssetVertex);
-                        String oppositeVertexId = oppositeEdgeAssetVertex.getIdForDisplay();
-                        LOG.info("addHasLineage: Setting __hasLineage=true on oppositeEdgeAsset (restore). oppositeVertexId={}, oppositeGuid={}", 
-                                oppositeVertexId, oppositeGuid);
                         AtlasGraphUtilsV2.setEncodedProperty(oppositeEdgeAssetVertex, HAS_LINEAGE, true);
-                        
-                        Object oppositeHasLineageAfterSet = oppositeEdgeAssetVertex.getProperty(HAS_LINEAGE, Boolean.class);
-                        LOG.info("addHasLineage: After setEncodedProperty, oppositeEdgeAssetVertex.getProperty(__hasLineage)={} for oppositeVertexId={}", 
-                                oppositeHasLineageAfterSet, oppositeVertexId);
-                        
                         AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(oppositeEdgeAssetVertex);
                         diffEntity.setAttribute(HAS_LINEAGE, true);
-                        
+
                         // Ensure cached vertex in RequestContext also has updated DynamicVertex
                         ensureCachedVertexHasLineage(oppositeEdgeAssetVertex, oppositeGuid);
                         
@@ -6385,9 +6377,6 @@ public class EntityGraphMapper {
         // Record lineage calculation time
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
-        
-        LOG.info("addHasLineage: Completed processing {} edges, took {}ms, updatedGuids={}", inputOutputEdges.size(), lineageCalcTime, updatedGuids);
-        
         RequestContext.get().endMetricRecord(metricRecorder);
         
         return updatedGuids;
