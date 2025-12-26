@@ -86,6 +86,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     private final DeleteHandlerDelegate     deleteDelegate;
     private final GraphHelper               graphHelper;
     private final IAtlasEntityChangeNotifier entityChangeNotifier;
+    private final EntityGraphMapper         entityGraphMapper;
 
     private static final String RELATIONSHIP_DEF_MAP_KEY = "relationshipDef";
     private static final String END_1_CARDINALITY_KEY = "end1Cardinality";
@@ -123,13 +124,15 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     @Inject
     public AtlasRelationshipStoreV2(AtlasGraph graph, AtlasTypeRegistry typeRegistry, DeleteHandlerDelegate deleteDelegate,
-                                    IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphRetriever entityRetriever) {
+                                    IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphRetriever entityRetriever,
+                                    EntityGraphMapper entityGraphMapper) {
         this.graph                = graph;
         this.typeRegistry         = typeRegistry;
         this.graphHelper          = new GraphHelper(graph);
         this.entityRetriever      = entityRetriever;
         this.deleteDelegate       = deleteDelegate;
         this.entityChangeNotifier = entityChangeNotifier;
+        this.entityGraphMapper    = entityGraphMapper;
     }
 
     @Override
@@ -345,7 +348,11 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             deletedRelationships.add(relationshipToDelete);
         }
 
-        deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(edgesToDelete,null);
+        Set<String> lineageResetGuids = deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(edgesToDelete, null);
+        
+        // Update DynamicVertex cache for entities that had __hasLineage reset
+        entityGraphMapper.updateCachedDynamicVertexHasLineage(lineageResetGuids, false);
+        
         deleteDelegate.getHandler().deleteRelationships(edgesToDelete, false);
 
         if (DEFERRED_ACTION_ENABLED) {
@@ -391,7 +398,11 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
         validateRelationshipType(getTypeName(edge));
 
-        deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(Collections.singleton(edge), null);
+        Set<String> lineageResetGuids = deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(Collections.singleton(edge), null);
+        
+        // Update DynamicVertex cache for entities that had __hasLineage reset
+        entityGraphMapper.updateCachedDynamicVertexHasLineage(lineageResetGuids, false);
+        
         deleteDelegate.getHandler().deleteRelationships(Collections.singleton(edge), forceDelete);
 
         if (DEFERRED_ACTION_ENABLED) {

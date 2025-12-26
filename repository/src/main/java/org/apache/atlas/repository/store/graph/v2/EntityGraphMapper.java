@@ -432,17 +432,14 @@ public class EntityGraphMapper {
                         lineageUpdatedGuids = addHasLineage(inOutEdges, isRestoreEntity);
                     }
 
+                    // Handle lineage reset for removed edges
                     Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
-
-                    if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
-                        deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
-                    }
+                    handleLineageReset(removedEdges, resp);
 
                     reqContext.cache(createdEntity);
                     
-                    // Update response headers for ALL entities that had __hasLineage set by addHasLineage
-                    // Note: Cached entities are already updated inside addHasLineage via ensureCachedVertexHasLineage
-                    updateHasLineageInResponseHeaders(resp, lineageUpdatedGuids);
+                    // Update response headers for entities that had __hasLineage set to true
+                    updateHasLineageInResponseHeaders(resp, lineageUpdatedGuids, true);
 
                     if (DEFERRED_ACTION_ENABLED) {
                         Set<String> deletedEdgeIds = reqContext.getDeletedEdgesIds();
@@ -537,17 +534,14 @@ public class EntityGraphMapper {
                         allLineageUpdatedGuids.addAll(restoredGuids);
                     }
 
+                    // Handle lineage reset for removed edges
                     Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
-
-                    if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
-                        deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
-                    }
+                    handleLineageReset(removedEdges, resp);
 
                     reqContext.cache(updatedEntity);
                     
-                    // Update response headers for ALL entities that had __hasLineage set by addHasLineage
-                    // Note: Cached entities are already updated inside addHasLineage via ensureCachedVertexHasLineage
-                    updateHasLineageInResponseHeaders(resp, allLineageUpdatedGuids);
+                    // Update response headers for entities that had __hasLineage set to true
+                    updateHasLineageInResponseHeaders(resp, allLineageUpdatedGuids, true);
 
                     if (DEFERRED_ACTION_ENABLED) {
                         Set<String> deletedEdgeIds = reqContext.getDeletedEdgesIds();
@@ -593,7 +587,7 @@ public class EntityGraphMapper {
                 Set<AtlasEdge> newlyCreatedEdges = getNewCreatedInputOutputEdges(guid);
                 if (CollectionUtils.isNotEmpty(newlyCreatedEdges)) {
                     Set<String> appendLineageUpdatedGuids = addHasLineage(newlyCreatedEdges, false);
-                    updateHasLineageInResponseHeaders(resp, appendLineageUpdatedGuids);
+                    updateHasLineageInResponseHeaders(resp, appendLineageUpdatedGuids, true);
                 }
             }
         }
@@ -605,11 +599,9 @@ public class EntityGraphMapper {
                 AtlasEntityType entityType = context.getType(guid);
                 mapAppendRemoveRelationshipAttributes(entity, entityType, vertex, UPDATE, context, false, true);
 
-                // Update __hasLineage for edges impacted during remove operation
+                // Handle lineage reset for removed edges
                 Set<AtlasEdge> removedEdges = getRemovedInputOutputEdges(guid);
-                if (!distributedHasLineageCalculationEnabled && CollectionUtils.isNotEmpty(removedEdges)) {
-                    deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
-                }
+                handleLineageReset(removedEdges, resp);
             }
         }
 
@@ -6300,23 +6292,10 @@ public class EntityGraphMapper {
             AtlasVertex assetVertex = atlasEdge.getInVertex();
 
             String assetGuid = GraphHelper.getGuid(assetVertex);
-            String assetVertexId = assetVertex.getIdForDisplay();
             String processGuid = GraphHelper.getGuid(processVertex);
-            String processVertexId = processVertex.getIdForDisplay();
 
             if (getEntityHasLineage(processVertex)) {
-                AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
-
-                AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(assetVertex);
-                diffEntity.setAttribute(HAS_LINEAGE, true);
-                
-                // Ensure cached vertex in RequestContext also has updated DynamicVertex
-                ensureCachedVertexHasLineage(assetVertex, assetGuid);
-                
-                // Track this GUID for response header updates
-                if (assetGuid != null) {
-                    updatedGuids.add(assetGuid);
-                }
+                setHasLineageOnVertex(assetVertex, assetGuid, true, updatedGuids);
                 continue;
             }
 
@@ -6330,43 +6309,14 @@ public class EntityGraphMapper {
 
                 if (getStatus(oppositeEdge) == ACTIVE && getStatus(oppositeEdgeAssetVertex) == ACTIVE) {
                     if (!isHasLineageSet) {
-                        AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, true);
-                        AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE, true);
-
-                        AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(assetVertex);
-                        diffEntity.setAttribute(HAS_LINEAGE, true);
-
-                        diffEntity = entityRetriever.getOrInitializeDiffEntity(processVertex);
-                        diffEntity.setAttribute(HAS_LINEAGE, true);
-                        
-                        // Ensure cached vertices in RequestContext also have updated DynamicVertex
-                        ensureCachedVertexHasLineage(assetVertex, assetGuid);
-                        ensureCachedVertexHasLineage(processVertex, processGuid);
-                        
-                        // Track these GUIDs for response header updates
-                        if (assetGuid != null) {
-                            updatedGuids.add(assetGuid);
-                        }
-                        if (processGuid != null) {
-                            updatedGuids.add(processGuid);
-                        }
-                        
+                        setHasLineageOnVertex(assetVertex, assetGuid, true, updatedGuids);
+                        setHasLineageOnVertex(processVertex, processGuid, true, updatedGuids);
                         isHasLineageSet = true;
                     }
 
                     if (isRestoreEntity) {
                         String oppositeGuid = GraphHelper.getGuid(oppositeEdgeAssetVertex);
-                        AtlasGraphUtilsV2.setEncodedProperty(oppositeEdgeAssetVertex, HAS_LINEAGE, true);
-                        AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(oppositeEdgeAssetVertex);
-                        diffEntity.setAttribute(HAS_LINEAGE, true);
-
-                        // Ensure cached vertex in RequestContext also has updated DynamicVertex
-                        ensureCachedVertexHasLineage(oppositeEdgeAssetVertex, oppositeGuid);
-                        
-                        // Track this GUID for response header updates
-                        if (oppositeGuid != null) {
-                            updatedGuids.add(oppositeGuid);
-                        }
+                        setHasLineageOnVertex(oppositeEdgeAssetVertex, oppositeGuid, true, updatedGuids);
                     } else {
                         break;
                     }
@@ -6383,80 +6333,179 @@ public class EntityGraphMapper {
     }
 
     /**
-     * Ensures that if a vertex is cached in RequestContext, its DynamicVertex also has __hasLineage=true.
-     * Also ensures the cached AtlasEntity has __hasLineage=true in its attributes.
-     * This is needed because when vertices are cached before addHasLineage runs, they may have DynamicVertex
-     * instances loaded from Cassandra that don't reflect the in-memory updates.
+     * Sets __hasLineage property on a vertex and updates all caches.
+     * This is the single helper method for all lineage property updates in addHasLineage.
      * 
-     * @param vertex The vertex that was just updated with __hasLineage=true
+     * @param vertex The vertex to update
      * @param guid The GUID of the vertex
+     * @param hasLineage The value to set
+     * @param updatedGuids Set to add the GUID to for response header updates
      */
-    private void ensureCachedVertexHasLineage(AtlasVertex vertex, String guid) throws AtlasBaseException {
+    private void setHasLineageOnVertex(AtlasVertex vertex, String guid, boolean hasLineage, Set<String> updatedGuids) throws AtlasBaseException {
+        if (vertex == null) {
+            return;
+        }
+        
+        AtlasGraphUtilsV2.setEncodedProperty(vertex, HAS_LINEAGE, hasLineage);
+        
+        AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(vertex);
+        diffEntity.setAttribute(HAS_LINEAGE, hasLineage);
+        
+        ensureCachedVertexHasLineage(vertex, guid, hasLineage);
+        
+        if (guid != null) {
+            updatedGuids.add(guid);
+        }
+    }
+    
+    /**
+     * Ensures that if a vertex is cached in RequestContext, its DynamicVertex and AtlasEntity are updated
+     * with the specified __hasLineage value. This is needed because:
+     * 1. Cached vertices may have different DynamicVertex instances loaded from Cassandra
+     * 2. Cached AtlasEntity is used for API responses
+     * 
+     * @param vertex The vertex that was just updated with __hasLineage
+     * @param guid The GUID of the vertex
+     * @param hasLineage The value to set for __hasLineage
+     */
+    private void ensureCachedVertexHasLineage(AtlasVertex vertex, String guid, boolean hasLineage) throws AtlasBaseException {
         if (guid == null || vertex == null) {
             return;
         }
         
         try {
             RequestContext reqContext = RequestContext.get();
-            Object cachedVertex = reqContext.getDifferentialVertex(guid);
             
-            if (cachedVertex != null && cachedVertex instanceof AtlasJanusVertex) {
+            // Sync DynamicVertex if cached vertex is a different instance
+            Object cachedVertex = reqContext.getDifferentialVertex(guid);
+            if (cachedVertex instanceof AtlasJanusVertex) {
                 AtlasJanusVertex cachedJanusVertex = (AtlasJanusVertex) cachedVertex;
                 
-                // If the cached vertex is a different instance, update its DynamicVertex
                 if (cachedJanusVertex != vertex && cachedJanusVertex.getDynamicVertex() != null) {
                     DynamicVertex cachedDV = cachedJanusVertex.getDynamicVertex();
-                    Object hasLineageInCachedDV = cachedDV.getProperty(HAS_LINEAGE, Object.class);
-                    
-                    if (!Boolean.TRUE.equals(hasLineageInCachedDV)) {
-                        cachedDV.setProperty(HAS_LINEAGE, true);
+                    Object currentValue = cachedDV.getProperty(HAS_LINEAGE, Object.class);
+                    if (!Boolean.valueOf(hasLineage).equals(currentValue)) {
+                        cachedDV.setProperty(HAS_LINEAGE, hasLineage);
                     }
                 }
             }
             
-            // Also ensure the cached AtlasEntity has __hasLineage=true in its attributes
-            // This is important for API responses which read from the cached entity
-            // The entity is cached via reqContext.cache() which happens before addHasLineage runs
+            // Update cached AtlasEntity
             AtlasEntity cachedEntity = reqContext.getEntity(guid);
-            if (cachedEntity != null) {
-                Object hasLineageInEntity = cachedEntity.getAttribute(HAS_LINEAGE);
-                if (!Boolean.TRUE.equals(hasLineageInEntity)) {
-                    cachedEntity.setAttribute(HAS_LINEAGE, true);
-                }
+            if (cachedEntity != null && !Boolean.valueOf(hasLineage).equals(cachedEntity.getAttribute(HAS_LINEAGE))) {
+                cachedEntity.setAttribute(HAS_LINEAGE, hasLineage);
             }
         } catch (Exception e) {
             throw new AtlasBaseException(e);
         }
     }
+    
+    /**
+     * Updates cached DynamicVertex for GUIDs that had __hasLineage changed.
+     * This is called after resetHasLineageOnInputOutputDelete returns, since DynamicVertex 
+     * cannot be accessed from DeleteHandlerV1 package.
+     * 
+     * Note: This method is package-private so it can be called from AtlasEntityStoreV2 as well.
+     * 
+     * @param guids Set of GUIDs to update
+     * @param hasLineage The value to set for __hasLineage
+     */
+    void updateCachedDynamicVertexHasLineage(Set<String> guids, boolean hasLineage) {
+        if (CollectionUtils.isEmpty(guids)) {
+            return;
+        }
+        
+        RequestContext reqContext = RequestContext.get();
+        
+        for (String guid : guids) {
+            if (guid == null) {
+                continue;
+            }
+            
+            Object cachedVertex = reqContext.getDifferentialVertex(guid);
+            if (cachedVertex instanceof AtlasJanusVertex) {
+                AtlasJanusVertex cachedJanusVertex = (AtlasJanusVertex) cachedVertex;
+                
+                if (cachedJanusVertex.getDynamicVertex() != null) {
+                    DynamicVertex cachedDV = cachedJanusVertex.getDynamicVertex();
+                    Object currentValue = cachedDV.getProperty(HAS_LINEAGE, Object.class);
+                    if (!Boolean.valueOf(hasLineage).equals(currentValue)) {
+                        cachedDV.setProperty(HAS_LINEAGE, hasLineage);
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Handles resetting __hasLineage=false when lineage edges are removed.
+     * This method:
+     * 1. Calls resetHasLineageOnInputOutputDelete to update vertices and get affected GUIDs
+     * 2. Updates DynamicVertex cache for the affected GUIDs
+     * 3. Updates response headers for the affected GUIDs
+     * 
+     * @param removedEdges The edges that were removed
+     * @param resp The EntityMutationResponse to update
+     * @return Set of GUIDs that had __hasLineage set to false
+     */
+    private Set<String> handleLineageReset(Set<AtlasEdge> removedEdges, EntityMutationResponse resp) throws AtlasBaseException {
+        boolean distributedHasLineageCalculationEnabled = AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()
+                && AtlasConfiguration.ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean();
+        
+        if (distributedHasLineageCalculationEnabled || CollectionUtils.isEmpty(removedEdges)) {
+            return Collections.emptySet();
+        }
+        
+        Set<String> lineageResetGuids = deleteDelegate.getHandler().resetHasLineageOnInputOutputDelete(removedEdges, null);
+        
+        // Update DynamicVertex cache (DeleteHandlerV1 can't access DynamicVertex)
+        updateCachedDynamicVertexHasLineage(lineageResetGuids, false);
+        
+        // Update response headers
+        updateHasLineageInResponseHeaders(resp, lineageResetGuids, false);
+        
+        return lineageResetGuids;
+    }
 
     /**
-     * Updates response headers for all entities that had __hasLineage set to true.
+     * Updates response headers for all entities that had __hasLineage changed.
      * Searches across all operation types (CREATE, UPDATE, PARTIAL_UPDATE) to find and update headers.
      * 
      * @param resp The EntityMutationResponse to update
-     * @param guids Set of GUIDs to update __hasLineage=true for
+     * @param guids Set of GUIDs to update __hasLineage for
+     * @param hasLineage The value to set for __hasLineage (true or false)
      */
-    private void updateHasLineageInResponseHeaders(EntityMutationResponse resp, Set<String> guids) {
-        if (resp == null || CollectionUtils.isEmpty(guids)) {
+    private void updateHasLineageInResponseHeaders(EntityMutationResponse resp, Set<String> guids, boolean hasLineage) {
+        if (CollectionUtils.isEmpty(guids)) {
             return;
         }
         
-        Map<EntityOperation, List<AtlasEntityHeader>> mutatedEntities = resp.getMutatedEntities();
-        if (mutatedEntities == null) {
-            return;
-        }
-        
-        // Check all operation types since entities could be in any of them
-        for (EntityOperation operation : Arrays.asList(CREATE, UPDATE, PARTIAL_UPDATE)) {
-            List<AtlasEntityHeader> headers = mutatedEntities.get(operation);
-            if (headers != null) {
-                for (AtlasEntityHeader header : headers) {
-                    if (guids.contains(header.getGuid())) {
-                        Object currentValue = header.getAttribute(HAS_LINEAGE);
-                        if (!Boolean.TRUE.equals(currentValue)) {
-                            header.setAttribute(HAS_LINEAGE, true);
+        // Update headers already in the response
+        if (resp != null) {
+            Map<EntityOperation, List<AtlasEntityHeader>> mutatedEntities = resp.getMutatedEntities();
+            if (mutatedEntities != null) {
+                // Check all operation types since entities could be in any of them
+                for (EntityOperation operation : Arrays.asList(CREATE, UPDATE, PARTIAL_UPDATE)) {
+                    List<AtlasEntityHeader> headers = mutatedEntities.get(operation);
+                    if (headers != null) {
+                        for (AtlasEntityHeader header : headers) {
+                            if (guids.contains(header.getGuid())) {
+                                header.setAttribute(HAS_LINEAGE, hasLineage);
+                            }
                         }
                     }
+                }
+            }
+        }
+        
+        // Also update headers in RequestContext.getUpdatedEntities() which haven't been added to response yet
+        // This is important because entities like old Tables (when edges are removed) are recorded via
+        // recordEntityUpdate() but added to the response later in the flow
+        Collection<AtlasEntityHeader> pendingUpdatedEntities = RequestContext.get().getUpdatedEntities();
+        if (CollectionUtils.isNotEmpty(pendingUpdatedEntities)) {
+            for (AtlasEntityHeader header : pendingUpdatedEntities) {
+                if (guids.contains(header.getGuid())) {
+                    header.setAttribute(HAS_LINEAGE, hasLineage);
                 }
             }
         }

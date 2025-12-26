@@ -47,6 +47,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.patches.PatchContext;
@@ -2328,6 +2329,18 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         return ret;
     }
 
+    /**
+     * Adds updated entities to the response, setting __hasLineage=false for entities in lineageResetGuids.
+     */
+    private void addUpdatedEntitiesToResponse(EntityMutationResponse response, Collection<AtlasEntityHeader> updatedEntities, Set<String> lineageResetGuids) {
+        for (AtlasEntityHeader entity : updatedEntities) {
+            if (lineageResetGuids.contains(entity.getGuid())) {
+                entity.setAttribute(HAS_LINEAGE, false);
+            }
+            response.addEntity(UPDATE, entity);
+        }
+    }
+
     private EntityMutationResponse deleteVertices(Collection<AtlasVertex> deletionCandidates) throws AtlasBaseException {
         EntityMutationResponse response = new EntityMutationResponse();
         try {
@@ -2364,9 +2377,13 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 deleteDelegate.getHandler(DeleteType.HARD).deleteEntities(categories);
             }
 
+            Set<String> lineageResetGuids = Collections.emptySet();
             if (CollectionUtils.isNotEmpty(others)) {
-                deleteDelegate.getHandler().removeHasLineageOnDelete(others);
+                lineageResetGuids = deleteDelegate.getHandler().removeHasLineageOnDelete(others);
                 deleteDelegate.getHandler().deleteEntities(others);
+                
+                // Update DynamicVertex cache for entities that had __hasLineage reset
+                entityGraphMapper.updateCachedDynamicVertexHasLineage(lineageResetGuids, false);
             }
 
             for (AtlasEntityHeader entity : req.getDeletedEntities()) {
@@ -2383,9 +2400,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 response.addEntity(DELETE, entity);
             }
 
-            for (AtlasEntityHeader entity : req.getUpdatedEntities()) {
-                response.addEntity(UPDATE, entity);
-            }
+            addUpdatedEntitiesToResponse(response, req.getUpdatedEntities(), lineageResetGuids);
+            
         if (ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean() && ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
             Map<String, String> typeByVertexId = getRemovedInputOutputVertexTypeMap();
             if (typeByVertexId != null && !typeByVertexId.isEmpty()) {
@@ -2486,11 +2502,21 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         req.setDeleteType(DeleteType.HARD);
         req.setPurgeRequested(true);
+        
+        // Reset __hasLineage on connected entities before purging
+        Set<String> lineageResetGuids = deleteDelegate.getHandler().removeHasLineageOnDelete(purgeCandidates);
+        
         deleteDelegate.getHandler().deleteEntities(purgeCandidates); // this will update req with list of purged entities
+        
+        // Update DynamicVertex cache for entities that had __hasLineage reset
+        entityGraphMapper.updateCachedDynamicVertexHasLineage(lineageResetGuids, false);
 
         for (AtlasEntityHeader entity : req.getDeletedEntities()) {
             response.addEntity(PURGE, entity);
         }
+        
+        // Add updated entities (inputs/outputs that had __hasLineage reset) to response
+        addUpdatedEntitiesToResponse(response, req.getUpdatedEntities(), lineageResetGuids);
 
         return response;
     }

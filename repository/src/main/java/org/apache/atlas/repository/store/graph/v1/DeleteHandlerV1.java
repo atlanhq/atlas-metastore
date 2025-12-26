@@ -1642,20 +1642,42 @@ public abstract class DeleteHandlerV1 {
         return false;
     }
 
-    public void removeHasLineageOnDelete(Collection<AtlasVertex> vertices) throws AtlasBaseException {
+    /**
+     * Removes __hasLineage flag from vertices when they are being deleted (hard/purge).
+     * 
+     * @param vertices The vertices being deleted
+     * @return Set of GUIDs that had __hasLineage set to false
+     */
+    public Set<String> removeHasLineageOnDelete(Collection<AtlasVertex> vertices) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("removeHasLineageOnDelete");
+        Set<String> allLineageResetGuids = new HashSet<>();
 
         long lineageCalcStart = System.currentTimeMillis();
 
         if (RequestContext.get().skipHasLineageCalculation()) {
-            return;
+            return allLineageResetGuids;
         }
 
         boolean distributedHasLineageCalculationEnabled = AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()
                 && AtlasConfiguration.ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean();
 
+        boolean isPurgeRequested = RequestContext.get().isPurgeRequested();
+        
+        // Collect all GUIDs being deleted in this batch to avoid false positives
+        // when checking if an asset has other lineage connections
+        Set<String> verticesBeingDeleted = new HashSet<>();
+        for (AtlasVertex v : vertices) {
+            String guid = getGuid(v);
+            if (guid != null) {
+                verticesBeingDeleted.add(guid);
+            }
+        }
+        
         for (AtlasVertex vertexToBeDeleted : vertices) {
-            if (ACTIVE.equals(getStatus(vertexToBeDeleted))) {
+            // Process ACTIVE entities always (hard delete or direct purge)
+            // For purge after soft-delete, also process DELETED entities to reset __hasLineage on connected ACTIVE entities
+            AtlasEntity.Status vertexStatus = getStatus(vertexToBeDeleted);
+            if (ACTIVE.equals(vertexStatus) || (isPurgeRequested && DELETED.equals(vertexStatus))) {
                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(getTypeName(vertexToBeDeleted));
                 boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
                 boolean isCatalog = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
@@ -1668,13 +1690,16 @@ public abstract class DeleteHandlerV1 {
 
                     while (edgeIterator.hasNext()) {
                         AtlasEdge edge = edgeIterator.next();
-                        if (ACTIVE.equals(getStatus(edge))) {
+                        // Process ACTIVE edges always; for purge after soft-delete, also consider DELETED edges
+                        AtlasEntity.Status edgeStatus = getStatus(edge);
+                        if (ACTIVE.equals(edgeStatus) || (isPurgeRequested && DELETED.equals(edgeStatus))) {
                             edgesToBeDeleted.add(edge);
                         }
                     }
 
                     if (!distributedHasLineageCalculationEnabled){
-                        resetHasLineageOnInputOutputDelete(edgesToBeDeleted, vertexToBeDeleted);
+                        Set<String> resetGuids = resetHasLineageOnInputOutputDelete(edgesToBeDeleted, vertexToBeDeleted, verticesBeingDeleted);
+                        allLineageResetGuids.addAll(resetGuids);
                     } else {
                         // Populate RemovedElementsMap for async hasLineage calculation
                         if (!edgesToBeDeleted.isEmpty()) {
@@ -1697,10 +1722,22 @@ public abstract class DeleteHandlerV1 {
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
         RequestContext.get().endMetricRecord(metricRecorder);
+        
+        return allLineageResetGuids;
     }
 
-    public void resetHasLineageOnInputOutputDelete(Collection<AtlasEdge> removedEdges, AtlasVertex deletedVertex) throws AtlasBaseException {
+    /**
+     * Resets __hasLineage to false on vertices when lineage edges are deleted.
+     * 
+     * @param removedEdges The edges being removed
+     * @param deletedVertex The vertex being deleted (can be null)
+     * @param verticesBeingDeleted Set of GUIDs of all vertices being deleted in this batch (used to avoid 
+     *                             false positives when checking if an asset has other lineage connections)
+     * @return Set of GUIDs that had __hasLineage set to false
+     */
+    public Set<String> resetHasLineageOnInputOutputDelete(Collection<AtlasEdge> removedEdges, AtlasVertex deletedVertex, Set<String> verticesBeingDeleted) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("resetHasLineageOnInputOutputDelete");
+        Set<String> lineageResetGuids = new HashSet<>();
 
         // Timing: Lineage calculation
         long lineageCalcStart = System.currentTimeMillis();
@@ -1717,7 +1754,10 @@ public abstract class DeleteHandlerV1 {
             if (!assetLabelPairAlreadyProcessed) {
                 RequestContext.get().addEdgeLabel(assetEdgeLabel);
                 if (getStatus(assetVertex) == ACTIVE && !assetVertex.equals(deletedVertex)) {
-                    updateAssetHasLineageStatus(assetVertex, atlasEdge, removedEdges);
+                    String resetGuid = updateAssetHasLineageStatus(assetVertex, atlasEdge, removedEdges, verticesBeingDeleted);
+                    if (resetGuid != null) {
+                        lineageResetGuids.add(resetGuid);
+                    }
                 }
             }
 
@@ -1733,7 +1773,7 @@ public abstract class DeleteHandlerV1 {
 
             RequestContext.get().addEdgeLabel(processEdgeLabel);
 
-                if (getStatus(processVertex) == ACTIVE && !processVertex.equals(deletedVertex)) {
+            if (getStatus(processVertex) == ACTIVE && !processVertex.equals(deletedVertex)) {
                 Iterator<AtlasEdge> edgeIterator = GraphHelper.getActiveEdges(processVertex, edgeLabel, AtlasEdgeDirection.BOTH);
 
                 boolean activeEdgeFound = false;
@@ -1751,11 +1791,10 @@ public abstract class DeleteHandlerV1 {
                 }
 
                 if (!activeEdgeFound) {
-                    AtlasGraphUtilsV2.setEncodedProperty(processVertex, HAS_LINEAGE, false);
-                    AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(processVertex);
-                    diffEntity.setAttribute(HAS_LINEAGE, false);
-                    // Add removed relationship attribute for notification
-                    addRemovedProcessRelationshipToDiffEntity(diffEntity, atlasEdge, removedEdges);
+                    String resetGuid = resetHasLineageOnVertex(processVertex, atlasEdge, removedEdges);
+                    if (resetGuid != null) {
+                        lineageResetGuids.add(resetGuid);
+                    }
 
                     String oppositeEdgeLabel = isOutputEdge ? PROCESS_INPUTS : PROCESS_OUTPUTS;
 
@@ -1774,7 +1813,10 @@ public abstract class DeleteHandlerV1 {
 
                         if (!removedEdges.contains(edge)) {
                             AtlasVertex relatedAssetVertex = edge.getInVertex();
-                            updateAssetHasLineageStatus(relatedAssetVertex, edge, removedEdges);
+                            String assetResetGuid = updateAssetHasLineageStatus(relatedAssetVertex, edge, removedEdges, verticesBeingDeleted);
+                            if (assetResetGuid != null) {
+                                lineageResetGuids.add(assetResetGuid);
+                            }
                         }
                     }
                 }
@@ -1784,6 +1826,73 @@ public abstract class DeleteHandlerV1 {
         long lineageCalcTime = System.currentTimeMillis() - lineageCalcStart;
         RequestContext.get().addLineageCalcTime(lineageCalcTime);
         RequestContext.get().endMetricRecord(metricRecorder);
+        
+        return lineageResetGuids;
+    }
+    
+    /**
+     * Overloaded method for backward compatibility - creates empty set for verticesBeingDeleted.
+     */
+    public Set<String> resetHasLineageOnInputOutputDelete(Collection<AtlasEdge> removedEdges, AtlasVertex deletedVertex) throws AtlasBaseException {
+        return resetHasLineageOnInputOutputDelete(removedEdges, deletedVertex, Collections.emptySet());
+    }
+    
+    /**
+     * Updates the cached AtlasEntity in RequestContext with the new __hasLineage value.
+     * Note: DynamicVertex updates are handled by EntityGraphMapper.updateCachedDynamicVertexHasLineage()
+     * after this method returns, since DynamicVertex is not accessible from this v1 package.
+     * 
+     * @param guid The GUID of the entity
+     * @param hasLineage The value to set for __hasLineage
+     */
+    private void updateCachedEntityHasLineage(String guid, boolean hasLineage) {
+        if (guid == null) {
+            return;
+        }
+        
+        // Update cached AtlasEntity
+        AtlasEntity cachedEntity = RequestContext.get().getEntity(guid);
+        if (cachedEntity != null) {
+            cachedEntity.setAttribute(HAS_LINEAGE, hasLineage);
+        }
+    }
+    
+    /**
+     * Resets __hasLineage=false on a vertex and updates all caches.
+     * This consolidates the repeated pattern across resetHasLineageOnInputOutputDelete,
+     * updateAssetHasLineageStatusV1, and updateAssetHasLineageStatusV2.
+     * 
+     * @param vertex The vertex to update
+     * @param currentEdge The edge being removed (for notification purposes)
+     * @param removedEdges All edges being removed in this operation
+     * @return The GUID of the vertex, or null if vertex is null
+     */
+    private String resetHasLineageOnVertex(AtlasVertex vertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) throws AtlasBaseException {
+        if (vertex == null) {
+            return null;
+        }
+        
+        String guid = getGuid(vertex);
+        
+        AtlasGraphUtilsV2.setEncodedProperty(vertex, HAS_LINEAGE, false);
+        
+        AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(vertex);
+        diffEntity.setAttribute(HAS_LINEAGE, false);
+        
+        // Add removed relationship attribute for notification
+        addRemovedProcessRelationshipToDiffEntity(diffEntity, currentEdge, removedEdges);
+        
+        // Update cached entity
+        updateCachedEntityHasLineage(guid, false);
+        
+        // Record entity update so it appears in response
+        if (guid != null) {
+            AtlasEntityHeader header = entityRetriever.toAtlasEntityHeader(vertex);
+            header.setAttribute(HAS_LINEAGE, false);
+            RequestContext.get().recordEntityUpdate(header);
+        }
+        
+        return guid;
     }
 
     private boolean skipClassificationTaskCreationV2(String entityGuid, String tagTypeName) throws AtlasBaseException {
@@ -1866,16 +1975,24 @@ public abstract class DeleteHandlerV1 {
        return  guid + ":" + label;
     }
 
-    private void updateAssetHasLineageStatus(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
+    /**
+     * Updates __hasLineage status on an asset vertex.
+     * @param verticesBeingDeleted Set of GUIDs of vertices being deleted in this batch
+     * @return The GUID of the asset if __hasLineage was set to false, null otherwise
+     */
+    private String updateAssetHasLineageStatus(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges, Set<String> verticesBeingDeleted) throws AtlasBaseException {
         if (AtlasConfiguration.USE_OPTIMISED_LINEAGE_CALCULATION.getBoolean()) {
-            updateAssetHasLineageStatusV2(assetVertex, currentEdge, removedEdges);
-        }else {
-            updateAssetHasLineageStatusV1(assetVertex, currentEdge, removedEdges);
+            return updateAssetHasLineageStatusV2(assetVertex, currentEdge, removedEdges, verticesBeingDeleted);
+        } else {
+            return updateAssetHasLineageStatusV1(assetVertex, currentEdge, removedEdges, verticesBeingDeleted);
         }
-
     }
 
-    private void updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
+    /**
+     * @param verticesBeingDeleted Set of GUIDs of vertices being deleted in this batch
+     * @return The GUID of the asset if __hasLineage was set to false, null otherwise
+     */
+    private String updateAssetHasLineageStatusV1(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges, Set<String> verticesBeingDeleted) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV1");
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
 
@@ -1892,6 +2009,13 @@ public abstract class DeleteHandlerV1 {
             AtlasEdge edge = edgeIterator.next();
             if (!RequestContext.get().getDeletedEdgesIdsForResetHasLineage().contains(edge.getIdForDisplay()) && !currentEdge.equals(edge)) {
                 AtlasVertex relatedProcessVertex = edge.getOutVertex();
+                
+                // Skip processes that are being deleted in the same batch
+                String processGuid = getGuid(relatedProcessVertex);
+                if (processGuid != null && verticesBeingDeleted.contains(processGuid)) {
+                    continue;
+                }
+                
                 boolean processHasLineage = getEntityHasLineage(relatedProcessVertex);
                 if (processHasLineage) {
                     processHasLineageCount++;
@@ -1900,17 +2024,14 @@ public abstract class DeleteHandlerV1 {
             }
         }
 
+        String resetGuid = null;
         if (processHasLineageCount == 0) {
-            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
-            AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(assetVertex);
-            diffEntity.setAttribute(HAS_LINEAGE, false);
-            // Add removed relationship attribute for notification
-            addRemovedProcessRelationshipToDiffEntity(diffEntity, currentEdge, removedEdges);
+            resetGuid = resetHasLineageOnVertex(assetVertex, currentEdge, removedEdges);
         }
 
         RequestContext.get().endMetricRecord(metricRecorder);
+        return resetGuid;
     }
-
 
     /**
      * Helper method to add removed process relationship to diff entity's removedRelationshipAttributes
@@ -1928,7 +2049,6 @@ public abstract class DeleteHandlerV1 {
                 LOG.warn("Cannot add removed process relationship: currentEdge is null");
                 return;
             }
-
 
             String edgeIdForDisplay = removedEdge.getIdForDisplay();
             boolean isEdgeInDeletedList = false;
@@ -2007,30 +2127,32 @@ public abstract class DeleteHandlerV1 {
         }
     }
 
-    private void updateAssetHasLineageStatusV2(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges) {
+    /**
+     * @param verticesBeingDeleted Set of GUIDs of vertices being deleted in this batch
+     * @return The GUID of the asset if __hasLineage was set to false, null otherwise
+     */
+    private String updateAssetHasLineageStatusV2(AtlasVertex assetVertex, AtlasEdge currentEdge, Collection<AtlasEdge> removedEdges, Set<String> verticesBeingDeleted) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateAssetHasLineageStatusV2");
 
         // Add removed edges to the context
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
 
         // Check for active lineage in outgoing edges first
-        boolean hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, Direction.OUT);
+        boolean hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, Direction.OUT, verticesBeingDeleted);
 
         // If no active lineage in outgoing edges, check incoming edges
         if (!hasActiveLineage) {
-            hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, Direction.IN);
+            hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, Direction.IN, verticesBeingDeleted);
         }
 
+        String resetGuid = null;
         // Only update if no active lineage found
         if (!hasActiveLineage) {
-            AtlasGraphUtilsV2.setEncodedProperty(assetVertex, HAS_LINEAGE, false);
-            AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(assetVertex);
-            diffEntity.setAttribute(HAS_LINEAGE, false);
-            // Add removed relationship attribute for notification
-            addRemovedProcessRelationshipToDiffEntity(diffEntity, currentEdge, removedEdges);
+            resetGuid = resetHasLineageOnVertex(assetVertex, currentEdge, removedEdges);
         }
 
         RequestContext.get().endMetricRecord(metricRecorder);
+        return resetGuid;
     }
 
     /**
@@ -2038,9 +2160,10 @@ public abstract class DeleteHandlerV1 {
      * @param assetVertex The vertex to check
      * @param currentEdge The current edge to exclude
      * @param direction The edge direction to explore
+     * @param verticesBeingDeleted Set of GUIDs of vertices being deleted in this batch
      * @return True if active lineage exists in the specified direction
      */
-    private boolean hasActiveLineageDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Direction direction) {
+    private boolean hasActiveLineageDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Direction direction, Set<String> verticesBeingDeleted) {
         GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
         GraphTraversal<Vertex, Edge> traversal;
 
@@ -2056,10 +2179,12 @@ public abstract class DeleteHandlerV1 {
         }
 
         // Complete the traversal with common operations
+        // Also project the process GUID to check against verticesBeingDeleted
         return traversal
-                .project("id", HAS_LINEAGE)
+                .project("id", HAS_LINEAGE, "processGuid")
                 .by(id())
                 .by(outV().values(HAS_LINEAGE))
+                .by(outV().values(GUID_PROPERTY_KEY))
                 .toStream()
                 .anyMatch(edge -> {
                     Object edgeId = edge.get("id");
@@ -2068,6 +2193,12 @@ public abstract class DeleteHandlerV1 {
                     // Skip if in deleted list or matches current edge
                     if (RequestContext.get().getDeletedEdgesIdsForResetHasLineage().contains(edgeIdStr) ||
                             currentEdge.getIdForDisplay().equals(edgeIdStr)) {
+                        return false;
+                    }
+
+                    // Skip if the connected process is being deleted in this batch
+                    Object processGuid = edge.get("processGuid");
+                    if (processGuid != null && verticesBeingDeleted.contains(processGuid.toString())) {
                         return false;
                     }
 
