@@ -355,10 +355,6 @@ public class EntityGraphMapper {
         EntityMutationResponse resp = new EntityMutationResponse();
         RequestContext reqContext = RequestContext.get();
 
-        boolean distributedHasLineageCalculationEnabled = AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()
-                && AtlasConfiguration.ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean();
-
-
         if (CollectionUtils.isNotEmpty(context.getEntitiesToRestore())) {
             restoreHandlerV1.restoreEntities(context.getEntitiesToRestore());
             for (AtlasEntityHeader restoredEntity : reqContext.getRestoredEntities()) {
