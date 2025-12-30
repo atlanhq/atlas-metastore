@@ -372,7 +372,7 @@ reaper:
   env:
     REAPER_AUTH_ENABLED: "false"
     REAPER_STORAGE_TYPE: "cassandra"
-    REAPER_CASS_CONTACT_POINTS: "[atlas-cassandra.atlas.svc.cluster.local]"
+    REAPER_CASS_CONTACT_POINTS: "[atlas-cassandra-online-dc.atlas.svc.cluster.local]"
     REAPER_CASS_CLUSTER_NAME: "cassandra"
     REAPER_CASS_KEYSPACE: "reaper_db"
     REAPER_ENABLE_DYNAMIC_SEED_LIST: "true"
