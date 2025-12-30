@@ -219,7 +219,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationPropagationAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         try {
             setRequestContext(requestContext);
@@ -237,7 +237,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationPropagationAddedToEntitiesV2(Set<AtlasVertex> vertices, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
         List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
@@ -248,7 +248,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationsAddedToEntitiesV2(Set<AtlasVertex> vertices, List<AtlasClassification> addedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
         List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
@@ -322,7 +322,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationUpdatedToEntitiesV2(List<AtlasEntity> entities, AtlasClassification updatedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         try {
             setRequestContext(requestContext);
@@ -340,7 +340,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationUpdatedToEntitiesV2(Set<AtlasVertex> vertices, AtlasClassification updatedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
         List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
@@ -429,7 +429,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationPropagationDeleted(List<AtlasEntity> entities, List<AtlasClassification> deletedClassifications, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         setRequestContext(requestContext);
         for (AtlasEntity entity : entities) {
@@ -438,7 +438,7 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
     }
 
     @Override
-    @Async
+    //@Async
     public void onClassificationPropagationDeletedV2(Set<AtlasVertex> vertices, AtlasClassification deletedClassification, boolean forceInline, RequestContext requestContext) throws AtlasBaseException {
         Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(vertices);
         List<AtlasEntity> entities = instanceConverter.getEnrichedEntitiesWithPrimitiveAttributes(vertices, primitiveAttributes);
