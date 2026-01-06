@@ -59,6 +59,7 @@ import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataProductPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
@@ -785,8 +786,6 @@ public class EntityGraphMapper {
             LOG.debug("==> setBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
 
-        validateProductStatus(entityVertex);
-
         validateBusinessAttributes(entityVertex, entityType, businessAttributes, true);
 
         Map<String, Map<String, AtlasBusinessAttribute>> entityTypeBusinessAttributes = entityType.getBusinessAttributes();
@@ -849,6 +848,8 @@ public class EntityGraphMapper {
             }
         }
 
+        DataProductPreProcessor.validateBusinessMetadataUpdateOnArchivedProduct(entityVertex, updatedBusinessAttributes);
+
         if (MapUtils.isNotEmpty(updatedBusinessAttributes)) {
             updateModificationMetadata(entityVertex);
             entityChangeNotifier.onBusinessAttributesUpdated(AtlasGraphUtilsV2.getIdFromVertex(entityVertex), updatedBusinessAttributes);
@@ -866,8 +867,6 @@ public class EntityGraphMapper {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> addOrUpdateBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
-
-        validateProductStatus(entityVertex);
 
         validateBusinessAttributes(entityVertex, entityType, businessAttributes, true);
 
@@ -936,6 +935,8 @@ public class EntityGraphMapper {
             }
         }
 
+        DataProductPreProcessor.validateBusinessMetadataUpdateOnArchivedProduct(entityVertex, updatedBusinessAttributes);
+
         if (MapUtils.isNotEmpty(updatedBusinessAttributes)) {
             updateModificationMetadata(entityVertex);
             entityChangeNotifier.onBusinessAttributesUpdated(AtlasGraphUtilsV2.getIdFromVertex(entityVertex), updatedBusinessAttributes);
@@ -953,8 +954,6 @@ public class EntityGraphMapper {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> removeBusinessAttributes(entityVertex={}, entityType={}, businessAttributes={}", entityVertex, entityType.getTypeName(), businessAttributes);
         }
-
-        validateProductStatus(entityVertex);
 
         AtlasEntityHeader               entityHeader   = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
         AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder requestBuilder = new AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder(typeRegistry, AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, entityHeader);
@@ -992,6 +991,8 @@ public class EntityGraphMapper {
                 }
             }
         }
+
+        DataProductPreProcessor.validateBusinessMetadataUpdateOnArchivedProduct(entityVertex, updatedBusinessAttributes);
 
         if (MapUtils.isNotEmpty(updatedBusinessAttributes)) {
             updateModificationMetadata(entityVertex);
