@@ -24,7 +24,7 @@ on:
     branches:
       - beta
       - master
-      - staging
+      - leangraphdep
 
 jobs:
   # Detect what changed to optimize workflow execution
