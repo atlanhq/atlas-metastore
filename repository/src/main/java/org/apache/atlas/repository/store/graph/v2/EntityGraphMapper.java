@@ -2097,7 +2097,7 @@ public class EntityGraphMapper {
         if (isReference && !isSoftReference) {
             currentElements = (List) getCollectionElementsUsingRelationship(ctx.getReferringVertex(), attribute, isStructType);
         } else {
-            currentElements = (List) getArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty());
+            currentElements = (List) getArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), cardinality);
         }
 
         if (PARTIAL_UPDATE.equals(ctx.getOp()) && attribute.getAttributeDef().isAppendOnPartialUpdate() && CollectionUtils.isNotEmpty(currentElements)) {
@@ -3595,13 +3595,20 @@ public class EntityGraphMapper {
         return ret;
     }
 
-    public static List<Object> getArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName) {
+    public static List<Object> getArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName, Cardinality cardinality) {
         boolean isArrayOfPrimitiveType = elementType.getTypeCategory().equals(TypeCategory.PRIMITIVE);
         boolean isArrayOfEnum = elementType.getTypeCategory().equals(TypeCategory.ENUM);
         if (!isSoftReference && isReference(elementType)) {
             return (List)vertex.getListProperty(vertexPropertyName, AtlasEdge.class);
         } else if (isArrayOfPrimitiveType || isArrayOfEnum) {
-            return (List) vertex.getMultiValuedProperty(vertexPropertyName, elementType.getClass());
+            // Check cardinality to determine whether to use getMultiValuedProperty or getMultiValuedSetProperty
+            boolean isSetCardinality = cardinality == SET;
+            if (isSetCardinality) {
+                // For SET cardinality, convert Set to List to maintain the return type
+                return new ArrayList<>(vertex.getMultiValuedSetProperty(vertexPropertyName, elementType.getClass()));
+            } else {
+                return (List) vertex.getMultiValuedProperty(vertexPropertyName, elementType.getClass());
+            }
         } else {
             return (List)vertex.getListProperty(vertexPropertyName);
         }
