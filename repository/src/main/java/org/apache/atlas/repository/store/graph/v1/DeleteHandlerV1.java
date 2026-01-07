@@ -453,6 +453,20 @@ public abstract class DeleteHandlerV1 {
                     //If deleting just the edge, reverse attribute should be updated for any references
                     //For example, for the department type system, if the person's manager edge is deleted, subordinates of manager should be updated
                     deleteEdge(edge, true, isInternalType || isCustomRelationship(edge) || isHardDeleteProductRelationship(edge));
+
+                    // NEW CODE: Record update for the referenced vertex to send notifications
+                    AtlasVertex referencedVertex = entityRetriever.getReferencedEntityVertex(edge, relationshipDirection, entityVertex);
+
+                    if (referencedVertex != null) {
+                        RequestContext requestContext = RequestContext.get();
+
+                        if (!requestContext.isUpdatedEntity(GraphHelper.getGuid(referencedVertex))) {
+                            AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, requestContext.getRequestTime());
+                            AtlasGraphUtilsV2.setEncodedProperty(referencedVertex, MODIFIED_BY_KEY, requestContext.getUser());
+
+                            requestContext.recordEntityUpdate(entityRetriever.toAtlasEntityHeader(referencedVertex));
+                        }
+                    }
                 }
             }
 
