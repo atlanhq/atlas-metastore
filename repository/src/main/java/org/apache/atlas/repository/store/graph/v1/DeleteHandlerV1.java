@@ -862,89 +862,94 @@ public abstract class DeleteHandlerV1 {
      * @throws AtlasException
      */
     protected void deleteTypeVertex(AtlasVertex instanceVertex, boolean force) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("Deleting {}, force={}", string(instanceVertex), force);
-        }
+        long start = System.currentTimeMillis();
+        try {
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Deleting {}, force={}", string(instanceVertex), force);
+            }
 
-        String    typeName   = GraphHelper.getTypeName(instanceVertex);
+            String    typeName   = GraphHelper.getTypeName(instanceVertex);
 
-        if (StringUtils.isNotEmpty(typeName)) {
-            AtlasType parentType = typeRegistry.getType(typeName);
+            if (StringUtils.isNotEmpty(typeName)) {
+                AtlasType parentType = typeRegistry.getType(typeName);
 
-            if (parentType instanceof AtlasStructType) {
-                AtlasStructType structType   = (AtlasStructType) parentType;
-                boolean         isEntityType = (parentType instanceof AtlasEntityType);
+                if (parentType instanceof AtlasStructType) {
+                    AtlasStructType structType   = (AtlasStructType) parentType;
+                    boolean         isEntityType = (parentType instanceof AtlasEntityType);
 
-                for (AtlasStructType.AtlasAttribute attributeInfo : structType.getAllAttributes().values()) {
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug("Deleting attribute {} for {}", attributeInfo.getName(), string(instanceVertex));
-                    }
+                    for (AtlasStructType.AtlasAttribute attributeInfo : structType.getAllAttributes().values()) {
+                        if (LOG.isDebugEnabled()) {
+                            LOG.debug("Deleting attribute {} for {}", attributeInfo.getName(), string(instanceVertex));
+                        }
 
-                    boolean   isOwned   = isEntityType && attributeInfo.isOwnedRef();
-                    AtlasType attrType  = attributeInfo.getAttributeType();
-                    String    edgeLabel = attributeInfo.getRelationshipEdgeLabel();
+                        boolean   isOwned   = isEntityType && attributeInfo.isOwnedRef();
+                        AtlasType attrType  = attributeInfo.getAttributeType();
+                        String    edgeLabel = attributeInfo.getRelationshipEdgeLabel();
 
-                    switch (attrType.getTypeCategory()) {
-                        case OBJECT_ID_TYPE:
-                            //If its class attribute, delete the reference
-                            deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), isOwned);
-                            break;
+                        switch (attrType.getTypeCategory()) {
+                            case OBJECT_ID_TYPE:
+                                //If its class attribute, delete the reference
+                                deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), isOwned);
+                                break;
 
-                        case STRUCT:
-                            //If its struct attribute, delete the reference
-                            deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), false);
-                            break;
+                            case STRUCT:
+                                //If its struct attribute, delete the reference
+                                deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), false);
+                                break;
 
-                        case ARRAY:
-                            //For array attribute, if the element is struct/class, delete all the references
-                            AtlasArrayType arrType  = (AtlasArrayType) attrType;
-                            AtlasType      elemType = arrType.getElementType();
+                            case ARRAY:
+                                //For array attribute, if the element is struct/class, delete all the references
+                                AtlasArrayType arrType  = (AtlasArrayType) attrType;
+                                AtlasType      elemType = arrType.getElementType();
 
-                            if (isReference(elemType.getTypeCategory())) {
-                                List<AtlasEdge> edges = getActiveCollectionElementsUsingRelationship(instanceVertex, attributeInfo);
+                                if (isReference(elemType.getTypeCategory())) {
+                                    List<AtlasEdge> edges = getActiveCollectionElementsUsingRelationship(instanceVertex, attributeInfo);
 
-                                if (CollectionUtils.isNotEmpty(edges)) {
-                                    for (AtlasEdge edge : edges) {
-                                        deleteEdgeReference(edge, elemType.getTypeCategory(), isOwned, false, instanceVertex);
+                                    if (CollectionUtils.isNotEmpty(edges)) {
+                                        for (AtlasEdge edge : edges) {
+                                            deleteEdgeReference(edge, elemType.getTypeCategory(), isOwned, false, instanceVertex);
+                                        }
                                     }
                                 }
-                            }
-                            break;
+                                break;
 
-                        case MAP:
-                            //For map attribute, if the value type is struct/class, delete all the references
-                            AtlasMapType mapType           = (AtlasMapType) attrType;
-                            TypeCategory valueTypeCategory = mapType.getValueType().getTypeCategory();
+                            case MAP:
+                                //For map attribute, if the value type is struct/class, delete all the references
+                                AtlasMapType mapType           = (AtlasMapType) attrType;
+                                TypeCategory valueTypeCategory = mapType.getValueType().getTypeCategory();
 
-                            if (isReference(valueTypeCategory)) {
-                                List<AtlasEdge> edges = getMapValuesUsingRelationship(instanceVertex, attributeInfo);
+                                if (isReference(valueTypeCategory)) {
+                                    List<AtlasEdge> edges = getMapValuesUsingRelationship(instanceVertex, attributeInfo);
 
-                                for (AtlasEdge edge : edges) {
-                                    deleteEdgeReference(edge, valueTypeCategory, isOwned, false, instanceVertex);
+                                    for (AtlasEdge edge : edges) {
+                                        deleteEdgeReference(edge, valueTypeCategory, isOwned, false, instanceVertex);
+                                    }
                                 }
-                            }
-                            break;
+                                break;
 
-                        case PRIMITIVE:
-                            // This is different from upstream atlas.
-                            // Here we are not deleting the unique property thus users can only restore after deleting an entity.
-                            if (attributeInfo.getVertexUniquePropertyName() != null && force) {
-                                instanceVertex.removeProperty(attributeInfo.getVertexUniquePropertyName());
-                            }
-                            break;
+                            case PRIMITIVE:
+                                // This is different from upstream atlas.
+                                // Here we are not deleting the unique property thus users can only restore after deleting an entity.
+                                if (attributeInfo.getVertexUniquePropertyName() != null && force) {
+                                    instanceVertex.removeProperty(attributeInfo.getVertexUniquePropertyName());
+                                }
+                                break;
+                        }
                     }
                 }
+            } else {
+                try {
+                    LOG.error("typeName not found for the vertex {}", instanceVertex.getIdForDisplay());
+                } catch (Exception e) {
+                    LOG.error("Error while writing error log");
+                    e.printStackTrace();
+                }
             }
-        } else {
-            try {
-                LOG.error("typeName not found for the vertex {}", instanceVertex.getIdForDisplay());
-            } catch (Exception e) {
-                LOG.error("Error while writing error log");
-                e.printStackTrace();
-            }
-        }
 
-        deleteVertex(instanceVertex, force);
+            deleteVertex(instanceVertex, force);
+        } finally {
+            RequestContext.get().incrementDeleteTypeVertexTime(System.currentTimeMillis() - start);
+        }
     }
 
     protected AtlasAttribute getAttributeForEdge(AtlasEdge edge) throws AtlasBaseException {
