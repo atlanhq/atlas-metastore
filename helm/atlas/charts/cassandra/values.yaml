@@ -82,8 +82,13 @@ service:
 #     # agent: 61621
 
 # Config for cassandra
+
 max_heap_size: 2048M
 heap_new_size: 512M
+
+# Development tenant heap configuration (smaller for 4Gi memory limit)
+max_heap_size_development: 1536M
+heap_new_size_development: 384M
 config:
   cluster_domain: cluster.local
   cluster_name: cassandra
@@ -158,11 +163,12 @@ updateStrategy:
 resources:
   requests:
     memory: 4Gi
-    cpu: 3000m
+    cpu: 1300m
   limits:
     memory: 5Gi
-    cpu: 3000m
+    cpu: 1300m
 
+# Lite deployment resources
 resources_dev:
   requests:
     memory: 4Gi
@@ -170,6 +176,15 @@ resources_dev:
   limits:
     memory: 5Gi
     cpu: 2000m
+
+# Development tenant resources (when global.Deployment_Type=Development)
+resources_development:
+  requests:
+    memory: 4Gi
+    cpu: 300m
+  limits:
+    memory: 4Gi
+    cpu: 300m
 
 # Persistence changes for cassandra
 persistence:

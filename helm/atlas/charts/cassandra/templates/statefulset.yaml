@@ -189,11 +189,13 @@ spec:
 {{- $tierType := .Values.global.Tier_Type | default "" }}
 {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
         resources:
-        {{- if eq .Values.global.Deployment_Type "Lite" }}
+{{- if eq .Values.global.Deployment_Type "Lite" }}
 {{ toYaml .Values.resources_dev | indent 10 }}
-        {{- else }}
+{{- else if eq .Values.global.Deployment_Type "Development" }}
+{{ toYaml .Values.resources_development | indent 10 }}
+{{- else }}
 {{ toYaml .Values.resources | indent 10 }}
-        {{- end }}
+{{- end }}
 {{- end }}
         env:
         {{- $seed_size := 1 -}}
@@ -210,9 +212,17 @@ spec:
           value: "atlas-cassandra-0.atlas-cassandra.atlas.svc.cluster.local,atlas-cassandra-1.atlas-cassandra.atlas.svc.cluster.local,atlas-cassandra-2.atlas-cassandra.atlas.svc.cluster.local"
           {{- end }}
         - name: MAX_HEAP_SIZE
+{{- if eq .Values.global.Deployment_Type "Development" }}
+          value: {{ default "1536M" .Values.max_heap_size_development | quote }}
+{{- else }}
           value: {{ default "8192M" .Values.max_heap_size | quote }}
+{{- end }}
         - name: HEAP_NEWSIZE
+{{- if eq .Values.global.Deployment_Type "Development" }}
+          value: {{ default "384M" .Values.heap_new_size_development | quote }}
+{{- else }}
           value: {{ default "200M" .Values.heap_new_size | quote }}
+{{- end }}
         - name: CASSANDRA_ENDPOINT_SNITCH
           value: {{ default "SimpleSnitch" .Values.config.endpoint_snitch | quote }}
         - name: CASSANDRA_CLUSTER_NAME
