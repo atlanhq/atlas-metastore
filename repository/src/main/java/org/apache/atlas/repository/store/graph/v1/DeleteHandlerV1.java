@@ -37,6 +37,7 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.model.tasks.TaskSearchResult;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
+import org.apache.atlas.model.typedef.AtlasRelationshipEndDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -86,6 +87,7 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPro
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_PROPAGATION_DELETE;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_REFRESH_PROPAGATION;
 import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.*;
+import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.IN;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection.OUT;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
@@ -902,6 +904,7 @@ public abstract class DeleteHandlerV1 {
                         case OBJECT_ID_TYPE:
                             //If its class attribute, delete the reference
                             deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), isOwned);
+
                             break;
 
                         case STRUCT:
@@ -920,6 +923,7 @@ public abstract class DeleteHandlerV1 {
                                 if (CollectionUtils.isNotEmpty(edges)) {
                                     for (AtlasEdge edge : edges) {
                                         deleteEdgeReference(edge, elemType.getTypeCategory(), isOwned, false, instanceVertex);
+                                        recordRelationshipDelete(attributeInfo, edge);
                                     }
                                 }
                             }
@@ -959,6 +963,40 @@ public abstract class DeleteHandlerV1 {
         }
 
         deleteVertex(instanceVertex, force);
+    }
+
+    private void recordRelationshipDelete(AtlasStructType.AtlasAttribute attributeInfo, AtlasEdge edge) {
+        AtlasVertex otherVertex = null;
+
+        if (IN == attributeInfo.getRelationshipEdgeDirection()) {
+            otherVertex = edge.getOutVertex();
+        } else {
+            otherVertex = edge.getInVertex();
+        }
+        String otherGuid = getGuid(otherVertex);
+
+        AtlasEntity entity = RequestContext.get().getDifferentialEntity(otherGuid);
+        if (entity == null) {
+            entity = new AtlasEntity();
+            entity.setGuid(otherGuid);
+            entity.setTypeName(getTypeName(otherVertex));
+            entity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
+        }
+
+        AtlasObjectId objectId = new AtlasObjectId(otherGuid, entity.getTypeName());
+
+        AtlasRelationshipType type = typeRegistry.getRelationshipTypeByName(attributeInfo.getRelationshipName());
+        AtlasRelationshipEndDef inverseEnd = ((AtlasRelationshipDef) type.getStructDef()).getEndDef2();
+
+        if (attributeInfo.getName().equals(inverseEnd.getName())) {
+            inverseEnd = ((AtlasRelationshipDef) type.getStructDef()).getEndDef1();
+        }
+
+        if (AtlasAttributeDef.Cardinality.SINGLE == inverseEnd.getCardinality()) {
+            entity.setRemovedRelationshipAttribute(inverseEnd.getName(), objectId);
+        } else {
+            entity.addOrAppendRemovedRelationshipAttribute(inverseEnd.getName(), objectId);
+        }
     }
 
     protected AtlasAttribute getAttributeForEdge(AtlasEdge edge) throws AtlasBaseException {
