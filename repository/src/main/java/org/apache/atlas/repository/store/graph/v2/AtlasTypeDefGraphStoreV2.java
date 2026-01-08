@@ -37,6 +37,7 @@ import org.apache.atlas.repository.store.graph.AtlasTypeDefGraphStore;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -191,7 +192,7 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
         }
 
         if (StringUtils.isBlank(typeDef.getGuid())) {
-            typeDef.setGuid(UUID.randomUUID().toString());
+            typeDef.setGuid(DeterministicIdUtils.generateTypeDefGuid(typeDef.getName(), typeDef.getServiceType()));
         }
 
         if (typeDef.getCreateTime() == null) {

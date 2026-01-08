@@ -37,6 +37,7 @@ import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.slf4j.Logger;
@@ -47,6 +48,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasErrorCode.BAD_REQUEST;
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.PURPOSE_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
@@ -111,7 +113,8 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
 
         String tenantId = getTenantId(entity);
 
-        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, getUUID()));
+        String purposeName = (String) entity.getAttribute(NAME);
+        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, DeterministicIdUtils.generateAccessControlQN("purpose", purposeName, tenantId)));
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
 
         //create ES alias

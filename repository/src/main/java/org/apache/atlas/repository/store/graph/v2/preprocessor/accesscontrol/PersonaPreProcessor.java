@@ -40,6 +40,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.users.KeycloakStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.keycloak.representations.idm.RoleRepresentation;
@@ -52,6 +53,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_ACCESS_CONTROL_ENABLED;
@@ -147,7 +149,8 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
 
         String tenantId = getTenantId(entity);
 
-        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, getUUID()));
+        String personaName = (String) entity.getAttribute(NAME);
+        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, DeterministicIdUtils.generateAccessControlQN("persona", personaName, tenantId)));
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
 
         //create keycloak role

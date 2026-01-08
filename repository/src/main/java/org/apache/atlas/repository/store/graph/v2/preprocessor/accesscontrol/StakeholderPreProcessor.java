@@ -37,6 +37,7 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -162,7 +163,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         entity.setAttribute(ATTR_STAKEHOLDER_TITLE_GUID, stakeholderTitleGuid);
 
         String stakeholderQualifiedName = format("default/%s/%s",
-                getUUID(),
+                DeterministicIdUtils.generateAccessControlQN("stakeholder", name, domainQualifiedName),
                 domainQualifiedName);
 
         entity.setAttribute(QUALIFIED_NAME, stakeholderQualifiedName);

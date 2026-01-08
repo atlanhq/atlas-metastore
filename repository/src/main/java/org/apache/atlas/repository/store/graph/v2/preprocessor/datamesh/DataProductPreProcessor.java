@@ -22,6 +22,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils
 import org.apache.atlas.repository.util.AtlasEntityUtils;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.collections4.CollectionUtils;
@@ -110,7 +111,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
         entity.setAttribute(DAAP_LINEAGE_STATUS_ATTR, DAAP_LINEAGE_STATUS_PENDING);
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(productName, parentDomainQualifiedName));
 
         productExists(productName, parentDomainQualifiedName, null);
 
@@ -247,7 +248,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
             String updatedQualifiedName;
             if(StringUtils.isEmpty(sourceDomainQualifiedName)){
-                updatedQualifiedName = createQualifiedName(targetDomainQualifiedName);
+                updatedQualifiedName = createQualifiedName(productName, targetDomainQualifiedName);
             } else {
                 updatedQualifiedName = currentDataProductQualifiedName.replace(sourceDomainQualifiedName, targetDomainQualifiedName);
             }
@@ -303,11 +304,11 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         }
     }
 
-    private static String createQualifiedName(String parentDomainQualifiedName) throws AtlasBaseException {
+    private static String createQualifiedName(String productName, String parentDomainQualifiedName) throws AtlasBaseException {
         if (StringUtils.isEmpty(parentDomainQualifiedName)) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Parent Domain Qualified Name cannot be empty or null");
         }
-        return parentDomainQualifiedName + "/product/" + PreProcessorUtils.getUUID();
+        return parentDomainQualifiedName + "/product/" + DeterministicIdUtils.generateProductQN(productName, parentDomainQualifiedName);
 
     }
 

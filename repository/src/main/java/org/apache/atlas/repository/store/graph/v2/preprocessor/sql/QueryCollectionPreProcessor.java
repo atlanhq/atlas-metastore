@@ -40,6 +40,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.repository.store.users.KeycloakStore;
 import org.apache.atlas.transformer.PreProcessorPoliciesTransformer;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
@@ -64,6 +65,7 @@ import static org.apache.atlas.repository.Constants.ATTR_ADMIN_USERS;
 import static org.apache.atlas.repository.Constants.ATTR_VIEWER_GROUPS;
 import static org.apache.atlas.repository.Constants.ATTR_VIEWER_USERS;
 import static org.apache.atlas.repository.Constants.CREATED_BY_KEY;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.PREFIX_QUERY_QN;
@@ -124,7 +126,8 @@ public class QueryCollectionPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateCollection");
 
         try {
-            entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+            String collectionName = (String) entity.getAttribute(NAME);
+            entity.setAttribute(QUALIFIED_NAME, createQualifiedName(collectionName));
 
             AtlasEntity collection = (AtlasEntity) entity;
 
@@ -197,8 +200,9 @@ public class QueryCollectionPreProcessor implements PreProcessor {
         }
     }
 
-    private static String createQualifiedName() {
-        return String.format(qualifiedNameFormat, AtlasAuthorizationUtils.getCurrentUserName(), getUUID());
+    private static String createQualifiedName(String collectionName) {
+        String userName = AtlasAuthorizationUtils.getCurrentUserName();
+        return String.format(qualifiedNameFormat, userName, DeterministicIdUtils.generateQueryResourceQN("collection", collectionName, "", userName));
     }
 
     private RoleRepresentation createCollectionAdminRole(AtlasEntity collection) throws AtlasBaseException {
