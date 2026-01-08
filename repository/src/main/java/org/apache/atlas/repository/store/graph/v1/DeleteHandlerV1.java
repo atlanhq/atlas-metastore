@@ -815,10 +815,15 @@ public abstract class DeleteHandlerV1 {
     }
 
     public void deleteEdgeReference(AtlasVertex outVertex, String edgeLabel, TypeCategory typeCategory, boolean isOwned) throws AtlasBaseException {
-        AtlasEdge edge = graphHelper.getEdgeForLabel(outVertex, edgeLabel);
+        deleteEdgeReference(outVertex, edgeLabel, typeCategory, isOwned, OUT);
+    }
+
+    public void deleteEdgeReference(AtlasVertex vertex, String edgeLabel, TypeCategory typeCategory, boolean isOwned,
+                                    AtlasRelationshipEdgeDirection edgeDirection) throws AtlasBaseException {
+        AtlasEdge edge = graphHelper.getEdgeForLabel(vertex, edgeLabel, edgeDirection);
 
         if (edge != null) {
-            deleteEdgeReference(edge, typeCategory, isOwned, false, outVertex);
+            deleteEdgeReference(edge, typeCategory, isOwned, false, edgeDirection, vertex);
         }
     }
 
@@ -909,7 +914,7 @@ public abstract class DeleteHandlerV1 {
                     switch (attrType.getTypeCategory()) {
                         case OBJECT_ID_TYPE:
                             //If its class attribute, delete the reference
-                            deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), isOwned);
+                            deleteEdgeReference(instanceVertex, edgeLabel, attrType.getTypeCategory(), isOwned, attributeInfo.getRelationshipEdgeDirection());
 
                             break;
 
