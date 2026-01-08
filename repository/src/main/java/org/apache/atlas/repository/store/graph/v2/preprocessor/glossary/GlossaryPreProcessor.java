@@ -32,6 +32,7 @@ import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -98,7 +99,7 @@ public class GlossaryPreProcessor implements PreProcessor {
             isValidLexoRank(lexicographicalSortOrder, "", "", this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(glossaryName));
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
@@ -126,8 +127,8 @@ public class GlossaryPreProcessor implements PreProcessor {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
-    public static String createQualifiedName() {
-        return getUUID();
+    public static String createQualifiedName(String glossaryName) {
+        return DeterministicIdUtils.generateGlossaryQN(glossaryName);
     }
 
     private boolean glossaryExists(String glossaryName) {

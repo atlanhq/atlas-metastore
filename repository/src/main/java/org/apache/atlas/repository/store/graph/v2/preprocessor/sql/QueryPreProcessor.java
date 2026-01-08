@@ -29,14 +29,15 @@ import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.COLLECTION_QUALIFIED_NAME;
 import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.updateQueryResourceAttributes;
-import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.getUUID;
 
 public class QueryPreProcessor implements PreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(QueryPreProcessor.class);
@@ -78,14 +79,16 @@ public class QueryPreProcessor implements PreProcessor {
             throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, entity.getTypeName(), COLLECTION_QUALIFIED_NAME);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(collectionQualifiedName));
+        String queryName = (String) entity.getAttribute(NAME);
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(queryName, collectionQualifiedName));
     }
 
     private void processUpdateQueryCollection(AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context) throws AtlasBaseException {
         updateQueryResourceAttributes(typeRegistry, entityRetriever, entity, vertex, context);
     }
 
-    public static String createQualifiedName(String collectionQualifiedName) {
-        return String.format(qualifiedNameFormat, collectionQualifiedName, AtlasAuthorizationUtils.getCurrentUserName(), getUUID());
+    public static String createQualifiedName(String queryName, String collectionQualifiedName) {
+        String userName = AtlasAuthorizationUtils.getCurrentUserName();
+        return String.format(qualifiedNameFormat, collectionQualifiedName, userName, DeterministicIdUtils.generateQueryResourceQN("query", queryName, collectionQualifiedName, userName));
     }
 }
