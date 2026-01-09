@@ -55,7 +55,7 @@ public class TypeCacheRefresher {
     @Value("${atlas.refresh.retries:3}")
     private long refreshRetries;
 
-    @Value("${atlas.k8s.pod.labels:atlas,atlas-read,atlas-leangraph}")
+    @Value("${atlas.k8s.pod.labels:atlas,atlas-read}")
     private String podLabels;
 
     @Value("${atlas.k8s.namespace:atlas}")
