@@ -91,6 +91,7 @@ public class AuditFilter implements Filter {
         final Set<String>         userGroups         = AtlasAuthorizationUtils.getCurrentUserGroups();
         final String              deleteType         = httpRequest.getParameter("deleteType");
         final boolean             skipFailedEntities = Boolean.parseBoolean(httpRequest.getParameter("skipFailedEntities"));
+        final String              createShellEntityParam = httpRequest.getParameter("createShellEntityForNonExistingReference");
 
         try {
             currentThread.setName(formatName(oldName, internalRequestId));
@@ -101,7 +102,17 @@ public class AuditFilter implements Filter {
             requestContext.setTraceId(internalRequestId);
             requestContext.setUser(user, userGroups);
             requestContext.setClientIPAddress(AtlasAuthorizationUtils.getRequestIpAddress(httpRequest));
-            requestContext.setCreateShellEntityForNonExistingReference(createShellEntityForNonExistingReference);
+            
+            // Allow query parameter to override the default configuration
+            boolean shouldCreateShellEntity = createShellEntityForNonExistingReference;
+            if (StringUtils.isNotEmpty(createShellEntityParam)) {
+                shouldCreateShellEntity = Boolean.parseBoolean(createShellEntityParam);
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Overriding createShellEntityForNonExistingReference with query parameter value: {}", shouldCreateShellEntity);
+                }
+            }
+            requestContext.setCreateShellEntityForNonExistingReference(shouldCreateShellEntity);
+            
             requestContext.setForwardedAddresses(AtlasAuthorizationUtils.getForwardedAddressesFromRequest(httpRequest));
             requestContext.setSkipFailedEntities(skipFailedEntities);
             requestContext.setClientOrigin(httpRequest.getHeader(X_ATLAN_CLIENT_ORIGIN));

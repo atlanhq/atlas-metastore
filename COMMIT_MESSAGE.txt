@@ -1,0 +1,56 @@
+Fix Snowflake workflow failure by enabling shell entity creation for REST API
+
+Problem:
+- CMA CGM Snowflake workflow failing with 404 (ATLAS-404-00-00A) and 400 (ATLAS-400-00-01A) errors
+- Errors occurred when entities referenced non-existent parent entities (e.g., Column referencing missing Database)
+- REST API was throwing errors while notification consumer was creating shell entities
+- Inconsistent behavior between data ingestion paths
+
+Solution:
+1. Changed default of REST_API_CREATE_SHELL_ENTITY_FOR_NON_EXISTING_REF from false to true
+   - Aligns REST API behavior with notification consumer
+   - Makes workflows resilient to missing entity references
+   
+2. Added createShellEntityForNonExistingReference query parameter support
+   - Allows per-request override of shell entity creation behavior
+   - Enables backward compatibility and fine-grained control
+   - Similar pattern to existing skipFailedEntities parameter
+
+Technical Details:
+- Shell entities are incomplete placeholders with minimal information (type, unique attributes, guid)
+- Marked with isIncomplete=true flag
+- Allow child entities to maintain references while parent data is resolved
+- Already implemented and used by notification consumer
+
+Changes:
+- intg/src/main/java/org/apache/atlas/AtlasConfiguration.java (1 line)
+  * Changed REST_API_CREATE_SHELL_ENTITY_FOR_NON_EXISTING_REF default: false → true
+  
+- webapp/src/main/java/org/apache/atlas/web/filters/AuditFilter.java (13 lines)
+  * Added query parameter extraction for createShellEntityForNonExistingReference
+  * Added override logic with debug logging
+  * Set RequestContext with appropriate value
+  
+- webapp/src/test/java/org/apache/atlas/web/filters/AuditFilterTest.java (new, 168 lines)
+  * Comprehensive unit tests for query parameter handling
+  * Tests default behavior, enable/disable overrides, and combinations
+
+Impact:
+- Workflows will no longer fail on missing entity references
+- Shell entities automatically created for missing parents
+- Consistent behavior across REST API and notification consumer
+- Backward compatible (can opt-out via query param or config)
+- No breaking changes to API contracts
+
+Usage:
+- Default: POST /api/atlas/v2/entity/bulk
+- Enable: POST /api/atlas/v2/entity/bulk?createShellEntityForNonExistingReference=true
+- Disable: POST /api/atlas/v2/entity/bulk?createShellEntityForNonExistingReference=false
+- Config: atlas.rest.create.shell.entity.for.non-existing.ref=false (to revert globally)
+
+Testing:
+- Unit tests: mvn test -Dtest=AuditFilterTest
+- Manual verification with entities referencing non-existent parents
+- Monitor 404 error rates and workflow success rates
+
+Linear: WARE-16
