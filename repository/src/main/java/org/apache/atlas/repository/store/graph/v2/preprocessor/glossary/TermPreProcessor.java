@@ -237,7 +237,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
 
     private String createQualifiedName(String termName) {
         String anchorQN = (String) anchor.getAttribute(QUALIFIED_NAME);
-        return DeterministicIdUtils.generateTermQN(termName, anchorQN) + "@" + anchorQN;
+        return DeterministicIdUtils.getTermQN(termName, anchorQN) + "@" + anchorQN;
     }
 
     private void setAnchor(AtlasEntity entity, EntityMutationContext context) throws AtlasBaseException {

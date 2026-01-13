@@ -271,6 +271,6 @@ public class QueryFolderPreProcessor implements PreProcessor {
 
     public static String createQualifiedName(String folderName, String collectionQualifiedName) {
         String userName = AtlasAuthorizationUtils.getCurrentUserName();
-        return String.format(qualifiedNameFormat, collectionQualifiedName, userName, DeterministicIdUtils.generateQueryResourceQN("folder", folderName, collectionQualifiedName, userName));
+        return String.format(qualifiedNameFormat, collectionQualifiedName, userName, DeterministicIdUtils.getQueryResourceQN("folder", folderName, collectionQualifiedName, userName));
     }
 }

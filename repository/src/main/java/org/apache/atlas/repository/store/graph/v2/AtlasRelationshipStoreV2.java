@@ -507,7 +507,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
                 String        relationshipGuid = relationship.getGuid();
                 PropagateTags tagPropagation   = getRelationshipTagPropagation(end1Vertex, end2Vertex, relationship);
                 final String  guid             = AtlasTypeUtil.isAssignedGuid(relationshipGuid) ? relationshipGuid :
-                    DeterministicIdUtils.generateRelationshipGuid(relationship.getTypeName(), end1Entity.getGuid(), end2Entity.getGuid());
+                    DeterministicIdUtils.getRelationshipGuid(relationship.getTypeName(), end1Entity.getGuid(), end2Entity.getGuid());
 
                 AtlasGraphUtilsV2.setEncodedProperty(ret, ENTITY_TYPE_PROPERTY_KEY, relationship.getTypeName());
                 AtlasGraphUtilsV2.setEncodedProperty(ret, RELATIONSHIP_GUID_PROPERTY_KEY, guid);

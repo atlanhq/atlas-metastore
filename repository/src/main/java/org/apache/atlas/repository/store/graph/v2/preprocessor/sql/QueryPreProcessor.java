@@ -89,6 +89,6 @@ public class QueryPreProcessor implements PreProcessor {
 
     public static String createQualifiedName(String queryName, String collectionQualifiedName) {
         String userName = AtlasAuthorizationUtils.getCurrentUserName();
-        return String.format(qualifiedNameFormat, collectionQualifiedName, userName, DeterministicIdUtils.generateQueryResourceQN("query", queryName, collectionQualifiedName, userName));
+        return String.format(qualifiedNameFormat, collectionQualifiedName, userName, DeterministicIdUtils.getQueryResourceQN("query", queryName, collectionQualifiedName, userName));
     }
 }

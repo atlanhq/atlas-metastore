@@ -123,11 +123,11 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
                     domainQualifiedNames.replaceAll(s -> s.equals(STAR) ? NEW_STAR : s);
                 }
 
-                String qualifiedName = format(PATTERN_QUALIFIED_NAME_ALL_DOMAINS, DeterministicIdUtils.generateAccessControlQN("stakeholdertitle", name, "default"));
+                String qualifiedName = format(PATTERN_QUALIFIED_NAME_ALL_DOMAINS, DeterministicIdUtils.getAccessControlQN("stakeholdertitle", name, "default"));
                 entity.setAttribute(QUALIFIED_NAME, qualifiedName);
 
             } else {
-                entity.setAttribute(QUALIFIED_NAME, format(PATTERN_QUALIFIED_NAME_DOMAIN, DeterministicIdUtils.generateAccessControlQN("stakeholdertitle", name, domainQualifiedNames.get(0))));
+                entity.setAttribute(QUALIFIED_NAME, format(PATTERN_QUALIFIED_NAME_DOMAIN, DeterministicIdUtils.getAccessControlQN("stakeholdertitle", name, domainQualifiedNames.get(0))));
             }
 
             authorizeDomainAccess(domainQualifiedNames);

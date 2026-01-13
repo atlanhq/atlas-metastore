@@ -242,7 +242,7 @@ public class EntityGraphMapper {
 
     public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
         final String qualifiedName = (String) entity.getAttribute(Constants.QUALIFIED_NAME);
-        final String guid = DeterministicIdUtils.generateEntityGuid(entity.getTypeName(), qualifiedName);
+        final String guid = DeterministicIdUtils.getEntityGuid(entity.getTypeName(), qualifiedName);
         return createVertexWithGuid(entity, guid);
     }
 
@@ -251,7 +251,7 @@ public class EntityGraphMapper {
             LOG.debug("==> createShellEntityVertex({})", objectId.getTypeName());
         }
 
-        final String    guid       = DeterministicIdUtils.generateEntityGuid(objectId.getTypeName(), objectId.getUniqueAttributes());
+        final String    guid       = DeterministicIdUtils.getEntityGuid(objectId.getTypeName(), objectId.getUniqueAttributes());
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(objectId.getTypeName());
         AtlasVertex     ret        = createStructVertex(objectId);
 

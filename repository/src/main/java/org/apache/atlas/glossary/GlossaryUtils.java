@@ -185,6 +185,6 @@ public abstract class GlossaryUtils {
     }
 
     protected static String createQualifiedName(String glossaryName) {
-        return DeterministicIdUtils.generateGlossaryQN(glossaryName);
+        return DeterministicIdUtils.getGlossaryQN(glossaryName);
     }
 }

@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.util;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.commons.lang3.StringUtils;
 
 import java.nio.charset.StandardCharsets;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * Utility class for generating deterministic IDs based on entity attributes.
@@ -34,16 +36,36 @@ import java.util.Map;
  * This enables running multiple Atlas instances that can generate consistent
  * GUIDs and QualifiedNames for the same entities, allowing for failover
  * scenarios without ID mismatches.
+ *
+ * Deterministic ID generation can be enabled/disabled via configuration:
+ * atlas.deterministic.id.generation.enabled=true/false (default: false)
+ *
+ * Note: Access control entities (AuthPolicy, Persona, Purpose, Stakeholder) use
+ * 22-character NanoIds for backward compatibility with existing data.
  */
 public final class DeterministicIdUtils {
 
     private static final char[] HEX_CHARS = "0123456789abcdef".toCharArray();
     private static final char[] NANOID_ALPHABET =
         "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ".toCharArray();
-    private static final int NANOID_SIZE = 21;
+
+    /** Default NanoId size for most entities */
+    public static final int NANOID_SIZE_DEFAULT = 21;
+
+    /** NanoId size for access control entities (AuthPolicy, Persona, Purpose, Stakeholder) for backward compatibility */
+    public static final int NANOID_SIZE_ACCESS_CONTROL = 22;
 
     private DeterministicIdUtils() {
         // Utility class - prevent instantiation
+    }
+
+    /**
+     * Check if deterministic ID generation is enabled via configuration.
+     *
+     * @return true if deterministic IDs should be generated, false otherwise
+     */
+    public static boolean isDeterministicIdGenerationEnabled() {
+        return AtlasConfiguration.DETERMINISTIC_ID_GENERATION_ENABLED.getBoolean();
     }
 
     /**
@@ -65,6 +87,19 @@ public final class DeterministicIdUtils {
     }
 
     /**
+     * Generate a GUID, using deterministic generation if enabled, or random UUID if disabled.
+     *
+     * @param components Variable number of string components to hash (used only if deterministic generation is enabled)
+     * @return A UUID-formatted string (deterministic or random based on configuration)
+     */
+    public static String getGuid(String... components) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateGuid(components);
+        }
+        return UUID.randomUUID().toString();
+    }
+
+    /**
      * Generate a deterministic NanoId-like string from input components.
      * Length: 21 characters (matching NanoId default)
      *
@@ -72,14 +107,52 @@ public final class DeterministicIdUtils {
      * @return A deterministic 21-character alphanumeric string
      */
     public static String generateNanoId(String... components) {
-        byte[] hashBytes = sha256HashBytes(components);
-        StringBuilder result = new StringBuilder(NANOID_SIZE);
+        return generateNanoId(NANOID_SIZE_DEFAULT, components);
+    }
 
-        for (int i = 0; i < NANOID_SIZE; i++) {
+    /**
+     * Generate a deterministic NanoId-like string from input components with specified size.
+     *
+     * @param size The length of the NanoId to generate
+     * @param components Variable number of string components to hash
+     * @return A deterministic alphanumeric string of the specified length
+     */
+    public static String generateNanoId(int size, String... components) {
+        byte[] hashBytes = sha256HashBytes(components);
+        StringBuilder result = new StringBuilder(size);
+
+        for (int i = 0; i < size; i++) {
             int index = (hashBytes[i % hashBytes.length] & 0xFF) % NANOID_ALPHABET.length;
             result.append(NANOID_ALPHABET[index]);
         }
         return result.toString();
+    }
+
+    /**
+     * Generate a NanoId, using deterministic generation if enabled, or random NanoId if disabled.
+     *
+     * @param components Variable number of string components to hash (used only if deterministic generation is enabled)
+     * @return A 21-character alphanumeric string (deterministic or random based on configuration)
+     */
+    public static String getNanoId(String... components) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateNanoId(components);
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
+    /**
+     * Generate a NanoId with specified size, using deterministic generation if enabled, or random NanoId if disabled.
+     *
+     * @param size The length of the NanoId to generate
+     * @param components Variable number of string components to hash (used only if deterministic generation is enabled)
+     * @return An alphanumeric string of the specified length (deterministic or random based on configuration)
+     */
+    public static String getNanoId(int size, String... components) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateNanoId(size, components);
+        }
+        return NanoIdUtils.randomNanoId(size);
     }
 
     /**
@@ -149,6 +222,63 @@ public final class DeterministicIdUtils {
     }
 
     /**
+     * Get entity GUID, using deterministic generation if enabled, or random UUID if disabled.
+     *
+     * @param typeName The entity type name
+     * @param qualifiedName The entity's qualified name
+     * @return A UUID-formatted GUID (deterministic or random based on configuration)
+     */
+    public static String getEntityGuid(String typeName, String qualifiedName) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateEntityGuid(typeName, qualifiedName);
+        }
+        return UUID.randomUUID().toString();
+    }
+
+    /**
+     * Get entity GUID from unique attributes, using deterministic generation if enabled.
+     *
+     * @param typeName The entity type name
+     * @param uniqueAttributes Map of unique attribute names to values
+     * @return A UUID-formatted GUID (deterministic or random based on configuration)
+     */
+    public static String getEntityGuid(String typeName, Map<String, Object> uniqueAttributes) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateEntityGuid(typeName, uniqueAttributes);
+        }
+        return UUID.randomUUID().toString();
+    }
+
+    /**
+     * Get TypeDef GUID, using deterministic generation if enabled, or random UUID if disabled.
+     *
+     * @param typeName The type definition name
+     * @param serviceType The service type (optional)
+     * @return A UUID-formatted GUID (deterministic or random based on configuration)
+     */
+    public static String getTypeDefGuid(String typeName, String serviceType) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateTypeDefGuid(typeName, serviceType);
+        }
+        return UUID.randomUUID().toString();
+    }
+
+    /**
+     * Get relationship GUID, using deterministic generation if enabled, or random UUID if disabled.
+     *
+     * @param relationshipType The relationship type name
+     * @param end1Guid GUID of the first end entity
+     * @param end2Guid GUID of the second end entity
+     * @return A UUID-formatted GUID (deterministic or random based on configuration)
+     */
+    public static String getRelationshipGuid(String relationshipType, String end1Guid, String end2Guid) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateRelationshipGuid(relationshipType, end1Guid, end2Guid);
+        }
+        return UUID.randomUUID().toString();
+    }
+
+    /**
      * Generate Glossary QualifiedName from glossary name.
      *
      * @param glossaryName The glossary name
@@ -156,6 +286,19 @@ public final class DeterministicIdUtils {
      */
     public static String generateGlossaryQN(String glossaryName) {
         return generateNanoId("glossary", glossaryName);
+    }
+
+    /**
+     * Get Glossary QualifiedName, using deterministic generation if enabled.
+     *
+     * @param glossaryName The glossary name
+     * @return A 21-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getGlossaryQN(String glossaryName) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateGlossaryQN(glossaryName);
+        }
+        return NanoIdUtils.randomNanoId();
     }
 
     /**
@@ -167,6 +310,20 @@ public final class DeterministicIdUtils {
      */
     public static String generateTermQN(String termName, String anchorGlossaryQN) {
         return generateNanoId("term", termName, anchorGlossaryQN);
+    }
+
+    /**
+     * Get Term QualifiedName prefix, using deterministic generation if enabled.
+     *
+     * @param termName The term name
+     * @param anchorGlossaryQN The anchor glossary's qualified name
+     * @return A 21-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getTermQN(String termName, String anchorGlossaryQN) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateTermQN(termName, anchorGlossaryQN);
+        }
+        return NanoIdUtils.randomNanoId();
     }
 
     /**
@@ -183,6 +340,21 @@ public final class DeterministicIdUtils {
     }
 
     /**
+     * Get Category QualifiedName prefix, using deterministic generation if enabled.
+     *
+     * @param categoryName The category name
+     * @param parentCategoryQN The parent category's qualified name (can be null)
+     * @param anchorGlossaryQN The anchor glossary's qualified name
+     * @return A 21-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getCategoryQN(String categoryName, String parentCategoryQN, String anchorGlossaryQN) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateCategoryQN(categoryName, parentCategoryQN, anchorGlossaryQN);
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
+    /**
      * Generate DataDomain QualifiedName suffix from domain name and parent domain QN.
      *
      * @param domainName The domain name
@@ -191,6 +363,20 @@ public final class DeterministicIdUtils {
      */
     public static String generateDomainQN(String domainName, String parentDomainQN) {
         return generateNanoId("domain", domainName, StringUtils.defaultString(parentDomainQN));
+    }
+
+    /**
+     * Get DataDomain QualifiedName suffix, using deterministic generation if enabled.
+     *
+     * @param domainName The domain name
+     * @param parentDomainQN The parent domain's qualified name (can be empty for root)
+     * @return A 21-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getDomainQN(String domainName, String parentDomainQN) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateDomainQN(domainName, parentDomainQN);
+        }
+        return NanoIdUtils.randomNanoId();
     }
 
     /**
@@ -205,15 +391,46 @@ public final class DeterministicIdUtils {
     }
 
     /**
+     * Get DataProduct QualifiedName suffix, using deterministic generation if enabled.
+     *
+     * @param productName The product name
+     * @param parentDomainQN The parent domain's qualified name
+     * @return A 21-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getProductQN(String productName, String parentDomainQN) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateProductQN(productName, parentDomainQN);
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
+    /**
      * Generate Persona/Purpose/Stakeholder QualifiedName suffix from name and context.
+     * Uses 22-character NanoId for backward compatibility with existing access control entities.
      *
      * @param type The access control type (persona, purpose, stakeholder, stakeholdertitle)
      * @param name The entity name
      * @param contextQN The context qualified name (tenantId or domainQN)
-     * @return A deterministic 21-character NanoId
+     * @return A deterministic 22-character NanoId
      */
     public static String generateAccessControlQN(String type, String name, String contextQN) {
-        return generateNanoId(type, name, contextQN);
+        return generateNanoId(NANOID_SIZE_ACCESS_CONTROL, type, name, contextQN);
+    }
+
+    /**
+     * Get Persona/Purpose/Stakeholder QualifiedName suffix, using deterministic generation if enabled.
+     * Uses 22-character NanoId for backward compatibility with existing access control entities.
+     *
+     * @param type The access control type (persona, purpose, stakeholder, stakeholdertitle)
+     * @param name The entity name
+     * @param contextQN The context qualified name (tenantId or domainQN)
+     * @return A 22-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getAccessControlQN(String type, String name, String contextQN) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateAccessControlQN(type, name, contextQN);
+        }
+        return NanoIdUtils.randomNanoId(NANOID_SIZE_ACCESS_CONTROL);
     }
 
     /**
@@ -230,14 +447,46 @@ public final class DeterministicIdUtils {
     }
 
     /**
+     * Get Query/Folder/Collection QualifiedName suffix, using deterministic generation if enabled.
+     *
+     * @param type The resource type (collection, folder, query)
+     * @param name The resource name
+     * @param parentQN The parent qualified name (can be empty for collections)
+     * @param userName The user name
+     * @return A 21-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getQueryResourceQN(String type, String name, String parentQN, String userName) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateQueryResourceQN(type, name, parentQN, userName);
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
+    /**
      * Generate Policy QualifiedName suffix from policy name and parent entity QN.
+     * Uses 22-character NanoId for backward compatibility with existing policy entities.
      *
      * @param policyName The policy name
      * @param parentEntityQN The parent entity's qualified name
-     * @return A deterministic 21-character NanoId
+     * @return A deterministic 22-character NanoId
      */
     public static String generatePolicyQN(String policyName, String parentEntityQN) {
-        return generateNanoId("policy", policyName, parentEntityQN);
+        return generateNanoId(NANOID_SIZE_ACCESS_CONTROL, "policy", policyName, parentEntityQN);
+    }
+
+    /**
+     * Get Policy QualifiedName suffix, using deterministic generation if enabled.
+     * Uses 22-character NanoId for backward compatibility with existing policy entities.
+     *
+     * @param policyName The policy name
+     * @param parentEntityQN The parent entity's qualified name
+     * @return A 22-character NanoId (deterministic or random based on configuration)
+     */
+    public static String getPolicyQN(String policyName, String parentEntityQN) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generatePolicyQN(policyName, parentEntityQN);
+        }
+        return NanoIdUtils.randomNanoId(NANOID_SIZE_ACCESS_CONTROL);
     }
 
     private static String sha256Hash(String... components) {

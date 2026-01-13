@@ -308,7 +308,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         if (StringUtils.isEmpty(parentDomainQualifiedName)) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Parent Domain Qualified Name cannot be empty or null");
         }
-        return parentDomainQualifiedName + "/product/" + DeterministicIdUtils.generateProductQN(productName, parentDomainQualifiedName);
+        return parentDomainQualifiedName + "/product/" + DeterministicIdUtils.getProductQN(productName, parentDomainQualifiedName);
 
     }
 

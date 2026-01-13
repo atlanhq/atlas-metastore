@@ -163,7 +163,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         entity.setAttribute(ATTR_STAKEHOLDER_TITLE_GUID, stakeholderTitleGuid);
 
         String stakeholderQualifiedName = format("default/%s/%s",
-                DeterministicIdUtils.generateAccessControlQN("stakeholder", name, domainQualifiedName),
+                DeterministicIdUtils.getAccessControlQN("stakeholder", name, domainQualifiedName),
                 domainQualifiedName);
 
         entity.setAttribute(QUALIFIED_NAME, stakeholderQualifiedName);

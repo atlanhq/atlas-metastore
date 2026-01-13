@@ -180,7 +180,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         
         String parentEntityQN = getEntityQualifiedName(parentEntity);
         String policyName = (String) policy.getAttribute(NAME);
-        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.generatePolicyQN(policyName, parentEntityQN)));
+        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.getPolicyQN(policyName, parentEntityQN)));
         String roleName = getPersonaRoleName(parentEntity);
         policy.setAttribute(ATTR_POLICY_ROLES, Arrays.asList(roleName));
         policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
@@ -225,7 +225,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
         
         String parentEntityQN = getEntityQualifiedName(parentEntity);
         String policyName = (String) policy.getAttribute(NAME);
-        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.generatePolicyQN(policyName, parentEntityQN)));
+        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.getPolicyQN(policyName, parentEntityQN)));
         List<String> purposeTags = getPurposeTags(parentEntity);
         List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
         policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);

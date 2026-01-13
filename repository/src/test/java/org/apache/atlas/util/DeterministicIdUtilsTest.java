@@ -37,6 +37,7 @@ public class DeterministicIdUtilsTest {
     private static final Pattern UUID_PATTERN = Pattern.compile(
             "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
     private static final Pattern NANOID_PATTERN = Pattern.compile("^[0-9a-zA-Z]{21}$");
+    private static final Pattern NANOID_22_PATTERN = Pattern.compile("^[0-9a-zA-Z]{22}$");
 
     // ========== GUID Format Tests ==========
 
@@ -507,5 +508,118 @@ public class DeterministicIdUtilsTest {
         // Verify determinism
         String qn2 = DeterministicIdUtils.generateGlossaryQN("Enterprise Data Glossary");
         assertEquals(qn, qn2);
+    }
+
+    // ========== 22-Character NanoId Tests for Access Control Entities ==========
+
+    @Test
+    public void testAccessControlQN_22Characters() {
+        String personaQN = DeterministicIdUtils.generateAccessControlQN("persona", "Admin", "tenant1");
+        String purposeQN = DeterministicIdUtils.generateAccessControlQN("purpose", "Admin", "tenant1");
+        String stakeholderQN = DeterministicIdUtils.generateAccessControlQN("stakeholder", "Admin", "tenant1");
+
+        // Verify 22-character length for backward compatibility
+        assertEquals(personaQN.length(), 22, "Persona QN should be 22 characters");
+        assertEquals(purposeQN.length(), 22, "Purpose QN should be 22 characters");
+        assertEquals(stakeholderQN.length(), 22, "Stakeholder QN should be 22 characters");
+
+        // Verify format
+        assertTrue(NANOID_22_PATTERN.matcher(personaQN).matches(), "Persona QN should match 22-char pattern");
+        assertTrue(NANOID_22_PATTERN.matcher(purposeQN).matches(), "Purpose QN should match 22-char pattern");
+        assertTrue(NANOID_22_PATTERN.matcher(stakeholderQN).matches(), "Stakeholder QN should match 22-char pattern");
+    }
+
+    @Test
+    public void testPolicyQN_22Characters() {
+        String policyQN = DeterministicIdUtils.generatePolicyQN("ReadAccess", "persona/datasteward");
+
+        // Verify 22-character length for backward compatibility
+        assertEquals(policyQN.length(), 22, "Policy QN should be 22 characters");
+
+        // Verify format
+        assertTrue(NANOID_22_PATTERN.matcher(policyQN).matches(), "Policy QN should match 22-char pattern");
+    }
+
+    @Test
+    public void testGenerateNanoIdWithSize() {
+        String nanoId21 = DeterministicIdUtils.generateNanoId(21, "test", "input");
+        String nanoId22 = DeterministicIdUtils.generateNanoId(22, "test", "input");
+        String nanoId10 = DeterministicIdUtils.generateNanoId(10, "test", "input");
+
+        assertEquals(nanoId21.length(), 21, "Should generate 21-character NanoId");
+        assertEquals(nanoId22.length(), 22, "Should generate 22-character NanoId");
+        assertEquals(nanoId10.length(), 10, "Should generate 10-character NanoId");
+
+        // Different sizes from same input should produce different results (at least in length)
+        assertNotEquals(nanoId21, nanoId22, "Different sizes should produce different results");
+    }
+
+    @Test
+    public void testNanoIdSizeConstants() {
+        assertEquals(DeterministicIdUtils.NANOID_SIZE_DEFAULT, 21, "Default NanoId size should be 21");
+        assertEquals(DeterministicIdUtils.NANOID_SIZE_ACCESS_CONTROL, 22, "Access control NanoId size should be 22");
+    }
+
+    // ========== Determinism Tests for 22-Character NanoIds ==========
+
+    @Test
+    public void testAccessControlQN_Deterministic_22Chars() {
+        String qn1 = DeterministicIdUtils.generateAccessControlQN("persona", "DataSteward", "tenant1");
+        String qn2 = DeterministicIdUtils.generateAccessControlQN("persona", "DataSteward", "tenant1");
+
+        assertEquals(qn1, qn2, "Same persona should produce identical 22-char QN");
+        assertEquals(qn1.length(), 22, "QN should be 22 characters");
+    }
+
+    @Test
+    public void testPolicyQN_Deterministic_22Chars() {
+        String qn1 = DeterministicIdUtils.generatePolicyQN("ReadAccess", "persona/datasteward");
+        String qn2 = DeterministicIdUtils.generatePolicyQN("ReadAccess", "persona/datasteward");
+
+        assertEquals(qn1, qn2, "Same policy should produce identical 22-char QN");
+        assertEquals(qn1.length(), 22, "QN should be 22 characters");
+    }
+
+    // ========== Collision Resistance for 22-Character NanoIds ==========
+
+    @Test
+    public void testAccessControlQN_NoCollisions_LargeSet() {
+        Set<String> nanoIds = new HashSet<>();
+        int count = 10000;
+
+        for (int i = 0; i < count; i++) {
+            String nanoId = DeterministicIdUtils.generateAccessControlQN("persona", "name" + i, "context" + (i % 100));
+            nanoIds.add(nanoId);
+        }
+
+        assertEquals(nanoIds.size(), count,
+                "All " + count + " unique access control inputs should produce unique 22-char NanoIds");
+    }
+
+    // ========== Standard vs Access Control NanoId Size Comparison ==========
+
+    @Test
+    public void testStandardVsAccessControlNanoIdSize() {
+        // Standard entities use 21-character NanoIds
+        String glossaryQN = DeterministicIdUtils.generateGlossaryQN("TestGlossary");
+        String termQN = DeterministicIdUtils.generateTermQN("TestTerm", "glossary123");
+        String categoryQN = DeterministicIdUtils.generateCategoryQN("TestCategory", null, "glossary123");
+        String domainQN = DeterministicIdUtils.generateDomainQN("TestDomain", "");
+        String productQN = DeterministicIdUtils.generateProductQN("TestProduct", "domain123");
+
+        assertEquals(glossaryQN.length(), 21, "Glossary QN should be 21 characters");
+        assertEquals(termQN.length(), 21, "Term QN should be 21 characters");
+        assertEquals(categoryQN.length(), 21, "Category QN should be 21 characters");
+        assertEquals(domainQN.length(), 21, "Domain QN should be 21 characters");
+        assertEquals(productQN.length(), 21, "Product QN should be 21 characters");
+
+        // Access control entities use 22-character NanoIds
+        String personaQN = DeterministicIdUtils.generateAccessControlQN("persona", "TestPersona", "tenant1");
+        String purposeQN = DeterministicIdUtils.generateAccessControlQN("purpose", "TestPurpose", "tenant1");
+        String policyQN = DeterministicIdUtils.generatePolicyQN("TestPolicy", "persona/test");
+
+        assertEquals(personaQN.length(), 22, "Persona QN should be 22 characters");
+        assertEquals(purposeQN.length(), 22, "Purpose QN should be 22 characters");
+        assertEquals(policyQN.length(), 22, "Policy QN should be 22 characters");
     }
 }
