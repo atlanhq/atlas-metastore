@@ -86,6 +86,7 @@ import org.springframework.stereotype.Component;
 
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
+import static org.apache.atlas.AtlasConfiguration.SKIP_OPTIONAL_ATTRIBUTES;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
@@ -1150,6 +1151,10 @@ public class EntityGraphMapper {
     }
 
     private boolean shouldSkipAttributeMapping(AtlasAttribute attribute, AtlasStruct struct) {
+        if (!AtlasConfiguration.SKIP_OPTIONAL_ATTRIBUTES.getBoolean()) {
+            return false;
+        }
+        
         boolean isPresentInPayload = struct.hasAttribute(attribute.getName());
         AtlasAttributeDef attributeDef = attribute.getAttributeDef();
 
