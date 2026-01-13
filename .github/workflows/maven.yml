@@ -195,8 +195,25 @@ jobs:
 
       - name: Build with Maven
         run: |
-          echo "build without dashboard"
+          echo "=========================================="
+          echo "BUILDING ATLAS WITH MAVEN"
+          echo "=========================================="
           chmod +x ./build.sh && ./build.sh
+          
+          # Verify the build artifact was created
+          echo ""
+          echo "Verifying build artifacts..."
+          if [ ! -f "distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz" ]; then
+            echo "❌ ERROR: Build artifact not found!"
+            echo "Expected: distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz"
+            echo ""
+            echo "Contents of distro/target/:"
+            ls -lh distro/target/ || echo "Directory does not exist"
+            exit 1
+          fi
+          
+          echo "✅ Build artifact verified: distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz"
+          ls -lh distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz
 
       - name: Check disk space before tests
         id: check_disk
