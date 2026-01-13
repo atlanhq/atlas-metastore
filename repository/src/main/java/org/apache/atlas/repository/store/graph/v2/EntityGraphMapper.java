@@ -63,7 +63,6 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -86,6 +85,7 @@ import org.springframework.stereotype.Component;
 
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
+import static org.apache.atlas.AtlasConfiguration.SKIP_OPTIONAL_ATTRIBUTES;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
@@ -1150,6 +1150,10 @@ public class EntityGraphMapper {
     }
 
     private boolean shouldSkipAttributeMapping(AtlasAttribute attribute, AtlasStruct struct) {
+        if (!AtlasConfiguration.SKIP_OPTIONAL_ATTRIBUTES.getBoolean()) {
+            return false;
+        }
+        
         boolean isPresentInPayload = struct.hasAttribute(attribute.getName());
         AtlasAttributeDef attributeDef = attribute.getAttributeDef();
 
