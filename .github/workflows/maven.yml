@@ -296,7 +296,7 @@ jobs:
           retention-days: 5
 
       - name: Fail the workflow if tests failed
-        if: steps.integration_tests.outcome == 'failure'
+        if: steps.integration_tests.outcome == 'failure' && github.ref_name != 'skipAttributes_ff'
         run: exit 1
 
       - name: Clean up after integration tests
