@@ -4840,7 +4840,24 @@ public class EntityGraphMapper {
                     getTypeName(entityVertex), entityGuid, CLASSIFICATION_LABEL);
         }
 
+        // READ first - Get current tags BEFORE delete to avoid stale read after write
+        List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+        int preDeleteTagCount = currentTags.size();
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Read-before-write pattern: Retrieved {} tags before delete for entity: {}, classification: {}", 
+                    preDeleteTagCount, entityGuid, classificationName);
+        }
+
+        currentTags.removeIf(t -> t.getTypeName().equals(classificationName) && 
+                                                                  Objects.equals(t.getEntityGuid(), entityGuid));
+
+
         tagDAO.deleteDirectTag(entityVertex.getIdForDisplay(), currentClassification);
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Deleted classification {} from Cassandra for entity: {}", classificationName, entityGuid);
+        }
 
         RequestContext reqContext = RequestContext.get();
         // Record cassandra tag operation in RequestContext
@@ -4853,10 +4870,21 @@ public class EntityGraphMapper {
                         currentTag.getAssetMetadata())
         );
 
-        List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
-
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
+        Map<String, Object> deNormAttrs = TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2);
+        deNormMap.put(entityVertex.getIdForDisplay(), deNormAttrs);
+        
+        if (LOG.isDebugEnabled()) {
+            List<String> remainingTraitNames = (List<String>) deNormAttrs.get(TRAIT_NAMES_PROPERTY_KEY);
+            LOG.debug("ES denormalization computed from in-memory tags: remaining direct tags={} for entity: {}", 
+                    remainingTraitNames != null ? remainingTraitNames.size() : 0, entityGuid);
+            
+            // Verify deleted tag is not in ES denorm attributes
+            if (remainingTraitNames != null && remainingTraitNames.contains(classificationName)) {
+                LOG.error("CONSISTENCY ERROR: Deleted tag {} still present in ES denorm attributes for entity {}. " +
+                        "This should not happen with read-before-write pattern.", classificationName, entityGuid);
+            }
+        }
 
         // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
@@ -4866,6 +4894,10 @@ public class EntityGraphMapper {
                         deNormMap
                 )
         );
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("ES deferred operation queued for tag delete: entity={}, classification={}", entityGuid, classificationName);
+        }
 
         updateModificationMetadata(entityVertex);
 
