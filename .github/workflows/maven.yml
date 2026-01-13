@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - skipAttributes_ff
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -195,7 +196,7 @@ jobs:
 
       - name: Check disk space before tests
         id: check_disk
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes_ff'
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK"
@@ -215,7 +216,7 @@ jobs:
           fi
 
       - name: Free up disk space for tests
-        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes_ff')
         run: |
           echo "=========================================="
           echo "CLEANING UP DISK SPACE"
@@ -251,7 +252,7 @@ jobs:
           df -h / | grep -E '^/dev/' || df -h / | tail -1
 
       - name: Verify sufficient disk space
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes_ff'
         run: |
           echo "=========================================="
           echo "VERIFYING DISK SPACE"
@@ -275,7 +276,7 @@ jobs:
 
       - name: Run Integration Tests
         id: integration_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes_ff'
         continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions
@@ -399,7 +400,7 @@ jobs:
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
     if: |
       needs.build.result == 'success' &&
-      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes_ff')
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
