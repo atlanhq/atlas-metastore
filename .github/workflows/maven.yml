@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - skipAttributes
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -175,8 +176,12 @@ jobs:
 
       - name: Get branch name
         run: |
-          echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
-          echo BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          BRANCH_RAW=${GITHUB_REF#refs/heads/}
+          BRANCH_LOWER=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]')
+          echo "BRANCH_NAME=$BRANCH_RAW" >> $GITHUB_ENV
+          echo "BRANCH_NAME_LOWER=$BRANCH_LOWER" >> $GITHUB_ENV
+          echo "Branch name: $BRANCH_RAW"
+          echo "Branch name (lowercase): $BRANCH_LOWER"
 
       - name: Create Maven Settings
         uses: s4u/maven-settings-action@v2.8.0
@@ -195,7 +200,7 @@ jobs:
 
       - name: Check disk space before tests
         id: check_disk
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes'
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK"
@@ -215,7 +220,7 @@ jobs:
           fi
 
       - name: Free up disk space for tests
-        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+        if: steps.check_disk.outputs.disk_usage > 70 && (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes')
         run: |
           echo "=========================================="
           echo "CLEANING UP DISK SPACE"
@@ -251,7 +256,7 @@ jobs:
           df -h / | grep -E '^/dev/' || df -h / | tail -1
 
       - name: Verify sufficient disk space
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes'
         run: |
           echo "=========================================="
           echo "VERIFYING DISK SPACE"
@@ -275,7 +280,7 @@ jobs:
 
       - name: Run Integration Tests
         id: integration_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes'
         continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions
@@ -371,16 +376,16 @@ jobs:
           provenance: true
           push: true
           tags: |
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:latest
-            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME_LOWER }}:latest
+            ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME_LOWER }}:${{ env.COMMIT_ID }}
 
       - name: Check Image Manifest
-        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}
+        run: docker buildx imagetools inspect --raw ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME_LOWER }}:${{ env.COMMIT_ID }}
 
       - name: Scan Image
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: 'ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}'
+          image-ref: 'ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME_LOWER }}:${{ env.COMMIT_ID }}'
           vuln-type: 'os,library'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
@@ -399,7 +404,7 @@ jobs:
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
     if: |
       needs.build.result == 'success' &&
-      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'skipAttributes')
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
@@ -422,13 +427,17 @@ jobs:
         uses: actions/checkout@v3
       
       - name: Get branch name
-        run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
+        run: |
+          BRANCH_RAW=${GITHUB_REF#refs/heads/}
+          BRANCH_LOWER=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]')
+          echo "BRANCH_NAME=$BRANCH_RAW" >> $GITHUB_ENV
+          echo "BRANCH_NAME_LOWER=$BRANCH_LOWER" >> $GITHUB_ENV
       
       - name: Get commit ID
         run: echo "COMMIT_ID=$(echo ${GITHUB_SHA} | cut -c1-7)abcd" >> $GITHUB_ENV
       
       - name: Set test image
-        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
+        run: echo "TEST_IMAGE=ghcr.io/atlanhq/${{ github.event.repository.name }}-${{ env.BRANCH_NAME_LOWER }}:${{ env.COMMIT_ID }}" >> $GITHUB_ENV
       
       - name: Install kubectl
         uses: azure/setup-kubectl@v3
@@ -729,7 +738,10 @@ jobs:
         if: steps.can_publish.outputs.should_publish == 'true'
         id: branch
         run: |
-          echo "name=${GITHUB_REF#refs/heads/}" >> $GITHUB_OUTPUT
+          BRANCH_RAW=${GITHUB_REF#refs/heads/}
+          BRANCH_LOWER=$(echo "$BRANCH_RAW" | tr '[:upper:]' '[:lower:]')
+          echo "name=$BRANCH_RAW" >> $GITHUB_OUTPUT
+          echo "name_lower=$BRANCH_LOWER" >> $GITHUB_OUTPUT
       
       - name: Get commit ID
         if: steps.can_publish.outputs.should_publish == 'true'
@@ -744,7 +756,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.ORG_PAT_GITHUB }}
         run: |
           # Fetch the latest existing image tag from GHCR (excluding arm64/amd64 variants)
-          IMAGE_NAME="atlas-metastore-${{ steps.branch.outputs.name }}"
+          IMAGE_NAME="atlas-metastore-${{ steps.branch.outputs.name_lower }}"
           
           echo "🔍 Fetching latest image tag for ${IMAGE_NAME}..."
           
@@ -826,7 +838,7 @@ jobs:
           fi
           
           sed -i "s/ATLAS_LATEST_IMAGE_TAG/${IMAGE_TAG}/g" ${{ matrix.path }}/values.yaml
-          sed -i "s/ATLAS_BRANCH_NAME/${{ steps.branch.outputs.name }}/g" ${{ matrix.path }}/values.yaml
+          sed -i "s/ATLAS_BRANCH_NAME/${{ steps.branch.outputs.name_lower }}/g" ${{ matrix.path }}/values.yaml
           
           echo "Image configuration in ${{ matrix.chart }}/values.yaml:"
           grep -A 3 "image:" ${{ matrix.path }}/values.yaml | head -10
