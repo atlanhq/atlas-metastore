@@ -22,9 +22,6 @@ name: Java CI with Maven
 on:
   push:
     branches:
-      - beta
-      - master
-      - staging
       - lite_staging
 
 jobs:
