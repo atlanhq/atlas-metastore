@@ -180,11 +180,6 @@ spec:
             - name: create-atlas-keycloak-config
               mountPath: /create-atlas-keycloak-config.sh
               subPath: create-atlas-keycloak-config.sh
-          {{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
-            - name: sentry-dsn-config
-              mountPath: /opt/apache-atlas/conf/sentry.properties
-              subPath: sentry.properties
-          {{- end}}
             - name: atlas-logs
               mountPath: /opt/apache-atlas/logs
           {{- if .Values.atlas.lifecycle }}
