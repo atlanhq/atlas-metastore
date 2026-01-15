@@ -80,6 +80,7 @@ spec:
             {{- toYaml .Values.atlas.affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 12 }}
           {{- end }}
           {{- end }}
+        {{- end }}
         {{- if eq .Values.atlas.podAntiAffinity true }}
         podAntiAffinity:
           {{- toYaml .Values.atlas.affinity.podAntiAffinity | nindent 10 }}
