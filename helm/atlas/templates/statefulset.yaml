@@ -7,19 +7,9 @@ metadata:
     app: {{ template "name" . }}
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
-{{- if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Development") }}
-  annotations:
-    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
-    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
-{{- else if or (eq .Values.sentry_flag "enable") (ne .Values.atlas.Deployment_Type "Lite") }}
-  annotations:
-    configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,sentry-dsn-config,rate-limit-nginx-config"
-    secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
-{{- else }}
   annotations:
     configmap.reloader.stakater.com/reload: "atlas-config,atlas-logback-config,atlas-audit-index,atlas-keycloak-config,atlas-init-script,atlas-init-container-script,rate-limit-nginx-config"
     secret.reloader.stakater.com/reload: "atlas-secret-manager,atlas-init-secret,atlas-keycloak-config"
-{{- end }}
 spec:
   selector:
     matchLabels:
@@ -260,11 +250,6 @@ spec:
           configMap:
             name: create-atlas-keycloak-config-cm
             defaultMode: 0755
-      {{- if or (eq .Values.sentry_flag "enable") (not (and (eq .Values.global.Deployment_Type "Lite") (eq .Values.atlas.Deployment_Type "Development"))) }}
-        - name: sentry-dsn-config
-          configMap:
-            name: sentry-dsn-config
-      {{- end }}
         - name: atlas-init-script
           configMap:
             name: atlas-init-script
