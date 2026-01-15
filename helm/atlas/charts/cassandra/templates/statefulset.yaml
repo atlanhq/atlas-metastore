@@ -196,6 +196,8 @@ spec:
         resources:
         {{- if eq .Values.global.Deployment_Type "Lite" }}
 {{ toYaml .Values.resources_dev | indent 10 }}
+        {{- else if eq .Values.global.Deployment_Type "Development" }}
+{{ toYaml .Values.resources_development | indent 10 }}  
         {{- else }}
 {{ toYaml .Values.resources | indent 10 }}
         {{- end }}
