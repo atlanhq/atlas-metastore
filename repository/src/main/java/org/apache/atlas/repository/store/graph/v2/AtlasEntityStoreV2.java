@@ -153,6 +153,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
 
+    private static final Set<String> CLASSIFICATION_ADD_EXCLUDE_LIST = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
+
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
                               IAtlasEntityChangeNotifier entityChangeNotifier, EntityGraphMapper entityGraphMapper, TaskManagement taskManagement,
@@ -1141,6 +1143,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
 
+        String entityTypeName = entityHeader.getTypeName();
+        if (CLASSIFICATION_ADD_EXCLUDE_LIST.contains(entityTypeName)) {
+            throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED,
+                    String.format("Adding classifications to entity type '%s' is not supported", entityTypeName));
+        }
+
         for (AtlasClassification classification : classifications) {
             AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_ADD_CLASSIFICATION, entityHeader, classification),
                                                  "add classification: guid=", guid, ", classification=", classification.getTypeName());
@@ -1243,6 +1251,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 }
 
                 AtlasEntityHeader entityHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
+
+                String entityTypeName = entityHeader.getTypeName();
+                if (CLASSIFICATION_ADD_EXCLUDE_LIST.contains(entityTypeName)) {
+                    throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED,
+                            String.format("Adding classifications to entity type '%s' is not supported", entityTypeName));
+                }
 
                 AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_ADD_CLASSIFICATION, entityHeader, classification),
                         "add classification: guid=", guid, ", classification=", classification.getTypeName());
