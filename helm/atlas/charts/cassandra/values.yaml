@@ -440,5 +440,5 @@ reaper:
     image:
       repository: ghcr.io/atlanhq/mt-utils-atlan-v2
       tag: 1.8.58-multiarch
-      pullPolicy: IfNotPresent
+      pullPolicy: IfNotPresent   
   

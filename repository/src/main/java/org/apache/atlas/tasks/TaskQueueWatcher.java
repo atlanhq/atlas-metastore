@@ -22,6 +22,8 @@ import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.ICuratorFactory;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.model.tasks.AtlasTask;
+import org.apache.atlas.service.config.ConfigKey;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.repository.metrics.TaskMetricsService;
@@ -94,6 +96,18 @@ public class TaskQueueWatcher implements Runnable {
         LOG.info("TaskQueueWatcher: Time constants - pollInterval: {}, TASK_WAIT_TIME_MS: {}", pollInterval, AtlasConstants.TASK_WAIT_TIME_MS);
 
         while (shouldRun.get()) {
+            // Check maintenance mode at start of each cycle
+            if (isMaintenanceModeEnabled()) {
+                LOG.info("TaskQueueWatcher: Maintenance mode enabled, pausing task processing for {} ms", pollInterval);
+                try {
+                    Thread.sleep(pollInterval);
+                } catch (InterruptedException e) {
+                    LOG.warn("TaskQueueWatcher: Sleep interrupted during maintenance mode");
+                    break;
+                }
+                continue;
+            }
+
             RequestContext requestContext = RequestContext.get();
             requestContext.setMetricRegistry(this.metricRegistry);
             TasksFetcher fetcher = new TasksFetcher(registry);
@@ -216,8 +230,25 @@ public class TaskQueueWatcher implements Runnable {
         long totalMemory = runtime.totalMemory();
         long freeMemory = runtime.freeMemory();
         long usedMemory = totalMemory - freeMemory;
-        
+
         return (double) usedMemory / maxMemory;
+    }
+
+    /**
+     * Check if maintenance mode is enabled dynamically.
+     * Uses DynamicConfigStore if enabled, otherwise falls back to static configuration.
+     *
+     * @return true if maintenance mode is enabled, false otherwise
+     */
+    private boolean isMaintenanceModeEnabled() {
+        try {
+            if (DynamicConfigStore.isEnabled()) {
+                return DynamicConfigStore.getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
+            }
+        } catch (Exception e) {
+            LOG.debug("Error checking DynamicConfigStore for maintenance mode, falling back to static config", e);
+        }
+        return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
     }
 
 
