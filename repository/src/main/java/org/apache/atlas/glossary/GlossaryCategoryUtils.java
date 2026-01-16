@@ -32,6 +32,7 @@ import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
@@ -653,18 +654,23 @@ public class GlossaryCategoryUtils extends GlossaryUtils {
             qName = t1[t1.length -1].split("@")[0];
         }
 
-        qName = StringUtils.isEmpty(qName) ? getUUID() : qName;
         if (parentRemoval) {
             AtlasGlossary glossary = dataAccess.load(getGlossarySkeleton(cat.getAnchor().getGlossaryGuid()));
-            ret = qName + "@" + glossary.getQualifiedName();
+            String glossaryQN = glossary.getQualifiedName();
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), null, glossaryQN) : qName;
+            ret = qName + "@" + glossaryQN;
 
         } else if (parentCategory != null) {
             String[] parentCatQname = parentCategory.getQualifiedName().split("@");
+            String parentCatQN = parentCategory.getQualifiedName();
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), parentCatQN, parentCatQname[1]) : qName;
             ret = parentCatQname[0] + "." + qName + "@" + parentCatQname[1];
 
         } else if (cat.getParentCategory() != null) {
             AtlasGlossaryCategory parentCat = dataAccess.load(getAtlasGlossaryCategorySkeleton(cat.getParentCategory().getCategoryGuid()));
             String[] parentCatQname = parentCat.getQualifiedName().split("@");
+            String parentCatQN = parentCat.getQualifiedName();
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), parentCatQN, parentCatQname[1]) : qName;
             ret = parentCatQname[0] + "." + qName + "@" + parentCatQname[1];
 
         } else {
@@ -673,7 +679,9 @@ public class GlossaryCategoryUtils extends GlossaryUtils {
             if (glossary == null) {
                 throw new AtlasBaseException("Glossary not found with guid: " + anchorGlossaryGuid);
             }
-            ret = qName + "@" + glossary.getQualifiedName();
+            String glossaryQN = glossary.getQualifiedName();
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), null, glossaryQN) : qName;
+            ret = qName + "@" + glossaryQN;
         }
         return ret;
     }

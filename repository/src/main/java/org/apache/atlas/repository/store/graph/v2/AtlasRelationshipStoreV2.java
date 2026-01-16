@@ -51,6 +51,7 @@ import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.type.AtlasTypeUtil;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
@@ -502,10 +503,11 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
             // map additional properties to relationship edge
             if (ret != null) {
-                // Accept a valid (assigned) guid from the supplied relationship, or generate one.
+                // Accept a valid (assigned) guid from the supplied relationship, or generate one deterministically.
                 String        relationshipGuid = relationship.getGuid();
                 PropagateTags tagPropagation   = getRelationshipTagPropagation(end1Vertex, end2Vertex, relationship);
-                final String  guid             = AtlasTypeUtil.isAssignedGuid(relationshipGuid) ? relationshipGuid : UUID.randomUUID().toString();
+                final String  guid             = AtlasTypeUtil.isAssignedGuid(relationshipGuid) ? relationshipGuid :
+                    DeterministicIdUtils.getRelationshipGuid(relationship.getTypeName(), end1Entity.getGuid(), end2Entity.getGuid());
 
                 AtlasGraphUtilsV2.setEncodedProperty(ret, ENTITY_TYPE_PROPERTY_KEY, relationship.getTypeName());
                 AtlasGraphUtilsV2.setEncodedProperty(ret, RELATIONSHIP_GUID_PROPERTY_KEY, guid);
