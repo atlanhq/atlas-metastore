@@ -22,7 +22,9 @@ name: Java CI with Maven
 on:
   push:
     branches:
-      - lite_staging
+      - beta
+      - master
+      - staging
 
 jobs:
   # Detect what changed to optimize workflow execution
