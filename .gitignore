@@ -85,5 +85,8 @@ distro/solr/*.tgz
 
 # local models and configurations
 /deploy
+
+# design docs
+/docs
 **.class
 */bin
