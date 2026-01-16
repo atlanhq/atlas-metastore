@@ -99,6 +99,7 @@ spec:
           ports:
             - containerPort: {{ .Values.atlas.service.targetPort }}
           env:
+          {{- toYaml .Values.atlas.env | nindent 12 }}
           {{- if eq .Values.global.Deployment_Type "Lite" }}
             - name: SPRING_PROFILES_ACTIVE
               value: "local"
