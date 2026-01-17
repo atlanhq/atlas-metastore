@@ -47,6 +47,7 @@ import org.apache.atlas.v1.model.instance.Id;
 import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef.PropagateTags;
+import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.RepositoryException;
@@ -1725,7 +1726,14 @@ public final class GraphHelper {
                 List values =  vertexEdgePropertiesCache.getMultiValuedProperties(instanceVertex.getIdForDisplay(), propertyName, elementType.getClass());
                 return values;
             }
-            return (List) instanceVertex.getMultiValuedProperty(propertyName, elementType.getClass());
+            // Check cardinality to determine whether to use getMultiValuedProperty or getMultiValuedSetProperty
+            boolean isSetCardinality = attribute.getAttributeDef().getCardinality() == AtlasStructDef.AtlasAttributeDef.Cardinality.SET;
+            if (isSetCardinality) {
+                // For SET cardinality, convert Set to List to maintain the return type
+                return new ArrayList<>(instanceVertex.getMultiValuedSetProperty(propertyName, elementType.getClass()));
+            } else {
+                return (List) instanceVertex.getMultiValuedProperty(propertyName, elementType.getClass());
+            }
         } else {
             return (List) instanceVertex.getListProperty(propertyName);
         }
