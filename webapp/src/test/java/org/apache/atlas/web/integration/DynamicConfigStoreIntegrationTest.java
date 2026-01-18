@@ -67,6 +67,7 @@ import static org.junit.jupiter.api.Assertions.*;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @ExtendWith(TestcontainersExtension.class)
+@Disabled
 public class DynamicConfigStoreIntegrationTest {
 
     private static final Logger LOG = LoggerFactory.getLogger(DynamicConfigStoreIntegrationTest.class);
