@@ -65,6 +65,8 @@ import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
 import org.apache.atlas.service.FeatureFlagStore;
+import org.apache.atlas.service.config.ConfigKey;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -75,6 +77,7 @@ import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -238,7 +241,8 @@ public class EntityGraphMapper {
     }
 
     public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
-        final String guid = UUID.randomUUID().toString();
+        final String qualifiedName = (String) entity.getAttribute(Constants.QUALIFIED_NAME);
+        final String guid = DeterministicIdUtils.getEntityGuid(entity.getTypeName(), qualifiedName);
         return createVertexWithGuid(entity, guid);
     }
 
@@ -247,7 +251,7 @@ public class EntityGraphMapper {
             LOG.debug("==> createShellEntityVertex({})", objectId.getTypeName());
         }
 
-        final String    guid       = UUID.randomUUID().toString();
+        final String    guid       = DeterministicIdUtils.getEntityGuid(objectId.getTypeName(), objectId.getUniqueAttributes());
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(objectId.getTypeName());
         AtlasVertex     ret        = createStructVertex(objectId);
 
@@ -4398,6 +4402,9 @@ public class EntityGraphMapper {
                 List<String> vertexIdsToAdd = new ArrayList<>(impactedVerticeIds);
                 int assetsAffected = 0;
                 for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE_FOR_ADD_PROPAGATION) {
+                    // Check for maintenance mode at each batch boundary
+                    checkMaintenanceModeOrInterrupt();
+
                     int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
@@ -4470,6 +4477,9 @@ public class EntityGraphMapper {
                         List<String> vertexIdsToAdd = new ArrayList<>(impactedVertexIds);
 
                         for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE_FOR_ADD_PROPAGATION) {
+                            // Check for maintenance mode at each batch boundary
+                            checkMaintenanceModeOrInterrupt();
+
                             int end = Math.min(i + BATCH_SIZE_FOR_ADD_PROPAGATION, vertexIdsToAdd.size());
                             List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
@@ -4554,6 +4564,9 @@ public class EntityGraphMapper {
 
         try {
             do {
+                // Check for maintenance mode at each chunk boundary
+                checkMaintenanceModeOrInterrupt();
+
                 toIndex = Math.min(offset + CHUNK_SIZE, impactedVerticesSize);
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 Set<AtlasVertex> chunkedVerticesToPropagateSet = new HashSet<>(chunkedVerticesToPropagate);
@@ -4566,7 +4579,7 @@ public class EntityGraphMapper {
                 if (MapUtils.isNotEmpty(deNormAttributesMap)) {
                     ESConnector.writeTagProperties(deNormAttributesMap);
                 }
-                
+
                 // Convert vertices to entities before async notification (prevent transaction closure issues)
                 try {
                     Set<AtlasStructType.AtlasAttribute> primitiveAttributes = getEntityTypeAttributes(chunkedVerticesToPropagateSet);
@@ -4576,7 +4589,7 @@ public class EntityGraphMapper {
                     LOG.error("Failed to convert vertices to entities for classification propagation notification: {}", e.getMessage(), e);
                     throw e;
                 }
-                
+
                 offset += CHUNK_SIZE;
                 LOG.info("offset {}, impactedVerticesSize: {}", offset, impactedVerticesSize);
             } while (offset < impactedVerticesSize);
@@ -5592,6 +5605,9 @@ public class EntityGraphMapper {
             }
 
             while (!batchToDelete.isEmpty()) {
+                // Check for maintenance mode at each page boundary
+                checkMaintenanceModeOrInterrupt();
+
                 // collect the vertex IDs in this batch
                 List<String> vertexIds = batchToDelete.stream()
                         .map(Tag::getVertexId)
@@ -6836,6 +6852,9 @@ public class EntityGraphMapper {
             int totalCountOfPropagatedTags = 0;
 
             while (hasMorePages) {
+                // Check for maintenance mode at each page boundary
+                checkMaintenanceModeOrInterrupt();
+
                 pageCount++;
                 PaginatedTagResult result = tagDAO.getPropagationsForAttachmentBatchWithPagination(entityVertexId, classificationTypeName, pagingState, BATCH_SIZE);
                 List<Tag> currentPageTags = result.getTags();
@@ -6874,6 +6893,9 @@ public class EntityGraphMapper {
                 LOG.info("classificationRefreshPropagationV2_new: Found {} assets that need the tag '{}' to be newly propagated.", expectedPropagatedVertexIds.size(), classificationTypeName);
                 List<String> vertexIdsToAdd = new ArrayList<>(expectedPropagatedVertexIds);
                 for (int i = 0; i < vertexIdsToAdd.size(); i += BATCH_SIZE) {
+                    // Check for maintenance mode at each batch boundary
+                    checkMaintenanceModeOrInterrupt();
+
                     int end = Math.min(i + BATCH_SIZE, vertexIdsToAdd.size());
                     List<String> batchIds = vertexIdsToAdd.subList(i, end);
 
@@ -7045,6 +7067,42 @@ public class EntityGraphMapper {
             }
         }
         return primitiveAttributes;
+    }
+
+    /**
+     * Check if maintenance mode is enabled and throw an exception if so.
+     * Also checks for thread interruption.
+     * This is used to gracefully stop long-running classification propagation tasks.
+     *
+     * @throws AtlasBaseException if maintenance mode is enabled or thread is interrupted
+     */
+    private void checkMaintenanceModeOrInterrupt() throws AtlasBaseException {
+        if (Thread.currentThread().isInterrupted()) {
+            throw new AtlasBaseException(AtlasErrorCode.TASK_INTERRUPTED,
+                "Task interrupted due to thread interruption");
+        }
+
+        if (isMaintenanceModeEnabled()) {
+            throw new AtlasBaseException(AtlasErrorCode.MAINTENANCE_MODE_ENABLED,
+                "Task stopped due to maintenance mode");
+        }
+    }
+
+    /**
+     * Check if maintenance mode is enabled dynamically.
+     * Uses DynamicConfigStore if enabled, otherwise falls back to static configuration.
+     *
+     * @return true if maintenance mode is enabled, false otherwise
+     */
+    private boolean isMaintenanceModeEnabled() {
+        try {
+            if (DynamicConfigStore.isEnabled()) {
+                return DynamicConfigStore.getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
+            }
+        } catch (Exception e) {
+            LOG.debug("Error checking DynamicConfigStore for maintenance mode, falling back to static config", e);
+        }
+        return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
     }
 
 }

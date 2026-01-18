@@ -1,7 +1,8 @@
+{{ if .Values.global.leangraph.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: atlas-config
+  name: atlas-leangraph-config
   namespace: {{ .Values.Namespace }}
   labels:
     app: {{ template "name" . }}
@@ -61,13 +62,13 @@ data:
     #atlas.graph.storage.clustername=
     #atlas.graph.storage.port=
     atlas.graph.storage.backend=cql
-    atlas.graph.storage.hostname={{ .Chart.Name }}-cassandra
-    atlas.graph.storage.cql.keyspace={{ .Chart.Name }}
-    {{- if eq .Values.global.Deployment_Type "Lite" }}
-    atlas.graph.storage.cql.replication-factor=1
+    {{- if .Values.global.leangraph.dedicated.active }}
+    atlas.graph.storage.hostname=atlas-leangraph-cassandra
     {{- else }}
-    atlas.graph.storage.cql.replication-factor={{ .Values.cassandra.config.cluster_size }}
+    atlas.graph.storage.hostname={{ .Chart.Name }}-cassandra
     {{- end }}
+    # atlas.graph.storage.cql.keyspace={{ .Chart.Name }}
+    atlas.graph.storage.cql.replication-factor={{ .Values.cassandra.config.cluster_size }}
     atlas.graph.storage.clustername={{ .Values.cassandra.config.cluster_name  }}
     atlas.graph.storage.port={{ .Values.cassandra.config.ports.cql }}
     atlas.graph.query.fast-property=true
@@ -144,7 +145,11 @@ data:
     # Alternatively, the JanusGraph documentation provides some tips on how to secure Elasticsearch without additional
     # plugins: http://docs.janusgraph.org/latest/elasticsearch.html
     
+    {{- if .Values.global.leangraph.dedicated.active }}
+    atlas.graph.index.search.hostname=atlas-leangraph-elasticsearch-master:9200
+    {{- else }}
     atlas.graph.index.search.hostname=atlas-elasticsearch-master:9200
+    {{- end }}
     atlas.graph.index.search.elasticsearch.client-only=true
     atlas.graph.index.search.elasticsearch.retry_on_conflict=5
     atlas.graph.index.search.max-result-set-size=1000
@@ -160,11 +165,8 @@ data:
     atlas.kafka.zookeeper.session.timeout.ms=60000
     atlas.kafka.zookeeper.connection.timeout.ms=30000
     atlas.kafka.zookeeper.sync.time.ms=20
-    {{- if eq .Values.global.Deployment_Type "Lite" }}
-    atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181
-    {{- else }}
     atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
-    {{- end }}
+
     atlas.kafka.auto.commit.interval.ms=1000
     atlas.kafka.hook.group.id=atlas
     atlas.kafka.enable.auto.commit=false
@@ -270,15 +272,13 @@ data:
     {{- else }}
     atlas.server.ha.enabled=false
     {{- end }}
+    atlas.server.type.cache-refresher=http://cinv.atlas.svc.cluster.local:5000/cinv
+    atlas.server.type.cache-refresher-health=http://cinv.atlas.svc.cluster.local:5000/health
     #### Enabled the configs below as per need if HA is enabled #####
     atlas.server.ids=id1,id2
     atlas.server.address.id1=atlas-0.atlas-service-atlas.atlas.svc.cluster.local:21000
     atlas.server.address.id2=atlas-1.atlas-service-atlas.atlas.svc.cluster.local:21000
-    {{- if eq .Values.global.Deployment_Type "Lite" }}
-    atlas.server.ha.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181
-    {{- else }}
     atlas.server.ha.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
-    {{- end }}
     atlas.server.ha.zookeeper.retry.sleeptime.ms=10000
     atlas.server.ha.zookeeper.num.retries=18
     atlas.server.ha.zookeeper.session.timeout.ms=20000
@@ -326,11 +326,7 @@ data:
     atlas.graph.cache.redis-cache-size=100000
     atlas.graph.cache.redis-cache-server-mode=sentinel
     atlas.graph.cache.redis-cache-server-url=redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
-    {{- if eq .Values.global.Deployment_Type "Lite" }}
-    atlas.graph.cache.redis-cache-sentinel-urls={{ .Values.atlas.redis.sentinel_urls_lite }}
-    {{- else }}
     atlas.graph.cache.redis-cache-sentinel-urls={{ .Values.atlas.redis.sentinel_urls }}
-    {{- end }}
     atlas.graph.cache.redis-cache-lock-watchdog-ms=300000
     atlas.graph.cache.redis-cache-username={{ .Values.atlas.redis.username }}
     atlas.graph.cache.redis-cache-password={{ .Values.atlas.redis.password }}
@@ -454,11 +450,7 @@ data:
     # org.apache.atlas.service.redis.NoRedisServiceImpl - default, dummy redis implementation.
     atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
     atlas.redis.url = redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
-    {{- if eq .Values.global.Deployment_Type "Lite" }}
-    atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls_lite }}
-    {{- else }}
     atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls }}
-    {{- end }}
     atlas.redis.username = {{ .Values.atlas.redis.username }}
     atlas.redis.password = {{ .Values.atlas.redis.password }}
     atlas.redis.master_name = {{ .Values.atlas.redis.master_name }}
@@ -506,8 +498,6 @@ data:
 
     ######### Atlas Distributed Task configs #########
     atlas.distributed.task.enabled={{ .Values.atlas.distributed_task.enabled }}
-    atlas.distributed.task.relationship.cleanup={{ .Values.atlas.distributed_task.relationship_cleanup }}
-    atlas.distributed.task.haslineage.calculation={{ .Values.atlas.distributed_task.haslineage_calculation }}
     {{- if eq .Values.atlas.distributed_task.enabled true }}
     atlas.relationship.cleanup.supported.asset.types={{ .Values.atlas.distributed_task.cleanup_supported_asset_types }}
     atlas.relationship.cleanup.supported.relationship.labels={{ .Values.atlas.distributed_task.cleanup_supported_relationship_labels }}
@@ -519,3 +509,18 @@ data:
 
     ######### Atlas notification configs #########
     atlas.notification.differential.entity.changes.enabled={{ .Values.atlas.notification.differential_entity_changes_enabled }}
+
+    ######### Atlas Leangraph configs #########
+    OTEL_RESOURCE_ATTRIBUTES="service.name=leangraph_atlas"
+    OTEL_SERVICE_NAME=leangraph_atlas
+    atlas.graph.new.keyspace=leangraph_tags
+    atlas.graph.storage.cql.keyspace=leangraph_janusgraph
+    atlas.graph.index.search.index-name=leangraph_janusgraph
+    atlas.graph.lean.graph.enabled=true
+    atlas.graph.graph.set-vertex-id=true
+    atlas.graph.graph.allow-custom-vid-types=true
+    atlas.cassandra.vanilla.keyspace=leangraph_janusgraph
+    atlas.cassandra.vertex.table=assets
+    atlas.graph.lean.graph.enabled={{ .Values.global.leangraph.enabled }}
+    atlas.k8s.pod.labels=atlas,atlas-leangraph
+{{- end }}

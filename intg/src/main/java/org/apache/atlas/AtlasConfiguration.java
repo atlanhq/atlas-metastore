@@ -184,7 +184,12 @@ public enum AtlasConfiguration {
     // Task resource management configuration
     TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 75),
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
-    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3);
+    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
+
+    // Deterministic ID generation configuration
+    // When enabled, generates deterministic GUIDs and QualifiedNames based on entity attributes
+    // This enables consistent IDs across multiple Atlas instances for shadow/failover scenarios
+    DETERMINISTIC_ID_GENERATION_ENABLED("atlas.deterministic.id.generation.enabled", false);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

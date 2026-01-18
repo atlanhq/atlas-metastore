@@ -37,6 +37,7 @@ import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -57,6 +58,7 @@ import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.CR
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.UPDATE;
 import static org.apache.atlas.repository.Constants.ATTR_ADMIN_ROLES;
 import static org.apache.atlas.repository.Constants.KEYCLOAK_ROLE_ADMIN;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.STAKEHOLDER_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
@@ -176,7 +178,9 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             throw new AtlasBaseException(BAD_REQUEST, "Parent entity is required for persona policy");
         }
         
-        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+        String parentEntityQN = getEntityQualifiedName(parentEntity);
+        String policyName = (String) policy.getAttribute(NAME);
+        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.getPolicyQN(policyName, parentEntityQN)));
         String roleName = getPersonaRoleName(parentEntity);
         policy.setAttribute(ATTR_POLICY_ROLES, Arrays.asList(roleName));
         policy.setAttribute(ATTR_POLICY_USERS, new ArrayList<>());
@@ -219,7 +223,9 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             throw new AtlasBaseException(BAD_REQUEST, "Parent entity is required for purpose policy");
         }
         
-        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+        String parentEntityQN = getEntityQualifiedName(parentEntity);
+        String policyName = (String) policy.getAttribute(NAME);
+        policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.getPolicyQN(policyName, parentEntityQN)));
         List<String> purposeTags = getPurposeTags(parentEntity);
         List<String> policyResources = purposeTags.stream().map(x -> "tag:" + x).collect(Collectors.toList());
         policy.setAttribute(ATTR_POLICY_RESOURCES, policyResources);
