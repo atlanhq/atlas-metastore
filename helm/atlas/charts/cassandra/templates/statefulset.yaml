@@ -204,11 +204,11 @@ spec:
 {{- end }}
         env:
         {{- $seed_size := 1 -}}
-        {{- if eq .Values.Deployment_Type "Lite" }}
-        {{- $seed_size := 1 -}}
-        {{- else }}
-        {{- $seed_size := default 1 .Values.config.seed_size | int -}}
-        {{- end }}
+        {{- if eq .Values.Deployment_Type "Lite" -}}
+          {{- $seed_size = 1 -}}
+        {{- else -}}
+          {{- $seed_size = default 1 .Values.config.seed_size | int -}}
+        {{- end -}}
         {{- $global := . }}
         - name: CASSANDRA_SEEDS
           {{- if .Values.hostNetwork }}
