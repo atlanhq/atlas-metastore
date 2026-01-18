@@ -171,33 +171,7 @@ atlas:
               app: atlas
           topologyKey: kubernetes.io/hostname
 
-  affinity_dev:
-    nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        nodeSelectorTerms:
-        - matchExpressions:
-          - key: eks.amazonaws.com/capacityType   #AWS
-            operator: In
-            values:
-            - ON_DEMAND
-        - matchExpressions:
-          - key: lifecycle     #Azure
-            operator: In
-            values:
-            - ondemand
-        - matchExpressions:
-          - key: cloud.google.com/gke-provisioning  #GCP
-            operator: In
-            values:
-            - standard  
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchLabels:
-              app: atlas
-          topologyKey: kubernetes.io/hostname
-
-  affinity_hard:
+  affinity_lite:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         nodeSelectorTerms:
@@ -216,12 +190,6 @@ atlas:
             operator: In
             values:
               - standard
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchLabels:
-              app: atlas
-          topologyKey: kubernetes.io/hostname
   # Kubernetes service for atlas
   service:
     portName: atlas

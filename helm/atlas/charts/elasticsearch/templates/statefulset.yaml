@@ -84,7 +84,7 @@ spec:
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
       {{- if eq .Values.global.Deployment_Type "Lite" }}
-      {{- with .Values.affinity_hard }}
+      {{- with .Values.affinity_lite }}
       affinity:
 {{ toYaml . | indent 8 }}
       {{- end }}
@@ -306,7 +306,7 @@ spec:
           containerPort: {{ .Values.transportPort }}
         resources:
 {{- if eq .Values.global.Deployment_Type "Lite" }}
-{{ toYaml .Values.resources_dev | indent 10 }}
+{{ toYaml .Values.resources_lite | indent 10 }}
 {{- else if eq .Values.global.Tier_Type "Enterprise" }}
 {{ toYaml .Values.resources | indent 10 }}
 {{- else if eq .Values.global.Tier_Type "Basic" }}
@@ -399,10 +399,6 @@ spec:
 {{ toYaml .Values.extraVolumeMounts | indent 10 }}
         {{- end }}
         {{- end }}
-{{- if .Values.lifecycle }}
-        lifecycle:
-{{ toYaml .Values.lifecycle | indent 10 }}
-{{- end }}
       {{- if .Values.masterTerminationFix }}
       {{- if eq .Values.roles.master "true" }}
       # This sidecar will prevent slow master re-election
@@ -461,6 +457,10 @@ spec:
         {{- end }}
       {{- end }}
       {{- end }}
+{{- if .Values.lifecycle }}
+        lifecycle:
+{{ toYaml .Values.lifecycle | indent 10 }}
+{{- end }}
       {{- if .Values.extraContainers }}
       # Currently some extra blocks accept strings
       # to continue with backwards compatibility this is being kept
