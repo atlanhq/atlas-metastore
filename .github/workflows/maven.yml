@@ -25,7 +25,7 @@ on:
       - beta
       - master
       - staging
-      - lite-staging
+      - lite_staging
 
 jobs:
   # Detect what changed to optimize workflow execution
