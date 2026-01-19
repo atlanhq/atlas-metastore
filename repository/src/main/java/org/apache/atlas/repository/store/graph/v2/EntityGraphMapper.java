@@ -3950,7 +3950,7 @@ public class EntityGraphMapper {
             try {
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
 
-                deNormMap.put(entityVertex.getIdForDisplay(),
+                deNormMap.put(entityVertex.getDocId(),
                         TagDeNormAttributesUtil.getAllAttributesForAllTagsForRepair(GraphHelper.getGuid(entityVertex), currentTags, typeRegistry, fullTextMapperV2));
 
                 // ES operation collected to be executed in the end
@@ -4220,7 +4220,7 @@ public class EntityGraphMapper {
 
                 // Update ES attributes
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
+                deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                         currentTags, typeRegistry, fullTextMapperV2));
                 // ES operation collected to be executed in the end
                 RequestContext.get().addESDeferredOperation(
@@ -4576,9 +4576,9 @@ public class EntityGraphMapper {
                 Map<String, Map<String, Object>> deNormAttributesMap = new HashMap<>();
                 Map<String, Map<String, Object>> assetMinAttrsMap = new HashMap<>();
 
-                List<AtlasEntity> propagatedEntitiesChunked = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
+                Set<String> propagatedVertexIds = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
 
-                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), deNormAttributesMap.keySet(), assetMinAttrsMap, classification);
+                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), propagatedVertexIds, assetMinAttrsMap, classification);
                 if (MapUtils.isNotEmpty(deNormAttributesMap)) {
                     ESConnector.writeTagProperties(deNormAttributesMap);
                 }
@@ -4856,7 +4856,7 @@ public class EntityGraphMapper {
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
+        deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
 
         // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
@@ -5270,7 +5270,7 @@ public class EntityGraphMapper {
                     )
             );
             Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-            deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
+            deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                     currentTags, typeRegistry, fullTextMapperV2));
             // ES operation collected to be executed in the end
             RequestContext.get().addESDeferredOperation(
@@ -6100,11 +6100,11 @@ public class EntityGraphMapper {
         return propagatedEntities;
     }
 
-    List<AtlasEntity> updateClassificationTextV2(AtlasClassification currentTag,
+    Set<String> updateClassificationTextV2(AtlasClassification currentTag,
                                                  Collection<AtlasVertex> propagatedVertices,
                                                  Map<String, Map<String, Object>> deNormAttributesMap,
                                                  Map<String, Map<String, Object>> assetMinAttrsMap) throws AtlasBaseException {
-        List<AtlasEntity> propagatedEntities = new ArrayList<>();
+        Set<String> propagatedVertexIds = new HashSet<>();
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
         if(CollectionUtils.isNotEmpty(propagatedVertices)) {
@@ -6152,12 +6152,12 @@ public class EntityGraphMapper {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
                 }
 
-                deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
-                propagatedEntities.add(entity);
+                deNormAttributesMap.put(vertex.getDocId(), deNormAttributes);
+                propagatedVertexIds.add(vertex.getIdForDisplay());
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
-        return propagatedEntities;
+        return propagatedVertexIds;
     }
 
     void updateClassificationTextV2(AtlasClassification currentTag,
@@ -6167,6 +6167,10 @@ public class EntityGraphMapper {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
         if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
+            Set<AtlasVertex> propagatedVertices = graph.getVertices(Arrays.toString(propagatedVertexIds.toArray()));
+            Map<String, String> vertexIdstoDocIdMap = new HashMap<>(propagatedVertices.size());
+            propagatedVertices.forEach(x -> vertexIdstoDocIdMap.put(x.getIdForDisplay(), x.getDocId()));
+
             for(Tag tagAttachment : propagatedTags) {
                 //get current associated tags to asset ONLY from Cassandra namespace
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
@@ -6183,7 +6187,7 @@ public class EntityGraphMapper {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2);
                 }
 
-                deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
+                deNormAttributesMap.put(vertexIdstoDocIdMap.get(tagAttachment.getVertexId()), deNormAttributes);
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
@@ -6672,10 +6676,10 @@ public class EntityGraphMapper {
 
 
                 //new bulk method to fetch in batches
-                Set<AtlasVertex> propagtedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
+                Set<AtlasVertex> propagatedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
 
                 // notify listeners (async) that these entities got their classification text updated
-                entityChangeNotifier.onClassificationUpdatedToEntitiesV2(propagtedVertices, originalClassification, true, RequestContext.get());
+                entityChangeNotifier.onClassificationUpdatedToEntitiesV2(propagatedVertices, originalClassification, true, RequestContext.get());
 
                 totalUpdated += batchToUpdate.size();
                 // grab next batch
