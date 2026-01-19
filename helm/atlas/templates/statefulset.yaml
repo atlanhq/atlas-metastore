@@ -32,7 +32,10 @@ spec:
       {{- if and .Values.atlas.affinity (ne .Values.global.Tier_Type "Basic") (ne .Values.global.Tier_Type "Standard") }}
       affinity:
         nodeAffinity:
-          {{- if eq .Values.atlas.custom_deployment.enabled true }}
+          {{- if .Values.atlas.affinityOverride }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- toYaml .Values.atlas.affinityOverride.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 12 }}
+          {{- else if eq .Values.atlas.custom_deployment.enabled true }}
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             {{- if (default false .Values.atlas.custom_deployment.karpenter_enabled) }}
