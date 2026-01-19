@@ -34,6 +34,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.apache.atlas.model.instance.AtlasObjectId.KEY_GUID;
@@ -64,6 +65,11 @@ public class RequestContext {
     private final Map<String, String>                    requestContextHeaders= new HashMap<>();
     private final Set<String>                            deletedEdgesIds      = new HashSet<>();
     private final Set<String>                            processGuidIds      = new HashSet<>();
+
+    // Type registry request-scoped caches for performance optimization
+    private final Map<String, Object>                    entityTypeCache         = new ConcurrentHashMap<>();
+    private final Map<String, Object>                    classificationTypeCache = new ConcurrentHashMap<>();
+    private final Map<String, Object>                    relationshipTypeCache   = new ConcurrentHashMap<>();
 
     private       Map<String, String>                    evaluateEntityHeaderCache        = null;
     private final AtlasPerfMetrics metrics = isMetricsEnabled ? new AtlasPerfMetrics() : null;
@@ -200,6 +206,9 @@ public class RequestContext {
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
         this.allInternalAttributesMap.clear();
+        this.entityTypeCache.clear();
+        this.classificationTypeCache.clear();
+        this.relationshipTypeCache.clear();
 
         // Reset observability timing fields
         this.lineageCalcTime.set(0L);
@@ -859,6 +868,40 @@ public class RequestContext {
 
     public Map<String, Map<String, Object>> getAllInternalAttributesMap() {
         return allInternalAttributesMap;
+    }
+
+    // Type registry cache methods for performance optimization
+    @SuppressWarnings("unchecked")
+    public <T> T getCachedEntityType(String typeName) {
+        return typeName != null ? (T) entityTypeCache.get(typeName) : null;
+    }
+
+    public void cacheEntityType(String typeName, Object entityType) {
+        if (typeName != null && entityType != null) {
+            entityTypeCache.put(typeName, entityType);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> T getCachedClassificationType(String typeName) {
+        return typeName != null ? (T) classificationTypeCache.get(typeName) : null;
+    }
+
+    public void cacheClassificationType(String typeName, Object classificationType) {
+        if (typeName != null && classificationType != null) {
+            classificationTypeCache.put(typeName, classificationType);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    public <T> T getCachedRelationshipType(String typeName) {
+        return typeName != null ? (T) relationshipTypeCache.get(typeName) : null;
+    }
+
+    public void cacheRelationshipType(String typeName, Object relationshipType) {
+        if (typeName != null && relationshipType != null) {
+            relationshipTypeCache.put(typeName, relationshipType);
+        }
     }
 
     public class EntityGuidPair {

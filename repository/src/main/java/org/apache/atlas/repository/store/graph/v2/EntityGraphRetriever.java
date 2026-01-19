@@ -61,6 +61,7 @@ import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasBuiltInTypes.AtlasObjectIdType;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
+import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasMapType;
 import org.apache.atlas.type.AtlasRelationshipType;
@@ -197,6 +198,63 @@ public class EntityGraphRetriever {
         this.fetchOnlyMandatoryRelationshipAttr = fetchOnlyMandatoryRelationshipAttr;
     }
 
+    /**
+     * Gets entity type with request-scoped caching to avoid repeated typeRegistry lookups.
+     */
+    private AtlasEntityType getEntityTypeCached(String typeName) {
+        if (typeName == null) {
+            return null;
+        }
+        RequestContext context = RequestContext.get();
+        AtlasEntityType cachedType = context.getCachedEntityType(typeName);
+        if (cachedType != null) {
+            return cachedType;
+        }
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        if (entityType != null) {
+            context.cacheEntityType(typeName, entityType);
+        }
+        return entityType;
+    }
+
+    /**
+     * Gets classification type with request-scoped caching.
+     */
+    private AtlasClassificationType getClassificationTypeCached(String typeName) {
+        if (typeName == null) {
+            return null;
+        }
+        RequestContext context = RequestContext.get();
+        AtlasClassificationType cachedType = context.getCachedClassificationType(typeName);
+        if (cachedType != null) {
+            return cachedType;
+        }
+        AtlasClassificationType classificationType = typeRegistry.getClassificationTypeByName(typeName);
+        if (classificationType != null) {
+            context.cacheClassificationType(typeName, classificationType);
+        }
+        return classificationType;
+    }
+
+    /**
+     * Gets relationship type with request-scoped caching.
+     */
+    private AtlasRelationshipType getRelationshipTypeCached(String typeName) {
+        if (typeName == null) {
+            return null;
+        }
+        RequestContext context = RequestContext.get();
+        AtlasRelationshipType cachedType = context.getCachedRelationshipType(typeName);
+        if (cachedType != null) {
+            return cachedType;
+        }
+        AtlasRelationshipType relationshipType = typeRegistry.getRelationshipTypeByName(typeName);
+        if (relationshipType != null) {
+            context.cacheRelationshipType(typeName, relationshipType);
+        }
+        return relationshipType;
+    }
+
     public AtlasEntity toAtlasEntity(String guid, boolean includeReferences) throws AtlasBaseException {
         return mapVertexToAtlasEntity(getEntityVertex(guid), null, false, includeReferences);
     }
@@ -288,7 +346,7 @@ public class EntityGraphRetriever {
     public Map<String, Map<String, Object>> getBusinessMetadata(AtlasVertex entityVertex) throws AtlasBaseException {
         Map<String, Map<String, Object>>                         ret             = null;
         String                                                   entityTypeName  = getTypeName(entityVertex);
-        AtlasEntityType                                          entityType      = typeRegistry.getEntityTypeByName(entityTypeName);
+        AtlasEntityType                                          entityType      = getEntityTypeCached(entityTypeName);
         Map<String, Map<String, AtlasBusinessAttribute>> entityTypeBm    = entityType != null ? entityType.getBusinessAttributes() : null;
 
         if (MapUtils.isNotEmpty(entityTypeBm)) {
@@ -335,7 +393,7 @@ public class EntityGraphRetriever {
     public AtlasObjectId toAtlasObjectId(AtlasVertex entityVertex) throws AtlasBaseException {
         AtlasObjectId   ret        = null;
         String          typeName   = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
-        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        AtlasEntityType entityType = getEntityTypeCached(typeName);
         boolean enableJanusOptimisation =
                 AtlasConfiguration.ATLAS_INDEXSEARCH_ENABLE_JANUS_OPTIMISATION_FOR_RELATIONS.getBoolean()
                          && RequestContext.get().isInvokedByIndexSearch();
@@ -388,7 +446,7 @@ public class EntityGraphRetriever {
         }
 //        String          typeName   = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
         String typeName = vertexEdgePropertiesCache.getPropertyValue(referenceVertexId, TYPE_NAME_PROPERTY_KEY, String.class);
-        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        AtlasEntityType entityType = getEntityTypeCached(typeName);
         Map<String, Object> referenceVertexProperties  = null;
         if (entityType != null) {
             Map<String, Object> uniqueAttributes = new HashMap<>();
@@ -425,7 +483,7 @@ public class EntityGraphRetriever {
 
     public AtlasObjectId toAtlasObjectId(AtlasEntity entity) {
         AtlasObjectId   ret        = null;
-        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+        AtlasEntityType entityType = getEntityTypeCached(entity.getTypeName());
 
         if (entityType != null) {
             Map<String, Object> uniqueAttributes = new HashMap<>();
@@ -480,7 +538,7 @@ public class EntityGraphRetriever {
             String strValidityPeriods;
 
             if (enableJanusOptimisation) {
-                referenceProperties = preloadProperties(classificationVertex, typeRegistry.getClassificationTypeByName(classificationName), Collections.emptySet(), false);
+                referenceProperties = preloadProperties(classificationVertex, getClassificationTypeCached(classificationName), Collections.emptySet(), false);
                 ret.setEntityGuid((String) referenceProperties.get(Constants.CLASSIFICATION_ENTITY_GUID));
                 ret.setEntityStatus(referenceProperties.get(Constants.CLASSIFICATION_ENTITY_STATUS) != null ?
                         AtlasEntity.Status.valueOf((String) referenceProperties.get(Constants.CLASSIFICATION_ENTITY_STATUS)) : null);
@@ -564,7 +622,7 @@ public class EntityGraphRetriever {
     public Map<String, Object> getEntityUniqueAttribute(AtlasVertex entityVertex) throws AtlasBaseException {
         Map<String, Object> ret        = null;
         String              typeName   = AtlasGraphUtilsV2.getTypeName(entityVertex);
-        AtlasEntityType     entityType = typeRegistry.getEntityTypeByName(typeName);
+        AtlasEntityType     entityType = getEntityTypeCached(typeName);
 
         if (entityType != null && MapUtils.isNotEmpty(entityType.getUniqAttributes())) {
             for (AtlasAttribute attribute : entityType.getUniqAttributes().values()) {
@@ -585,7 +643,7 @@ public class EntityGraphRetriever {
 
     public AtlasEntitiesWithExtInfo getEntitiesByUniqueAttributes(String typeName, List<Map<String, Object>> uniqueAttributesList, boolean isMinExtInfo) throws AtlasBaseException {
         AtlasEntitiesWithExtInfo ret        = new AtlasEntitiesWithExtInfo();
-        AtlasEntityType          entityType = typeRegistry.getEntityTypeByName(typeName);
+        AtlasEntityType          entityType = getEntityTypeCached(typeName);
 
         if (entityType != null) {
             for (Map<String, Object> uniqAttributes : uniqueAttributesList) {
@@ -801,7 +859,7 @@ public class EntityGraphRetriever {
 
             visitedVertices.add(entityVertexId);
 
-            AtlasEntityType entityType          = typeRegistry.getEntityTypeByName(getTypeName(entityVertex));
+            AtlasEntityType entityType          = getEntityTypeCached(getTypeName(entityVertex));
             String[]        tagPropagationEdges = entityType != null ? entityType.getTagPropagationEdgesArray() : null;
 
             if (tagPropagationEdges == null) {
@@ -1018,7 +1076,7 @@ public class EntityGraphRetriever {
     private Set<String> getAdjacentVerticesIds(AtlasVertex entityVertex,final String classificationId, final String relationshipGuidToExclude
             ,List<String> edgeLabelsToCheck,Boolean toExclude, Set<String> visitedVerticesIds) {
 
-        AtlasEntityType         entityType          = typeRegistry.getEntityTypeByName(getTypeName(entityVertex));
+        AtlasEntityType         entityType          = getEntityTypeCached(getTypeName(entityVertex));
         String[]                tagPropagationEdges = entityType != null ? entityType.getTagPropagationEdgesArray() : null;
         Set<String>             ret                 = new HashSet<>();
         RequestContext          requestContext      = RequestContext.get();
@@ -1110,7 +1168,7 @@ public class EntityGraphRetriever {
         if (AtlasTypeUtil.isAssignedGuid(objId)) {
             ret = AtlasGraphUtilsV2.findByGuid(this.graph, objId.getGuid());
         } else {
-            AtlasEntityType     entityType     = typeRegistry.getEntityTypeByName(objId.getTypeName());
+            AtlasEntityType     entityType     = getEntityTypeCached(objId.getTypeName());
             Map<String, Object> uniqAttributes = objId.getUniqueAttributes();
 
             ret = AtlasGraphUtilsV2.getVertexByUniqueAttributes(this.graph, entityType, uniqAttributes);
@@ -1153,7 +1211,7 @@ public class EntityGraphRetriever {
         Set<String> edgeLabels = new HashSet<>();
 
         for (String typeName : typeNames) {
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+            AtlasEntityType entityType = getEntityTypeCached(typeName);
             if (entityType == null) {
                 continue;
             }
@@ -1455,7 +1513,7 @@ public class EntityGraphRetriever {
             mapSystemAttributes(entityVertex, entity);
 
             entity.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
-            entity.setSuperTypeNames(typeRegistry.getEntityTypeByName(entity.getTypeName()).getAllSuperTypes());
+            entity.setSuperTypeNames(getEntityTypeCached(entity.getTypeName()).getAllSuperTypes());
 
             mapBusinessAttributes(entityVertex, entity);
 
@@ -1500,7 +1558,7 @@ public class EntityGraphRetriever {
 
             mapClassifications(entityVertex, entity);
 
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+            AtlasEntityType entityType = getEntityTypeCached(entity.getTypeName());
 
             if (entityType != null) {
                 for (AtlasAttribute attribute : entityType.getMinInfoAttributes().values()) {
@@ -1734,7 +1792,7 @@ public class EntityGraphRetriever {
                         termAssignmentHeaders.stream().map(AtlasTermAssignmentHeader::getDisplayText)
                                 .collect(Collectors.toList()));
             }
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+            AtlasEntityType entityType = getEntityTypeCached(typeName);
 
             ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
             if (entityType != null) {
@@ -1843,7 +1901,7 @@ public class EntityGraphRetriever {
                         termAssignmentHeaders.stream().map(AtlasTermAssignmentHeader::getDisplayText)
                                 .collect(Collectors.toList()));
             }
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+            AtlasEntityType entityType = getEntityTypeCached(typeName);
 
             ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
 
@@ -1912,7 +1970,7 @@ public class EntityGraphRetriever {
         try {
             //pre-fetching the properties
             String typeName = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class); //properties.get returns null
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName); // this is not costly
+            AtlasEntityType entityType = getEntityTypeCached(typeName);
             Map<String, Object> properties = preloadProperties(entityVertex, entityType, attributes, true);
 
             String guid = (String) properties.get(Constants.GUID_PROPERTY_KEY);
@@ -2049,7 +2107,7 @@ public class EntityGraphRetriever {
             if (entityVertex != null) {
                 if (enableJanusOptimization) {
                     String typeName = entityVertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
-                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+                    AtlasEntityType entityType = getEntityTypeCached(typeName);
                     Map<String, Object> properties = preloadProperties(entityVertex, entityType, Collections.emptySet(), false);
 
                     entity.setGuid((String) properties.get(GUID_PROPERTY_KEY));
@@ -2880,7 +2938,7 @@ public class EntityGraphRetriever {
 
 
         if (isRelationshipAttribute && RequestContext.get().isIncludeRelationshipAttributes()) {             // Map Attributes
-            AtlasRelationshipType relationshipType = typeRegistry.getRelationshipTypeByName(relationshipTypeName);
+            AtlasRelationshipType relationshipType = getRelationshipTypeCached(relationshipTypeName);
             if (relationshipType == null) {
                 LOG.warn("Relationship type not found for typeName: {}", relationshipTypeName);
                 return ret;
@@ -3018,7 +3076,7 @@ public class EntityGraphRetriever {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphRetriever.mapRelationshipAttributes");
 
         try {
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+            AtlasEntityType entityType = getEntityTypeCached(entity.getTypeName());
 
             if (entityType == null) {
                 throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, entity.getTypeName());
@@ -3036,7 +3094,7 @@ public class EntityGraphRetriever {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("EntityGraphRetriever.mapMandatoryRelationshipAttributes");
 
         try {
-            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+            AtlasEntityType entityType = getEntityTypeCached(entity.getTypeName());
 
             if (entityType == null) {
                 throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, entity.getTypeName());
@@ -3061,7 +3119,7 @@ public class EntityGraphRetriever {
         try {
             Object                ret                  = null;
             String                relationshipTypeName = graphHelper.getRelationshipTypeName(entityVertex, entityType, attributeName);
-            AtlasRelationshipType relationshipType     = relationshipTypeName != null ? typeRegistry.getRelationshipTypeByName(relationshipTypeName) : null;
+            AtlasRelationshipType relationshipType     = relationshipTypeName != null ? getRelationshipTypeCached(relationshipTypeName) : null;
 
             if (relationshipType == null) {
                 throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIPDEF_INVALID, "relationshipDef is null");
@@ -3071,8 +3129,8 @@ public class EntityGraphRetriever {
             AtlasRelationshipDef    relationshipDef = relationshipType.getRelationshipDef();
             AtlasRelationshipEndDef endDef1         = relationshipDef.getEndDef1();
             AtlasRelationshipEndDef endDef2         = relationshipDef.getEndDef2();
-            AtlasEntityType         endDef1Type     = typeRegistry.getEntityTypeByName(endDef1.getType());
-            AtlasEntityType         endDef2Type     = typeRegistry.getEntityTypeByName(endDef2.getType());
+            AtlasEntityType         endDef1Type     = getEntityTypeCached(endDef1.getType());
+            AtlasEntityType         endDef2Type     = getEntityTypeCached(endDef2.getType());
             AtlasRelationshipEndDef attributeEndDef = null;
 
             if (endDef1Type.isTypeOrSuperTypeOf(entityType.getTypeName()) && StringUtils.equals(endDef1.getName(), attributeName)) {
@@ -3237,7 +3295,7 @@ public class EntityGraphRetriever {
     }
 
     private Object getDisplayText(AtlasVertex entityVertex, String entityTypeName) throws AtlasBaseException {
-        return getDisplayText(entityVertex, typeRegistry.getEntityTypeByName(entityTypeName));
+        return getDisplayText(entityVertex, getEntityTypeCached(entityTypeName));
     }
 
     private Object getDisplayText(String vertexId, AtlasEntityType entityType, VertexEdgePropertiesCache vertexEdgePropertiesCache) throws AtlasBaseException {
