@@ -192,6 +192,7 @@ public class RangerUserStoreProvider {
 			perf = RangerPerfTracer.getPerfTracer(PERF_POLICYENGINE_INIT_LOG, "RangerUserStoreProvider.loadUserStoreFromAdmin(serviceName=" + serviceName + ")");
 		}
 
+		long startTime = System.currentTimeMillis();
 		try {
 			if ("atlas".equals(serviceName)) {
 				userStore = keycloakUserStore.loadUserStoreIfUpdated(lastUpdateTimeInMillis);
@@ -205,7 +206,9 @@ public class RangerUserStoreProvider {
 
 				long newVersion = userStore.getUserStoreVersion() == null ? -1 : userStore.getUserStoreVersion().longValue();
 				saveToCache(userStore);
-				LOG.info("RangerUserStoreProvider(serviceName=" + serviceName + "): found updated version. lastKnownUserStoreVersion=" + lastKnownUserStoreVersion + "; newVersion=" + newVersion );
+				long timeTaken = System.currentTimeMillis() - startTime;
+				int userCount = userStore.getUserGroupMapping() != null ? userStore.getUserGroupMapping().size() : 0;
+				LOG.info("RangerUserStoreProvider(serviceName=" + serviceName + "): found updated version. lastKnownUserStoreVersion=" + lastKnownUserStoreVersion + "; newVersion=" + newVersion + "; userCount=" + userCount + "; timeTakenMs=" + timeTaken);
 			} else {
 				if(LOG.isDebugEnabled()) {
 					LOG.debug("RangerUserStoreProvider(serviceName=" + serviceName + ").run(): no update found. lastKnownUserStoreVersion=" + lastKnownUserStoreVersion );

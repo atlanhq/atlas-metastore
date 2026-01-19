@@ -152,24 +152,29 @@ public class KeycloakUserStore {
     }
 
     public RangerRoles loadRolesIfUpdated(long lastUpdatedTime) throws AtlasBaseException {
+        long startTime = System.currentTimeMillis();
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("loadRolesIfUpdated");
 
         boolean isKeycloakUpdated = isKeycloakSubjectsStoreUpdated(lastUpdatedTime);
         if (!isKeycloakUpdated) {
+            LOG.info("loadRolesIfUpdated: No updates from Heracles, skipping cache reload (lastUpdatedTime: {})", lastUpdatedTime);
             return null;
         }
+        
         RangerRoles rangerRoles = new RangerRoles();
         Map<String, List<RangerRole.RoleMember>> roleUserMapping = new HashMap<>();
         Set<RangerRole> roleSet = new HashSet<>();
 
         int userSize = AtlasConfiguration.HERACLES_CLIENT_PAGINATION_SIZE.getInt();
         int userFrom = 0;
+        int totalUsersFetched = 0;
         List<UserRepresentation> userRetrievalResult;
 
         do {
             userRetrievalResult = getHeraclesClient().getUsersMappings(userFrom, userSize, new String[]{KEYCLOAK_FIELDS.ROLES.name().toLowerCase()});
 
             if (!CollectionUtils.isEmpty(userRetrievalResult)) {
+                totalUsersFetched += userRetrievalResult.size();
                 userRetrievalResult.forEach(user -> {
                     Set<String> userRoles = new HashSet<>(user.getRealmRoles());
 
@@ -186,6 +191,7 @@ public class KeycloakUserStore {
 
         int roleSize = AtlasConfiguration.HERACLES_CLIENT_PAGINATION_SIZE.getInt();
         int roleFrom = 0;
+        int totalRolesFetched = 0;
         List<HeraclesRoleViewRepresentation> roleRetrievalResult;
 
         do {
@@ -193,6 +199,7 @@ public class KeycloakUserStore {
                     KEYCLOAK_FIELDS.GROUPS.name()});
 
             if (!CollectionUtils.isEmpty(roleRetrievalResult)) {
+                totalRolesFetched += roleRetrievalResult.size();
                 roleRetrievalResult.forEach(role -> {
                     RangerRole rangerRole = new RangerRole();
                     rangerRole.setName(role.getName());
@@ -226,6 +233,10 @@ public class KeycloakUserStore {
         rangerRoles.setRoleVersion(-1L);
 
         RequestContext.get().endMetricRecord(recorder);
+
+        long timeTaken = System.currentTimeMillis() - startTime;
+        LOG.info("loadRolesIfUpdated: Successfully loaded {} users with {} roles from Heracles in {} ms", 
+                 totalUsersFetched, roleSet.size(), timeTaken);
 
         return rangerRoles;
     }
@@ -317,9 +328,12 @@ public class KeycloakUserStore {
     }
 
     public RangerUserStore loadUserStoreIfUpdated(long lastUpdatedTime) throws AtlasBaseException {
+        long startTime = System.currentTimeMillis();
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("loadUserStoreIfUpdated");
+        
         boolean isKeycloakUpdated = isKeycloakSubjectsStoreUpdated(lastUpdatedTime);
         if (!isKeycloakUpdated) {
+            LOG.info("loadUserStoreIfUpdated: No updates from Heracles, skipping cache reload (lastUpdatedTime: {})", lastUpdatedTime);
             return null;
         }
 
@@ -351,6 +365,9 @@ public class KeycloakUserStore {
 
         RequestContext.get().endMetricRecord(recorder);
 
+        long timeTaken = System.currentTimeMillis() - startTime;
+        LOG.info("loadUserStoreIfUpdated: Successfully loaded {} users with {} groups from Heracles in {} ms", 
+                 ret.size(), userGroupMapping.size(), timeTaken);
 
         return userStore;
     }
