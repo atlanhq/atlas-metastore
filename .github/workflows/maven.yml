@@ -25,7 +25,7 @@ on:
       - beta
       - master
       - staging
-      - alcon-v2-418
+      - userstore-time-master
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -309,7 +309,7 @@ jobs:
           df -h / | tail -1
 
       - name: Verify disk space for tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'userstore-time-master'
         run: |
           echo "=========================================="
           echo "DISK SPACE CHECK BEFORE TESTS"
@@ -333,7 +333,7 @@ jobs:
 
       - name: Run Integration Tests
         id: integration_tests
-        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master'
+        if: github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master' || github.ref_name == 'userstore-time-master'
         continue-on-error: true
         env:
           # Configure Testcontainers for GitHub Actions

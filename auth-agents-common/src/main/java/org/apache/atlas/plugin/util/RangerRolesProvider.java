@@ -192,6 +192,7 @@ public class RangerRolesProvider {
 			perf = RangerPerfTracer.getPerfTracer(PERF_POLICYENGINE_INIT_LOG, "RangerRolesProvider.loadUserGroupRolesFromAdmin(serviceName=" + serviceName + ")");
 		}
 
+		long startTime = System.currentTimeMillis();
 		try {
 			if ("atlas".equals(serviceName)) {
 				roles = keycloakUserStore.loadRolesIfUpdated(lastUpdatedTimeInMillis);
@@ -204,7 +205,9 @@ public class RangerRolesProvider {
 			if(isUpdated) {
 				long newVersion = roles.getRoleVersion() == null ? -1 : roles.getRoleVersion().longValue();
 				saveToCache(roles);
-				LOG.info("RangerRolesProvider(serviceName=" + serviceName + "): found updated version. lastKnownRoleVersion=" + lastKnownRoleVersion + "; newVersion=" + newVersion );
+				long timeTaken = System.currentTimeMillis() - startTime;
+				int roleCount = roles.getRangerRoles() != null ? roles.getRangerRoles().size() : 0;
+				LOG.info("RangerRolesProvider(serviceName=" + serviceName + "): found updated version. lastKnownRoleVersion=" + lastKnownRoleVersion + "; newVersion=" + newVersion + "; roleCount=" + roleCount + "; timeTakenMs=" + timeTaken);
 			} else {
 				if(LOG.isDebugEnabled()) {
 					LOG.debug("RangerRolesProvider(serviceName=" + serviceName + ").run(): no update found. lastKnownRoleVersion=" + lastKnownRoleVersion );
