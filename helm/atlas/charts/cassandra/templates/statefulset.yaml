@@ -53,7 +53,10 @@ spec:
 {{- if or (eq $tierType "Enterprise") (eq $tierType "") }}
       affinity:
         nodeAffinity:
-          {{- if eq .Values.custom_deployment.enabled true }}
+          {{- if .Values.affinityOverride }}
+          requiredDuringSchedulingIgnoredDuringExecution:
+            {{- toYaml .Values.affinityOverride.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution | nindent 12 }}
+          {{- else if eq .Values.custom_deployment.enabled true }}
           requiredDuringSchedulingIgnoredDuringExecution:
             nodeSelectorTerms:
             {{- if (default false .Values.custom_deployment.karpenter_enabled) }}
