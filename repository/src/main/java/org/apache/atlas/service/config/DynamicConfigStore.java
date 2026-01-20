@@ -1,6 +1,7 @@
 package org.apache.atlas.service.config;
 
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,8 +32,14 @@ import java.util.Objects;
  * - If Cassandra is disabled, operations are no-ops (fall back to existing behavior)
  *
  * Configuration:
- * - atlas.config.store.cassandra.enabled=true to enable
- * - If disabled, all operations are no-ops
+ * - atlas.config.store.cassandra.enabled=true to enable Cassandra connectivity and sync
+ * - atlas.config.store.cassandra.activated=true to use Cassandra for reads (instead of Redis)
+ *
+ * Migration Strategy:
+ * 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis
+ *    - Feature flag helper methods fall back to FeatureFlagStore (Redis)
+ * 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
+ *    - Feature flag helper methods read from Cassandra cache
  */
 @Component
 public class DynamicConfigStore implements ApplicationContextAware {
@@ -51,7 +58,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
         this.config = Objects.requireNonNull(config, "DynamicConfigStoreConfig cannot be null");
         this.cacheStore = Objects.requireNonNull(cacheStore, "DynamicConfigCacheStore cannot be null");
 
-        LOG.info("DynamicConfigStore created - enabled: {}", config.isEnabled());
+        LOG.info("DynamicConfigStore created - enabled: {}, activated: {}", config.isEnabled(), config.isActivated());
     }
 
     @PostConstruct
@@ -223,6 +230,95 @@ public class DynamicConfigStore implements ApplicationContextAware {
     public static boolean isReady() {
         DynamicConfigStore store = getInstance();
         return store != null && store.initialized;
+    }
+
+    /**
+     * Check if the store is activated for reads.
+     * When activated, feature flag reads come from Cassandra instead of Redis.
+     *
+     * @return true if enabled AND activated, false otherwise
+     */
+    public static boolean isActivated() {
+        DynamicConfigStore store = getInstance();
+        return store != null && store.config.isEnabled() && store.config.isActivated();
+    }
+
+    // ================== Feature Flag Helper Methods ==================
+    //
+    // These methods check if DynamicConfigStore is activated.
+    // If activated, they read from Cassandra cache.
+    // If not activated, they fall back to FeatureFlagStore (Redis).
+    //
+
+    /**
+     * Check if Tag V2 (Janus optimization) is enabled.
+     * Note: The flag ENABLE_JANUS_OPTIMISATION being "false" means Tag V2 is ENABLED.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if Tag V2 is enabled, false otherwise
+     */
+    public static boolean isTagV2Enabled() {
+        if (isActivated()) {
+            return !getConfigAsBoolean(ConfigKey.ENABLE_JANUS_OPTIMISATION.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.isTagV2Enabled();
+    }
+
+    /**
+     * Check if maintenance mode is enabled.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if maintenance mode is enabled, false otherwise
+     */
+    public static boolean isMaintenanceModeEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.MAINTENANCE_MODE.getKey(), "true");
+    }
+
+    /**
+     * Check if writes are disabled.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if writes are disabled, false otherwise
+     */
+    public static boolean isWriteDisabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.DISABLE_WRITE_FLAG.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.DISABLE_WRITE_FLAG.getKey(), "true");
+    }
+
+    /**
+     * Check if persona hierarchy filter is enabled.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if enabled, false otherwise
+     */
+    public static boolean isPersonaHierarchyFilterEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.ENABLE_PERSONA_HIERARCHY_FILTER.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.ENABLE_PERSONA_HIERARCHY_FILTER.getKey(), "true");
+    }
+
+    /**
+     * Check if temp ES index should be used.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if temp ES index should be used, false otherwise
+     */
+    public static boolean useTempEsIndex() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.USE_TEMP_ES_INDEX.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.USE_TEMP_ES_INDEX.getKey(), "true");
     }
 
     // ================== Internal Methods ==================

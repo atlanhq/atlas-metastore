@@ -12,12 +12,17 @@ import org.springframework.stereotype.Component;
  *
  * Loads configuration properties from atlas-application.properties:
  * - atlas.config.store.cassandra.enabled: Enable/disable Cassandra config store (default: false)
+ * - atlas.config.store.cassandra.activated: Activate Cassandra for reads instead of Redis (default: false)
  * - atlas.config.store.sync.interval.ms: Background sync interval in milliseconds (default: 60000)
  * - atlas.config.store.cassandra.keyspace: Cassandra keyspace name (default: config_store)
  * - atlas.config.store.cassandra.table: Cassandra table name (default: configs)
  * - atlas.config.store.app.name: Application name for partitioning (default: atlas)
  * - atlas.config.store.cassandra.hostname: Cassandra hostname (falls back to atlas.graph.storage.hostname)
  * - atlas.config.store.cassandra.replication.factor: Replication factor (default: 3)
+ *
+ * Migration Strategy:
+ * 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis
+ * 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
  */
 @Component
 public class DynamicConfigStoreConfig {
@@ -25,6 +30,7 @@ public class DynamicConfigStoreConfig {
 
     // Property keys
     public static final String PROP_ENABLED = "atlas.config.store.cassandra.enabled";
+    public static final String PROP_ACTIVATED = "atlas.config.store.cassandra.activated";
     public static final String PROP_SYNC_INTERVAL_MS = "atlas.config.store.sync.interval.ms";
     public static final String PROP_KEYSPACE = "atlas.config.store.cassandra.keyspace";
     public static final String PROP_TABLE = "atlas.config.store.cassandra.table";
@@ -38,6 +44,7 @@ public class DynamicConfigStoreConfig {
 
     // Default values
     private static final boolean DEFAULT_ENABLED = false;
+    private static final boolean DEFAULT_ACTIVATED = false;
     private static final long DEFAULT_SYNC_INTERVAL_MS = 60000L; // 60 seconds
     private static final String DEFAULT_KEYSPACE = "config_store";
     private static final String DEFAULT_TABLE = "configs";
@@ -48,6 +55,7 @@ public class DynamicConfigStoreConfig {
     public static final int CASSANDRA_PORT = 9042;
 
     private final boolean enabled;
+    private final boolean activated;
     private final long syncIntervalMs;
     private final String keyspace;
     private final String table;
@@ -60,6 +68,7 @@ public class DynamicConfigStoreConfig {
         Configuration props = ApplicationProperties.get();
 
         this.enabled = props.getBoolean(PROP_ENABLED, DEFAULT_ENABLED);
+        this.activated = props.getBoolean(PROP_ACTIVATED, DEFAULT_ACTIVATED);
         this.syncIntervalMs = props.getLong(PROP_SYNC_INTERVAL_MS, DEFAULT_SYNC_INTERVAL_MS);
         this.keyspace = props.getString(PROP_KEYSPACE, DEFAULT_KEYSPACE);
         this.table = props.getString(PROP_TABLE, DEFAULT_TABLE);
@@ -75,12 +84,16 @@ public class DynamicConfigStoreConfig {
             this.hostname = props.getString(PROP_GRAPH_STORAGE_HOSTNAME, DEFAULT_HOSTNAME);
         }
 
-        LOG.info("DynamicConfigStoreConfig initialized - enabled: {}, keyspace: {}, table: {}, hostname: {}, syncInterval: {}ms",
-                enabled, keyspace, table, hostname, syncIntervalMs);
+        LOG.info("DynamicConfigStoreConfig initialized - enabled: {}, activated: {}, keyspace: {}, table: {}, hostname: {}, syncInterval: {}ms",
+                enabled, activated, keyspace, table, hostname, syncIntervalMs);
     }
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isActivated() {
+        return activated;
     }
 
     public long getSyncIntervalMs() {
