@@ -105,6 +105,10 @@ atlas:
     thread_count: 5
     lock_name: "atlas-read:type-def:lock"
 
+  # Deterministic ID generation for entities
+  deterministicIdGeneration:
+    enabled: true
+
   # Cassandra Config Store - Dynamic configuration backed by Cassandra
   # Migration Strategy:
   # 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis
