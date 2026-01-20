@@ -375,8 +375,48 @@ public class DynamicConfigStore implements ApplicationContextAware {
                 LOG.info("Config set - key: {}, value: {}, by: {} (no cache refresher)", key, value, updatedBy);
             }
 
+            // When maintenance mode is disabled, clear the activation flags
+            if (ConfigKey.MAINTENANCE_MODE.getKey().equals(key) && "false".equalsIgnoreCase(value)) {
+                clearMaintenanceModeActivation(updatedBy);
+            }
+
         } catch (Exception e) {
             LOG.error("Failed to set config - key: {}, value: {}", key, value, e);
+        }
+    }
+
+    /**
+     * Clear maintenance mode activation flags.
+     * Called when MAINTENANCE_MODE is set to false.
+     */
+    private void clearMaintenanceModeActivation(String clearedBy) {
+        try {
+            String activatedAt = cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey()) != null
+                    ? cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey()).getValue() : null;
+            String activatedBy = cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey()) != null
+                    ? cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey()).getValue() : null;
+
+            if (activatedAt != null || activatedBy != null) {
+                // Delete from Cassandra
+                CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
+                dao.deleteConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+                dao.deleteConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+
+                // Remove from local cache
+                cacheStore.remove(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+                cacheStore.remove(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+
+                // Refresh activation keys on all pods
+                if (cacheRefresher != null) {
+                    cacheRefresher.refreshAllPodsCache(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+                    cacheRefresher.refreshAllPodsCache(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+                }
+
+                LOG.info("Maintenance mode activation cleared by {} (was activated at {} by {})",
+                        clearedBy, activatedAt, activatedBy);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to clear maintenance mode activation flags", e);
         }
     }
 

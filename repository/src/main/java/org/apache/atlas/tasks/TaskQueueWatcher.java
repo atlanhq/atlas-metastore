@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.PreDestroy;
+import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -58,6 +59,8 @@ public class TaskQueueWatcher implements Runnable {
     private static final String ATLAS_TASK_LOCK = "atlas:task:lock";
 
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
+    private final AtomicBoolean maintenanceModeActivated = new AtomicBoolean(false);
+    private final String podId = System.getenv().getOrDefault("HOSTNAME", "unknown-pod");
 
     public TaskQueueWatcher(ExecutorService executorService, TaskRegistry registry,
                             Map<String, TaskFactory> taskTypeFactoryMap, TaskManagement.Statistics statistics,
@@ -96,7 +99,7 @@ public class TaskQueueWatcher implements Runnable {
         LOG.info("TaskQueueWatcher: Time constants - pollInterval: {}, TASK_WAIT_TIME_MS: {}", pollInterval, AtlasConstants.TASK_WAIT_TIME_MS);
 
         while (shouldRun.get()) {
-            // Check maintenance mode at start of each cycle
+            // Quick check - if MM is enabled, don't bother acquiring lock
             if (isMaintenanceModeEnabled()) {
                 LOG.info("TaskQueueWatcher: Maintenance mode enabled, pausing task processing for {} ms", pollInterval);
                 try {
@@ -120,6 +123,20 @@ public class TaskQueueWatcher implements Runnable {
                 }
                 LOG.info("TaskQueueWatcher: Acquired distributed lock: {}", ATLAS_TASK_LOCK);
                 lockAcquired = true;
+
+                // We now hold the lock - we're the "processing pod"
+                // Check MM again - if enabled, set activation and release lock
+                if (isMaintenanceModeEnabled()) {
+                    if (!maintenanceModeActivated.get()) {
+                        setMaintenanceModeActivated();
+                        LOG.info("TaskQueueWatcher: Maintenance mode ACTIVATED - task processing paused by lock-holding pod {}", podId);
+                    }
+                    continue; // Release lock in finally, don't process
+                }
+
+                // Reset local flag when MM is not enabled
+                maintenanceModeActivated.set(false);
+
                 List<AtlasTask> tasks = fetcher.getTasks();
                 
                 // Update queue size metric
@@ -250,6 +267,25 @@ public class TaskQueueWatcher implements Runnable {
         }
         return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
     }
+
+    /**
+     * Set the maintenance mode activation flags in ConfigStore.
+     * Called when task processing is actually paused due to maintenance mode.
+     */
+    private void setMaintenanceModeActivated() {
+        try {
+            if (DynamicConfigStore.isEnabled()) {
+                String now = Instant.now().toString();
+                DynamicConfigStore.setConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey(), now, "system");
+                DynamicConfigStore.setConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey(), podId, "system");
+                maintenanceModeActivated.set(true);
+                LOG.info("TaskQueueWatcher: Maintenance mode ACTIVATED at {} by pod {}", now, podId);
+            }
+        } catch (Exception e) {
+            LOG.warn("TaskQueueWatcher: Failed to set maintenance mode activation flags", e);
+        }
+    }
+
 
 
     static class TasksFetcher {

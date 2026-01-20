@@ -3,6 +3,7 @@ package org.apache.atlas.web.rest;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.config.CassandraConfigDAO;
+import org.apache.atlas.service.config.ConfigKey;
 import org.apache.atlas.service.config.DynamicConfigCacheStore;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.atlas.service.config.DynamicConfigStore;
@@ -144,6 +145,51 @@ public class ConfigCacheRefreshREST {
     }
 
     /**
+     * Get the current maintenance mode status.
+     *
+     * Returns:
+     * - enabled: Whether maintenance mode is set in the config store
+     * - activated: Whether task processing has actually paused
+     * - activatedAt: Timestamp when task processing paused
+     * - activatedBy: Pod ID that paused task processing
+     *
+     * @return maintenance mode status
+     */
+    @GET
+    @Path("/maintenance-mode/status")
+    @Timed
+    public Response getMaintenanceModeStatus() {
+        try {
+            if (!DynamicConfigStore.isEnabled()) {
+                return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity("{\"error\": \"DynamicConfigStore is not enabled\"}")
+                    .build();
+            }
+
+            boolean enabled = DynamicConfigStore.getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
+            String activatedAt = DynamicConfigStore.getConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+            String activatedBy = DynamicConfigStore.getConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+            boolean activated = activatedAt != null && !activatedAt.isEmpty();
+
+            return Response.ok()
+                .entity(new MaintenanceModeStatusResponse(
+                    enabled,
+                    activated,
+                    activatedAt,
+                    activatedBy,
+                    System.getenv().getOrDefault("HOSTNAME", "unknown")
+                ))
+                .build();
+
+        } catch (Exception e) {
+            LOG.error("ConfigCacheRefreshREST: Error getting maintenance mode status", e);
+            return Response.serverError()
+                .entity("{\"error\": \"" + e.getMessage() + "\"}")
+                .build();
+        }
+    }
+
+    /**
      * Response DTO for cache state
      */
     public static class CacheStateResponse {
@@ -166,5 +212,31 @@ public class ConfigCacheRefreshREST {
         public String getUpdatedBy() { return updatedBy; }
         public String getLastUpdated() { return lastUpdated; }
         public String getPodId() { return podId; }
+    }
+
+    /**
+     * Response DTO for maintenance mode status
+     */
+    public static class MaintenanceModeStatusResponse {
+        private boolean enabled;
+        private boolean activated;
+        private String activatedAt;
+        private String activatedBy;
+        private String respondingPod;
+
+        public MaintenanceModeStatusResponse(boolean enabled, boolean activated, String activatedAt,
+                                             String activatedBy, String respondingPod) {
+            this.enabled = enabled;
+            this.activated = activated;
+            this.activatedAt = activatedAt;
+            this.activatedBy = activatedBy;
+            this.respondingPod = respondingPod;
+        }
+
+        public boolean isEnabled() { return enabled; }
+        public boolean isActivated() { return activated; }
+        public String getActivatedAt() { return activatedAt; }
+        public String getActivatedBy() { return activatedBy; }
+        public String getRespondingPod() { return respondingPod; }
     }
 }
