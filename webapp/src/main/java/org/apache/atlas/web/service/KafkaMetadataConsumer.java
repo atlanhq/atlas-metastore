@@ -46,6 +46,7 @@ public class KafkaMetadataConsumer {
     private String topic;
     private int pollTimeoutSeconds;
     private long commitEveryMs;
+    private int maxInFlightRecords;
 
     private final EntityMutationService entityMutationService;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -71,6 +72,7 @@ public class KafkaMetadataConsumer {
             topic = configuration.getString("atlas.kafka.metadata.topic", "events-topic");
             pollTimeoutSeconds = configuration.getInt("atlas.kafka.metadata.pollTimeoutSeconds", 1);
             commitEveryMs = configuration.getLong("atlas.kafka.metadata.commitEveryMs", 1000L);
+            maxInFlightRecords = configuration.getInt("atlas.kafka.metadata.maxInFlightRecords", 100);
             bootstrapServers = configuration.getString(
                     "atlas.graph.kafka.bootstrap.servers",
                     configuration.getString("atlas.kafka.bootstrap.servers", "localhost:9092")
@@ -159,6 +161,7 @@ public class KafkaMetadataConsumer {
 
         Map<TopicPartition, ExecutorService> executors = new ConcurrentHashMap<>();
         Map<TopicPartition, AtomicLong> nextCommitOffset = new ConcurrentHashMap<>();
+        Semaphore inFlight = new Semaphore(maxInFlightRecords);
         long lastCommitAt = System.currentTimeMillis();
         AtomicLong createdSinceLastReport = new AtomicLong(0);
         AtomicLong lastReportAt = new AtomicLong(System.currentTimeMillis());
@@ -206,6 +209,15 @@ public class KafkaMetadataConsumer {
 
                     if (ex == null || next == null) continue;
 
+                    if (running.get()) {
+                        try {
+                            inFlight.acquire();
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
+                    }
+
                     ex.submit(() -> {
                         try {
                             LOG.debug("KafkaMetadataConsumer processing {}-{}@{} key={}",
@@ -218,6 +230,8 @@ public class KafkaMetadataConsumer {
                         } catch (Exception e) {
                             LOG.error("KafkaMetadataConsumer failed {}-{}@{}: {}",
                                     rec.topic(), rec.partition(), rec.offset(), e.getMessage(), e);
+                        } finally {
+                            inFlight.release();
                         }
                     });
                 }
