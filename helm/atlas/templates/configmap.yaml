@@ -503,3 +503,6 @@ data:
 
     ######### Atlas Entity Attribute Optimization #########
     atlas.entity.skip.optional.attributes={{ .Values.atlas.entity.skip_optional_attributes }}
+
+    ######### Deterministic ID Generation #########
+    atlas.deterministic.id.generation.enabled={{ .Values.atlas.deterministicIdGeneration.enabled }}
