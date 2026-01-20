@@ -38,6 +38,7 @@ public class DynamicConfigStoreConfig {
     public static final String PROP_HOSTNAME = "atlas.config.store.cassandra.hostname";
     public static final String PROP_REPLICATION_FACTOR = "atlas.config.store.cassandra.replication.factor";
     public static final String PROP_DATACENTER = "atlas.config.store.cassandra.datacenter";
+    public static final String PROP_CONSISTENCY_LEVEL = "atlas.config.store.cassandra.consistency.level";
 
     // Fallback property key (reuse existing Cassandra hostname config)
     private static final String PROP_GRAPH_STORAGE_HOSTNAME = "atlas.graph.storage.hostname";
@@ -52,6 +53,8 @@ public class DynamicConfigStoreConfig {
     private static final String DEFAULT_HOSTNAME = "localhost";
     private static final int DEFAULT_REPLICATION_FACTOR = 3;
     private static final String DEFAULT_DATACENTER = "datacenter1";
+    // Consistency level: LOCAL_QUORUM for production (requires 2+ nodes), LOCAL_ONE for local dev (single node)
+    private static final String DEFAULT_CONSISTENCY_LEVEL = "LOCAL_QUORUM";
     public static final int CASSANDRA_PORT = 9042;
 
     private final boolean enabled;
@@ -63,6 +66,7 @@ public class DynamicConfigStoreConfig {
     private final String hostname;
     private final int replicationFactor;
     private final String datacenter;
+    private final String consistencyLevel;
 
     public DynamicConfigStoreConfig() throws AtlasException {
         Configuration props = ApplicationProperties.get();
@@ -75,6 +79,7 @@ public class DynamicConfigStoreConfig {
         this.appName = props.getString(PROP_APP_NAME, DEFAULT_APP_NAME);
         this.replicationFactor = props.getInt(PROP_REPLICATION_FACTOR, DEFAULT_REPLICATION_FACTOR);
         this.datacenter = props.getString(PROP_DATACENTER, DEFAULT_DATACENTER);
+        this.consistencyLevel = props.getString(PROP_CONSISTENCY_LEVEL, DEFAULT_CONSISTENCY_LEVEL);
 
         // Hostname: use dedicated property or fall back to graph storage hostname
         String configuredHostname = props.getString(PROP_HOSTNAME, null);
@@ -84,8 +89,8 @@ public class DynamicConfigStoreConfig {
             this.hostname = props.getString(PROP_GRAPH_STORAGE_HOSTNAME, DEFAULT_HOSTNAME);
         }
 
-        LOG.info("DynamicConfigStoreConfig initialized - enabled: {}, activated: {}, keyspace: {}, table: {}, hostname: {}, syncInterval: {}ms",
-                enabled, activated, keyspace, table, hostname, syncIntervalMs);
+        LOG.info("DynamicConfigStoreConfig initialized - enabled: {}, activated: {}, keyspace: {}, table: {}, hostname: {}, syncInterval: {}ms, consistencyLevel: {}",
+                enabled, activated, keyspace, table, hostname, syncIntervalMs, consistencyLevel);
     }
 
     public boolean isEnabled() {
@@ -126,5 +131,9 @@ public class DynamicConfigStoreConfig {
 
     public int getCassandraPort() {
         return CASSANDRA_PORT;
+    }
+
+    public String getConsistencyLevel() {
+        return consistencyLevel;
     }
 }

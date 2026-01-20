@@ -130,6 +130,8 @@ atlas:
       table: configs           # Cassandra table name
       appName: atlas           # Application name for partitioning
       replicationFactor: 3     # Cassandra replication factor
+      # Consistency level: LOCAL_QUORUM for production (requires 2+ nodes), LOCAL_ONE for local dev (single node)
+      consistencyLevel: LOCAL_QUORUM
 
   podAnnotations:
     backup.velero.io/backup-volumes-excludes: master
