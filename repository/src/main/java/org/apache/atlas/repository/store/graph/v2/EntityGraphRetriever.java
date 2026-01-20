@@ -3378,7 +3378,7 @@ public class EntityGraphRetriever {
         Set<AtlasClassification> propagatedClassifications = new HashSet<>();
         Set<AtlasClassification> blockedClassifications = new HashSet<>();
 
-        if (FeatureFlagStore.isTagV2Enabled()) {
+        if (DynamicConfigStore.isTagV2Enabled()) {
             List<AtlasClassification> classifications = getPropagatableClassificationsV2(edge);
 
             for (AtlasClassification classification : classifications) {
