@@ -96,27 +96,79 @@ public abstract class AbstractDomainPreProcessor implements PreProcessor {
     }
 
     protected void isAuthorizedToMove(String typeName, AtlasEntityHeader sourceDomain, AtlasEntityHeader targetDomain) throws AtlasBaseException {
+        LOG.debug("[americano] ==> isAuthorizedToMove(typeName={}, sourceDomain={}, targetDomain={})", 
+                 typeName, 
+                 sourceDomain != null ? sourceDomain.getAttribute(QUALIFIED_NAME) : null,
+                 targetDomain != null ? targetDomain.getAttribute(QUALIFIED_NAME) : null);
 
         String qualifiedNameToAuthSuffix = DATA_DOMAIN_ENTITY_TYPE.equals(typeName) ? "/*domain/*" : "/*product/*";
-        AtlasEntityHeader headerToAuth = new AtlasEntityHeader(typeName);
 
         if (sourceDomain != null) {
            //Update sub-domains/product on source parent
            String qualifiedNameToAuth = sourceDomain.getAttribute(QUALIFIED_NAME) + qualifiedNameToAuthSuffix;
-           headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
+           LOG.info("[americano] Checking UPDATE permission for {} move from source domain: {}", typeName, qualifiedNameToAuth);
+           
+           AtlasEntityHeader headerToAuth = createHeaderForAuth(typeName, qualifiedNameToAuth, sourceDomain);
 
            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_UPDATE, headerToAuth),
                    AtlasPrivilege.ENTITY_UPDATE.name(), " " , typeName, " : ", qualifiedNameToAuth);
-       }
+           
+           LOG.info("[americano] UPDATE permission granted for {} on source domain: {}", typeName, qualifiedNameToAuth);
+        }
 
-       if (targetDomain != null) {
+        if (targetDomain != null) {
            //Create sub-domains/product on target parent
            String qualifiedNameToAuth = targetDomain.getAttribute(QUALIFIED_NAME) + qualifiedNameToAuthSuffix;
-           headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
+           LOG.info("[americano] Checking CREATE permission for {} move to target domain: {}", typeName, qualifiedNameToAuth);
+           
+           AtlasEntityHeader headerToAuth = createHeaderForAuth(typeName, qualifiedNameToAuth, targetDomain);
 
            AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, headerToAuth),
                    AtlasPrivilege.ENTITY_CREATE.name(), " " , typeName, " : ", qualifiedNameToAuth);
-       }
+           
+           LOG.info("[americano] CREATE permission granted for {} on target domain: {}", typeName, qualifiedNameToAuth);
+        }
+
+        LOG.debug("[americano] <== isAuthorizedToMove: Authorization checks completed successfully");
+    }
+
+    /**
+     * Creates an AtlasEntityHeader for authorization checks by copying relevant attributes from the domain header.
+     * This ensures ABAC/persona policies have access to necessary attributes (ownerUsers, ownerGroups, etc.)
+     * for proper policy evaluation. The qualifiedName is set to the pattern (e.g., domainQN/*product/*) while
+     * other attributes are copied from the domain to enable policy evaluation based on domain ownership.
+     */
+    private AtlasEntityHeader createHeaderForAuth(String typeName, String qualifiedNameToAuth, AtlasEntityHeader domainHeader) {
+        LOG.debug("[americano] ==> createHeaderForAuth(typeName={}, qualifiedNameToAuth={}, domainHeader.guid={})", 
+                 typeName, qualifiedNameToAuth, domainHeader != null ? domainHeader.getGuid() : null);
+        
+        AtlasEntityHeader headerToAuth = new AtlasEntityHeader(typeName);
+        headerToAuth.setAttribute(QUALIFIED_NAME, qualifiedNameToAuth);
+
+        // Copy all attributes from domain header that are needed for ABAC/persona policy evaluation
+        // This ensures policies can evaluate based on domain ownership, classifications, etc.
+        if (domainHeader != null) {
+            // Copy all attributes from domain header (ownerUsers, ownerGroups, etc.)
+            if (MapUtils.isNotEmpty(domainHeader.getAttributes())) {
+                LOG.debug("[americano] Copying {} attributes from domain header to auth header", domainHeader.getAttributes().size());
+                for (Map.Entry<String, Object> entry : domainHeader.getAttributes().entrySet()) {
+                    // Skip qualifiedName as we're using the pattern-based one
+                    if (!QUALIFIED_NAME.equals(entry.getKey())) {
+                        headerToAuth.setAttribute(entry.getKey(), entry.getValue());
+                        LOG.debug("[americano] Copied attribute: {} = {}", entry.getKey(), entry.getValue());
+                    }
+                }
+            }
+            // Copy classifications if present, as they may be used in policy evaluation
+            if (CollectionUtils.isNotEmpty(domainHeader.getClassifications())) {
+                headerToAuth.setClassifications(domainHeader.getClassifications());
+                LOG.debug("[americano] Copied {} classifications from domain header", domainHeader.getClassifications().size());
+            }
+        }
+
+        LOG.debug("[americano] <== createHeaderForAuth: Created header with {} attributes", 
+                 headerToAuth.getAttributes() != null ? headerToAuth.getAttributes().size() : 0);
+        return headerToAuth;
     }
 
     protected void updatePolicies(Map<String, String> updatedPolicyResources, EntityMutationContext context) throws AtlasBaseException {

@@ -177,11 +177,23 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         AtlasEntityHeader currentParentDomainHeader = null;
 
         if(currentParentDomainObjectId != null) {
-            currentParentDomainHeader = entityRetriever.toAtlasEntityHeader(currentParentDomainObjectId.getGuid());
+            // Use toAtlasEntityHeaderWithClassifications to ensure all attributes are loaded for ABAC policy evaluation
+            LOG.debug("[americano] Loading current parent domain with classifications: {}", currentParentDomainObjectId.getGuid());
+            currentParentDomainHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(currentParentDomainObjectId.getGuid());
             currentParentDomainQualifiedName = (String) currentParentDomainHeader.getAttribute(QUALIFIED_NAME);
+            LOG.debug("[americano] Current parent domain loaded: {} with {} attributes", 
+                     currentParentDomainQualifiedName, 
+                     currentParentDomainHeader.getAttributes() != null ? currentParentDomainHeader.getAttributes().size() : 0);
         }
 
         AtlasEntityHeader newParentDomainHeader = getParent(entity);
+        // Ensure newParentDomainHeader has all attributes for ABAC policy evaluation
+        if (newParentDomainHeader != null && StringUtils.isNotEmpty(newParentDomainHeader.getGuid())) {
+            LOG.debug("[americano] Loading new parent domain with classifications: {}", newParentDomainHeader.getGuid());
+            newParentDomainHeader = entityRetriever.toAtlasEntityHeaderWithClassifications(newParentDomainHeader.getGuid());
+            LOG.debug("[americano] New parent domain loaded with {} attributes", 
+                     newParentDomainHeader.getAttributes() != null ? newParentDomainHeader.getAttributes().size() : 0);
+        }
         if (newParentDomainHeader != null) {
             newParentDomainQualifiedName = (String) newParentDomainHeader.getAttribute(QUALIFIED_NAME);
         }

@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - test-move-fix
 
 jobs:
   # Detect what changed to optimize workflow execution
