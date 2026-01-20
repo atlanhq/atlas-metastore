@@ -26,6 +26,7 @@ on:
       - beta
       - development
       - master
+      - lite_beta
 jobs:
   # Detect what changed to optimize workflow execution
   # This dramatically speeds up helm-only changes by skipping the 20+ minute build job
