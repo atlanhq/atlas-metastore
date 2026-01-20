@@ -20,10 +20,14 @@ import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetAndMetadata;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.atlas.service.metrics.MetricUtils;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
@@ -50,6 +54,7 @@ public class KafkaMetadataConsumer {
     private static final String METRIC_PREFIX = "kafka.metadata.consumer";
 
     private String topic;
+    private String errorTopic;
     private int pollTimeoutSeconds;
     private long commitEveryMs;
     private int maxInFlightRecords;
@@ -61,6 +66,7 @@ public class KafkaMetadataConsumer {
     private final AtomicLong lastPollTimestampMs = new AtomicLong(0);
     private final AtomicLong lastCommitTimestampMs = new AtomicLong(0);
     private volatile KafkaConsumer<String, String> consumer;
+    private volatile KafkaProducer<String, String> errorProducer;
     private volatile Thread consumerThread;
     private String bootstrapServers;
     private Properties consumerProperties;
@@ -88,6 +94,7 @@ public class KafkaMetadataConsumer {
                 return;
             }
             topic = configuration.getString("atlas.kafka.metadata.topic", "events-topic");
+            errorTopic = configuration.getString("atlas.kafka.metadata.errorTopic", topic + "-errors");
             pollTimeoutSeconds = configuration.getInt("atlas.kafka.metadata.pollTimeoutSeconds", 1);
             commitEveryMs = configuration.getLong("atlas.kafka.metadata.commitEveryMs", 1000L);
             maxInFlightRecords = configuration.getInt("atlas.kafka.metadata.maxInFlightRecords", 100);
@@ -96,7 +103,9 @@ public class KafkaMetadataConsumer {
                     configuration.getString("atlas.kafka.bootstrap.servers", "localhost:9092")
             );
             consumerProperties = buildConsumerProperties(bootstrapServers, configuration);
-            ensureTopic(bootstrapServers, topic, 20, (short) 1);
+            ensureTopic(bootstrapServers, topic, 10, (short) 1);
+            ensureTopic(bootstrapServers, errorTopic, 10, (short) 1);
+            errorProducer = new KafkaProducer<>(buildProducerProperties(bootstrapServers));
         } catch (AtlasException e) {
             LOG.error("Failed to load Kafka metadata consumer configuration", e);
             return;
@@ -142,6 +151,10 @@ public class KafkaMetadataConsumer {
                 Thread.currentThread().interrupt();
             }
         }
+        KafkaProducer<String, String> producerRef = errorProducer;
+        if (producerRef != null) {
+            producerRef.close();
+        }
     }
 
     private void runLoop() {
@@ -168,6 +181,27 @@ public class KafkaMetadataConsumer {
         String autoOffsetReset = configuration.getString("atlas.kafka.metadata.autoOffsetReset", "latest");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
         return props;
+    }
+
+    private static Properties buildProducerProperties(String bootstrapServers) {
+        Properties props = new Properties();
+        props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
+        return props;
+    }
+
+    private void sendToErrorQueue(ConsumerRecord<String, String> record) {
+        KafkaProducer<String, String> producer = errorProducer;
+        if (producer == null) {
+            LOG.warn("KafkaMetadataConsumer error producer not available, dropping failed record");
+            return;
+        }
+        try {
+            producer.send(new ProducerRecord<>(errorTopic, record.key(), record.value()));
+        } catch (Exception e) {
+            LOG.warn("KafkaMetadataConsumer failed to publish to error topic {}", errorTopic, e);
+        }
     }
 
     private void consume(EntityMutationService entityMutationService,
@@ -259,6 +293,7 @@ public class KafkaMetadataConsumer {
                         } catch (Exception e) {
                             LOG.error("KafkaMetadataConsumer failed {}-{}@{}: {}",
                                     rec.topic(), rec.partition(), rec.offset(), e.getMessage(), e);
+                            sendToErrorQueue(rec);
                             failedCounter.increment();
                         } finally {
                             processSample.stop(processTimer);
