@@ -174,11 +174,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             if(searchParams.isCallAsync() || AtlasConfiguration.ENABLE_ASYNC_INDEXSEARCH.getBoolean()) {
                 return performAsyncDirectIndexQuery(searchParams);
             } else {
-                String responseString =  performDirectIndexQuery(searchParams.getQuery(), false);
+                // Check if _source is specified in the query DSL - if so, we need to include source fields
+                String query = searchParams.getQuery();
+                boolean includeSource = query != null && query.contains("\"_source\"");
+                String responseString = performDirectIndexQuery(query, includeSource);
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("runQueryWithLowLevelClient.response : {}", responseString);
                 }
-                return getResultFromResponse(responseString);
+                return getResultFromResponse(responseString, includeSource);
             }
         } catch (IOException e) {
             LOG.error("Failed to execute direct query on ES {}", e.getMessage());
@@ -633,6 +636,10 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
     }
 
     private DirectIndexQueryResult getResultFromResponse(Map<String, LinkedHashMap> responseMap) throws IOException {
+        return getResultFromResponse(responseMap, false);
+    }
+
+    private DirectIndexQueryResult getResultFromResponse(Map<String, LinkedHashMap> responseMap, boolean extractClassificationNames) throws IOException {
         DirectIndexQueryResult result = new DirectIndexQueryResult();
         Map<String, LinkedHashMap> hits_0 = AtlasType.fromJson(AtlasType.toJson(responseMap.get("hits")), Map.class);
         if (hits_0 == null) {
@@ -645,7 +652,8 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         List<LinkedHashMap> hits_1 = AtlasType.fromJson(AtlasType.toJson(hits_0.get("hits")), List.class);
 
-        Stream<Result<AtlasJanusVertex, AtlasJanusEdge>> resultStream = hits_1.stream().map(ResultImplDirect::new);
+        Stream<Result<AtlasJanusVertex, AtlasJanusEdge>> resultStream = hits_1.stream()
+                .map(hit -> new ResultImplDirect(hit, extractClassificationNames));
         result.setIterator(resultStream.iterator());
 
         Map<String, Object> aggregationsMap = (Map<String, Object>) responseMap.get("aggregations");
@@ -660,10 +668,12 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
 
     private DirectIndexQueryResult getResultFromResponse(String responseString) throws IOException {
+        return getResultFromResponse(responseString, false);
+    }
 
+    private DirectIndexQueryResult getResultFromResponse(String responseString, boolean extractClassificationNames) throws IOException {
         Map<String, LinkedHashMap> responseMap = AtlasType.fromJson(responseString, Map.class);
-
-        return getResultFromResponse(responseMap);
+        return getResultFromResponse(responseMap, extractClassificationNames);
     }
 
 
@@ -764,9 +774,54 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
         Map<String, LinkedHashMap> innerHitsMap;
 
         public ResultImplDirect(LinkedHashMap<String, Object> hit) {
+            this(hit, false);
+        }
+
+        public ResultImplDirect(LinkedHashMap<String, Object> hit, boolean extractClassificationNames) {
             this.hit = hit;
             if (hit.get("inner_hits") != null) {
                 innerHitsMap = AtlasType.fromJson(AtlasType.toJson(hit.get("inner_hits")), Map.class);
+            }
+
+            // Extract classification names from _source and cache them to avoid Cassandra calls later
+            if (extractClassificationNames) {
+                extractAndCacheClassificationNames();
+            }
+        }
+
+        /**
+         * Extracts classification names from ES _source field and caches them in RequestContext.
+         * This enables avoiding Cassandra calls when only classification names are needed.
+         */
+        private void extractAndCacheClassificationNames() {
+            try {
+                Object sourceObj = hit.get("_source");
+                if (sourceObj instanceof Map) {
+                    Map<String, Object> source = (Map<String, Object>) sourceObj;
+                    List<String> allClassificationNames = new ArrayList<>();
+
+                    // Extract __traitNames (direct classifications)
+                    Object traitNames = source.get("__traitNames");
+                    if (traitNames instanceof List) {
+                        allClassificationNames.addAll((List<String>) traitNames);
+                    }
+
+                    // Extract __propagatedTraitNames (propagated classifications)
+                    Object propagatedTraitNames = source.get("__propagatedTraitNames");
+                    if (propagatedTraitNames instanceof List) {
+                        allClassificationNames.addAll((List<String>) propagatedTraitNames);
+                    }
+
+                    // Cache the classification names in RequestContext for later use
+                    String vertexId = String.valueOf(LongEncoding.decode(String.valueOf(hit.get("_id"))));
+                    RequestContext.get().cacheESClassificationNames(vertexId, allClassificationNames);
+
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Cached {} classification names from ES for vertex {}", allClassificationNames.size(), vertexId);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to extract classification names from ES _source, will fall back to Cassandra: {}", e.getMessage());
             }
         }
 

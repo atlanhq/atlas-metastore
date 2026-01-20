@@ -109,6 +109,8 @@ public class RequestContext {
     private boolean     includeRelationshipAttributes;
 
     private boolean     includeClassificationNames = false;
+    // Cache for classification names fetched from ES to avoid Cassandra calls
+    private final Map<String, List<String>> esClassificationNamesCache = new HashMap<>();
     private boolean     skipProcessEdgeRestoration = false;
     private String      currentTypePatchAction = "";
     private AtlasTask   currentTask;
@@ -790,6 +792,35 @@ public class RequestContext {
 
     public void setIncludeClassificationNames(boolean includeClassificationNames) {
         this.includeClassificationNames = includeClassificationNames;
+    }
+
+    /**
+     * Cache classification names fetched from ES for a vertex to avoid Cassandra calls.
+     * @param vertexId the vertex ID
+     * @param classificationNames list of classification names (combined trait names and propagated trait names)
+     */
+    public void cacheESClassificationNames(String vertexId, List<String> classificationNames) {
+        if (vertexId != null && classificationNames != null) {
+            esClassificationNamesCache.put(vertexId, classificationNames);
+        }
+    }
+
+    /**
+     * Get cached classification names for a vertex that were fetched from ES.
+     * @param vertexId the vertex ID
+     * @return list of classification names, or null if not cached
+     */
+    public List<String> getCachedESClassificationNames(String vertexId) {
+        return esClassificationNamesCache.get(vertexId);
+    }
+
+    /**
+     * Check if classification names are cached from ES for a vertex.
+     * @param vertexId the vertex ID
+     * @return true if cached, false otherwise
+     */
+    public boolean hasESClassificationNamesCache(String vertexId) {
+        return esClassificationNamesCache.containsKey(vertexId);
     }
 
     public String getClientOrigin() {

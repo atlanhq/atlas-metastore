@@ -1704,12 +1704,24 @@ public class EntityGraphRetriever {
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
             if(includeClassifications || includeClassificationNames){
-                List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+                // Optimization: Check if classification names are cached from ES response
+                // This avoids Cassandra calls when only names are needed
+                if (!includeClassifications && includeClassificationNames && context.hasESClassificationNamesCache(vertexId)) {
+                    // Use cached classification names from ES - no need to call Cassandra
+                    List<String> cachedNames = context.getCachedESClassificationNames(vertexId);
+                    ret.setClassificationNames(cachedNames);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Using {} cached classification names from ES for vertex {} (with cache path)", cachedNames.size(), vertexId);
+                    }
+                } else {
+                    // Fall back to Cassandra/graph for full classification objects or when cache miss
+                    List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
 
-                if (includeClassifications) {
-                    ret.setClassifications(tags);
+                    if (includeClassifications) {
+                        ret.setClassifications(tags);
+                    }
+                    ret.setClassificationNames(getAllTagNames(tags));
                 }
-                ret.setClassificationNames(getAllTagNames(tags));
             }
             ret.setLabels(getLabels(entityVertex));
 
@@ -1810,12 +1822,26 @@ public class EntityGraphRetriever {
             boolean includeClassificationNames = context.isIncludeClassificationNames();
 
             if(includeClassifications || includeClassificationNames){
-                List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+                String vertexId = entityVertex.getIdForDisplay();
 
-                if(includeClassifications){
-                    ret.setClassifications(tags);
+                // Optimization: Check if classification names are cached from ES response
+                // This avoids Cassandra calls when only names are needed
+                if (!includeClassifications && includeClassificationNames && context.hasESClassificationNamesCache(vertexId)) {
+                    // Use cached classification names from ES - no need to call Cassandra
+                    List<String> cachedNames = context.getCachedESClassificationNames(vertexId);
+                    ret.setClassificationNames(cachedNames);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Using {} cached classification names from ES for vertex {}", cachedNames.size(), vertexId);
+                    }
+                } else {
+                    // Fall back to Cassandra/graph for full classification objects or when cache miss
+                    List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+
+                    if(includeClassifications){
+                        ret.setClassifications(tags);
+                    }
+                    ret.setClassificationNames(getAllTagNames(tags));
                 }
-                ret.setClassificationNames(getAllTagNames(tags));
             }
 
             ret.setIsIncomplete(isIncomplete);
@@ -1939,12 +1965,26 @@ public class EntityGraphRetriever {
             boolean includeClassificationNames = context.isIncludeClassificationNames();
 
             if(includeClassifications || includeClassificationNames){
-                List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+                String vertexId = entityVertex.getIdForDisplay();
 
-                if (includeClassifications) {
-                    ret.setClassifications(tags);
+                // Optimization: Check if classification names are cached from ES response
+                // This avoids Cassandra calls when only names are needed
+                if (!includeClassifications && includeClassificationNames && context.hasESClassificationNamesCache(vertexId)) {
+                    // Use cached classification names from ES - no need to call Cassandra
+                    List<String> cachedNames = context.getCachedESClassificationNames(vertexId);
+                    ret.setClassificationNames(cachedNames);
+                    if (LOG.isDebugEnabled()) {
+                        LOG.debug("Using {} cached classification names from ES for vertex {} (prefetch path)", cachedNames.size(), vertexId);
+                    }
+                } else {
+                    // Fall back to Cassandra/graph for full classification objects or when cache miss
+                    List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
+
+                    if (includeClassifications) {
+                        ret.setClassifications(tags);
+                    }
+                    ret.setClassificationNames(getAllTagNames(tags));
                 }
-                ret.setClassificationNames(getAllTagNames(tags));
             }
 
             ret.setIsIncomplete(isIncomplete);

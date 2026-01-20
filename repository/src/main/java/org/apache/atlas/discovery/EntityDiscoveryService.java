@@ -352,6 +352,10 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
             AtlasPerfMetrics.MetricRecorder elasticSearchQueryMetric = RequestContext.get().startMetricRecord("elasticSearchQuery");
             optimizeQueryIfApplicable(searchParams, clientOrigin);
+
+            // Add _source includes for classification names if needed (optimization to avoid Cassandra calls)
+            addClassificationNamesToSourceFields(searchParams);
+
             if (CLIENT_ORIGIN_PRODUCT.equals(clientOrigin) || CLIENT_ORIGIN_PLAYBOOK.equals(clientOrigin)) {
                 if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                     perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityDiscoveryService.directIndexSearch(" + searchParams.getQuery() + ")");
@@ -782,6 +786,49 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
 
         } catch (Exception e) {
             LOG.error("Error -> addPreFiltersToSearchQuery!", e);
+        }
+    }
+
+    /**
+     * Adds _source includes to the ES query when classification names need to be fetched from ES.
+     * This optimization avoids Cassandra calls for classification names when only names are needed.
+     *
+     * @param searchParams the search parameters containing the query
+     */
+    private void addClassificationNamesToSourceFields(SearchParams searchParams) {
+        if (!searchParams.isIncludeClassificationNames()) {
+            return;
+        }
+
+        // Only add _source when we want classification names but not full classification objects
+        // This is the optimization case - getting names from ES instead of Cassandra
+        if (!searchParams.isExcludeClassifications()) {
+            // If full classifications are needed, we'll still need Cassandra for the full objects
+            // but we can still use ES for names if includeClassificationNames is true
+            // For now, let's only optimize the case where we don't need full classifications
+            return;
+        }
+
+        try {
+            AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("addClassificationNamesToSourceFields");
+            ObjectMapper mapper = new ObjectMapper();
+            String dslString = searchParams.getQuery();
+            JsonNode node = mapper.readTree(dslString);
+
+            // Add _source includes for classification name fields
+            // These fields are indexed in ES and can be returned without hitting Cassandra
+            ObjectNode sourceNode = mapper.createObjectNode();
+            sourceNode.putArray("includes")
+                    .add("__traitNames")
+                    .add("__propagatedTraitNames");
+
+            ((ObjectNode) node).set("_source", sourceNode);
+            searchParams.setQuery(node.toString());
+
+            LOG.debug("Added _source includes for classification names to ES query");
+            RequestContext.get().endMetricRecord(metric);
+        } catch (Exception e) {
+            LOG.warn("Error adding _source includes for classification names, will fall back to Cassandra: {}", e.getMessage());
         }
     }
 }
