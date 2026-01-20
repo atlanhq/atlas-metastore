@@ -49,14 +49,17 @@ public class DynamicConfigStore implements ApplicationContextAware {
 
     private final DynamicConfigStoreConfig config;
     private final DynamicConfigCacheStore cacheStore;
+    private final ConfigCacheRefresher cacheRefresher;
 
     private volatile boolean initialized = false;
     private volatile boolean cassandraAvailable = false;
 
     @Inject
-    public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore) {
+    public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore,
+                              ConfigCacheRefresher cacheRefresher) {
         this.config = Objects.requireNonNull(config, "DynamicConfigStoreConfig cannot be null");
         this.cacheStore = Objects.requireNonNull(cacheStore, "DynamicConfigCacheStore cannot be null");
+        this.cacheRefresher = cacheRefresher; // Can be null in tests
 
         LOG.info("DynamicConfigStore created - enabled: {}, activated: {}", config.isEnabled(), config.isActivated());
     }
@@ -358,7 +361,19 @@ public class DynamicConfigStore implements ApplicationContextAware {
             // Then update local cache
             cacheStore.put(key, value, updatedBy);
 
-            LOG.info("Config set - key: {}, value: {}, by: {}", key, value, updatedBy);
+            // Refresh cache on all other pods (blocking call)
+            if (cacheRefresher != null) {
+                ConfigCacheRefresher.RefreshSummary summary = cacheRefresher.refreshAllPodsCache(key);
+                if (!summary.isFullySuccessful() && summary.getTotalCount() > 0) {
+                    LOG.warn("Config set - key: {}, value: {}, by: {} - but only {}/{} pods refreshed successfully",
+                        key, value, updatedBy, summary.getSuccessCount(), summary.getTotalCount());
+                } else {
+                    LOG.info("Config set - key: {}, value: {}, by: {} - all {} pods refreshed",
+                        key, value, updatedBy, summary.getTotalCount());
+                }
+            } else {
+                LOG.info("Config set - key: {}, value: {}, by: {} (no cache refresher)", key, value, updatedBy);
+            }
 
         } catch (Exception e) {
             LOG.error("Failed to set config - key: {}, value: {}", key, value, e);
@@ -378,7 +393,18 @@ public class DynamicConfigStore implements ApplicationContextAware {
             // Then remove from local cache
             cacheStore.remove(key);
 
-            LOG.info("Config deleted - key: {}", key);
+            // Refresh cache on all other pods (blocking call)
+            if (cacheRefresher != null) {
+                ConfigCacheRefresher.RefreshSummary summary = cacheRefresher.refreshAllPodsCache(key);
+                if (!summary.isFullySuccessful() && summary.getTotalCount() > 0) {
+                    LOG.warn("Config deleted - key: {} - but only {}/{} pods refreshed successfully",
+                        key, summary.getSuccessCount(), summary.getTotalCount());
+                } else {
+                    LOG.info("Config deleted - key: {} - all {} pods refreshed", key, summary.getTotalCount());
+                }
+            } else {
+                LOG.info("Config deleted - key: {} (no cache refresher)", key);
+            }
 
         } catch (Exception e) {
             LOG.error("Failed to delete config - key: {}", key, e);
