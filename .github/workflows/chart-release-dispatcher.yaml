@@ -17,7 +17,6 @@ on:
       - idonlycanary
       - idonlycanarybeta
       - atlas_ci_cd_updates
-      - lite_beta
     types:
       - completed
 
