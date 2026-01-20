@@ -3,6 +3,7 @@ package org.apache.atlas.web.service;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
+import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
@@ -10,6 +11,9 @@ import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.serialization.StringSerializer;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -22,17 +26,23 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 public class KafkaMetadataProducer {
     private static final Logger LOG = LoggerFactory.getLogger(KafkaMetadataProducer.class);
+    private static final String METRIC_PREFIX = "kafka.metadata.producer";
 
     private String topic;
     private String bootstrapServers;
     private long producerSendTimeoutMs;
     private Properties producerProperties;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicInteger runningGauge = new AtomicInteger(0);
     private volatile KafkaProducer<String, String> producer;
+    private Counter sendSuccessCounter;
+    private Counter sendFailureCounter;
+    private Timer sendTimer;
 
     @PostConstruct
     public void start() {
@@ -54,12 +64,15 @@ public class KafkaMetadataProducer {
             LOG.error("Failed to load Kafka metadata producer configuration", e);
             return;
         }
+        initMetrics();
         running.set(true);
+        runningGauge.set(1);
     }
 
     @PreDestroy
     public void stop() {
         running.set(false);
+        runningGauge.set(0);
         KafkaProducer<String, String> producerRef = producer;
         if (producerRef != null) {
             producerRef.close();
@@ -89,8 +102,17 @@ public class KafkaMetadataProducer {
 
         String value = AtlasType.toJson(envelope);
         ProducerRecord<String, String> record = new ProducerRecord<>(topic, eventId, value);
-        producerRef.send(record).get(producerSendTimeoutMs, TimeUnit.MILLISECONDS);
-        return eventId;
+        Timer.Sample sendSample = Timer.start(MetricUtils.getMeterRegistry());
+        try {
+            producerRef.send(record).get(producerSendTimeoutMs, TimeUnit.MILLISECONDS);
+            sendSuccessCounter.increment();
+            return eventId;
+        } catch (Exception e) {
+            sendFailureCounter.increment();
+            throw e;
+        } finally {
+            sendSample.stop(sendTimer);
+        }
     }
 
     private KafkaProducer<String, String> getOrCreateProducer() {
@@ -113,5 +135,20 @@ public class KafkaMetadataProducer {
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         return props;
+    }
+
+    private void initMetrics() {
+        Gauge.builder(METRIC_PREFIX + ".running", runningGauge, AtomicInteger::get)
+                .description("Kafka metadata producer running state")
+                .register(MetricUtils.getMeterRegistry());
+        sendSuccessCounter = Counter.builder(METRIC_PREFIX + ".send.success.count")
+                .description("Kafka metadata producer send successes")
+                .register(MetricUtils.getMeterRegistry());
+        sendFailureCounter = Counter.builder(METRIC_PREFIX + ".send.failure.count")
+                .description("Kafka metadata producer send failures")
+                .register(MetricUtils.getMeterRegistry());
+        sendTimer = Timer.builder(METRIC_PREFIX + ".send.latency")
+                .description("Kafka metadata producer send latency")
+                .register(MetricUtils.getMeterRegistry());
     }
 }
