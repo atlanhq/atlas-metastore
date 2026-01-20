@@ -24,6 +24,10 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
 import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.atlas.service.metrics.MetricUtils;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -35,6 +39,7 @@ import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
@@ -42,6 +47,7 @@ import java.util.stream.Stream;
 public class KafkaMetadataConsumer {
 
     private static final Logger LOG = LoggerFactory.getLogger(KafkaMetadataConsumer.class);
+    private static final String METRIC_PREFIX = "kafka.metadata.consumer";
 
     private String topic;
     private int pollTimeoutSeconds;
@@ -50,10 +56,22 @@ public class KafkaMetadataConsumer {
 
     private final EntityMutationService entityMutationService;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    private final AtomicInteger runningGauge = new AtomicInteger(0);
+    private final AtomicInteger inFlightGauge = new AtomicInteger(0);
+    private final AtomicLong lastPollTimestampMs = new AtomicLong(0);
+    private final AtomicLong lastCommitTimestampMs = new AtomicLong(0);
     private volatile KafkaConsumer<String, String> consumer;
     private volatile Thread consumerThread;
     private String bootstrapServers;
     private Properties consumerProperties;
+    private Counter pollCounter;
+    private Counter recordsCounter;
+    private Counter processedCounter;
+    private Counter failedCounter;
+    private Counter commitSuccessCounter;
+    private Counter commitFailureCounter;
+    private Timer pollTimer;
+    private Timer processTimer;
 
     @Inject
     public KafkaMetadataConsumer(EntityMutationService entityMutationService) {
@@ -84,7 +102,9 @@ public class KafkaMetadataConsumer {
             return;
         }
 
+        initMetrics();
         running.set(true);
+        runningGauge.set(1);
         consumerThread = new Thread(this::runLoop, "kafka-metadata-consumer");
         consumerThread.setDaemon(true);
         consumerThread.start();
@@ -109,6 +129,7 @@ public class KafkaMetadataConsumer {
     @PreDestroy
     public void stop() {
         running.set(false);
+        runningGauge.set(0);
         KafkaConsumer<String, String> consumerRef = this.consumer;
         if (consumerRef != null) {
             consumerRef.wakeup();
@@ -196,10 +217,15 @@ public class KafkaMetadataConsumer {
 
         try {
             while (running.get()) {
+                Timer.Sample pollSample = Timer.start(MetricUtils.getMeterRegistry());
                 ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(pollTimeoutSeconds));
+                pollSample.stop(pollTimer);
+                pollCounter.increment();
+                lastPollTimestampMs.set(System.currentTimeMillis());
 
                 if (!records.isEmpty()) {
                     LOG.info("KafkaMetadataConsumer polled {} records", records.count());
+                    recordsCounter.increment(records.count());
                 }
 
                 for (ConsumerRecord<String, String> rec : records) {
@@ -212,6 +238,7 @@ public class KafkaMetadataConsumer {
                     if (running.get()) {
                         try {
                             inFlight.acquire();
+                            inFlightGauge.incrementAndGet();
                         } catch (InterruptedException e) {
                             Thread.currentThread().interrupt();
                             break;
@@ -219,6 +246,7 @@ public class KafkaMetadataConsumer {
                     }
 
                     ex.submit(() -> {
+                        Timer.Sample processSample = Timer.start(MetricUtils.getMeterRegistry());
                         try {
                             LOG.debug("KafkaMetadataConsumer processing {}-{}@{} key={}",
                                     rec.topic(), rec.partition(), rec.offset(), rec.key());
@@ -227,10 +255,14 @@ public class KafkaMetadataConsumer {
                                 createdSinceLastReport.addAndGet(created);
                             }
                             next.set(rec.offset() + 1);
+                            processedCounter.increment();
                         } catch (Exception e) {
                             LOG.error("KafkaMetadataConsumer failed {}-{}@{}: {}",
                                     rec.topic(), rec.partition(), rec.offset(), e.getMessage(), e);
+                            failedCounter.increment();
                         } finally {
+                            processSample.stop(processTimer);
+                            inFlightGauge.decrementAndGet();
                             inFlight.release();
                         }
                     });
@@ -265,7 +297,7 @@ public class KafkaMetadataConsumer {
         }
     }
 
-    private static void commitNow(KafkaConsumer<String, String> consumer,
+    private void commitNow(KafkaConsumer<String, String> consumer,
                                   Map<TopicPartition, AtomicLong> nextCommitOffset) {
         if (consumer.assignment().isEmpty()) return;
 
@@ -279,8 +311,11 @@ public class KafkaMetadataConsumer {
         if (!toCommit.isEmpty()) {
             try {
                 consumer.commitSync(toCommit);
+                commitSuccessCounter.increment();
+                lastCommitTimestampMs.set(System.currentTimeMillis());
             } catch (RebalanceInProgressException e) {
                 LOG.warn("KafkaMetadataConsumer commit skipped due to rebalance in progress");
+                commitFailureCounter.increment();
             }
         }
     }
@@ -363,4 +398,44 @@ public class KafkaMetadataConsumer {
         void set(KafkaConsumer<String, String> consumer);
     }
 
+    private void initMetrics() {
+        Gauge.builder(METRIC_PREFIX + ".running", runningGauge, AtomicInteger::get)
+                .description("Kafka metadata consumer running state")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".in_flight", inFlightGauge, AtomicInteger::get)
+                .description("Kafka metadata consumer in-flight records")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".last_poll_timestamp_ms", lastPollTimestampMs, AtomicLong::get)
+                .description("Kafka metadata consumer last poll timestamp (ms)")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".last_commit_timestamp_ms", lastCommitTimestampMs, AtomicLong::get)
+                .description("Kafka metadata consumer last commit timestamp (ms)")
+                .register(MetricUtils.getMeterRegistry());
+
+        pollCounter = Counter.builder(METRIC_PREFIX + ".poll.count")
+                .description("Kafka metadata consumer poll count")
+                .register(MetricUtils.getMeterRegistry());
+        recordsCounter = Counter.builder(METRIC_PREFIX + ".records.count")
+                .description("Kafka metadata consumer records received")
+                .register(MetricUtils.getMeterRegistry());
+        processedCounter = Counter.builder(METRIC_PREFIX + ".processed.count")
+                .description("Kafka metadata consumer records processed successfully")
+                .register(MetricUtils.getMeterRegistry());
+        failedCounter = Counter.builder(METRIC_PREFIX + ".failed.count")
+                .description("Kafka metadata consumer record processing failures")
+                .register(MetricUtils.getMeterRegistry());
+        commitSuccessCounter = Counter.builder(METRIC_PREFIX + ".commit.success.count")
+                .description("Kafka metadata consumer commit successes")
+                .register(MetricUtils.getMeterRegistry());
+        commitFailureCounter = Counter.builder(METRIC_PREFIX + ".commit.failure.count")
+                .description("Kafka metadata consumer commit failures")
+                .register(MetricUtils.getMeterRegistry());
+
+        pollTimer = Timer.builder(METRIC_PREFIX + ".poll.latency")
+                .description("Kafka metadata consumer poll latency")
+                .register(MetricUtils.getMeterRegistry());
+        processTimer = Timer.builder(METRIC_PREFIX + ".process.latency")
+                .description("Kafka metadata consumer processing latency")
+                .register(MetricUtils.getMeterRegistry());
+    }
 }
