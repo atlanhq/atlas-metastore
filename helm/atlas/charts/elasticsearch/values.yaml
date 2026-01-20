@@ -109,7 +109,7 @@ resources_standard:
   limits:
     memory: "5Gi"
 
-resources_dev:
+resources_lite:
   requests:
     cpu: "100m"
     memory: "5Gi"
@@ -192,7 +192,7 @@ antiAffinityTopologyKey: "kubernetes.io/hostname"
 # and that they will never end up on the same node. Setting this to soft will do this "best effort"
 antiAffinity: "hard"
 
-affinity_hard:
+affinity_lite:
   nodeAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       nodeSelectorTerms:
