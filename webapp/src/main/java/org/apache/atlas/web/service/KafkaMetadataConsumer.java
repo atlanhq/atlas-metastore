@@ -1,8 +1,9 @@
 package org.apache.atlas.web.service;
 
+import io.confluent.parallelconsumer.ParallelConsumerOptions;
+import io.confluent.parallelconsumer.ParallelStreamProcessor;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.EntityMutationResponse;
@@ -15,23 +16,15 @@ import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRebalanceListener;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
-import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
-import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.errors.WakeupException;
-import org.apache.kafka.common.errors.RebalanceInProgressException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.apache.kafka.common.serialization.StringSerializer;
 import org.apache.atlas.service.metrics.MetricUtils;
-import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
-import io.micrometer.core.instrument.Timer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -40,44 +33,39 @@ import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
 import java.time.Duration;
-import java.util.*;
-import java.util.concurrent.*;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Properties;
+import java.util.Set;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Stream;
 
 @Service
 public class KafkaMetadataConsumer {
-
     private static final Logger LOG = LoggerFactory.getLogger(KafkaMetadataConsumer.class);
     private static final String METRIC_PREFIX = "kafka.metadata.consumer";
 
-    private String topic;
-    private String errorTopic;
-    private int pollTimeoutSeconds;
-    private long commitEveryMs;
-    private int maxInFlightRecords;
-
     private final EntityMutationService entityMutationService;
-    private final AtomicBoolean running = new AtomicBoolean(false);
     private final AtomicInteger runningGauge = new AtomicInteger(0);
     private final AtomicInteger inFlightGauge = new AtomicInteger(0);
-    private final AtomicLong lastPollTimestampMs = new AtomicLong(0);
-    private final AtomicLong lastCommitTimestampMs = new AtomicLong(0);
-    private volatile KafkaConsumer<String, String> consumer;
-    private volatile KafkaProducer<String, String> errorProducer;
+    private final AtomicLong processedCount = new AtomicLong(0);
+    private final AtomicLong failedCount = new AtomicLong(0);
+    private final AtomicLong lastProcessedTimestampMs = new AtomicLong(0);
+    private final AtomicLong lastProcessDurationMs = new AtomicLong(0);
     private volatile Thread consumerThread;
+    private volatile ParallelStreamProcessor<String, String> parallelConsumer;
+    private volatile KafkaProducer<String, String> errorProducer;
+
+    private String topic;
+    private String errorTopic;
     private String bootstrapServers;
+    private int maxConcurrency;
+    private long commitEveryMs;
     private Properties consumerProperties;
-    private Counter pollCounter;
-    private Counter recordsCounter;
-    private Counter processedCounter;
-    private Counter failedCounter;
-    private Counter commitSuccessCounter;
-    private Counter commitFailureCounter;
-    private Timer pollTimer;
-    private Timer processTimer;
+    private Properties errorProducerProperties;
 
     @Inject
     public KafkaMetadataConsumer(EntityMutationService entityMutationService) {
@@ -94,54 +82,39 @@ public class KafkaMetadataConsumer {
                 return;
             }
             topic = configuration.getString("atlas.kafka.metadata.topic", "events-topic");
-            errorTopic = configuration.getString("atlas.kafka.metadata.errorTopic", topic + "-errors");
-            pollTimeoutSeconds = configuration.getInt("atlas.kafka.metadata.pollTimeoutSeconds", 1);
+            errorTopic = configuration.getString("atlas.kafka.metadata.error.topic", "events-topic-errors");
             commitEveryMs = configuration.getLong("atlas.kafka.metadata.commitEveryMs", 1000L);
-            maxInFlightRecords = configuration.getInt("atlas.kafka.metadata.maxInFlightRecords", 100);
+            maxConcurrency = configuration.getInt("atlas.kafka.metadata.maxConcurrency", 16);
             bootstrapServers = configuration.getString(
                     "atlas.graph.kafka.bootstrap.servers",
                     configuration.getString("atlas.kafka.bootstrap.servers", "localhost:9092")
             );
             consumerProperties = buildConsumerProperties(bootstrapServers, configuration);
+            errorProducerProperties = buildErrorProducerProperties(bootstrapServers);
             ensureTopic(bootstrapServers, topic, 10, (short) 1);
             ensureTopic(bootstrapServers, errorTopic, 10, (short) 1);
-            errorProducer = new KafkaProducer<>(buildProducerProperties(bootstrapServers));
         } catch (AtlasException e) {
             LOG.error("Failed to load Kafka metadata consumer configuration", e);
             return;
         }
 
         initMetrics();
-        running.set(true);
         runningGauge.set(1);
-        consumerThread = new Thread(this::runLoop, "kafka-metadata-consumer");
+        consumerThread = new Thread(this::runPoll, "kafka-metadata-consumer");
         consumerThread.setDaemon(true);
         consumerThread.start();
     }
 
-    private static void ensureTopic(String bootstrapServers, String topicName, int partitions, short replicationFactor) {
-        Properties props = new Properties();
-        props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-
-        try (AdminClient admin = AdminClient.create(props)) {
-            Set<String> existingTopics = admin.listTopics().names().get();
-            if (existingTopics.contains(topicName)) return;
-
-            NewTopic topic = new NewTopic(topicName, partitions, replicationFactor);
-            admin.createTopics(Collections.singleton(topic)).all().get();
-            LOG.info("HttpToKafkaVerticle created topic {} with {} partitions", topicName, partitions);
-        } catch (Exception e) {
-            LOG.error("HttpToKafkaVerticle failed to recreate topic {}", topicName, e);
-        }
-    }
-
     @PreDestroy
     public void stop() {
-        running.set(false);
         runningGauge.set(0);
-        KafkaConsumer<String, String> consumerRef = this.consumer;
+        ParallelStreamProcessor<String, String> consumerRef = this.parallelConsumer;
         if (consumerRef != null) {
-            consumerRef.wakeup();
+            consumerRef.closeDrainFirst(Duration.ofSeconds(30));
+        }
+        KafkaProducer<String, String> errorProducerRef = errorProducer;
+        if (errorProducerRef != null) {
+            errorProducerRef.close();
         }
         Thread threadRef = consumerThread;
         if (threadRef != null) {
@@ -151,14 +124,59 @@ public class KafkaMetadataConsumer {
                 Thread.currentThread().interrupt();
             }
         }
-        KafkaProducer<String, String> producerRef = errorProducer;
-        if (producerRef != null) {
-            producerRef.close();
-        }
     }
 
-    private void runLoop() {
-        consume(entityMutationService, running, consumerRef -> this.consumer = consumerRef);
+    private void runPoll() {
+        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties);
+        ParallelConsumerOptions<String, String> options = ParallelConsumerOptions.<String, String>builder()
+                .consumer(consumer)
+                .ordering(ParallelConsumerOptions.ProcessingOrder.PARTITION)
+                .maxConcurrency(maxConcurrency)
+                .commitInterval(Duration.ofMillis(commitEveryMs))
+                .meterRegistry(MetricUtils.getMeterRegistry())
+                .build();
+        parallelConsumer = ParallelStreamProcessor.createEosStreamProcessor(options);
+        parallelConsumer.subscribe(Collections.singletonList(topic));
+
+        parallelConsumer.poll(context -> {
+            ConsumerRecord<String, String> record = context.getSingleConsumerRecord();
+            long startNs = System.nanoTime();
+            inFlightGauge.incrementAndGet();
+            try {
+                processRecord(record, entityMutationService);
+                processedCount.incrementAndGet();
+            } catch (Exception e) {
+                LOG.error("KafkaMetadataConsumer failed {}-{}@{}: {}",
+                        record.topic(), record.partition(), record.offset(), e.getMessage(), e);
+                sendToErrorTopic(record, e);
+                failedCount.incrementAndGet();
+            } finally {
+                lastProcessedTimestampMs.set(System.currentTimeMillis());
+                lastProcessDurationMs.set(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startNs));
+                inFlightGauge.decrementAndGet();
+            }
+        });
+    }
+
+    private void initMetrics() {
+        Gauge.builder(METRIC_PREFIX + ".running", runningGauge, AtomicInteger::get)
+                .description("Kafka metadata consumer running state")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".in_flight", inFlightGauge, AtomicInteger::get)
+                .description("Kafka metadata consumer in-flight records")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".processed.count", processedCount, AtomicLong::get)
+                .description("Kafka metadata consumer processed records")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".failed.count", failedCount, AtomicLong::get)
+                .description("Kafka metadata consumer failed records")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".last_processed_timestamp_ms", lastProcessedTimestampMs, AtomicLong::get)
+                .description("Kafka metadata consumer last processed timestamp (ms)")
+                .register(MetricUtils.getMeterRegistry());
+        Gauge.builder(METRIC_PREFIX + ".last_process_duration_ms", lastProcessDurationMs, AtomicLong::get)
+                .description("Kafka metadata consumer last process duration (ms)")
+                .register(MetricUtils.getMeterRegistry());
     }
 
     private static Properties buildConsumerProperties(String bootstrapServers, Configuration configuration) {
@@ -183,7 +201,7 @@ public class KafkaMetadataConsumer {
         return props;
     }
 
-    private static Properties buildProducerProperties(String bootstrapServers) {
+    private static Properties buildErrorProducerProperties(String bootstrapServers) {
         Properties props = new Properties();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
         props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
@@ -191,167 +209,64 @@ public class KafkaMetadataConsumer {
         return props;
     }
 
-    private void sendToErrorQueue(ConsumerRecord<String, String> record) {
-        KafkaProducer<String, String> producer = errorProducer;
-        if (producer == null) {
-            LOG.warn("KafkaMetadataConsumer error producer not available, dropping failed record");
+    private static void ensureTopic(String bootstrapServers, String topicName, int partitions, short replicationFactor) {
+        Properties props = new Properties();
+        props.put(AdminClientConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+
+        try (AdminClient admin = AdminClient.create(props)) {
+            Set<String> existingTopics = admin.listTopics().names().get();
+            if (existingTopics.contains(topicName)) return;
+
+            NewTopic topic = new NewTopic(topicName, partitions, replicationFactor);
+            admin.createTopics(Collections.singleton(topic)).all().get();
+            LOG.info("KafkaMetadataConsumer created topic {} with {} partitions", topicName, partitions);
+        } catch (Exception e) {
+            LOG.error("KafkaMetadataConsumer failed to create topic {}", topicName, e);
+        }
+    }
+
+    private KafkaProducer<String, String> getOrCreateErrorProducer() {
+        KafkaProducer<String, String> producerRef = errorProducer;
+        if (producerRef == null) {
+            synchronized (this) {
+                producerRef = errorProducer;
+                if (producerRef == null) {
+                    producerRef = new KafkaProducer<>(errorProducerProperties);
+                    errorProducer = producerRef;
+                }
+            }
+        }
+        return producerRef;
+    }
+
+    private void sendToErrorTopic(ConsumerRecord<String, String> record, Exception e) {
+        if (errorTopic == null || errorTopic.isEmpty()) {
             return;
         }
         try {
-            producer.send(new ProducerRecord<>(errorTopic, record.key(), record.value()));
-        } catch (Exception e) {
-            LOG.warn("KafkaMetadataConsumer failed to publish to error topic {}", errorTopic, e);
-        }
-    }
+            Map<String, Object> envelope = new HashMap<>();
+            envelope.put("errorMessage", e.getMessage());
+            envelope.put("errorType", e.getClass().getName());
+            envelope.put("failedAt", System.currentTimeMillis());
+            envelope.put("topic", record.topic());
+            envelope.put("partition", record.partition());
+            envelope.put("offset", record.offset());
+            envelope.put("timestamp", record.timestamp());
+            envelope.put("key", record.key());
+            envelope.put("value", record.value());
 
-    private void consume(EntityMutationService entityMutationService,
-                         AtomicBoolean running,
-                         ConsumerSetter consumerSetter) {
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(consumerProperties);
-        if (consumerSetter != null) {
-            consumerSetter.set(consumer);
-        }
-        LOG.info("KafkaMetadataConsumer starting: bootstrap={}, topic={}",
-                bootstrapServers, topic);
-
-        Map<TopicPartition, ExecutorService> executors = new ConcurrentHashMap<>();
-        Map<TopicPartition, AtomicLong> nextCommitOffset = new ConcurrentHashMap<>();
-        Semaphore inFlight = new Semaphore(maxInFlightRecords);
-        long lastCommitAt = System.currentTimeMillis();
-        AtomicLong createdSinceLastReport = new AtomicLong(0);
-        AtomicLong lastReportAt = new AtomicLong(System.currentTimeMillis());
-
-        consumer.subscribe(Collections.singletonList(topic), new ConsumerRebalanceListener() {
-            @Override
-            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-                LOG.info("KafkaMetadataConsumer partitions revoked: {}", partitions);
-                commitNow(consumer, nextCommitOffset);
-
-                for (TopicPartition tp : partitions) {
-                    ExecutorService ex = executors.remove(tp);
-                    if (ex != null) ex.shutdownNow();
-                    nextCommitOffset.remove(tp);
+            String value = AtlasType.toJson(envelope);
+            String key = record.key() != null ? record.key() : String.valueOf(record.offset());
+            ProducerRecord<String, String> errorRecord = new ProducerRecord<>(errorTopic, key, value);
+            getOrCreateErrorProducer().send(errorRecord, (metadata, ex) -> {
+                if (ex != null) {
+                    LOG.error("KafkaMetadataConsumer failed to publish to error topic {}: {}",
+                            errorTopic, ex.getMessage(), ex);
                 }
-            }
-
-            @Override
-            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-                LOG.info("KafkaMetadataConsumer partitions assigned: {}", partitions);
-                for (TopicPartition tp : partitions) {
-                    long pos = consumer.position(tp);
-                    nextCommitOffset.put(tp, new AtomicLong(pos));
-                    executors.put(tp, Executors.newSingleThreadExecutor(r -> {
-                        Thread t = new Thread(r);
-                        t.setName("worker-" + tp.partition());
-                        return t;
-                    }));
-                }
-            }
-        });
-
-        try {
-            while (running.get()) {
-                Timer.Sample pollSample = Timer.start(MetricUtils.getMeterRegistry());
-                ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(pollTimeoutSeconds));
-                pollSample.stop(pollTimer);
-                pollCounter.increment();
-                lastPollTimestampMs.set(System.currentTimeMillis());
-
-                if (!records.isEmpty()) {
-                    LOG.info("KafkaMetadataConsumer polled {} records", records.count());
-                    recordsCounter.increment(records.count());
-                }
-
-                for (ConsumerRecord<String, String> rec : records) {
-                    TopicPartition tp = new TopicPartition(rec.topic(), rec.partition());
-                    ExecutorService ex = executors.get(tp);
-                    AtomicLong next = nextCommitOffset.get(tp);
-
-                    if (ex == null || next == null) continue;
-
-                    if (running.get()) {
-                        try {
-                            inFlight.acquire();
-                            inFlightGauge.incrementAndGet();
-                        } catch (InterruptedException e) {
-                            Thread.currentThread().interrupt();
-                            break;
-                        }
-                    }
-
-                    ex.submit(() -> {
-                        Timer.Sample processSample = Timer.start(MetricUtils.getMeterRegistry());
-                        try {
-                            LOG.debug("KafkaMetadataConsumer processing {}-{}@{} key={}",
-                                    rec.topic(), rec.partition(), rec.offset(), rec.key());
-                            int created = processRecord(rec, entityMutationService);
-                            if (created > 0) {
-                                createdSinceLastReport.addAndGet(created);
-                            }
-                            next.set(rec.offset() + 1);
-                            processedCounter.increment();
-                        } catch (Exception e) {
-                            LOG.error("KafkaMetadataConsumer failed {}-{}@{}: {}",
-                                    rec.topic(), rec.partition(), rec.offset(), e.getMessage(), e);
-                            sendToErrorQueue(rec);
-                            failedCounter.increment();
-                        } finally {
-                            processSample.stop(processTimer);
-                            inFlightGauge.decrementAndGet();
-                            inFlight.release();
-                        }
-                    });
-                }
-
-                long now = System.currentTimeMillis();
-                if (now - lastCommitAt >= commitEveryMs) {
-                    commitNow(consumer, nextCommitOffset);
-                    lastCommitAt = now;
-                }
-
-                if (now - lastReportAt.get() >= TimeUnit.SECONDS.toMillis(1) &&
-                        createdSinceLastReport.get() > 0) {
-                    long created = createdSinceLastReport.getAndSet(0);
-                    int partitionCount = consumer.assignment().size();
-                    LOG.debug("Created entities per second: " + created
-                            + "; assigned partitions: " + partitionCount);
-                    lastReportAt.set(now);
-                }
-            }
-        } catch (WakeupException we) {
-            // expected on shutdown
-        } finally {
-            try { commitNow(consumer, nextCommitOffset); } catch (Exception ignored) {}
-
-            for (ExecutorService ex : executors.values()) {
-                ex.shutdown();
-                try { ex.awaitTermination(30, TimeUnit.SECONDS); } catch (InterruptedException ignored) {}
-            }
-
-            consumer.close();
-        }
-    }
-
-    private void commitNow(KafkaConsumer<String, String> consumer,
-                                  Map<TopicPartition, AtomicLong> nextCommitOffset) {
-        if (consumer.assignment().isEmpty()) return;
-
-        Map<TopicPartition, OffsetAndMetadata> toCommit = new HashMap<>();
-        for (TopicPartition tp : consumer.assignment()) {
-            AtomicLong next = nextCommitOffset.get(tp);
-            if (next != null) {
-                toCommit.put(tp, new OffsetAndMetadata(next.get()));
-            }
-        }
-        if (!toCommit.isEmpty()) {
-            try {
-                consumer.commitSync(toCommit);
-                commitSuccessCounter.increment();
-                lastCommitTimestampMs.set(System.currentTimeMillis());
-            } catch (RebalanceInProgressException e) {
-                LOG.warn("KafkaMetadataConsumer commit skipped due to rebalance in progress");
-                commitFailureCounter.increment();
-            }
+            });
+        } catch (Exception ex) {
+            LOG.error("KafkaMetadataConsumer failed to serialize error record for {}-{}@{}: {}",
+                    record.topic(), record.partition(), record.offset(), ex.getMessage(), ex);
         }
     }
 
@@ -362,7 +277,6 @@ public class KafkaMetadataConsumer {
             return 0;
         }
 
-//        RequestContext.get().setSkipProcessEdgeRestoration(false);
         try {
             Map<String, Object> envelope = AtlasType.fromJson(rec.value(), Map.class);
             Object payload = envelope != null && envelope.containsKey("payload") ? envelope.get("payload") : envelope;
@@ -378,16 +292,11 @@ public class KafkaMetadataConsumer {
             }
 
             BulkRequestContext context = buildBulkRequestContext(metadata);
-//            boolean skipProcessEdgeRestoration = getBoolean(metadata, "skipProcessEdgeRestoration", false);
-//            RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
-
             EntityMutationResponse response = entityMutationService.createOrUpdate(new AtlasEntityStream(entities), context);
-            if (response == null || response.getCreatedEntities() == null) {
-                return 0;
-            }
+            if (response == null || response.getCreatedEntities() == null) return 0;
             return response.getCreatedEntities().size();
         } finally {
-            RequestContext.clear();
+            // RequestContext.clear();
         }
     }
 
@@ -427,50 +336,5 @@ public class KafkaMetadataConsumer {
             return (Boolean) value;
         }
         return Boolean.parseBoolean(String.valueOf(value));
-    }
-
-    private interface ConsumerSetter {
-        void set(KafkaConsumer<String, String> consumer);
-    }
-
-    private void initMetrics() {
-        Gauge.builder(METRIC_PREFIX + ".running", runningGauge, AtomicInteger::get)
-                .description("Kafka metadata consumer running state")
-                .register(MetricUtils.getMeterRegistry());
-        Gauge.builder(METRIC_PREFIX + ".in_flight", inFlightGauge, AtomicInteger::get)
-                .description("Kafka metadata consumer in-flight records")
-                .register(MetricUtils.getMeterRegistry());
-        Gauge.builder(METRIC_PREFIX + ".last_poll_timestamp_ms", lastPollTimestampMs, AtomicLong::get)
-                .description("Kafka metadata consumer last poll timestamp (ms)")
-                .register(MetricUtils.getMeterRegistry());
-        Gauge.builder(METRIC_PREFIX + ".last_commit_timestamp_ms", lastCommitTimestampMs, AtomicLong::get)
-                .description("Kafka metadata consumer last commit timestamp (ms)")
-                .register(MetricUtils.getMeterRegistry());
-
-        pollCounter = Counter.builder(METRIC_PREFIX + ".poll.count")
-                .description("Kafka metadata consumer poll count")
-                .register(MetricUtils.getMeterRegistry());
-        recordsCounter = Counter.builder(METRIC_PREFIX + ".records.count")
-                .description("Kafka metadata consumer records received")
-                .register(MetricUtils.getMeterRegistry());
-        processedCounter = Counter.builder(METRIC_PREFIX + ".processed.count")
-                .description("Kafka metadata consumer records processed successfully")
-                .register(MetricUtils.getMeterRegistry());
-        failedCounter = Counter.builder(METRIC_PREFIX + ".failed.count")
-                .description("Kafka metadata consumer record processing failures")
-                .register(MetricUtils.getMeterRegistry());
-        commitSuccessCounter = Counter.builder(METRIC_PREFIX + ".commit.success.count")
-                .description("Kafka metadata consumer commit successes")
-                .register(MetricUtils.getMeterRegistry());
-        commitFailureCounter = Counter.builder(METRIC_PREFIX + ".commit.failure.count")
-                .description("Kafka metadata consumer commit failures")
-                .register(MetricUtils.getMeterRegistry());
-
-        pollTimer = Timer.builder(METRIC_PREFIX + ".poll.latency")
-                .description("Kafka metadata consumer poll latency")
-                .register(MetricUtils.getMeterRegistry());
-        processTimer = Timer.builder(METRIC_PREFIX + ".process.latency")
-                .description("Kafka metadata consumer processing latency")
-                .register(MetricUtils.getMeterRegistry());
     }
 }
