@@ -1,6 +1,7 @@
 package org.apache.atlas.service.config;
 
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -31,8 +32,14 @@ import java.util.Objects;
  * - If Cassandra is disabled, operations are no-ops (fall back to existing behavior)
  *
  * Configuration:
- * - atlas.config.store.cassandra.enabled=true to enable
- * - If disabled, all operations are no-ops
+ * - atlas.config.store.cassandra.enabled=true to enable Cassandra connectivity and sync
+ * - atlas.config.store.cassandra.activated=true to use Cassandra for reads (instead of Redis)
+ *
+ * Migration Strategy:
+ * 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis
+ *    - Feature flag helper methods fall back to FeatureFlagStore (Redis)
+ * 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
+ *    - Feature flag helper methods read from Cassandra cache
  */
 @Component
 public class DynamicConfigStore implements ApplicationContextAware {
@@ -42,16 +49,19 @@ public class DynamicConfigStore implements ApplicationContextAware {
 
     private final DynamicConfigStoreConfig config;
     private final DynamicConfigCacheStore cacheStore;
+    private final ConfigCacheRefresher cacheRefresher;
 
     private volatile boolean initialized = false;
     private volatile boolean cassandraAvailable = false;
 
     @Inject
-    public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore) {
+    public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore,
+                              ConfigCacheRefresher cacheRefresher) {
         this.config = Objects.requireNonNull(config, "DynamicConfigStoreConfig cannot be null");
         this.cacheStore = Objects.requireNonNull(cacheStore, "DynamicConfigCacheStore cannot be null");
+        this.cacheRefresher = cacheRefresher; // Can be null in tests
 
-        LOG.info("DynamicConfigStore created - enabled: {}", config.isEnabled());
+        LOG.info("DynamicConfigStore created - enabled: {}, activated: {}", config.isEnabled(), config.isActivated());
     }
 
     @PostConstruct
@@ -225,6 +235,95 @@ public class DynamicConfigStore implements ApplicationContextAware {
         return store != null && store.initialized;
     }
 
+    /**
+     * Check if the store is activated for reads.
+     * When activated, feature flag reads come from Cassandra instead of Redis.
+     *
+     * @return true if enabled AND activated, false otherwise
+     */
+    public static boolean isActivated() {
+        DynamicConfigStore store = getInstance();
+        return store != null && store.config.isEnabled() && store.config.isActivated();
+    }
+
+    // ================== Feature Flag Helper Methods ==================
+    //
+    // These methods check if DynamicConfigStore is activated.
+    // If activated, they read from Cassandra cache.
+    // If not activated, they fall back to FeatureFlagStore (Redis).
+    //
+
+    /**
+     * Check if Tag V2 (Janus optimization) is enabled.
+     * Note: The flag ENABLE_JANUS_OPTIMISATION being "false" means Tag V2 is ENABLED.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if Tag V2 is enabled, false otherwise
+     */
+    public static boolean isTagV2Enabled() {
+        if (isActivated()) {
+            return !getConfigAsBoolean(ConfigKey.ENABLE_JANUS_OPTIMISATION.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.isTagV2Enabled();
+    }
+
+    /**
+     * Check if maintenance mode is enabled.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if maintenance mode is enabled, false otherwise
+     */
+    public static boolean isMaintenanceModeEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.MAINTENANCE_MODE.getKey(), "true");
+    }
+
+    /**
+     * Check if writes are disabled.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if writes are disabled, false otherwise
+     */
+    public static boolean isWriteDisabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.DISABLE_WRITE_FLAG.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.DISABLE_WRITE_FLAG.getKey(), "true");
+    }
+
+    /**
+     * Check if persona hierarchy filter is enabled.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if enabled, false otherwise
+     */
+    public static boolean isPersonaHierarchyFilterEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.ENABLE_PERSONA_HIERARCHY_FILTER.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.ENABLE_PERSONA_HIERARCHY_FILTER.getKey(), "true");
+    }
+
+    /**
+     * Check if temp ES index should be used.
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if temp ES index should be used, false otherwise
+     */
+    public static boolean useTempEsIndex() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.USE_TEMP_ES_INDEX.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.USE_TEMP_ES_INDEX.getKey(), "true");
+    }
+
     // ================== Internal Methods ==================
 
     String getConfigInternal(String key) {
@@ -262,10 +361,62 @@ public class DynamicConfigStore implements ApplicationContextAware {
             // Then update local cache
             cacheStore.put(key, value, updatedBy);
 
-            LOG.info("Config set - key: {}, value: {}, by: {}", key, value, updatedBy);
+            // Refresh cache on all other pods (blocking call)
+            if (cacheRefresher != null) {
+                ConfigCacheRefresher.RefreshSummary summary = cacheRefresher.refreshAllPodsCache(key);
+                if (!summary.isFullySuccessful() && summary.getTotalCount() > 0) {
+                    LOG.warn("Config set - key: {}, value: {}, by: {} - but only {}/{} pods refreshed successfully",
+                        key, value, updatedBy, summary.getSuccessCount(), summary.getTotalCount());
+                } else {
+                    LOG.info("Config set - key: {}, value: {}, by: {} - all {} pods refreshed",
+                        key, value, updatedBy, summary.getTotalCount());
+                }
+            } else {
+                LOG.info("Config set - key: {}, value: {}, by: {} (no cache refresher)", key, value, updatedBy);
+            }
+
+            // When maintenance mode is disabled, clear the activation flags
+            if (ConfigKey.MAINTENANCE_MODE.getKey().equals(key) && "false".equalsIgnoreCase(value)) {
+                clearMaintenanceModeActivation(updatedBy);
+            }
 
         } catch (Exception e) {
             LOG.error("Failed to set config - key: {}, value: {}", key, value, e);
+        }
+    }
+
+    /**
+     * Clear maintenance mode activation flags.
+     * Called when MAINTENANCE_MODE is set to false.
+     */
+    private void clearMaintenanceModeActivation(String clearedBy) {
+        try {
+            String activatedAt = cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey()) != null
+                    ? cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey()).getValue() : null;
+            String activatedBy = cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey()) != null
+                    ? cacheStore.get(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey()).getValue() : null;
+
+            if (activatedAt != null || activatedBy != null) {
+                // Delete from Cassandra
+                CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
+                dao.deleteConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+                dao.deleteConfig(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+
+                // Remove from local cache
+                cacheStore.remove(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+                cacheStore.remove(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+
+                // Refresh activation keys on all pods
+                if (cacheRefresher != null) {
+                    cacheRefresher.refreshAllPodsCache(ConfigKey.MAINTENANCE_MODE_ACTIVATED_AT.getKey());
+                    cacheRefresher.refreshAllPodsCache(ConfigKey.MAINTENANCE_MODE_ACTIVATED_BY.getKey());
+                }
+
+                LOG.info("Maintenance mode activation cleared by {} (was activated at {} by {})",
+                        clearedBy, activatedAt, activatedBy);
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to clear maintenance mode activation flags", e);
         }
     }
 
@@ -282,7 +433,18 @@ public class DynamicConfigStore implements ApplicationContextAware {
             // Then remove from local cache
             cacheStore.remove(key);
 
-            LOG.info("Config deleted - key: {}", key);
+            // Refresh cache on all other pods (blocking call)
+            if (cacheRefresher != null) {
+                ConfigCacheRefresher.RefreshSummary summary = cacheRefresher.refreshAllPodsCache(key);
+                if (!summary.isFullySuccessful() && summary.getTotalCount() > 0) {
+                    LOG.warn("Config deleted - key: {} - but only {}/{} pods refreshed successfully",
+                        key, summary.getSuccessCount(), summary.getTotalCount());
+                } else {
+                    LOG.info("Config deleted - key: {} - all {} pods refreshed", key, summary.getTotalCount());
+                }
+            } else {
+                LOG.info("Config deleted - key: {} (no cache refresher)", key);
+            }
 
         } catch (Exception e) {
             LOG.error("Failed to delete config - key: {}", key, e);

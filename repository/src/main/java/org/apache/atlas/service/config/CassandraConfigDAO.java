@@ -63,6 +63,7 @@ public class CassandraConfigDAO implements AutoCloseable {
     private final String keyspace;
     private final String table;
     private final String appName;
+    private final DefaultConsistencyLevel consistencyLevel;
 
     // Prepared statements
     private final PreparedStatement selectAllStmt;
@@ -123,10 +124,11 @@ public class CassandraConfigDAO implements AutoCloseable {
         this.keyspace = config.getKeyspace();
         this.table = config.getTable();
         this.appName = config.getAppName();
+        this.consistencyLevel = parseConsistencyLevel(config.getConsistencyLevel());
 
         try {
-            LOG.info("Initializing CassandraConfigDAO - hostname: {}, keyspace: {}, table: {}",
-                    config.getHostname(), keyspace, table);
+            LOG.info("Initializing CassandraConfigDAO - hostname: {}, keyspace: {}, table: {}, consistencyLevel: {}",
+                    config.getHostname(), keyspace, table, consistencyLevel);
 
             DriverConfigLoader configLoader = DriverConfigLoader.programmaticBuilder()
                     .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, CONNECTION_TIMEOUT)
@@ -175,8 +177,27 @@ public class CassandraConfigDAO implements AutoCloseable {
 
     private PreparedStatement prepare(String cql) {
         return session.prepare(SimpleStatement.builder(cql)
-                .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM)
+                .setConsistencyLevel(consistencyLevel)
                 .build());
+    }
+
+    /**
+     * Parse consistency level string to DefaultConsistencyLevel enum.
+     * Supported values: LOCAL_ONE, ONE, LOCAL_QUORUM, QUORUM, ALL
+     *
+     * @param level the consistency level string
+     * @return the parsed DefaultConsistencyLevel, defaults to LOCAL_QUORUM if invalid
+     */
+    private static DefaultConsistencyLevel parseConsistencyLevel(String level) {
+        if (level == null || level.isEmpty()) {
+            return DefaultConsistencyLevel.LOCAL_QUORUM;
+        }
+        try {
+            return DefaultConsistencyLevel.valueOf(level.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            LOG.warn("Invalid consistency level '{}', defaulting to LOCAL_QUORUM. Valid values: LOCAL_ONE, ONE, LOCAL_QUORUM, QUORUM, ALL", level);
+            return DefaultConsistencyLevel.LOCAL_QUORUM;
+        }
     }
 
     private void initializeSchema(int replicationFactor) throws AtlasBaseException {
