@@ -423,6 +423,7 @@ This project uses standard GitHub flow with PR-based merges to `master` branch.
 ## Internal Documentation
 
 - [Adding ConfigMap Properties to Helm Charts](docs/helm/adding-configmap-properties.md) - Guide for adding new configuration properties to Atlas Helm charts
+- [Delete Asset Flow Analysis](docs/internals/delete-asset-flow.md) - Comprehensive analysis of delete operation, graph traversals, and optimization strategies
 
 ## External Resources
 
