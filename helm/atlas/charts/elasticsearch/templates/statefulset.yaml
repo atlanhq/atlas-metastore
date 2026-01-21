@@ -84,7 +84,7 @@ spec:
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
       {{- if eq .Values.global.Deployment_Type "Lite" }}
-      {{- with .Values.affinity_hard }}
+      {{- with .Values.affinity_lite }}
       affinity:
 {{ toYaml . | indent 8 }}
       {{- end }}
@@ -307,7 +307,7 @@ spec:
           containerPort: {{ .Values.transportPort }}
         resources:
 {{- if eq .Values.global.Deployment_Type "Lite" }}
-{{ toYaml .Values.resources_dev | indent 10 }}
+{{ toYaml .Values.resources_lite | indent 10 }}
 {{- else if eq .Values.global.Tier_Type "Enterprise" }}
 {{ toYaml .Values.resources | indent 10 }}
 {{- else if eq .Values.global.Tier_Type "Basic" }}

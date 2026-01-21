@@ -169,7 +169,7 @@ resources:
     cpu: 1300m
 
 # Lite deployment resources
-resources_dev:
+resources_lite:
   requests:
     memory: 4Gi
     cpu: 300m
@@ -216,7 +216,7 @@ custom_deployment:
 ## Affinity for pod assignment
 ## Ref: https://kubernetes.io/docs/concepts/configuration/assign-pod-node/#affinity-and-anti-affinity
 
-affinity_hard:
+affinity_lite:
   nodeAffinity:
     requiredDuringSchedulingIgnoredDuringExecution:
       nodeSelectorTerms:
@@ -351,7 +351,7 @@ icarus:
     requests:
       cpu: 0.5
       memory: 2Gi
-  resources_dev:
+  resources_lite:
     limits:
       cpu: 0.1
       memory: 1Gi

@@ -136,7 +136,7 @@ atlas:
               app: atlas
           topologyKey: kubernetes.io/hostname
 
-  affinity_dev:
+  affinity_lite:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         nodeSelectorTerms:
@@ -162,7 +162,7 @@ atlas:
               app: atlas
           topologyKey: kubernetes.io/hostname
 
-  affinity_hard:
+  affinity_lite:
     nodeAffinity:
       requiredDuringSchedulingIgnoredDuringExecution:
         nodeSelectorTerms:

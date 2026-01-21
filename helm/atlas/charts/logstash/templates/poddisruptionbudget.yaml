@@ -1,5 +1,6 @@
 {{- if .Values.global.atlasLogstash.enabled }}
 {{- if .Values.maxUnavailable }}
+{{- if ne .Values.global.Deployment_Type "Lite" }}
 {{- if .Capabilities.APIVersions.Has "policy/v1" -}}
 apiVersion: policy/v1
 {{- else}}
@@ -18,5 +19,6 @@ spec:
   selector:
     matchLabels:
       app: "{{ template "logstash.fullname" . }}"
+{{- end }}
 {{- end }}
 {{- end }}
