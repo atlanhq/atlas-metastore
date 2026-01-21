@@ -18,6 +18,10 @@ public enum ConfigKey {
     // Maintenance mode flag
     MAINTENANCE_MODE("MAINTENANCE_MODE", "false"),
 
+    // Maintenance mode activation tracking (set by tag propagation when it stops)
+    MAINTENANCE_MODE_ACTIVATED_AT("MAINTENANCE_MODE_ACTIVATED_AT", null),
+    MAINTENANCE_MODE_ACTIVATED_BY("MAINTENANCE_MODE_ACTIVATED_BY", null),
+
     // Tag/Janus optimization flag (mirrors existing feature flag)
     ENABLE_JANUS_OPTIMISATION("ENABLE_JANUS_OPTIMISATION", "false"),
 

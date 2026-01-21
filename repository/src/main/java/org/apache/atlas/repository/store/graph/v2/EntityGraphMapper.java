@@ -64,7 +64,6 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.config.ConfigKey;
 import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.tasks.TaskManagement;
@@ -4106,7 +4105,7 @@ public class EntityGraphMapper {
     }
 
     public void handleAddClassifications(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
-        if(!RequestContext.get().isSkipAuthorizationCheck() && FeatureFlagStore.isTagV2Enabled()){
+        if(!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()){
             addClassificationsV2(context, guid, classifications);
         } else {
             addClassificationsV1(context, guid, classifications);
@@ -4760,7 +4759,7 @@ public class EntityGraphMapper {
     }
 
     public void handleDirectDeleteClassification(String entityGuid, String classificationName) throws AtlasBaseException {
-        if(FeatureFlagStore.isTagV2Enabled()) {
+        if(DynamicConfigStore.isTagV2Enabled()) {
             deleteClassificationV2(entityGuid, classificationName);
         } else {
             deleteClassificationV1(entityGuid, classificationName);
@@ -5222,7 +5221,7 @@ public class EntityGraphMapper {
     }
 
     public void handleUpdateClassifications(EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
-        if (FeatureFlagStore.isTagV2Enabled()) {
+        if (DynamicConfigStore.isTagV2Enabled()) {
             updateClassificationsV2(guid, classifications);
         } else {
             updateClassificationsV1(context, guid, classifications);
