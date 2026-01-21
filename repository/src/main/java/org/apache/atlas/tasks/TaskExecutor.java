@@ -91,6 +91,10 @@ public class TaskExecutor {
         }
     }
 
+    public boolean isProcessingTasks() {
+        return watcher != null && watcher.isProcessingTasks();
+    }
+
     static class TaskConsumer implements Runnable {
         private static final int MAX_ATTEMPT_COUNT = 3;
 
