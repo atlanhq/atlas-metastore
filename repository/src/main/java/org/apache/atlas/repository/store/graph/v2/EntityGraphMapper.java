@@ -23,6 +23,7 @@ import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import javax.inject.Inject;
 
@@ -189,6 +190,7 @@ public class EntityGraphMapper {
     private static final int MAX_NUMBER_OF_RETRIES = AtlasConfiguration.MAX_NUMBER_OF_RETRIES.getInt();
     private static final int CHUNK_SIZE            = AtlasConfiguration.TAG_CASSANDRA_BATCHING_CHUNK_SIZE.getInt();
     private static final int UD_REL_THRESHOLD = AtlasConfiguration.ATLAS_UD_RELATIONSHIPS_MAX_COUNT.getInt();
+    private static final int VERTEX_FETCH_BATCH_SIZE = 100;
 
     private final GraphHelper               graphHelper;
     private final AtlasGraph                graph;
@@ -6166,10 +6168,22 @@ public class EntityGraphMapper {
                                                  Map<String, Map<String, Object>> deNormAttributesMap) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
+
         if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
-            Set<AtlasVertex> propagatedVertices = graph.getVertices(Arrays.toString(propagatedVertexIds.toArray()));
-            Map<String, String> vertexIdstoDocIdMap = new HashMap<>(propagatedVertices.size());
-            propagatedVertices.forEach(x -> vertexIdstoDocIdMap.put(x.getIdForDisplay(), x.getDocId()));
+            Map<String, String> vertexIdstoDocIdMap = new HashMap<>(propagatedVertexIds.size());
+
+            for (int i = 0; i < propagatedVertexIds.size(); i += VERTEX_FETCH_BATCH_SIZE) {
+                int endIndex = Math.min(i + VERTEX_FETCH_BATCH_SIZE, propagatedVertexIds.size());
+                List<String> batch = propagatedVertexIds.subList(i, endIndex);
+
+                // Get vertices for this batch
+                Set<AtlasVertex> batchVertices = graph.getVertices(batch.toArray(new String[0]));
+
+                // Add to map
+                batchVertices.forEach(vertex ->
+                        vertexIdstoDocIdMap.put(vertex.getIdForDisplay(), vertex.getDocId())
+                );
+            }
 
             for(Tag tagAttachment : propagatedTags) {
                 //get current associated tags to asset ONLY from Cassandra namespace
@@ -6676,10 +6690,10 @@ public class EntityGraphMapper {
 
 
                 //new bulk method to fetch in batches
-                Set<AtlasVertex> propagatedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
+                Set<AtlasVertex> propagtedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
 
                 // notify listeners (async) that these entities got their classification text updated
-                entityChangeNotifier.onClassificationUpdatedToEntitiesV2(propagatedVertices, originalClassification, true, RequestContext.get());
+                entityChangeNotifier.onClassificationUpdatedToEntitiesV2(propagtedVertices, originalClassification, true, RequestContext.get());
 
                 totalUpdated += batchToUpdate.size();
                 // grab next batch
