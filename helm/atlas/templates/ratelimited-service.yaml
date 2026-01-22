@@ -23,7 +23,11 @@ spec:
       name: {{ .Values.atlas.service.portName }}
     {{- end }}
   selector:
+    {{- if .Values.global.leangraph.enabled }}
+    app: atlas-nginx
+    {{- else }}
     app: {{ template "name" . }}
+    {{- end }}
     release: {{ .Release.Name }}
   internalTrafficPolicy: Cluster
   ipFamilyPolicy: SingleStack
