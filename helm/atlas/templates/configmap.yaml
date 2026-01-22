@@ -513,7 +513,7 @@ data:
     atlas.relationship.cleanup.supported.relationship.labels={{ .Values.atlas.distributed_task.cleanup_supported_relationship_labels }}
     {{- end }}
     
-         ######### Atlas Typedefs update configs #########
+    ######### Atlas Typedefs update configs #########
     atlas.types.update.async.enable={{ .Values.atlas.types_update.async_enable }}
     atlas.types.update.thread.count={{ .Values.atlas.types_update.thread_count }}
 
@@ -533,3 +533,6 @@ data:
 
     ######### Deterministic ID Generation #########
     atlas.deterministic.id.generation.enabled={{ .Values.atlas.deterministicIdGeneration.enabled }}
+
+    ######### Atlas Entity Attribute Optimization #########
+    atlas.entity.skip.optional.attributes={{ .Values.atlas.entity.skip_optional_attributes }}
