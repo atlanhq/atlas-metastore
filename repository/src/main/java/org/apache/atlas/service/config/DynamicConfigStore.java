@@ -283,20 +283,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
-     * Check if writes are disabled.
-     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
-     *
-     * @return true if writes are disabled, false otherwise
-     */
-    public static boolean isWriteDisabled() {
-        if (isActivated()) {
-            return getConfigAsBoolean(ConfigKey.DISABLE_WRITE_FLAG.getKey());
-        }
-        // Fall back to FeatureFlagStore (Redis)
-        return FeatureFlagStore.evaluate(ConfigKey.DISABLE_WRITE_FLAG.getKey(), "true");
-    }
-
-    /**
      * Check if persona hierarchy filter is enabled.
      * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
      *
