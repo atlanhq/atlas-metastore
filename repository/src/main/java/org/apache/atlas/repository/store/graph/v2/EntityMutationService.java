@@ -1,7 +1,6 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.CassandraTagOperation;
@@ -25,7 +24,6 @@ import javax.inject.Inject;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.Stack;
 
 @Service
