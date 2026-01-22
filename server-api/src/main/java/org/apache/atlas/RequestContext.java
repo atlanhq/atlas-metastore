@@ -46,6 +46,12 @@ public class RequestContext {
     private static final ThreadLocal<RequestContext> CURRENT_CONTEXT = new ThreadLocal<>();
     private static final Set<RequestContext>         ACTIVE_REQUESTS = new HashSet<>();
     private static final boolean                     isMetricsEnabled = METRICS.isDebugEnabled();
+    
+    // Maximum cache sizes to prevent memory issues during large bulk operations
+    // These caches hold entity data that can be re-fetched if evicted
+    private static final int MAX_ENTITY_CACHE_SIZE = 1000;
+    private static final int MAX_ENTITY_HEADER_CACHE_SIZE = 1000;
+    private static final int MAX_ENTITY_EXT_INFO_CACHE_SIZE = 1000;
 
     private final long                                   requestTime          = System.currentTimeMillis();
     private final Map<String, AtlasEntityHeader>         updatedEntities      = new HashMap<>();
@@ -55,9 +61,13 @@ public class RequestContext {
     private final Map<String, Map<String, Object>> allInternalAttributesMap     = new HashMap<>();
 
     private       Map<String, String>                    lexoRankCache        = null;
-    private final Map<String, AtlasEntity>               entityCache          = new HashMap<>();
-    private final Map<String, AtlasEntityHeader>         entityHeaderCache    = new HashMap<>();
-    private final Map<String, AtlasEntityWithExtInfo>    entityExtInfoCache   = new HashMap<>();
+    
+    // Use bounded LRU caches for entity data that can be re-fetched
+    private final Map<String, AtlasEntity>               entityCache          = createBoundedCache(MAX_ENTITY_CACHE_SIZE);
+    private final Map<String, AtlasEntityHeader>         entityHeaderCache    = createBoundedCache(MAX_ENTITY_HEADER_CACHE_SIZE);
+    private final Map<String, AtlasEntityWithExtInfo>    entityExtInfoCache   = createBoundedCache(MAX_ENTITY_EXT_INFO_CACHE_SIZE);
+    
+    // diffEntityCache and diffVertexCache should NOT have limits - they track changes within a transaction
     private final Map<String, AtlasEntity>               diffEntityCache      = new HashMap<>();
     private final Map<String, Object>                    diffVertexCache      = new HashMap<>();
     private final Map<String, Object>                    guidVertexCache      = new HashMap<>();
@@ -903,6 +913,29 @@ public class RequestContext {
 
     public Map<String, Map<String, Object>> getAllInternalAttributesMap() {
         return allInternalAttributesMap;
+    }
+    
+    /**
+     * Creates a bounded LRU cache map that automatically evicts oldest entries
+     * when the maximum size is exceeded. This helps prevent memory issues during
+     * large bulk operations.
+     * 
+     * @param maxSize the maximum number of entries to keep in the cache
+     * @param <K> the key type
+     * @param <V> the value type
+     * @return a new bounded LinkedHashMap with LRU eviction
+     */
+    private static <K, V> Map<K, V> createBoundedCache(final int maxSize) {
+        return new LinkedHashMap<K, V>(maxSize + 1, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<K, V> eldest) {
+                boolean shouldRemove = size() > maxSize;
+                if (shouldRemove && LOG.isDebugEnabled()) {
+                    LOG.debug("RequestContext cache evicting entry to maintain size limit of {}", maxSize);
+                }
+                return shouldRemove;
+            }
+        };
     }
 
     public class EntityGuidPair {

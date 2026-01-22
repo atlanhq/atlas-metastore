@@ -71,20 +71,27 @@ public class DynamicVertexService {
         }
 
         Map<String, String> toInsert = new HashMap<>(vertices.size());
-        vertices.stream()
-                .filter(x -> ((AtlasJanusVertex) x).getDynamicVertex().hasProperties())
-                .forEach(x -> toInsert.put(x.getIdForDisplay(), serializer.serialize(((AtlasJanusVertex) x).getDynamicVertex())));
+        for (AtlasVertex vertex : vertices) {
+            if (((AtlasJanusVertex) vertex).getDynamicVertex().hasProperties()) {
+                toInsert.put(vertex.getIdForDisplay(), 
+                            serializer.serialize(((AtlasJanusVertex) vertex).getDynamicVertex()));
+            }
+        }
 
-        repository.insertVertices(toInsert);
+        if (!toInsert.isEmpty()) {
+            repository.insertVertices(toInsert);
+        }
     }
 
     public void insertVertices(Map<String, Map<String, Object>> allPropertiesMap) throws AtlasBaseException {
         if (MapUtils.isEmpty(allPropertiesMap)) {
             return;
         }
+        
         Map<String, String> toInsert = new HashMap<>(allPropertiesMap.size());
-
-        allPropertiesMap.keySet().forEach(x -> toInsert.put(x, serializer.serialize(allPropertiesMap.get(x))));
+        for (String key : allPropertiesMap.keySet()) {
+            toInsert.put(key, serializer.serialize(allPropertiesMap.get(key)));
+        }
 
         repository.insertVertices(toInsert);
     }

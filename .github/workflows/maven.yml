@@ -26,6 +26,11 @@ on:
       - master
       - staging
       - idonlymasterrefreshfiles
+      - idonlymasterrefreshfiles-v1comp
+
+permissions:
+  id-token: write
+  contents: write
 
 jobs:
   # Detect what changed to optimize workflow execution
