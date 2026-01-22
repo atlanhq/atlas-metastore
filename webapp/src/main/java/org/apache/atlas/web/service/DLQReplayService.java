@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.*;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -18,7 +19,6 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.janusgraph.diskstorage.TemporaryBackendException;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -520,15 +520,16 @@ public class DLQReplayService {
 
             Map<String, SerializableIndexMutation> vertexIndex = entry.getMutations().get("vertex_index");
             if (MapUtils.isNotEmpty(vertexIndex)) {
-                Set<Long> vertexIds = new HashSet<>();
+                Set<String> vertexIds = new HashSet<>();
                 for (Map.Entry<String, SerializableIndexMutation> ve : vertexIndex.entrySet()) {
                     log.debug("DLQ Entry Vertex Index Mutation - DocID: {}, Additions: {}, Deletions: {}",
                             ve.getKey(), ve.getValue().getAdditions().size(), ve.getValue().getDeletions().size());
+
                     // Check if any addition has an invalid rank_feature value using typedef-aware validation
                     if (hasInvalidRankFeatureValue(ve.getValue())) {
                         log.warn("Skipping vertex ID {} due to invalid rank_feature value", ve.getKey());
                     } else {
-                        vertexIds.add(LongEncoding.decode(ve.getKey()));
+                        vertexIds.add(AtlasGraphUtilsV2.getVertexIdForDocId(ve.getKey()));
                     }
                 }
                 repairIndex.reindexVerticesByIds(INDEX_NAME_VERTEX_INDEX, vertexIds);

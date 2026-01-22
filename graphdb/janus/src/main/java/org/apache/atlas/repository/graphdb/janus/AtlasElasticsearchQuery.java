@@ -25,6 +25,7 @@ import org.apache.atlas.model.discovery.SearchParams;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasMetricType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -62,6 +63,7 @@ import java.util.concurrent.Future;
 import java.util.stream.Stream;
 
 import static org.apache.atlas.AtlasErrorCode.INDEX_NOT_FOUND;
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
 
 
 public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex, AtlasJanusEdge> {
@@ -728,8 +730,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(hit.getId());
+            String vertexId = getVertexId();
             return graph.getVertex(String.valueOf(vertexId));
+        }
+
+        @Override
+        public String getVertexId() {
+            String docId = String.valueOf(hit.getId());
+            return docId.substring(1);
         }
 
         @Override
@@ -772,8 +780,13 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
-            return graph.getVertex(String.valueOf(vertexId));
+            if (LEAN_GRAPH_ENABLED) {
+                String vertexId = getVertexId();
+                return graph.getVertex(vertexId);
+            } else {
+                long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
+                return graph.getVertex(String.valueOf(vertexId));
+            }
         }
 
         @Override
@@ -802,6 +815,18 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
                 return result;
             }
             return null;
+        }
+
+        @Override
+        public String getVertexId() {
+            // Discard prefix "S" from doc id
+            // TODO: This should not fail in case of migrated vertices
+            String docId = String.valueOf(hit.get("_id"));
+            if (docId.startsWith(ESConnector.JG_ES_DOC_ID_PREFIX)) {
+                return docId.substring(1);
+            } else {
+                return String.valueOf(LongEncoding.decode(docId));
+            }
         }
 
         @Override

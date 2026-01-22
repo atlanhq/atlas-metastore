@@ -18,16 +18,22 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
+import org.apache.atlas.RequestContext;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.janusgraph.core.EdgeLabel;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
 import org.apache.tinkerpop.gremlin.structure.Edge;
+import org.apache.tinkerpop.gremlin.structure.Property;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.core.PropertyKey;
 import org.janusgraph.core.schema.JanusGraphIndex;
+
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
+import static org.apache.atlas.type.Constants.GUID_PROPERTY_KEY;
 
 
 /**
@@ -64,18 +70,75 @@ public final class GraphDbObjectFactory {
         return new AtlasJanusGraphQuery(graph, isChildQuery);
     }
 
+    private static final String ASSET_LABEL = "Asset";
+
+    /**
+     * Creates an AtlasJanusVertex that corresponds to the given Gremlin Vertex.
+     * When LEAN_GRAPH_ENABLED, checks diffVertexCache first to reuse existing vertex instances.
+     * This ensures that property changes (like hasLineage) are made on the same vertex instance
+     * that will be committed.
+     *
+     * @param graph The graph that contains the vertex
+     * @param source the Gremlin vertex
+     */
+    public static AtlasJanusVertex createVertex(AtlasJanusGraph graph, Vertex source) {
+        if (source == null) {
+            return null;
+        }
+
+        // Check vertex caches when LEAN_GRAPH_ENABLED to reuse existing vertex instances.
+        // This ensures that property changes (like hasLineage) are made on the same vertex instance
+        // that will be committed.
+        if (LEAN_GRAPH_ENABLED && isAssetVertex(source)) {
+            // __guid is in VERTEX_CORE_PROPERTIES, so it's stored in JanusGraph
+            Property<String> guidProperty = source.property(GUID_PROPERTY_KEY);
+            if (guidProperty.isPresent()) {
+                String guid = guidProperty.value();
+
+                // First check diffVertexCache (entities modified in this transaction)
+                Object cached = RequestContext.get().getDifferentialVertex(guid);
+                if (cached instanceof AtlasJanusVertex) {
+                    return (AtlasJanusVertex) cached;
+                }
+
+                // Fallback to guidVertexCache (vertices looked up via findByGuid/findDeletedByGuid)
+                cached = RequestContext.get().getCachedVertex(guid);
+                if (cached instanceof AtlasJanusVertex) {
+                    return (AtlasJanusVertex) cached;
+                }
+            }
+        }
+
+        AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
+
+        if (LEAN_GRAPH_ENABLED && ret.isAssetVertex()) { // Do only for Asset vertices
+            try {
+                DynamicVertex dynamicVertex = graph.getDynamicVertexRetrievalService().retrieveVertex(source.id().toString());
+                if (dynamicVertex == null) {
+                    dynamicVertex = new DynamicVertex();
+                }
+                ret.setDynamicVertex(dynamicVertex);
+
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+        return ret;
+    }
+
     /**
      * Creates an AtlasJanusVertex that corresponds to the given Gremlin Vertex.
      *
      * @param graph The graph that contains the vertex
      * @param source the Gremlin vertex
      */
-    public static AtlasJanusVertex createVertex(AtlasJanusGraph graph, Vertex source) {
-
+    public static AtlasJanusVertex createJanusVertex(AtlasJanusGraph graph, Vertex source) {
         if (source == null) {
             return null;
         }
-        return new AtlasJanusVertex(graph, source);
+
+        AtlasJanusVertex ret = new AtlasJanusVertex(graph, source);
+        return ret;
     }
 
     /**
@@ -125,6 +188,10 @@ public final class GraphDbObjectFactory {
             return AtlasCardinality.LIST;
         }
         return AtlasCardinality.SET;
+    }
+
+    private static boolean isAssetVertex(Vertex source) {
+        return source != null && ASSET_LABEL.equals(source.label());
     }
 
 }
