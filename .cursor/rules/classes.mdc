@@ -1,0 +1,364 @@
+---
+description: Key classes and functions in those classes of metastore, this includes utility functions
+globs: 
+alwaysApply: false
+---
+# Key Classes in Atlas Metastore
+
+This document provides a comprehensive overview of seven key classes in the Atlas Metastore codebase, detailing their purpose, internal functions, and how they're used across the project.
+
+## Table of Contents
+
+1. [AtlasElasticsearchQuery](#atlasElasticsearchQuery)
+2. [EntityGraphRetriever](#entityGraphRetriever)
+3. [EntityGraphMapper](#entityGraphMapper)
+4. [AtlasAuthorizationUtils](#atlasAuthorizationUtils)
+5. [AtlasEntityChangeNotifier](#atlasEntityChangeNotifier)
+6. [GraphHelper](#graphHelper)
+7. [AtlasGraphUtilsV2](#atlasGraphUtilsV2)
+
+## AtlasElasticsearchQuery
+
+**Location**: `/graphdb/janus/src/main/java/org/apache/atlas/repository/graphdb/janus/AtlasElasticsearchQuery.java`
+
+### Purpose
+
+`AtlasElasticsearchQuery` serves as the interface between Atlas Metastore and Elasticsearch, handling direct queries to the Elasticsearch index. It provides methods for executing both synchronous and asynchronous search operations, managing search contexts, and processing search results.
+
+### Key Components
+
+#### Search Execution Methods
+
+- **`search()`**: Executes a synchronous Elasticsearch query and returns the results
+- **`performAsyncDirectIndexQuery()`**: Handles asynchronous Elasticsearch queries with context ID management
+- **`submitAsyncSearch()`**: Initiates an Elasticsearch async search with configurable timeouts
+- **`getAsyncSearchResponse()`**: Retrieves results from an ongoing asynchronous search
+- **`getResultFromResponse()`**: Parses Elasticsearch response into a `DirectIndexQueryResult` object
+
+#### Search Context Management
+
+- **`getSearchContext()`**: Retrieves or creates a search context for managing async searches
+- **`deleteSearchContext()`**: Cleans up search contexts after completion
+- **`getSearchContextId()`**: Generates a unique ID for a search context
+
+#### Error Handling
+
+- **`isNetworkError()`**: Detects network-specific errors during Elasticsearch operations
+- **`isGatewayTimeout()`**: Identifies gateway timeout errors
+- **`handleSearchError()`**: Processes and logs search errors with appropriate error codes
+
+### Usage Across Project
+
+- Used by `EntityDiscoveryService` for executing direct index searches via `directIndexSearch()` method
+- Integrated with JanusGraph through `AtlasJanusGraph.elasticsearchQuery()` method
+- Leveraged by the search/indexsearch endpoint in `DiscoveryREST` for handling complex search queries
+- Used for both entity and relationship searches with support for aggregations and highlighting
+
+### Performance Optimizations
+
+- **Async Search**: Supports asynchronous search operations for handling large result sets
+- **Search Context Caching**: Manages concurrent requests from the same client
+- **Configurable Timeouts**: Allows tuning of search timeouts based on query complexity
+- **Collapsed Results**: Optimizes inner hits processing for better performance
+- **Batch Processing**: Processes search results in batches to reduce memory usage
+
+## EntityGraphRetriever
+
+**Location**: `/repository/src/main/java/org/apache/atlas/repository/store/graph/v2/EntityGraphRetriever.java`
+
+### Purpose
+
+`EntityGraphRetriever` is responsible for converting graph vertices to Atlas entity objects. It retrieves entity data from the graph database, maps vertex properties to entity attributes, and handles complex operations like relationship traversal and classification retrieval.
+
+### Key Components
+
+#### Entity Retrieval Methods
+
+- **`toAtlasEntity()`**: Converts a graph vertex to an `AtlasEntity` object
+- **`toAtlasEntityWithExtInfo()`**: Retrieves an entity with its extended information (classifications, relationships)
+- **`toAtlasEntityHeaderWithClassifications()`**: Creates an entity header with classification information
+- **`getAndCacheEntity()`**: Retrieves and caches an entity by GUID for efficient access
+
+#### Attribute Mapping
+
+- **`mapVertexToAtlasEntity()`**: Maps vertex properties to entity attributes
+- **`mapAttributes()`**: Maps attributes based on their type category
+- **`mapRelationshipAttributes()`**: Handles relationship attribute mapping
+- **`getReferencedEntities()`**: Collects entities referenced by the main entity
+
+#### Classification Handling
+
+- **`addClassifications()`**: Adds classification information to an entity
+- **`getAllClassifications()`**: Retrieves all classifications (direct and propagated)
+- **`getPropagatedClassifications()`**: Gets classifications propagated from related entities
+
+### Usage Across Project
+
+- Used by `AtlasEntityStoreV2` for retrieving entities during CRUD operations
+- Leveraged by `EntitiesREST` to convert graph data to API response objects
+- Integrated with `EntityDiscoveryService` for processing search results
+- Used by `AtlasEntityChangeNotifier` to prepare entities for notification
+
+### Performance Optimizations
+
+- **Entity Caching**: Caches retrieved entities to avoid redundant database lookups
+- **Selective Attribute Loading**: Supports loading only specified attributes
+- **Batch Vertex Retrieval**: Efficiently loads multiple vertices in a single operation
+- **Property Prefetching**: Prefetches commonly accessed properties
+- **Relationship Depth Control**: Allows limiting the depth of relationship traversal
+
+## EntityGraphMapper
+
+**Location**: `/repository/src/main/java/org/apache/atlas/repository/store/graph/v2/EntityGraphMapper.java`
+
+### Purpose
+
+`EntityGraphMapper` is responsible for mapping Atlas entities to graph vertices and vice versa. It handles the creation, update, and deletion of vertices and edges in the graph database based on entity operations, ensuring proper representation of entity attributes, classifications, and relationships.
+
+### Key Components
+
+#### Vertex Management
+
+- **`createVertex()`**: Creates a new vertex with a unique GUID
+- **`createVertexWithGuid()`**: Creates a vertex with a specified GUID
+- **`updateVertex()`**: Updates an existing vertex with new attribute values
+- **`deleteVertex()`**: Removes a vertex from the graph
+
+#### Attribute Mapping
+
+- **`mapAttributes()`**: Maps entity attributes to vertex properties
+- **`mapAttribute()`**: Maps a single attribute based on its type
+- **`mapToVertexByTypeCategory()`**: Handles type-specific attribute mapping
+- **`mapPrimitiveValue()`**: Maps primitive values to vertex properties
+
+#### Relationship Handling
+
+- **`mapRelationshipAttributes()`**: Maps relationship attributes to edges
+- **`getOrCreateRelationshipEdge()`**: Creates or retrieves an edge for a relationship
+- **`updateRelationshipAttributes()`**: Updates relationship edges with new values
+- **`deleteRelationshipEdge()`**: Removes a relationship edge
+
+#### Classification Management
+
+- **`addClassifications()`**: Adds classification vertices and edges
+- **`updateClassifications()`**: Updates existing classifications
+- **`deleteClassifications()`**: Removes classifications from entities
+- **`addClassificationEdge()`**: Creates an edge between entity and classification vertices
+
+### Usage Across Project
+
+- Core component of `AtlasEntityStoreV2` for entity persistence operations
+- Used in bulk entity operations via `EntityREST.createOrUpdate()`
+- Integrated with `AtlasRelationshipStoreV2` for relationship management
+- Leveraged by classification propagation system for managing classification edges
+
+### Special Features
+
+- **Differential Updates**: Only processes changed attributes for efficiency
+- **Unique Attribute Handling**: Ensures uniqueness constraints are maintained
+- **System Attribute Management**: Automatically updates system attributes like modification timestamps
+- **Soft Delete Support**: Implements entity state changes (active/deleted)
+- **Import Mode**: Special handling for entity import operations
+
+## AtlasAuthorizationUtils
+
+**Location**: `/repository/src/main/java/org/apache/atlas/authorizer/AtlasAuthorizationUtils.java`
+
+### Purpose
+
+`AtlasAuthorizationUtils` provides centralized authorization checks for access to Atlas resources. It enforces access control for entities, types, and relationships based on user permissions and policies, integrating with both standard Atlas authorization and Attribute-Based Access Control (ABAC).
+
+### Key Components
+
+#### Access Verification Methods
+
+- **`verifyAccess()`**: Checks if the current user has access to a resource
+- **`verifyUpdateEntityAccess()`**: Verifies update permission for an entity
+- **`verifyDeleteEntityAccess()`**: Verifies delete permission for an entity
+- **`isAccessAllowed()`**: Determines if access is allowed based on policies
+
+#### Authorization Integration
+
+- **`isAccessAllowed(AtlasEntityAccessRequest)`**: Checks entity access permissions
+- **`isAccessAllowed(AtlasTypeAccessRequest)`**: Checks type definition access permissions
+- **`isAccessAllowed(AtlasRelationshipAccessRequest)`**: Checks relationship access permissions
+- **`isAccessAllowed(AtlasAdminAccessRequest)`**: Checks admin operation permissions
+
+#### Search Result Filtering
+
+- **`scrubSearchResults()`**: Filters search results based on user permissions
+- **`filterTypesDef()`**: Filters type definitions based on access rights
+
+#### ABAC Integration
+
+- **`ABACAuthorizerUtils.isAccessAllowed()`**: Integrates with ABAC for fine-grained access control
+- **Decision hierarchy logic**: Implements priority-based decision making between Atlas policies and ABAC
+
+### Usage Across Project
+
+- Used by all REST endpoints to verify user permissions before operations
+- Integrated with `EntityDiscoveryService` for filtering search results
+- Used by `AtlasEntityStoreV2` for authorization checks during entity operations
+- Leveraged by `AtlasTypeDefGraphStore` for type definition access control
+
+### Special Features
+
+- **Policy Priority Handling**: Implements sophisticated policy priority resolution
+- **Explicit vs. Implicit Deny**: Distinguishes between explicit and implicit deny decisions
+- **Audit Logging**: Records authorization decisions for audit purposes
+- **Performance Metrics**: Tracks authorization check performance
+
+## AtlasEntityChangeNotifier
+
+**Location**: `/repository/src/main/java/org/apache/atlas/repository/store/graph/v2/AtlasEntityChangeNotifier.java`
+
+### Purpose
+
+`AtlasEntityChangeNotifier` broadcasts entity mutations to registered listeners. It handles notifications for entity creation, update, deletion, classification changes, and relationship modifications, ensuring that all components that need to react to entity changes are properly informed.
+
+### Key Components
+
+#### Entity Mutation Notification
+
+- **`onEntitiesMutated()`**: Notifies listeners about entity mutations (create, update, delete)
+- **`notifyListeners()`**: Sends notifications to registered listeners for specific operations
+- **`notifyV1Listeners()`**: Handles notifications for V1 API listeners
+- **`notifyV2Listeners()`**: Handles notifications for V2 API listeners
+
+#### Classification Notification
+
+- **`onClassificationAddedToEntity()`**: Notifies about classification addition
+- **`onClassificationUpdatedToEntity()`**: Notifies about classification updates
+- **`onClassificationDeletedFromEntity()`**: Notifies about classification removal
+- **`notifyPropagatedEntities()`**: Handles notifications for propagated classifications
+
+#### Relationship Notification
+
+- **`notifyRelationshipMutation()`**: Broadcasts relationship changes
+- **`notifyV2RelationshipListeners()`**: Notifies V2 listeners about relationship changes
+
+#### Full-Text Mapping
+
+- **`doFullTextMapping()`**: Updates full-text search indices for entities
+- **`updateFullTextMapping()`**: Updates full-text mapping for classifications
+- **`doFullTextMappingHelper()`**: Helper method for batch full-text updates
+
+### Usage Across Project
+
+- Used by `AtlasEntityStoreV2` to notify about entity mutations
+- Integrated with `AtlasRelationshipStoreV2` for relationship change notifications
+- Used by classification management system for propagation notifications
+- Leveraged by audit system to record entity changes
+
+### Special Features
+
+- **Versioned API Support**: Supports both V1 and V2 notification APIs
+- **Selective Notification**: Prunes response to avoid unnecessary notifications
+- **Full-Text Index Updates**: Ensures search indices are updated with entity changes
+- **Classification Propagation**: Handles propagated classification notifications
+- **Import Mode Handling**: Special handling for import operations
+
+## GraphHelper
+
+**Location**: `/repository/src/main/java/org/apache/atlas/repository/graph/GraphHelper.java`
+
+### Purpose
+
+`GraphHelper` provides utility methods for performing various graph operations within Atlas Metastore. It handles low-level graph interactions like edge creation, vertex management, and property manipulation, with built-in retry mechanisms for handling concurrent modifications.
+
+### Key Components
+
+#### Edge Management
+
+- **`addEdge()`**: Creates an edge between two vertices with a specified label
+- **`getEdge()`**: Retrieves an edge between two vertices
+- **`getOrCreateEdge()`**: Gets an existing edge or creates a new one with retry logic
+- **`removeEdge()`**: Deletes an edge from the graph
+
+#### Vertex Operations
+
+- **`findVertex()`**: Finds a vertex with specified property values
+- **`createVertex()`**: Creates a new vertex with properties
+- **`removeVertex()`**: Deletes a vertex from the graph
+- **`getVertexForGUID()`**: Retrieves a vertex by its GUID
+
+#### Classification Edge Handling
+
+- **`addClassificationEdge()`**: Creates an edge between entity and classification vertices
+- **`getClassificationVertex()`**: Finds a classification vertex for an entity
+- **`getClassificationEdge()`**: Retrieves the edge between entity and classification vertices
+- **`getPropagatedClassificationEdge()`**: Gets edges for propagated classifications
+
+#### Property Management
+
+- **`setProperty()`**: Sets a property on a graph element
+- **`getProperty()`**: Retrieves a property value from a graph element
+- **`updateModificationMetadata()`**: Updates modification timestamps and user information
+
+### Usage Across Project
+
+- Used extensively by `EntityGraphMapper` for graph operations
+- Leveraged by `AtlasEntityStoreV2` for entity persistence
+- Used by classification propagation system for managing classification edges
+- Integrated with `AtlasRelationshipStoreV2` for relationship management
+
+### Special Features
+
+- **Retry Mechanism**: Implements configurable retry logic for handling concurrent modifications
+- **Edge Label Management**: Provides consistent edge label generation
+- **Vertex Traversal**: Offers methods for traversing related vertices
+- **Classification Propagation Support**: Specialized methods for classification propagation
+- **Performance Metrics**: Records performance metrics for graph operations
+
+## AtlasGraphUtilsV2
+
+**Location**: `/repository/src/main/java/org/apache/atlas/repository/store/graph/v2/AtlasGraphUtilsV2.java`
+
+### Purpose
+
+`AtlasGraphUtilsV2` provides utility methods for graph operations, focusing on property encoding/decoding, vertex and edge management, and entity lookup by unique attributes. It serves as a foundation for higher-level graph operations throughout the Atlas Metastore codebase.
+
+### Key Components
+
+#### Property Management
+
+- **`setProperty()`**: Sets a property on a graph element with encoding
+- **`getProperty()`**: Retrieves a property value with decoding
+- **`addProperty()`**: Adds a property to a multi-property
+- **`deleteProperty()`**: Removes a property from a graph element
+
+#### Entity Lookup
+
+- **`findByUniqueAttributes()`**: Finds an entity vertex by its unique attributes
+- **`findByGuid()`**: Retrieves a vertex by its GUID
+- **`findByTypeAndPropertyName()`**: Finds vertices by type and property values
+- **`findByTypeAndUniquePropertyName()`**: Finds vertices using unique property indices
+
+#### Type System Support
+
+- **`getTypeDefPropertyKey()`**: Generates property keys for type definitions
+- **`isEntityVertex()`**: Determines if a vertex represents an entity
+- **`isTypeVertex()`**: Checks if a vertex represents a type definition
+- **`isReference()`**: Determines if a type category is a reference type
+
+#### Property Encoding/Decoding
+
+- **`encodePropertyKey()`**: Encodes property keys for storage
+- **`decodePropertyKey()`**: Decodes property keys for retrieval
+- **`setEncodedProperty()`**: Sets a property with pre-encoded key
+- **`getEncodedProperty()`**: Retrieves a property with pre-encoded key
+
+### Usage Across Project
+
+- Used by `EntityGraphMapper` for property management
+- Leveraged by `AtlasEntityStoreV2` for entity lookup operations
+- Used by `AtlasTypeDefGraphStore` for type definition persistence
+- Integrated with search system for entity retrieval
+
+### Special Features
+
+- **Vertex Caching**: Integrates with transaction interceptor for vertex caching
+- **Index-Based Lookup**: Optimized entity lookup using indices
+- **Type-Specific Handling**: Special handling for glossary terms and categories
+- **Date Handling**: Proper encoding/decoding of date values
+- **Performance Optimization**: Configurable lookup strategies for different scenarios

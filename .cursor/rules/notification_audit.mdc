@@ -1,0 +1,549 @@
+---
+description: Entity notitication and differential audit system
+globs: 
+alwaysApply: false
+---
+# Kafka Notification and ES Audit System in Atlas Metastore
+
+## Overview
+
+Atlas Metastore implements two complementary systems for tracking entity changes:
+
+1. **Kafka Notification System**: Broadcasts entity changes to external systems through Kafka topics
+2. **Elasticsearch Audit System**: Records detailed audit history of entity operations for compliance and governance
+
+These systems work together to provide a comprehensive solution for entity change tracking, enabling real-time integration with external systems while maintaining a detailed audit trail for compliance and governance purposes.
+
+## Kafka Notification System
+
+### Architecture
+
+The Kafka notification system consists of several key components:
+
+1. **KafkaNotification**: Core implementation that interfaces with Kafka
+2. **EntityNotificationListenerV2**: Listens for entity changes and creates notifications
+3. **EntityNotificationSender**: Sends notifications either inline or post-commit
+4. **AtlasEntityChangeNotifier**: Orchestrates the notification process
+
+```
+┌─────────────────┐     ┌───────────────────────┐     ┌────────────────────────┐     ┌─────────┐
+│ Entity          │     │ AtlasEntity           │     │ EntityNotification     │     │         │
+│ Operations      │────▶│ ChangeNotifier        │────▶│ ListenerV2             │────▶│ Kafka   │
+│ (CRUD)          │     │                       │     │                        │     │ Topics  │
+└─────────────────┘     └───────────────────────┘     └────────────────────────┘     └─────────┘
+```
+
+### Notification Types and Topics
+
+The system supports multiple notification types, each with its own Kafka topic:
+
+```java
+// From KafkaNotification.java
+public enum NotificationType {
+    HOOK(ATLAS_HOOK_TOPIC),
+    ENTITIES(ATLAS_ENTITIES_TOPIC),
+    RELATIONSHIPS(ATLAS_RELATIONSHIPS_TOPIC),
+    DISTRIBUTED_TASKS(ATLAS_DISTRIBUTED_TASKS_TOPIC);
+}
+```
+
+Entity changes are published to the `ENTITIES` topic, while relationship changes go to the `RELATIONSHIPS` topic.
+
+### Differential Notifications
+
+Atlas supports differential notifications to reduce message size and improve performance:
+
+```java
+// From EntityNotificationListenerV2.java
+Map<String, AtlasEntity> differentialEntities = RequestContext.get().getDifferentialEntitiesMap();
+
+if (differentialEntities != null) {
+    if (differentialEntities.containsKey(entityGuid)) {
+        messages.add(new EntityNotificationV2(toNotificationHeader(entity), differentialEntities.get(entityGuid),
+                operationType, RequestContext.get().getRequestTime(), requestContextHeaders));
+    } else {
+        messages.add(new EntityNotificationV2(toNotificationHeader(entity), null,
+                operationType, RequestContext.get().getRequestTime(), requestContextHeaders));
+    }
+}
+```
+
+When differential notifications are enabled, only the changed entity attributes are included in the notification, reducing message size.
+
+### Notification Delivery Modes
+
+Notifications can be delivered in two modes:
+
+1. **Inline**: Sent immediately during entity processing
+2. **Post-Commit**: Sent only after the transaction is successfully committed
+
+```java
+// From EntityNotificationSender.java
+public EntityNotificationSender(NotificationInterface notificationInterface, boolean sendPostCommit) {
+    if (sendPostCommit) {
+        LOG.debug("EntityNotificationSender: notifications will be sent after transaction commit");
+        this.notificationSender = new PostCommitNotificationSender(notificationInterface);
+    } else {
+        LOG.debug("EntityNotificationSender: notifications will be sent inline (i.e. not waiting for transaction to commit)");
+        this.notificationSender = new InlineNotificationSender(notificationInterface);
+    }
+}
+```
+
+The delivery mode is configurable via the `atlas.notification.send.postcommit` property, with post-commit being the default.
+
+### Notification Triggers
+
+Notifications are triggered for various entity operations:
+
+| Operation | Trigger Method | Notification Type |
+|-----------|---------------|-------------------|
+| Entity Create | `onEntitiesAdded` | `ENTITY_CREATE` |
+| Entity Update | `onEntitiesUpdated` | `ENTITY_UPDATE` |
+| Entity Delete | `onEntitiesDeleted` | `ENTITY_DELETE` |
+| Classification Add | `onClassificationsAdded` | `CLASSIFICATION_ADD` |
+| Classification Update | `onClassificationsUpdated` | `CLASSIFICATION_UPDATE` |
+| Classification Delete | `onClassificationsDeleted` | `CLASSIFICATION_DELETE` |
+| Relationship Create | `onRelationshipsAdded` | `RELATIONSHIP_CREATE` |
+| Relationship Update | `onRelationshipsUpdated` | `RELATIONSHIP_UPDATE` |
+| Relationship Delete | `onRelationshipsDeleted` | `RELATIONSHIP_DELETE` |
+| Business Metadata Update | `onBusinessAttributesUpdated` | `BUSINESS_ATTRIBUTE_UPDATE` |
+
+```java
+// From EntityNotificationListenerV2.java
+@Override
+public void onEntitiesAdded(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+    notifyEntityEvents(entities, ENTITY_CREATE);
+}
+
+@Override
+public void onEntitiesUpdated(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+    notifyEntityEvents(entities, ENTITY_UPDATE);
+}
+
+@Override
+public void onEntitiesDeleted(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+    notifyEntityEvents(entities, ENTITY_DELETE);
+}
+```
+
+### Notification Content
+
+Notifications include:
+
+1. Entity header with type, GUID, and status
+2. Entity attributes (full or differential)
+3. Operation type
+4. Timestamp
+5. Request context headers
+
+```java
+// From EntityNotificationListenerV2.java
+private AtlasEntityHeaderWithRelations toNotificationHeader(AtlasEntity entity) {
+    AtlasEntityHeaderWithRelations ret = new AtlasEntityHeaderWithRelations(entity.getTypeName(), entity.getGuid(), new HashMap<>());
+    
+    // Set basic properties
+    ret.setGuid(entity.getGuid());
+    ret.setStatus(entity.getStatus());
+    ret.setIsIncomplete(entity.getIsIncomplete());
+    ret.setCreatedBy(entity.getCreatedBy());
+    ret.setUpdatedBy(entity.getUpdatedBy());
+    ret.setCreateTime(entity.getCreateTime());
+    ret.setUpdateTime(entity.getUpdateTime());
+    
+    // Add unique attributes and those marked for notification
+    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+    if (entityType != null) {
+        for (AtlasAttribute attribute : entityType.getAllAttributes().values()) {
+            if (attribute.getAttributeDef().getIsUnique() || attribute.getAttributeDef().getIncludeInNotification()) {
+                Object attrValue = entity.getAttribute(attribute.getName());
+                if (attrValue != null) {
+                    ret.setAttribute(attribute.getName(), attrValue);
+                }
+            }
+        }
+    }
+    
+    // Add classifications
+    if (CollectionUtils.isNotEmpty(entity.getClassifications())) {
+        List<AtlasClassification> classifications = new ArrayList<>(entity.getClassifications().size());
+        List<String> classificationNames = new ArrayList<>(entity.getClassifications().size());
+        
+        for (AtlasClassification classification : getAllClassifications(entity.getClassifications())) {
+            classifications.add(classification);
+            classificationNames.add(classification.getTypeName());
+        }
+        
+        ret.setClassifications(classifications);
+        ret.setClassificationNames(classificationNames);
+    }
+    
+    return ret;
+}
+```
+
+## Elasticsearch Audit System
+
+### Architecture
+
+The Elasticsearch audit system consists of several key components:
+
+1. **EntityAuditListenerV2**: Listens for entity changes and creates audit events
+2. **ESBasedAuditRepository**: Stores audit events in Elasticsearch
+3. **AtlasEntityChangeNotifier**: Orchestrates the audit process
+
+```
+┌─────────────────┐     ┌───────────────────────┐     ┌────────────────────────┐     ┌─────────────┐
+│ Entity          │     │ AtlasEntity           │     │ EntityAudit            │     │             │
+│ Operations      │────▶│ ChangeNotifier        │────▶│ ListenerV2             │────▶│ Elasticsearch│
+│ (CRUD)          │     │                       │     │                        │     │             │
+└─────────────────┘     └───────────────────────┘     └────────────────────────┘     └─────────────┘
+```
+
+### Audit Event Types
+
+The system records various types of audit events:
+
+```java
+// From EntityAuditEventV2.java
+public enum EntityAuditActionV2 {
+    ENTITY_CREATE,
+    ENTITY_UPDATE,
+    ENTITY_DELETE,
+    ENTITY_PURGE,
+    CLASSIFICATION_ADD,
+    CLASSIFICATION_DELETE,
+    CLASSIFICATION_UPDATE,
+    PROPAGATED_CLASSIFICATION_ADD,
+    PROPAGATED_CLASSIFICATION_DELETE,
+    PROPAGATED_CLASSIFICATION_UPDATE,
+    ENTITY_IMPORT_CREATE,
+    ENTITY_IMPORT_UPDATE,
+    ENTITY_IMPORT_DELETE,
+    TERM_ADD,
+    TERM_DELETE,
+    LABEL_ADD,
+    LABEL_DELETE,
+    BUSINESS_ATTRIBUTE_UPDATE,
+    CUSTOM_ATTRIBUTE_UPDATE
+}
+```
+
+### Differential Audits
+
+Atlas supports differential audits to reduce storage requirements:
+
+```java
+// From EntityAuditListenerV2.java
+private static boolean DIFFERENTIAL_AUDITS = false;
+
+// In constructor
+DIFFERENTIAL_AUDITS = STORE_DIFFERENTIAL_AUDITS.getBoolean();
+
+// In onEntitiesUpdated
+Collection<AtlasEntity> updatedEntites;
+if (DIFFERENTIAL_AUDITS) {
+    updatedEntites = reqContext.getDifferentialEntities();
+} else {
+    updatedEntites = entities;
+}
+
+// When creating events
+if (DIFFERENTIAL_AUDITS) {
+    createEvent(updatedEvents.next(), entity, entitiesMap.get(entity.getGuid()), action, auditMaxSize);
+} else {
+    createEvent(updatedEvents.next(), entity, action, auditMaxSize);
+}
+```
+
+When differential audits are enabled, only the changed entity attributes are stored in the audit event.
+
+### Audit Storage in Elasticsearch
+
+Audit events are stored in Elasticsearch using bulk operations:
+
+```java
+// From ESBasedAuditRepository.java
+@Override
+public void putEventsV2(List<EntityAuditEventV2> events) throws AtlasBaseException {
+    AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("pushInES");
+    try {
+        if (events != null && events.size() > 0) {
+            Map<String, String> requestContextHeaders = RequestContext.get().getRequestContextHeaders();
+            String entityPayloadTemplate = getQueryTemplate(requestContextHeaders);
+            
+            StringBuilder bulkRequestBody = new StringBuilder();
+            for (EntityAuditEventV2 event : events) {
+                String created = String.format("%s", event.getTimestamp());
+                String auditDetailPrefix = EntityAuditListenerV2.getV2AuditPrefix(event.getAction());
+                String details = event.getDetails().substring(auditDetailPrefix.length());
+                
+                String bulkItem = MessageFormat.format(entityPayloadTemplate,
+                        event.getEntityId(),
+                        event.getAction(),
+                        details,
+                        event.getUser(),
+                        event.getEntityId() + ":" + event.getEntity().getUpdateTime().getTime(),
+                        event.getEntityQualifiedName(),
+                        event.getEntity().getTypeName(),
+                        created,
+                        "" + event.getEntity().getUpdateTime().getTime());
+                
+                bulkRequestBody.append(bulkMetadata);
+                bulkRequestBody.append(bulkItem);
+                bulkRequestBody.append("\n");
+            }
+            
+            String endpoint = INDEX_NAME + "/_bulk";
+            HttpEntity entity = new NStringEntity(bulkRequestBody.toString(), ContentType.APPLICATION_JSON);
+            Request request = new Request("POST", endpoint);
+            request.setEntity(entity);
+            Response response = lowLevelClient.performRequest(request);
+            
+            // Error handling...
+        }
+    } catch (Exception e) {
+        throw new AtlasBaseException("Unable to push entity audits to ES", e);
+    } finally {
+        RequestContext.get().endMetricRecord(metric);
+    }
+}
+```
+
+### Audit Triggers
+
+Audit events are triggered for various entity operations:
+
+| Operation | Trigger Method | Audit Action |
+|-----------|---------------|--------------|
+| Entity Create | `onEntitiesAdded` | `ENTITY_CREATE` or `ENTITY_IMPORT_CREATE` |
+| Entity Update | `onEntitiesUpdated` | `ENTITY_UPDATE`, `ENTITY_IMPORT_UPDATE`, `CUSTOM_ATTRIBUTE_UPDATE`, or `BUSINESS_ATTRIBUTE_UPDATE` |
+| Entity Delete | `onEntitiesDeleted` | `ENTITY_DELETE` or `ENTITY_IMPORT_DELETE` |
+| Entity Purge | `onEntitiesPurged` | `ENTITY_PURGE` |
+| Classification Add | `onClassificationsAdded` | `CLASSIFICATION_ADD` or `PROPAGATED_CLASSIFICATION_ADD` |
+| Classification Update | `onClassificationsUpdated` | `CLASSIFICATION_UPDATE` or `PROPAGATED_CLASSIFICATION_UPDATE` |
+| Classification Delete | `onClassificationsDeleted` | `CLASSIFICATION_DELETE` or `PROPAGATED_CLASSIFICATION_DELETE` |
+| Term Add | `onTermAdded` | `TERM_ADD` |
+| Term Delete | `onTermDeleted` | `TERM_DELETE` |
+| Label Add | `onLabelsAdded` | `LABEL_ADD` |
+| Label Delete | `onLabelsDeleted` | `LABEL_DELETE` |
+| Business Metadata Update | `onBusinessAttributesUpdated` | `BUSINESS_ATTRIBUTE_UPDATE` |
+
+```java
+// From EntityAuditListenerV2.java
+@Override
+public void onEntitiesAdded(List<AtlasEntity> entities, boolean isImport) throws AtlasBaseException {
+    MetricRecorder metric = RequestContext.get().startMetricRecord("onEntitiesAdded");
+    
+    for (EntityAuditRepository auditRepository: auditRepositories) {
+        FixedBufferList<EntityAuditEventV2> entitiesAdded = getAuditEventsList();
+        for (AtlasEntity entity : entities) {
+            long auditMaxSize = getAuditMaxSize(auditRepository, entities.size());
+            createEvent(entitiesAdded.next(), entity, isImport ? ENTITY_IMPORT_CREATE : ENTITY_CREATE, auditMaxSize);
+        }
+        auditRepository.putEventsV2(entitiesAdded.toList());
+    }
+    
+    RequestContext.get().endMetricRecord(metric);
+}
+```
+
+### Audit Content
+
+Audit events include:
+
+1. Entity ID (GUID)
+2. Entity qualified name
+3. Entity type name
+4. Action type
+5. User who performed the action
+6. Timestamp
+7. Detailed entity information (full or differential)
+8. Request context headers
+
+```java
+// From EntityAuditListenerV2.java
+private EntityAuditEventV2 createEvent(EntityAuditEventV2 entityAuditEventV2, AtlasEntity entity, EntityAuditActionV2 action, String details) {
+    entityAuditEventV2.setEntityId(entity.getGuid());
+    entityAuditEventV2.setTimestamp(System.currentTimeMillis());
+    entityAuditEventV2.setUser(RequestContext.get().getUser());
+    entityAuditEventV2.setAction(action);
+    entityAuditEventV2.setDetails(details);
+    entityAuditEventV2.setEntity(entity);
+    
+    String qualifiedName = (String) entity.getAttribute(QUALIFIED_NAME);
+    entityAuditEventV2.setEntityQualifiedName(AtlasType.toJson(qualifiedName));
+    
+    return entityAuditEventV2;
+}
+```
+
+### Audit Size Management
+
+The audit system includes mechanisms to manage the size of audit events:
+
+```java
+// From EntityAuditListenerV2.java
+private String getAuditEventDetail(AtlasEntity entity, EntityAuditActionV2 action, long auditMaxSize) {
+    Map<String, Object> prunedAttributes = pruneEntityAttributesForAudit(entity);
+    
+    String auditPrefix  = getV2AuditPrefix(action);
+    String auditString  = auditPrefix + getAuditString(entity, action);
+    byte[] auditBytes   = auditString.getBytes(StandardCharsets.UTF_8);
+    long   auditSize    = auditBytes != null ? auditBytes.length : 0;
+    
+    if (auditMaxSize >= 0 && auditSize > auditMaxSize) { // don't store attributes in audit
+        LOG.warn("audit record too long: entityType={}, guid={}, size={}; maxSize={}. entity attribute values not stored in audit",
+                entity.getTypeName(), entity.getGuid(), auditSize, auditMaxSize);
+        
+        // Remove attributes and try again
+        Map<String, Object> attrValues    = entity.getAttributes();
+        Map<String, Object> relAttrValues = entity.getRelationshipAttributes();
+        
+        entity.setAttributes(null);
+        entity.setRelationshipAttributes(null);
+        
+        auditString = auditPrefix + getAuditString(entity, attrValues, action);
+        auditBytes  = auditString.getBytes(StandardCharsets.UTF_8);
+        auditSize   = auditBytes != null ? auditBytes.length : 0;
+        
+        if (auditMaxSize >= 0 && auditSize > auditMaxSize) { // don't store classifications and meanings as well
+            LOG.warn("audit record still too long: entityType={}, guid={}, size={}; maxSize={}. audit will have only summary details",
+                    entity.getTypeName(), entity.getGuid(), auditSize, auditMaxSize);
+            
+            // Create a minimal entity with just the essential attributes
+            AtlasEntity shallowEntity = new AtlasEntity();
+            
+            shallowEntity.setGuid(entity.getGuid());
+            shallowEntity.setTypeName(entity.getTypeName());
+            shallowEntity.setCreateTime(entity.getCreateTime());
+            shallowEntity.setUpdateTime(entity.getUpdateTime());
+            shallowEntity.setCreatedBy(entity.getCreatedBy());
+            shallowEntity.setUpdatedBy(entity.getUpdatedBy());
+            shallowEntity.setStatus(entity.getStatus());
+            shallowEntity.setVersion(entity.getVersion());
+            
+            //entity.attributes will only have uniqueAttributes
+            shallowEntity.setAttribute(QUALIFIED_NAME, entity.getAttribute(QUALIFIED_NAME));
+            
+            auditString = auditPrefix + AtlasType.toJson(shallowEntity);
+        }
+        
+        entity.setAttributes(attrValues);
+        entity.setRelationshipAttributes(relAttrValues);
+    }
+    
+    restoreEntityAttributes(entity, prunedAttributes);
+    
+    return auditString;
+}
+```
+
+## Integration with Entity Change Process
+
+The notification and audit systems are integrated with the entity change process through the `AtlasEntityChangeNotifier` class:
+
+```java
+// From AtlasEntityChangeNotifier.java
+public void onEntitiesMutated(EntityMutationResponse entityMutationResponse, boolean isImport) throws AtlasBaseException {
+    if (entityMutationResponse == null || !entityMutationResponse.hasData()) {
+        return;
+    }
+
+    List<AtlasEntityHeader> createdEntities          = entityMutationResponse.getCreatedEntities();
+    List<AtlasEntityHeader> updatedEntities          = entityMutationResponse.getUpdatedEntities();
+    List<AtlasEntityHeader> partiallyUpdatedEntities = entityMutationResponse.getPartialUpdatedEntities();
+    List<AtlasEntityHeader> deletedEntities          = entityMutationResponse.getDeletedEntities();
+    List<AtlasEntityHeader> purgedEntities           = entityMutationResponse.getPurgedEntities();
+
+    // notify listeners on entity changes
+    if (CollectionUtils.isNotEmpty(createdEntities)) {
+        List<AtlasEntity> entities = convertToAtlasEntities(createdEntities);
+
+        for (EntityChangeListener listener : entityChangeListeners) {
+            listener.onEntitiesAdded(entities, isImport);
+        }
+
+        if (v2Enabled) {
+            for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
+                listener.onEntitiesAdded(entities, isImport);
+            }
+        }
+    }
+
+    // Similar blocks for updated, deleted, and purged entities...
+}
+```
+
+The `AtlasEntityChangeNotifier` calls the appropriate methods on both the notification and audit listeners based on the entity operation.
+
+## Purpose and Benefits
+
+### Kafka Notification System
+
+The Kafka notification system serves several important purposes:
+
+1. **Real-time Integration**: Enables real-time integration with external systems by broadcasting entity changes
+2. **Event-Driven Architecture**: Facilitates event-driven architectures by providing a stream of entity change events
+3. **Decoupling**: Decouples Atlas from downstream consumers, allowing them to process entity changes asynchronously
+4. **Scalability**: Supports high-throughput scenarios by leveraging Kafka's scalability
+
+### Elasticsearch Audit System
+
+The Elasticsearch audit system provides several key benefits:
+
+1. **Compliance**: Maintains a detailed audit trail for compliance and governance purposes
+2. **Traceability**: Enables tracing of entity changes over time, including who made the changes and when
+3. **Accountability**: Provides accountability by recording the user who performed each action
+4. **Historical Analysis**: Supports historical analysis of entity changes for troubleshooting and reporting
+
+## Configuration Options
+
+### Kafka Notification Configuration
+
+```properties
+# Enable/disable entity notifications
+atlas.enable.entity.notifications=true
+
+# Send notifications after transaction commit (true) or inline (false)
+atlas.notification.send.postcommit=true
+
+# Kafka connection settings
+atlas.kafka.bootstrap.servers=localhost:9092
+atlas.kafka.zookeeper.connect=localhost:2181
+atlas.kafka.zookeeper.session.timeout.ms=400
+atlas.kafka.zookeeper.connection.timeout.ms=200
+atlas.kafka.zookeeper.sync.time.ms=20
+atlas.kafka.auto.commit.interval.ms=1000
+atlas.kafka.hook.group.id=atlas
+
+# Kafka topic names
+atlas.notification.topics=ATLAS_HOOK,ATLAS_ENTITIES,ATLAS_RELATIONSHIPS,ATLAS_DISTRIBUTED_TASKS
+atlas.notification.hook.topic.name=ATLAS_HOOK
+atlas.notification.entities.topic.name=ATLAS_ENTITIES
+atlas.notification.relationships.topic.name=ATLAS_RELATIONSHIPS
+atlas.notification.distributed.tasks.topic.name=ATLAS_DISTRIBUTED_TASKS
+```
+
+### Elasticsearch Audit Configuration
+
+```properties
+# Enable/disable entity audits
+atlas.enable.entity.audits=true
+
+# Store differential audits (only changed attributes)
+atlas.entity.audit.differential=true
+
+# Elasticsearch connection settings
+atlas.graph.index.search.hostname=localhost:9200
+
+# Audit index settings
+atlas.index.audit.elasticsearch.total_field_limit=10000
+
+# Audit size limits
+atlas.audit.hbase.entity.<entityType>.attributes.exclude=<attribute1>,<attribute2>
+```
+
+## Conclusion
+
+The Kafka notification and Elasticsearch audit systems in Atlas Metastore provide a comprehensive solution for entity change tracking. The notification system enables real-time integration with external systems, while the audit system maintains a detailed history of entity changes for compliance and governance purposes. Together, these systems form a critical part of Atlas Metastore's data governance capabilities.

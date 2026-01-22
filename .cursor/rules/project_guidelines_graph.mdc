@@ -1,0 +1,682 @@
+---
+description: Guidelines on how to use graph calls in the project
+globs: 
+alwaysApply: false
+---
+# Graph Operation Best Practices for Atlas Metastore
+
+## Overview
+
+This document outlines best practices for graph operations in the Atlas Metastore project, with a focus on performance, scalability, and maintainability. It provides guidance on which graph calls are recommended, which should be avoided, and includes examples from the codebase to illustrate these practices.
+
+## Table of Contents
+
+1. [Vertex and Edge Retrieval](#vertex-and-edge-retrieval)
+2. [Property Management](#property-management)
+3. [Transaction Management](#transaction-management)
+4. [Bulk Operations](#bulk-operations)
+5. [Query Optimization](#query-optimization)
+6. [Caching Strategies](#caching-strategies)
+7. [Error Handling and Retries](#error-handling-and-retries)
+8. [Performance Monitoring](#performance-monitoring)
+
+## Vertex and Edge Retrieval
+
+### DO: Use Indexed Lookups
+
+Always use indexed properties for vertex lookups to ensure optimal performance.
+
+```java
+// GOOD: Using indexed property (GUID) for lookup
+AtlasVertex vertex = AtlasGraphUtilsV2.findByGuid(graph, guid);
+
+// GOOD: Using unique attribute index
+AtlasVertex vertex = AtlasGraphUtilsV2.findByUniqueAttributes(graph, entityType, uniqueAttributes);
+```
+
+### DON'T: Use Full Graph Scans
+
+Avoid operations that require scanning the entire graph, as they can be extremely inefficient.
+
+```java
+// BAD: Full graph scan without index
+Iterator<AtlasVertex> vertices = graph.getVertices().iterator();
+while (vertices.hasNext()) {
+    AtlasVertex vertex = vertices.next();
+    if (vertex.getProperty(PROPERTY_KEY, String.class).equals(value)) {
+        // Process vertex
+    }
+}
+
+// GOOD: Use indexed query instead
+AtlasGraphQuery query = graph.query()
+    .has(PROPERTY_KEY, value);
+Iterator<AtlasVertex> vertices = query.vertices().iterator();
+```
+
+### DO: Batch Vertex Retrieval
+
+When retrieving multiple vertices, use batch operations instead of individual lookups.
+
+```java
+// BAD: Individual lookups in a loop
+List<AtlasVertex> vertices = new ArrayList<>();
+for (String guid : guids) {
+    vertices.add(AtlasGraphUtilsV2.findByGuid(graph, guid));
+}
+
+// GOOD: Batch lookup using IN operator
+AtlasGraphQuery query = graph.query()
+    .in(Constants.GUID_PROPERTY_KEY, guids);
+Iterator<AtlasVertex> vertices = query.vertices().iterator();
+```
+
+### DON'T: Create Unnecessary Edges
+
+Avoid creating redundant edges or edges that could be inferred from other relationships.
+
+```java
+// BAD: Creating redundant edges
+addEdge(parentVertex, childVertex, PARENT_EDGE);
+addEdge(childVertex, parentVertex, CHILD_EDGE);
+
+// GOOD: Create only one edge and traverse in both directions
+AtlasEdge edge = addEdge(parentVertex, childVertex, PARENT_EDGE);
+// To find children: parentVertex.getEdges(AtlasEdgeDirection.OUT, PARENT_EDGE)
+// To find parent: childVertex.getEdges(AtlasEdgeDirection.IN, PARENT_EDGE)
+```
+
+## Property Management
+
+### DO: Use Encoded Property Keys
+
+Always use encoded property keys to ensure proper handling of special characters.
+
+```java
+// BAD: Using raw property keys
+vertex.setProperty("first.name", "John");
+
+// GOOD: Using encoded property keys
+AtlasGraphUtilsV2.setEncodedProperty(vertex, "first.name", "John");
+```
+
+### DON'T: Store Large Values as Properties
+
+Avoid storing large values (like long strings) directly as vertex properties.
+
+```java
+// BAD: Storing large text as a property
+AtlasGraphUtilsV2.setProperty(vertex, "description", veryLongText);
+
+// GOOD: Store large text externally and reference it
+String storageKey = storeExternally(veryLongText);
+AtlasGraphUtilsV2.setProperty(vertex, "descriptionKey", storageKey);
+```
+
+### DO: Use Appropriate Property Types
+
+Use the appropriate data type for properties to ensure efficient storage and querying.
+
+```java
+// BAD: Storing numbers as strings
+AtlasGraphUtilsV2.setProperty(vertex, "count", count.toString());
+
+// GOOD: Storing numbers as numeric types
+AtlasGraphUtilsV2.setProperty(vertex, "count", count);
+```
+
+### DON'T: Update Properties Unnecessarily
+
+Avoid updating properties when the value hasn't changed.
+
+```java
+// BAD: Always updating property
+AtlasGraphUtilsV2.setProperty(vertex, "name", newName);
+
+// GOOD: Update only if changed
+String currentName = AtlasGraphUtilsV2.getProperty(vertex, "name", String.class);
+if (!Objects.equals(currentName, newName)) {
+    AtlasGraphUtilsV2.setProperty(vertex, "name", newName);
+}
+```
+
+## Transaction Management
+
+### DO: Use @GraphTransaction Annotation
+
+Always use the `@GraphTransaction` annotation for methods that modify the graph.
+
+```java
+// GOOD: Using transaction annotation
+@GraphTransaction
+public EntityMutationResponse createOrUpdate(EntityStream entityStream) throws AtlasBaseException {
+    // Implementation
+}
+```
+
+### DON'T: Mix Transaction Boundaries
+
+Avoid calling transactional methods from within another transactional method.
+
+```java
+// BAD: Nested transactional methods
+@GraphTransaction
+public void methodA() {
+    // Some operations
+    methodB(); // Also has @GraphTransaction
+}
+
+// GOOD: Extract common functionality without transaction annotation
+@GraphTransaction
+public void methodA() {
+    // Some operations
+    commonImplementation();
+}
+
+@GraphTransaction
+public void methodB() {
+    // Some operations
+    commonImplementation();
+}
+
+private void commonImplementation() {
+    // Common implementation without @GraphTransaction
+}
+```
+
+### DO: Keep Transactions Short
+
+Keep transactions as short as possible to reduce lock contention.
+
+```java
+// BAD: Long-running transaction
+@GraphTransaction
+public void processAllEntities() {
+    Iterator<AtlasVertex> vertices = getAllEntityVertices();
+    while (vertices.hasNext()) {
+        // Process each vertex with complex logic
+    }
+}
+
+// GOOD: Process in batches with separate transactions
+public void processAllEntities() {
+    Iterator<AtlasVertex> vertices = getAllEntityVertices();
+    List<AtlasVertex> batch = new ArrayList<>(BATCH_SIZE);
+    
+    while (vertices.hasNext()) {
+        batch.add(vertices.next());
+        
+        if (batch.size() >= BATCH_SIZE) {
+            processBatch(batch);
+            batch.clear();
+        }
+    }
+    
+    if (!batch.isEmpty()) {
+        processBatch(batch);
+    }
+}
+
+@GraphTransaction
+private void processBatch(List<AtlasVertex> vertices) {
+    // Process batch
+}
+```
+
+## Bulk Operations
+
+### DO: Use Bulk Import for Large Datasets
+
+Use bulk import capabilities for loading large datasets.
+
+```java
+// GOOD: Using bulk import
+BulkLoadingConfig config = new BulkLoadingConfig();
+graph.startBulkLoad(config);
+
+try {
+    // Perform bulk operations
+    for (AtlasEntity entity : entities) {
+        createVertex(entity);
+    }
+} finally {
+    graph.stopBulkLoad();
+}
+```
+
+### DON'T: Process Large Results in Memory
+
+Avoid loading large result sets into memory at once.
+
+```java
+// BAD: Loading all results into memory
+List<AtlasVertex> allVertices = new ArrayList<>();
+Iterator<AtlasVertex> iterator = query.vertices().iterator();
+while (iterator.hasNext()) {
+    allVertices.add(iterator.next());
+}
+// Process allVertices
+
+// GOOD: Stream processing of results
+Iterator<AtlasVertex> iterator = query.vertices().iterator();
+while (iterator.hasNext()) {
+    AtlasVertex vertex = iterator.next();
+    // Process each vertex individually
+}
+```
+
+### DO: Use Batch Mutations
+
+Group multiple mutations into batches for better performance.
+
+```java
+// BAD: Individual commits for each entity
+for (AtlasEntity entity : entities) {
+    createEntity(entity); // Each call has its own @GraphTransaction
+}
+
+// GOOD: Batch processing with a single transaction
+@GraphTransaction
+public EntityMutationResponse createEntities(List<AtlasEntity> entities) {
+    EntityMutationResponse response = new EntityMutationResponse();
+    
+    for (AtlasEntity entity : entities) {
+        // Create entity and add to response
+    }
+    
+    return response;
+}
+```
+
+## Query Optimization
+
+### DO: Use Appropriate Indices
+
+Ensure that frequently queried properties have appropriate indices.
+
+```java
+// GOOD: Creating index for frequently queried property
+AtlasGraphIndex index = graph.createIndex(
+    "byTypeAndName",
+    AtlasPropertyKey.ENTITY_TYPE,
+    AtlasPropertyKey.NAME
+);
+```
+
+### DON'T: Use Complex Queries When Simple Ones Suffice
+
+Avoid overly complex queries when simpler ones would work.
+
+```java
+// BAD: Overly complex query
+AtlasGraphQuery query = graph.query()
+    .has("__typeName", "Process")
+    .has("__state", "ACTIVE")
+    .has("name", "process1")
+    .has("owner", "admin");
+
+// GOOD: Use the most selective property first
+AtlasVertex vertex = AtlasGraphUtilsV2.findByUniqueAttributes(
+    graph, 
+    typeRegistry.getEntityTypeByName("Process"), 
+    Collections.singletonMap("qualifiedName", qualifiedName)
+);
+```
+
+### DO: Use Query Hints and Limits
+
+Use query hints and limits to optimize query execution.
+
+```java
+// GOOD: Using limit to restrict results
+AtlasGraphQuery query = graph.query()
+    .has("__typeName", "Table")
+    .limit(100);
+```
+
+### DON'T: Use String Concatenation for Property Keys
+
+Avoid string concatenation for property keys, use constants or utility methods.
+
+```java
+// BAD: String concatenation for property keys
+vertex.getProperty(typeName + "." + attributeName, String.class);
+
+// GOOD: Use utility method
+String propertyKey = AtlasGraphUtilsV2.getQualifiedAttributePropertyKey(type, attributeName);
+vertex.getProperty(propertyKey, String.class);
+```
+
+## Caching Strategies
+
+### DO: Use Vertex Caching
+
+Use the vertex cache to avoid redundant database lookups.
+
+```java
+// GOOD: Using vertex cache
+AtlasVertex vertex = GraphTransactionInterceptor.getVertexFromCache(guid);
+if (vertex == null) {
+    vertex = graph.getVertex(guid);
+    if (vertex != null) {
+        GraphTransactionInterceptor.addToVertexCache(guid, vertex);
+    }
+}
+```
+
+### DON'T: Cache Too Many Vertices
+
+Avoid caching too many vertices, which can lead to memory issues.
+
+```java
+// BAD: Caching too many vertices without bounds
+for (String guid : allGuids) {
+    AtlasVertex vertex = graph.getVertex(guid);
+    cache.put(guid, vertex);
+}
+
+// GOOD: Using bounded cache
+Cache<String, AtlasVertex> vertexCache = CacheBuilder.newBuilder()
+    .maximumSize(10000)
+    .expireAfterAccess(10, TimeUnit.MINUTES)
+    .build();
+```
+
+### DO: Prefetch Related Vertices
+
+Prefetch related vertices that are likely to be accessed together.
+
+```java
+// GOOD: Prefetching related vertices
+Set<String> relatedGuids = new HashSet<>();
+for (AtlasEdge edge : vertex.getEdges(AtlasEdgeDirection.BOTH)) {
+    AtlasVertex otherVertex = edge.getOtherVertex(vertex);
+    relatedGuids.add(AtlasGraphUtilsV2.getIdFromVertex(otherVertex));
+}
+
+// Batch fetch and cache
+prefetchVertices(relatedGuids);
+```
+
+## Error Handling and Retries
+
+### DO: Implement Retry Logic for Concurrent Modifications
+
+Implement retry logic for operations that might face concurrent modification issues.
+
+```java
+// GOOD: Retry logic for edge creation
+public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) {
+    for (int retry = 0; retry < MAX_RETRIES; retry++) {
+        try {
+            AtlasEdge edge = graph.getEdgeBetweenVertices(outVertex, inVertex, edgeLabel);
+            if (edge != null) {
+                return edge;
+            }
+            
+            return graph.addEdge(outVertex, inVertex, edgeLabel);
+        } catch (Exception e) {
+            if (retry == MAX_RETRIES - 1) {
+                throw e;
+            }
+            
+            try {
+                Thread.sleep(RETRY_SLEEP_TIME);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(ie);
+            }
+        }
+    }
+    
+    throw new RuntimeException("Failed after " + MAX_RETRIES + " retries");
+}
+```
+
+### DON'T: Swallow Exceptions
+
+Avoid catching and swallowing exceptions without proper handling.
+
+```java
+// BAD: Swallowing exception
+try {
+    // Graph operation
+} catch (Exception e) {
+    // Do nothing
+}
+
+// GOOD: Proper exception handling
+try {
+    // Graph operation
+} catch (Exception e) {
+    LOG.error("Error performing graph operation", e);
+    throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
+}
+```
+
+### DO: Use Specific Exception Types
+
+Use specific exception types for different error scenarios.
+
+```java
+// GOOD: Using specific exception types
+if (vertex == null) {
+    throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
+}
+
+if (!hasPermission) {
+    throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS, operation);
+}
+```
+
+## Performance Monitoring
+
+### DO: Use Performance Metrics
+
+Use performance metrics to track and optimize graph operations.
+
+```java
+// GOOD: Using performance metrics
+AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("findByUniqueAttributes");
+
+try {
+    // Implementation
+} finally {
+    RequestContext.get().endMetricRecord(metric);
+}
+```
+
+### DON'T: Perform Expensive Operations Without Monitoring
+
+Avoid performing expensive operations without monitoring their performance.
+
+```java
+// BAD: Expensive operation without monitoring
+Iterator<AtlasVertex> vertices = graph.getVertices().iterator();
+while (vertices.hasNext()) {
+    // Process vertices
+}
+
+// GOOD: Monitored expensive operation
+AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("processAllVertices");
+try {
+    Iterator<AtlasVertex> vertices = graph.getVertices().iterator();
+    int count = 0;
+    while (vertices.hasNext()) {
+        // Process vertices
+        count++;
+    }
+    metric.recordCount("processedVertices", count);
+} finally {
+    RequestContext.get().endMetricRecord(metric);
+}
+```
+
+### DO: Log Performance Issues
+
+Log performance issues for further investigation.
+
+```java
+// GOOD: Logging performance issues
+long startTime = System.currentTimeMillis();
+// Perform operation
+long endTime = System.currentTimeMillis();
+long duration = endTime - startTime;
+
+if (duration > SLOW_OPERATION_THRESHOLD) {
+    LOG.warn("Slow graph operation: {} ms for {}", duration, operationName);
+}
+```
+
+## Real-World Examples from Atlas Metastore
+
+### Example 1: Efficient Entity Lookup by Unique Attributes
+
+The `findByUniqueAttributes` method in `AtlasGraphUtilsV2` demonstrates efficient entity lookup using unique attributes:
+
+```java
+public static AtlasVertex findByUniqueAttributes(AtlasGraph graph, AtlasEntityType entityType, Map<String, Object> attrValues) {
+    MetricRecorder metric = RequestContext.get().startMetricRecord("findByUniqueAttributes");
+    AtlasVertex vertex = null;
+    
+    try {
+        final Map<String, AtlasAttribute> uniqueAttributes = entityType.getUniqAttributes();
+        
+        if (MapUtils.isNotEmpty(uniqueAttributes) && MapUtils.isNotEmpty(attrValues)) {
+            Map<String, Object> uniqAttrValues = populateUniqueAttributesMap(uniqueAttributes, attrValues);
+            
+            if (USE_UNIQUE_INDEX_PROPERTY_TO_FIND_ENTITY && MapUtils.isNotEmpty(uniqAttrValues)) {
+                vertex = findByTypeAndUniquePropertyName(graph, entityType.getTypeName(), uniqAttrValues);
+                
+                // If not found, try subtypes
+                if (vertex == null && !entityType.getAllSubTypes().isEmpty()) {
+                    vertex = findBySuperTypeAndUniquePropertyName(graph, entityType.getTypeName(), uniqAttrValues);
+                }
+            }
+        }
+    } finally {
+        RequestContext.get().endMetricRecord(metric);
+    }
+    
+    return vertex;
+}
+```
+
+This method:
+- Uses performance metrics to track execution time
+- Leverages unique attribute indices for efficient lookup
+- Falls back to subtype search if needed
+- Avoids unnecessary graph operations when inputs are empty
+
+### Example 2: Batch Vertex Retrieval
+
+The `getVertices` method in `EntityGraphRetriever` demonstrates efficient batch retrieval of vertices:
+
+```java
+private List<AtlasVertex> getVertices(List<String> guids) {
+    List<AtlasVertex> ret = new ArrayList<>();
+    
+    if (CollectionUtils.isNotEmpty(guids)) {
+        for (int i = 0; i < guids.size(); i += BATCH_SIZE) {
+            List<String> batchGuids = guids.subList(i, Math.min(i + BATCH_SIZE, guids.size()));
+            AtlasGraphQuery query = graph.query().in(Constants.GUID_PROPERTY_KEY, batchGuids);
+            
+            Iterator<AtlasVertex> vertices = query.vertices().iterator();
+            while (vertices.hasNext()) {
+                ret.add(vertices.next());
+            }
+        }
+    }
+    
+    return ret;
+}
+```
+
+This method:
+- Processes GUIDs in batches to avoid large IN clauses
+- Uses indexed lookup with the IN operator
+- Avoids loading all vertices into memory at once
+
+### Example 3: Retry Logic for Edge Creation
+
+The `getOrCreateEdge` method in `GraphHelper` demonstrates proper retry logic for edge creation:
+
+```java
+public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws RepositoryException {
+    AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getOrCreateEdge");
+    
+    for (int numRetries = 0; numRetries < maxRetries; numRetries++) {
+        try {
+            // Check if edge already exists
+            AtlasEdge edge = getEdgeBetweenVertices(outVertex, inVertex, edgeLabel);
+            if (edge != null) {
+                return edge;
+            }
+            
+            // Create new edge
+            return addEdge(outVertex, inVertex, edgeLabel);
+        } catch (Exception e) {
+            if (numRetries == (maxRetries - 1)) {
+                throw new RepositoryException("Max retries exceeded for getOrCreateEdge", e);
+            }
+            
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Exception while getOrCreateEdge, retrying: attempt={}, maxRetries={}", numRetries, maxRetries, e);
+            }
+            
+            try {
+                LOG.debug("Retrying with delay: {} ms", retrySleepTime);
+                Thread.sleep(retrySleepTime);
+            } catch (InterruptedException ie) {
+                LOG.error("Interrupted while waiting for retry", ie);
+                Thread.currentThread().interrupt();
+                throw new RepositoryException("Interrupted during retry", ie);
+            }
+        }
+    }
+    
+    // This should never happen
+    throw new RepositoryException("Max retries exceeded for getOrCreateEdge");
+}
+```
+
+This method:
+- Implements configurable retry logic for handling concurrent modifications
+- Checks for existing edges before creating new ones
+- Uses exponential backoff for retries
+- Properly handles interruptions
+- Tracks performance metrics
+
+### Example 4: Differential Updates for Entity Attributes
+
+The `mapAttributes` method in `EntityGraphMapper` demonstrates efficient differential updates:
+
+```java
+private void mapAttributes(AtlasVertex vertex, AtlasEntity entity, EntityOperation operation) throws AtlasBaseException {
+    if (operation == CREATE) {
+        // For CREATE, set all attributes
+        for (String attrName : entity.getAttributes().keySet()) {
+            mapAttribute(vertex, entity, attrName, operation);
+        }
+    } else if (operation == UPDATE || operation == PARTIAL_UPDATE) {
+        // For UPDATE, only set attributes that are provided
+        for (String attrName : entity.getAttributes().keySet()) {
+            mapAttribute(vertex, entity, attrName, operation);
+        }
+    }
+    
+    // Update system attributes
+    updateSystemAttributes(vertex, entity);
+}
+```
+
+This method:
+- Only updates attributes that are provided in the update request
+- Avoids unnecessary property updates
+- Handles different operation types appropriately
+
+## Conclusion
+
+Following these graph operation best practices will help ensure that Atlas Metastore remains performant, scalable, and maintainable. By leveraging efficient graph operations, implementing proper caching strategies, and using appropriate error handling, you can optimize the performance of graph operations while maintaining code quality.
+
+Remember that these guidelines are not exhaustive, and specific scenarios may require different approaches. Always consider the context and requirements when applying these practices.

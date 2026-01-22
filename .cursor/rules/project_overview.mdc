@@ -1,0 +1,645 @@
+---
+description: Project structure with code example
+globs: 
+alwaysApply: false
+---
+# Atlas Metastore: Project Structure Documentation
+
+## Overview
+
+Apache Atlas is a scalable and extensible metadata management and data governance platform designed for the Hadoop ecosystem. This document provides a comprehensive breakdown of the Atlas Metastore project structure, detailing the organization of code, key components, and their interactions.
+
+## Table of Contents
+
+1. [Project Organization](mdc:#project-organization)
+2. [Core Systems and Services](mdc:#core-systems-and-services)
+3. [Main Directories and Files](mdc:#main-directories-and-files)
+4. [Key Components and Classes](mdc:#key-components-and-classes)
+5. [API Endpoints](mdc:#api-endpoints)
+6. [Database Schema](mdc:#database-schema)
+7. [Configuration](mdc:#configuration)
+8. [Integration Points](mdc:#integration-points)
+
+## Project Organization
+
+The Atlas Metastore project follows a modular architecture with clear separation of concerns. The codebase is organized into several modules, each responsible for a specific aspect of the system.
+
+```
+atlas-metastore/
+├── addons/                  # Integration components for external systems
+├── auth-agents-common/      # Authorization and security components
+├── client/                  # Client libraries for API access
+├── common/                  # Common utilities and helper classes
+├── distro/                  # Distribution packaging and configuration
+├── docs/                    # Documentation
+├── graphdb/                 # Graph database abstraction and implementation
+├── intg/                    # Integration models and common interfaces
+├── notification/            # Notification framework for metadata changes
+├── repository/              # Core implementation of Atlas services and graph storage
+├── webapp/                  # Web application and REST APIs
+└── .github/                 # CI/CD pipeline configuration
+```
+
+## Core Systems and Services
+
+### 1. Entity Management System
+
+The Entity Management System handles the creation, retrieval, update, and deletion of metadata entities. It is responsible for managing the lifecycle of entities and their relationships.
+
+**Key Components:**
+- `AtlasEntityStoreV2`: Core service for entity CRUD operations
+- `EntityGraphMapper`: Maps between Atlas entity objects and graph vertices/edges
+- `EntityGraphRetriever`: Retrieves entities from graph and converts to Atlas entity objects
+
+**Key Interactions:**
+```
+EntityREST (API) → AtlasEntityStoreV2 (Service) → EntityGraphMapper (Mapper) → AtlasGraph (Database)
+```
+
+**Sample Code (Entity Creation):**
+```java
+public EntityMutationResponse createOrUpdate(AtlasEntitiesWithExtInfo entities,
+                                            boolean replaceClassifications,
+                                            boolean replaceTags,
+                                            boolean replaceBusinessAttributes,
+                                            boolean overwriteBusinessAttributes) throws AtlasBaseException {
+    // Validate request
+    validateAttributeLength(entities.getEntities());
+    
+    // Create entity stream and context
+    AtlasEntityStream entityStream = new AtlasEntityStream(entities);
+    BulkRequestContext bulkRequestContext = new BulkRequestContext(
+            replaceClassifications, replaceTags, replaceBusinessAttributes, overwriteBusinessAttributes);
+    
+    // Process entities
+    return entitiesStore.createOrUpdate(entityStream, bulkRequestContext);
+}
+```
+
+### 2. Type System
+
+The Type System defines and manages metadata types (entity, classification, relationship). It provides schema validation and type enforcement.
+
+**Key Components:**
+- `AtlasTypeDefGraphStore`: Manages persistence of type definitions in graph database
+- `AtlasTypeRegistry`: Maintains all type definitions and provides type validation
+
+**Key Interactions:**
+```
+TypesREST (API) → AtlasTypeDefStore (Service) → AtlasTypeDefGraphStore (Store) → AtlasGraph (Database)
+```
+
+**Sample Code (Type Registration):**
+```java
+public AtlasTypesDef createTypesDef(AtlasTypesDef typesDef) throws AtlasBaseException {
+    AtlasPerfTracer perf = null;
+
+    try {
+        if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+            perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "TypesREST.createTypesDef(" + 
+                   AtlasType.toJson(typesDef) + ")");
+        }
+
+        AtlasTypesDef ret = typeDefStore.createTypesDef(typesDef);
+
+        return ret;
+    } finally {
+        AtlasPerfTracer.log(perf);
+    }
+}
+```
+
+### 3. Search and Discovery
+
+The Search and Discovery system enables searching for metadata based on various criteria. It uses both graph database and search index for query processing.
+
+**Key Components:**
+- `EntityDiscoveryService`: Provides entity search capabilities with various search types
+- `SearchProcessor`: Abstract class for different search strategies
+
+**Key Interactions:**
+```
+DiscoveryREST (API) → EntityDiscoveryService (Service) → SearchProcessor (Processor) → AtlasGraph/Elasticsearch (Database)
+```
+
+**Sample Code (Index Search):**
+```java
+public AtlasSearchResult directIndexSearch(SearchParams searchParams) throws AtlasBaseException {
+    IndexSearchParams params = (IndexSearchParams) searchParams;
+    RequestContext.get().setRelationAttrsForSearch(params.getRelationAttributes());
+    
+    AtlasSearchResult ret = new AtlasSearchResult();
+    AtlasIndexQuery indexQuery;
+
+    ret.setSearchParameters(searchParams);
+    ret.setQueryType(AtlasQueryType.INDEX);
+
+    try {
+        String indexName = getIndexName(params);
+        indexQuery = graph.elasticsearchQuery(indexName);
+        
+        if (searchParams.getEnableFullRestriction()) {
+            addPreFiltersToSearchQuery(searchParams);
+        }
+        
+        DirectIndexQueryResult indexQueryResult = indexQuery.vertices(searchParams);
+        prepareSearchResult(ret, indexQueryResult, resultAttributes, true);
+        
+        ret.setAggregations(indexQueryResult.getAggregationMap());
+        ret.setApproximateCount(indexQuery.vertexTotals());
+    } catch (Exception e) {
+        LOG.error("Error while performing direct search", e);
+        throw e;
+    }
+    return ret;
+}
+```
+
+### 4. Lineage System
+
+The Lineage System tracks data flow between entities. It supports on-demand and list-based lineage retrieval.
+
+**Key Components:**
+- `EntityLineageService`: Retrieves lineage information for entities
+- `AtlasLineageService`: Provides lineage API implementation
+
+**Key Interactions:**
+```
+LineageREST (API) → AtlasLineageService (Service) → EntityLineageService (Service) → AtlasGraph (Database)
+```
+
+**Sample Code (Lineage Retrieval):**
+```java
+public AtlasLineageInfo getLineageInfo(String guid, LineageDirection direction, int depth) throws AtlasBaseException {
+    AtlasPerfTracer perf = null;
+
+    try {
+        if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+            perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "LineageREST.getLineageInfo(" + guid + 
+                   ", " + direction + ", " + depth + ")");
+        }
+
+        return atlasLineageService.getAtlasLineageInfo(guid, direction, depth);
+    } finally {
+        AtlasPerfTracer.log(perf);
+    }
+}
+```
+
+### 5. Notification System
+
+The Notification System captures changes in metadata and publishes notifications. It uses Kafka for asynchronous delivery.
+
+**Key Components:**
+- `AtlasHook`: Base class for metadata hooks that capture changes in external systems
+- `EntityNotificationListenerV2`: Listens for entity notifications
+
+**Key Interactions:**
+```
+AtlasEntityChangeNotifier (Notifier) → NotificationInterface (Interface) → KafkaNotification (Implementation)
+```
+
+**Sample Code (Entity Notification):**
+```java
+public void onEntitiesMutated(EntityMutations entityMutations, boolean isImport) throws AtlasBaseException {
+    // Notify entity mutation listeners
+    for (EntityMutationListener listener : entityMutationListeners) {
+        listener.onEntitiesMutated(entityMutations, isImport);
+    }
+    
+    // Create audit events
+    List<EntityAuditEventV2> auditEvents = createAuditEvents(entityMutations);
+    
+    // Notify audit listeners
+    for (EntityAuditListener listener : entityAuditListeners) {
+        listener.onEntitiesAudited(auditEvents);
+    }
+    
+    // Update search index
+    indexSearchProcessor.onEntitiesMutated(entityMutations);
+}
+```
+
+### 6. Security and Authorization
+
+The Security and Authorization system controls access to metadata based on policies. It supports attribute-based access control (ABAC).
+
+**Key Components:**
+- `ESAliasStore`: Manages Elasticsearch aliases for access control filtering
+- `AtlasAuthorizationUtils`: Centralizes authorization checks for access to Atlas resources
+- `PolicyTransformer`: Transforms high-level policies into more granular enforcement rules
+
+**Key Interactions:**
+```
+AtlasAuthorizationUtils (Utils) → AtlasAuthorizer (Interface) → RangerAtlasAuthorizer (Implementation)
+```
+
+**Sample Code (Authorization Check):**
+```java
+public static void verifyAccess(AtlasEntityAccessRequest request) throws AtlasBaseException {
+    if (!isAccessAllowed(request)) {
+        String message = String.format("User %s does not have %s access to entity %s", 
+                                      RequestContext.get().getCurrentUser(), 
+                                      request.getAction(), 
+                                      request.getEntity().getGuid());
+        
+        throw new AtlasBaseException(AtlasErrorCode.AUTHORIZATION_FAILED, message);
+    }
+}
+```
+
+### 7. Data Mesh Implementation
+
+The Data Mesh Implementation implements Data Mesh concepts like domains and data products. It manages governance of data products.
+
+**Key Components:**
+- `DataProductPreProcessor`: Handles data product entity creation/updates for Data Mesh
+- `DataDomainPreProcessor`: Manages data domain entities
+
+**Key Interactions:**
+```
+EntityREST (API) → AtlasEntityStoreV2 (Service) → DataProductPreProcessor (PreProcessor) → EntityGraphMapper (Mapper)
+```
+
+**Sample Code (Data Product Processing):**
+```java
+public void preProcess(AtlasEntity entity, PreProcessorContext context) throws AtlasBaseException {
+    if (!entity.getTypeName().equals(DATA_PRODUCT_TYPE_NAME)) {
+        return;
+    }
+    
+    // Validate data product attributes
+    validateDataProductAttributes(entity);
+    
+    // Set data product metadata
+    setDataProductMetadata(entity, context);
+    
+    // Link data product to domain
+    linkDataProductToDomain(entity, context);
+}
+```
+
+### 8. Audit System
+
+The Audit System tracks changes to metadata entities. It stores audit events in Elasticsearch.
+
+**Key Components:**
+- `ESBasedAuditRepository`: Stores entity audit events in Elasticsearch
+- `EntityAuditListenerV2`: Listens for entity audit events
+
+**Key Interactions:**
+```
+AtlasEntityChangeNotifier (Notifier) → EntityAuditListenerV2 (Listener) → ESBasedAuditRepository (Repository)
+```
+
+**Sample Code (Audit Event Creation):**
+```java
+public List<EntityAuditEventV2> createAuditEvents(EntityMutations entityMutations) {
+    List<EntityAuditEventV2> ret = new ArrayList<>();
+    
+    for (EntityMutations.EntityOperation operation : EntityMutations.EntityOperation.values()) {
+        Collection<AtlasEntityHeader> entities = entityMutations.getEntitiesByOperation(operation);
+        
+        if (CollectionUtils.isEmpty(entities)) {
+            continue;
+        }
+        
+        for (AtlasEntityHeader entity : entities) {
+            EntityAuditEventV2 auditEvent = new EntityAuditEventV2(entity.getGuid(), 
+                                                                  RequestContext.get().getRequestTime(),
+                                                                  RequestContext.get().getCurrentUser(),
+                                                                  toAuditAction(operation),
+                                                                  entity.getTypeName(),
+                                                                  entity);
+            
+            ret.add(auditEvent);
+        }
+    }
+    
+    return ret;
+}
+```
+
+### 9. Task Management
+
+The Task Management system handles asynchronous background tasks. It manages task scheduling and execution.
+
+**Key Components:**
+- `TaskRegistry`: Manages persistence and retrieval of asynchronous tasks
+- `TaskExecutor`: Executes tasks
+- `TaskQueueWatcher`: Watches task queue for new tasks
+
+**Key Interactions:**
+```
+TaskManagementService (Service) → TaskRegistry (Registry) → TaskExecutor (Executor) → Task (Implementation)
+```
+
+**Sample Code (Task Execution):**
+```java
+public void executeTask(AtlasTask task) {
+    String taskType = task.getType();
+    TaskFactory factory = taskFactories.get(taskType);
+    
+    if (factory == null) {
+        LOG.error("No task factory registered for type: {}", taskType);
+        return;
+    }
+    
+    Task taskInstance = factory.createTask(task);
+    
+    try {
+        TaskStatus status = taskInstance.execute();
+        task.setStatus(status);
+        
+        if (status == TaskStatus.COMPLETE) {
+            taskRegistry.deleteTask(task.getGuid());
+        } else {
+            taskRegistry.updateTask(task);
+        }
+    } catch (Exception e) {
+        LOG.error("Error executing task: {}", task.getGuid(), e);
+        task.setStatus(TaskStatus.FAILED);
+        task.setErrorMessage(e.getMessage());
+        taskRegistry.updateTask(task);
+    }
+}
+```
+
+## Main Directories and Files
+
+### repository/
+
+The `repository` directory contains the core implementation of Atlas services and graph storage.
+
+```
+repository/
+├── src/main/java/org/apache/atlas/repository/
+│   ├── audit/                # Audit repository implementation
+│   ├── discovery/            # Search and discovery implementation
+│   ├── graph/                # Graph database operations
+│   ├── impexp/               # Import/export functionality
+│   ├── ogm/                  # Object-graph mapping
+│   ├── patches/              # Database patches
+│   ├── query/                # Query processing
+│   ├── store/                # Entity and type storage
+│   │   ├── graph/            # Graph-based storage implementation
+│   │   │   ├── v1/           # Legacy implementation
+│   │   │   └── v2/           # Current implementation
+│   │   └── aliasstore/       # Alias store for access control
+│   ├── tasks/                # Asynchronous task management
+│   └── userprofile/          # User profile management
+```
+
+**Key Files:**
+- `store/graph/v2/AtlasEntityStoreV2.java`: Core entity storage implementation
+- `store/graph/v2/EntityGraphMapper.java`: Maps entities to graph elements
+- `discovery/EntityDiscoveryService.java`: Search and discovery implementation
+- `graph/GraphHelper.java`: Graph database utility functions
+
+### webapp/
+
+The `webapp` directory contains the web application and REST APIs.
+
+```
+webapp/
+├── src/main/java/org/apache/atlas/web/
+│   ├── adapters/              # Adapters for different formats
+│   ├── filters/               # Request filters
+│   ├── listeners/             # Web application listeners
+│   ├── rest/                  # REST API endpoints
+│   ├── security/              # Security configuration
+│   ├── service/               # Web services
+│   └── util/                  # Web utilities
+```
+
+**Key Files:**
+- `rest/EntityREST.java`: Entity API endpoints
+- `rest/TypesREST.java`: Type system API endpoints
+- `rest/DiscoveryREST.java`: Search and discovery API endpoints
+- `rest/LineageREST.java`: Lineage API endpoints
+
+### intg/
+
+The `intg` directory contains integration models and common interfaces.
+
+```
+intg/
+├── src/main/java/org/apache/atlas/
+│   ├── model/                 # Data models
+│   │   ├── discovery/         # Search models
+│   │   ├── instance/          # Entity instance models
+│   │   ├── lineage/           # Lineage models
+│   │   ├── typedef/           # Type definition models
+│   │   └── tasks/             # Task models
+│   ├── type/                  # Type system
+│   └── utils/                 # Utility classes
+```
+
+**Key Files:**
+- `model/instance/AtlasEntity.java`: Entity model
+- `model/typedef/AtlasTypesDef.java`: Type definitions model
+- `model/discovery/SearchParameters.java`: Search parameters model
+- `type/AtlasTypeRegistry.java`: Type registry implementation
+
+### graphdb/
+
+The `graphdb` directory contains the graph database abstraction and implementation.
+
+```
+graphdb/
+├── api/                      # Graph database API
+└── janus/                    # JanusGraph implementation
+```
+
+**Key Files:**
+- `api/src/main/java/org/apache/atlas/repository/graphdb/AtlasGraph.java`: Graph database interface
+- `janus/src/main/java/org/apache/atlas/repository/graphdb/janus/AtlasJanusGraph.java`: JanusGraph implementation
+
+### notification/
+
+The `notification` directory contains the notification framework for metadata changes.
+
+```
+notification/
+├── src/main/java/org/apache/atlas/notification/
+│   ├── hook/                 # Hook notifications
+│   └── spool/                # Notification spooling
+```
+
+**Key Files:**
+- `hook/HookNotification.java`: Hook notification model
+- `NotificationInterface.java`: Notification interface
+
+### auth-agents-common/
+
+The `auth-agents-common` directory contains authorization and security components.
+
+```
+auth-agents-common/
+├── src/main/java/org/apache/atlas/
+│   ├── authorize/            # Authorization interfaces
+│   ├── policytransformer/    # Policy transformation
+│   └── security/             # Security utilities
+```
+
+**Key Files:**
+- `authorize/AtlasAuthorizer.java`: Authorizer interface
+- `policytransformer/CachePolicyTransformerImpl.java`: Policy transformer implementation
+
+## Key Components and Classes
+
+### Entity Management
+
+- **AtlasEntity**: Core model class representing metadata entities
+- **AtlasEntityHeader**: Lightweight representation of an entity, containing basic metadata
+- **AtlasEntityStoreV2**: Core service for entity CRUD operations
+- **EntityGraphMapper**: Maps between Atlas entity objects and graph vertices/edges
+- **EntityGraphRetriever**: Retrieves entities from graph and converts to Atlas entity objects
+- **EntityREST**: REST endpoint for entity CRUD operations
+
+### Type System
+
+- **AtlasTypeRegistry**: Maintains all type definitions and provides type validation
+- **AtlasTypeDefGraphStore**: Manages persistence of type definitions in graph database
+- **AtlasEntityType**: Represents an entity type definition
+- **AtlasClassificationType**: Represents a classification type definition
+- **AtlasRelationshipType**: Represents a relationship type definition
+- **TypesREST**: REST endpoint for type system operations
+
+### Search and Discovery
+
+- **EntityDiscoveryService**: Provides entity search capabilities with various search types
+- **SearchProcessor**: Abstract class for different search strategies
+- **AtlasSearchResult**: Container for entity search results
+- **SearchParameters**: Configuration for entity search requests
+- **DiscoveryREST**: REST endpoint for search operations
+
+### Lineage
+
+- **EntityLineageService**: Retrieves lineage information for entities
+- **AtlasLineageService**: Provides lineage API implementation
+- **AtlasLineageInfo**: Contains lineage information for an entity
+- **LineageREST**: REST endpoint for lineage operations
+
+### Notification
+
+- **AtlasHook**: Base class for metadata hooks that capture changes in external systems
+- **HookNotification**: Message sent by hooks to notify Atlas of entity changes
+- **EntityChangeNotifier**: Notifies listeners about entity changes
+
+### Security and Authorization
+
+- **AtlasAuthorizationUtils**: Centralizes authorization checks for access to Atlas resources
+- **ESAliasStore**: Manages Elasticsearch aliases for access control filtering
+- **AtlasPrivilege**: Defines access privileges for Atlas operations
+- **CachePolicyTransformer**: Transforms high-level policies into more granular enforcement rules
+
+### Audit
+
+- **ESBasedAuditRepository**: Stores entity audit events in Elasticsearch
+- **EntityAuditEventV2**: Represents an audit event for an entity change
+- **EntityAuditListenerV2**: Listens for entity audit events
+
+### Task Management
+
+- **TaskRegistry**: Manages persistence and retrieval of asynchronous tasks
+- **AtlasTask**: Represents an asynchronous task to be executed
+- **TaskExecutor**: Executes tasks
+
+## API Endpoints
+
+### Entity API
+
+- **POST /api/atlas/v2/entity**: Create or update an entity
+- **POST /api/atlas/v2/entity/bulk**: Create or update multiple entities
+- **GET /api/atlas/v2/entity/guid/{guid}**: Get entity by GUID
+- **DELETE /api/atlas/v2/entity/guid/{guid}**: Delete entity by GUID
+- **GET /api/atlas/v2/entity/uniqueAttribute/type/{typeName}**: Get entity by unique attribute
+
+### Type API
+
+- **POST /api/atlas/v2/types/typedefs**: Create type definitions
+- **GET /api/atlas/v2/types/typedefs**: Get all type definitions
+- **GET /api/atlas/v2/types/typedef/name/{name}**: Get type definition by name
+- **DELETE /api/atlas/v2/types/typedefs**: Delete type definitions
+
+### Search API
+
+- **GET /api/atlas/v2/search/dsl**: Search using DSL query
+- **GET /api/atlas/v2/search/fulltext**: Search using full text query
+- **GET /api/atlas/v2/search/basic**: Search using basic query
+- **POST /api/atlas/v2/search/basic**: Search with parameters
+- **POST /api/atlas/v2/search/indexsearch**: Search directly using Elasticsearch
+
+### Lineage API
+
+- **GET /api/atlas/v2/lineage/{guid}**: Get lineage information for an entity
+
+### Relationship API
+
+- **POST /api/atlas/v2/relationship**: Create a relationship
+- **GET /api/atlas/v2/relationship/guid/{guid}**: Get relationship by GUID
+- **DELETE /api/atlas/v2/relationship/guid/{guid}**: Delete relationship by GUID
+
+## Database Schema
+
+Atlas uses a graph database (JanusGraph) for storing metadata. The graph schema consists of:
+
+### Vertices
+
+- **Entity Vertices**: Represent metadata entities
+- **Classification Vertices**: Represent classifications/tags
+- **Struct Vertices**: Represent complex attributes
+
+### Edges
+
+- **Attribute Edges**: Connect entities to their attributes
+- **Relationship Edges**: Connect related entities
+- **Classification Edges**: Connect entities to their classifications
+- **Lineage Edges**: Connect entities in a lineage chain
+
+### Properties
+
+- **System Properties**: GUID, state, createdBy, modifiedBy, etc.
+- **Attribute Properties**: Entity attributes stored as vertex properties
+- **Index Properties**: Properties used for indexing and search
+
+## Configuration
+
+Atlas configuration is managed through properties files in the `distro/conf` directory:
+
+```
+distro/conf/
+├── atlas-application.properties   # Main configuration file
+├── atlas-env.sh                   # Environment variables
+├── atlas-log4j.xml                # Logging configuration
+├── atlas-simple-authz-policy.json # Authorization policy
+```
+
+Key configuration parameters include:
+
+- **Graph Database**: Configuration for JanusGraph
+- **Search Index**: Configuration for Elasticsearch/Solr
+- **Notification**: Configuration for Kafka
+- **Security**: Authentication and authorization configuration
+- **API**: REST API configuration
+
+## Integration Points
+
+Atlas integrates with various external systems:
+
+### Security
+
+- **Ranger**: Integration for authorization
+
+### Notification
+
+- **Kafka**: Used for notification delivery
+
+### Search
+
+- **Elasticsearch**: Used for search indexing
+
+This document provides a comprehensive breakdown of the Atlas Metastore project structure, detailing the organization of code, key components, and their interactions.
+
+
