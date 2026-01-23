@@ -66,6 +66,9 @@ public final class Constants {
     public static final String TERMS_REQUEST_HANDLER            = "/terms";
     public static final String ES_API_ALIASES                   = "/_aliases";
 
+    // To distinguish assets created with Leangraph feature enabled
+    public static final String LEANGRAPH_MODE                   = "leangraph";
+
     /**
      * Entity type name property key.
      */
@@ -512,6 +515,9 @@ public final class Constants {
     public static final String ATTR_ADMIN_ROLES = "adminRoles";
     public static final String ATTR_VIEWER_USERS = "viewerUsers";
     public static final String ATTR_VIEWER_GROUPS = "viewerGroups";
+    public static final String ATTR_OWNER_USERS = "ownerUsers";
+    public static final String ATTR_OWNER_GROUPS = "ownerGroups";
+    public static final String ATTR_ANNOUNCEMENT_MESSAGE = "announcementMessage";
 
     public static final String ATTR_STARRED_BY = "starredBy";
     public static final String ATTR_STARRED_COUNT = "starredCount";

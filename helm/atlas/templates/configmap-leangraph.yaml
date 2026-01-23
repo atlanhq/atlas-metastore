@@ -1,4 +1,4 @@
-{{ if .Values.atlas.leangraph.enabled }}
+{{ if .Values.global.leangraph.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -62,7 +62,11 @@ data:
     #atlas.graph.storage.clustername=
     #atlas.graph.storage.port=
     atlas.graph.storage.backend=cql
+    {{- if .Values.global.leangraph.dedicated.active }}
+    atlas.graph.storage.hostname=atlas-leangraph-cassandra
+    {{- else }}
     atlas.graph.storage.hostname={{ .Chart.Name }}-cassandra
+    {{- end }}
     # atlas.graph.storage.cql.keyspace={{ .Chart.Name }}
     atlas.graph.storage.cql.replication-factor={{ .Values.cassandra.config.cluster_size }}
     atlas.graph.storage.clustername={{ .Values.cassandra.config.cluster_name  }}
@@ -141,7 +145,11 @@ data:
     # Alternatively, the JanusGraph documentation provides some tips on how to secure Elasticsearch without additional
     # plugins: http://docs.janusgraph.org/latest/elasticsearch.html
     
+    {{- if .Values.global.leangraph.dedicated.active }}
+    atlas.graph.index.search.hostname=atlas-leangraph-elasticsearch-master:9200
+    {{- else }}
     atlas.graph.index.search.hostname=atlas-elasticsearch-master:9200
+    {{- end }}
     atlas.graph.index.search.elasticsearch.client-only=true
     atlas.graph.index.search.elasticsearch.retry_on_conflict=5
     atlas.graph.index.search.max-result-set-size=1000
@@ -505,15 +513,14 @@ data:
     ######### Atlas Leangraph configs #########
     OTEL_RESOURCE_ATTRIBUTES="service.name=leangraph_atlas"
     OTEL_SERVICE_NAME=leangraph_atlas
-    atlas.graph.tag.table.name=leangraph_tags_by_id
-    atlas.graph.propagated.tag.table.name=leangraph_propagated_tags_by_source
     atlas.graph.new.keyspace=leangraph_tags
-    atlas.graph.storage.cql.keyspace=leangraph_atlas
-    atlas.graph.index.search.index-name=janus_leangraph
+    atlas.graph.storage.cql.keyspace=leangraph_janusgraph
+    atlas.graph.index.search.index-name=leangraph_janusgraph
     atlas.graph.lean.graph.enabled=true
     atlas.graph.graph.set-vertex-id=true
     atlas.graph.graph.allow-custom-vid-types=true
-    atlas.cassandra.vanilla.keyspace=leangraph_atlas
+    atlas.cassandra.vanilla.keyspace=leangraph_janusgraph
     atlas.cassandra.vertex.table=assets
-    atlas.graph.lean.graph.enabled={{ .Values.atlas.leangraph.enabled }}
+    atlas.graph.lean.graph.enabled={{ .Values.global.leangraph.enabled }}
+    atlas.k8s.pod.labels=atlas,atlas-leangraph
 {{- end }}
