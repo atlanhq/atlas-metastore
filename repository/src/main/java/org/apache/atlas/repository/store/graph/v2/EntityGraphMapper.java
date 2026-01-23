@@ -193,6 +193,7 @@ public class EntityGraphMapper {
     private static final int MAX_NUMBER_OF_RETRIES = AtlasConfiguration.MAX_NUMBER_OF_RETRIES.getInt();
     private static final int CHUNK_SIZE            = AtlasConfiguration.TAG_CASSANDRA_BATCHING_CHUNK_SIZE.getInt();
     private static final int UD_REL_THRESHOLD = AtlasConfiguration.ATLAS_UD_RELATIONSHIPS_MAX_COUNT.getInt();
+    private static final int VERTEX_FETCH_BATCH_SIZE = 100;
 
     private final GraphHelper               graphHelper;
     private final AtlasGraph                graph;
@@ -3917,7 +3918,7 @@ public class EntityGraphMapper {
             try {
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
 
-                deNormMap.put(entityVertex.getIdForDisplay(),
+                deNormMap.put(entityVertex.getDocId(),
                         TagDeNormAttributesUtil.getAllAttributesForAllTagsForRepair(GraphHelper.getGuid(entityVertex), currentTags, typeRegistry, fullTextMapperV2));
 
                 // ES operation collected to be executed in the end
@@ -4187,7 +4188,7 @@ public class EntityGraphMapper {
 
                 // Update ES attributes
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
+                deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                         currentTags, typeRegistry, fullTextMapperV2));
                 // ES operation collected to be executed in the end
                 RequestContext.get().addESDeferredOperation(
@@ -4542,9 +4543,9 @@ public class EntityGraphMapper {
                 Map<String, Map<String, Object>> deNormAttributesMap = new HashMap<>();
                 Map<String, Map<String, Object>> assetMinAttrsMap = new HashMap<>();
 
-                List<AtlasEntity> propagatedEntitiesChunked = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
+                Set<String> propagatedVertexIds = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
 
-                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), deNormAttributesMap.keySet(), assetMinAttrsMap, classification);
+                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), propagatedVertexIds, assetMinAttrsMap, classification);
                 if (MapUtils.isNotEmpty(deNormAttributesMap)) {
                     ESConnector.writeTagProperties(deNormAttributesMap);
                 }
@@ -4838,7 +4839,7 @@ public class EntityGraphMapper {
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
+        deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
 
         // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
@@ -5272,7 +5273,7 @@ public class EntityGraphMapper {
                     )
             );
             Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-            deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
+            deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                     currentTags, typeRegistry, fullTextMapperV2));
             // ES operation collected to be executed in the end
             RequestContext.get().addESDeferredOperation(
@@ -5579,7 +5580,7 @@ public class EntityGraphMapper {
                         .map(Tag::getVertexId)
                         .toList();
 
-                List<AtlasEntity> entities = batchToDelete.stream().map(x->getEntityForNotification(x.getAssetMetadata())).toList();
+                batchToDelete.stream().map(x->getEntityForNotification(x.getAssetMetadata())).toList();
 
                 // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
@@ -6109,11 +6110,11 @@ public class EntityGraphMapper {
         return propagatedEntities;
     }
 
-    List<AtlasEntity> updateClassificationTextV2(AtlasClassification currentTag,
+    Set<String> updateClassificationTextV2(AtlasClassification currentTag,
                                                  Collection<AtlasVertex> propagatedVertices,
                                                  Map<String, Map<String, Object>> deNormAttributesMap,
                                                  Map<String, Map<String, Object>> assetMinAttrsMap) throws AtlasBaseException {
-        List<AtlasEntity> propagatedEntities = new ArrayList<>();
+        Set<String> propagatedVertexIds = new HashSet<>();
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
         if(CollectionUtils.isNotEmpty(propagatedVertices)) {
@@ -6161,12 +6162,12 @@ public class EntityGraphMapper {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
                 }
 
-                deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
-                propagatedEntities.add(entity);
+                deNormAttributesMap.put(vertex.getDocId(), deNormAttributes);
+                propagatedVertexIds.add(vertex.getIdForDisplay());
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
-        return propagatedEntities;
+        return propagatedVertexIds;
     }
 
     void updateClassificationTextV2(AtlasClassification currentTag,
@@ -6175,7 +6176,23 @@ public class EntityGraphMapper {
                                                  Map<String, Map<String, Object>> deNormAttributesMap) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
+
         if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
+            Map<String, String> vertexIdstoDocIdMap = new HashMap<>(propagatedVertexIds.size());
+
+            for (int i = 0; i < propagatedVertexIds.size(); i += VERTEX_FETCH_BATCH_SIZE) {
+                int endIndex = Math.min(i + VERTEX_FETCH_BATCH_SIZE, propagatedVertexIds.size());
+                List<String> batch = propagatedVertexIds.subList(i, endIndex);
+
+                // Get vertices for this batch
+                Set<AtlasVertex> batchVertices = graph.getVertices(batch.toArray(new String[0]));
+
+                // Add to map
+                batchVertices.forEach(vertex ->
+                        vertexIdstoDocIdMap.put(vertex.getIdForDisplay(), vertex.getDocId())
+                );
+            }
+
             for(Tag tagAttachment : propagatedTags) {
                 //get current associated tags to asset ONLY from Cassandra namespace
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
@@ -6192,7 +6209,7 @@ public class EntityGraphMapper {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2);
                 }
 
-                deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
+                deNormAttributesMap.put(vertexIdstoDocIdMap.get(tagAttachment.getVertexId()), deNormAttributes);
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
