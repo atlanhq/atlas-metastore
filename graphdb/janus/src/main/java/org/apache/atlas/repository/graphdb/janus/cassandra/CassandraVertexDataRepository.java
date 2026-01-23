@@ -153,7 +153,7 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         }
 
         try {
-            return fetchSingleBatchDirectly(sanitizedIds);
+            return fetchSingleDirectly(sanitizedIds);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -163,32 +163,32 @@ class CassandraVertexDataRepository implements VertexDataRepository {
      * Fetches a single batch of vertices directly as DynamicVertex objects using concurrent single-partition queries.
      * This avoids large IN clauses and aligns with Cassandra best practices.
      */
-    private Map<String, DynamicVertex> fetchSingleBatchDirectly(List<String> vertexIdsInBatch) throws AtlasBaseException {
+    private Map<String, DynamicVertex> fetchSingleDirectly(List<String> vertexIds) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder mainRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly");
         Map<String, DynamicVertex> results = new HashMap<>();
 
-        if (vertexIdsInBatch == null || vertexIdsInBatch.isEmpty()) {
+        if (vertexIds == null || vertexIds.isEmpty()) {
             RequestContext.get().endMetricRecord(mainRecorder);
             return Collections.emptyMap();
         }
 
-        Set<String> uniqueSanitizedVertexIdsInBatch = new LinkedHashSet<>();
-        for (String vertexId : vertexIdsInBatch) {
+        Set<String> uniqueSanitizedVertexIds = new LinkedHashSet<>();
+        for (String vertexId : vertexIds) {
             if (StringUtils.isNotBlank(vertexId)) {
-                uniqueSanitizedVertexIdsInBatch.add(vertexId);
+                uniqueSanitizedVertexIds.add(vertexId);
             }
         }
 
-        if (uniqueSanitizedVertexIdsInBatch.isEmpty()) {
+        if (uniqueSanitizedVertexIds.isEmpty()) {
             RequestContext.get().endMetricRecord(mainRecorder);
             return Collections.emptyMap();
         }
 
         try {
-            LOG.debug("Executing concurrent Cassandra calls for batch: IDs={}", uniqueSanitizedVertexIdsInBatch.size());
+            LOG.debug("Executing concurrent Cassandra calls for batch: IDs={}", uniqueSanitizedVertexIds.size());
 
-            List<CompletableFuture<List<Row>>> futures = new ArrayList<>(uniqueSanitizedVertexIdsInBatch.size());
-            for (String vertexId : uniqueSanitizedVertexIdsInBatch) {
+            List<CompletableFuture<List<Row>>> futures = new ArrayList<>(uniqueSanitizedVertexIds.size());
+            for (String vertexId : uniqueSanitizedVertexIds) {
                 BoundStatement boundStatement = selectByIdStatement.bind(vertexId)
                         .setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
                 CompletableFuture<List<Row>> future = session.executeAsync(boundStatement)

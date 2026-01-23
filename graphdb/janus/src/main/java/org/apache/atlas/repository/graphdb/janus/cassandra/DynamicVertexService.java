@@ -31,8 +31,6 @@ public class DynamicVertexService {
     private final VertexDataRepository repository;
     private final JacksonVertexSerializer serializer;
 
-    private static final int defaultBatchSize = AtlasConfiguration.ATLAS_CASSANDRA_BATCH_SIZE.getInt();
-
     public final static Set<String> VERTEX_CORE_PROPERTIES = ConcurrentHashMap.newKeySet();
 
     static {
@@ -103,32 +101,10 @@ public class DynamicVertexService {
      * @return A map of vertex ID to dynamic vertex data
      */
     public Map<String, DynamicVertex> retrieveVertices(List<String> vertexIds) throws AtlasBaseException {
-        return retrieveVertices(vertexIds, defaultBatchSize);
-    }
-
-    /**
-     * Retrieves multiple vertices by their IDs with custom batch size.
-     *
-     * @param vertexIds The list of vertex IDs to retrieve
-     * @param batchSize The batch size to use
-     * @return A map of vertex ID to dynamic vertex data
-     */
-    private Map<String, DynamicVertex> retrieveVertices(List<String> vertexIds, int batchSize) throws AtlasBaseException {
         if (vertexIds == null || vertexIds.isEmpty()) {
             return Collections.emptyMap();
         }
 
-        Map<String, DynamicVertex> results = new HashMap<>();
-
-        for (int i = 0; i < vertexIds.size(); i += batchSize) {
-            int endIndex = Math.min(i + batchSize, vertexIds.size());
-            List<String> batch = vertexIds.subList(i, endIndex);
-
-            // Use direct loading approach
-            Map<String, DynamicVertex> batchResults = repository.fetchVerticesDirectly(batch);
-            results.putAll(batchResults);
-        }
-
-        return results;
+        return repository.fetchVerticesDirectly(vertexIds);
     }
 }
