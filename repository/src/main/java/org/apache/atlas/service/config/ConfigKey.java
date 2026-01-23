@@ -17,6 +17,8 @@ import java.util.stream.Collectors;
 public enum ConfigKey {
     // Maintenance mode flag
     MAINTENANCE_MODE("MAINTENANCE_MODE", "false"),
+    MAINTENANCE_START_TIME("MAINTENANCE_START_TIME", null),
+    MAINTENANCE_END_TIME("MAINTENANCE_END_TIME", null),
 
     // Tag/Janus optimization flag (mirrors existing feature flag)
     ENABLE_JANUS_OPTIMISATION("ENABLE_JANUS_OPTIMISATION", "false"),
