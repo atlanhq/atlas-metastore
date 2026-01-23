@@ -108,7 +108,7 @@ public class FeatureFlagStore implements ApplicationContextAware {
         LOG.info("Validating FeatureFlagStore dependencies...");
         try {
             // Test Redis connectivity with a simple operation
-            String testKey = "ff:_health_check";
+            String testKey = addFeatureFlagNamespace("_health_check");
             redisService.putValue(testKey, "test");
             String testValue = redisService.getValue(testKey);
             redisService.removeValue(testKey);

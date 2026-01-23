@@ -88,7 +88,7 @@ public class AccessAuditLogsIndexCreator extends Thread {
     private boolean is_completed = false;
 
     public AccessAuditLogsIndexCreator(Configuration configuration) throws IOException, AtlasException {
-        LOG.debug("Starting Ranger audit schema setup in ElasticSearch.");
+        LOG.info("Starting Ranger audit schema setup in ElasticSearch.");
         time_interval = configuration.getLong(ES_TIME_INTERVAL, DEFAULT_ES_TIME_INTERVAL_MS);
         user = configuration.getString(ES_CONFIG_USERNAME);
 
@@ -115,6 +115,7 @@ public class AccessAuditLogsIndexCreator extends Thread {
                 password = configuration.getString(ES_CONFIG_PASSWORD);
             }
         }
+        LOG.info("Elasticsearch connection info: " + connectionString());
     }
 
     private String connectionString() {
@@ -123,14 +124,14 @@ public class AccessAuditLogsIndexCreator extends Thread {
 
     @Override
     public void run() {
-        LOG.debug("Started run method");
+        LOG.info("Started run method");
         if (CollectionUtils.isNotEmpty(hosts)) {
-            LOG.debug("Elastic search hosts=" + hosts + ", index=" + index);
+            LOG.info("Elastic search hosts=" + hosts + ", index=" + index);
             while (!is_completed && (max_retry == TRY_UNTIL_SUCCESS || retry_counter < max_retry)) {
                 try {
-                    LOG.debug("Trying to acquire elastic search connection");
+                    LOG.info("Trying to acquire elastic search connection");
                     if (connect()) {
-                        LOG.debug("Connection to elastic search established successfully");
+                        LOG.info("Connection to elastic search established successfully");
                         if (createIndex()) {
                             is_completed = true;
                             break;
