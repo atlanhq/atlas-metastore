@@ -99,7 +99,7 @@ public class ESConnector {
 
             if (!MapUtils.isEmpty(entitiesMapForUpdate)) {
                 for (String assetDocId : entitiesMapForUpdate.keySet()) {
-                    Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetDocId));
+                    Map<String, Object> toUpdate = entitiesMapForUpdate.get(assetDocId);
 
                     bulkRequestBody.append("{\"update\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",\"_id\":\"" + assetDocId + "\" }}\n");
 
