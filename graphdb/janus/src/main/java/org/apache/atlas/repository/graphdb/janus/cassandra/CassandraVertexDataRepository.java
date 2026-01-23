@@ -130,135 +130,50 @@ class CassandraVertexDataRepository implements VertexDataRepository {
      * Fetches vertices directly as DynamicVertex objects without intermediate JSON serialization/deserialization.
      * This is the most efficient method for retrieving vertices from the database.
      *
-     * @param vertexIds List of vertex IDs to fetch
+     * @param vertexId List of vertex IDs to fetch
      * @return Map of vertex ID to DynamicVertex object
      */
     @Override
-    public Map<String, DynamicVertex> fetchVerticesDirectly(List<String> vertexIds) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("fetchVerticesDirectly");
-        if (vertexIds == null || vertexIds.isEmpty()) {
-            return Collections.emptyMap();
+    public CompletableFuture<DynamicVertex> fetchVertexAsync(String vertexId) {
+        if (StringUtils.isBlank(vertexId)) {
+            return CompletableFuture.completedFuture(null);
         }
 
-        // Filter out blank IDs
-        List<String> sanitizedIds = new ArrayList<>();
-        for (String id : vertexIds) {
-            if (StringUtils.isNotBlank(id)) {
-                sanitizedIds.add(id);
-            }
-        }
+        BoundStatement boundStatement = selectByIdStatement.bind(vertexId)
+                .setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
 
-        if (sanitizedIds.isEmpty()) {
-            return Collections.emptyMap();
-        }
-
-        try {
-            return fetchSingleDirectly(sanitizedIds);
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
-    }
-
-    /**
-     * Fetches a single batch of vertices directly as DynamicVertex objects using concurrent single-partition queries.
-     * This avoids large IN clauses and aligns with Cassandra best practices.
-     */
-    private Map<String, DynamicVertex> fetchSingleDirectly(List<String> vertexIds) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder mainRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly");
-        Map<String, DynamicVertex> results = new HashMap<>();
-
-        if (vertexIds == null || vertexIds.isEmpty()) {
-            RequestContext.get().endMetricRecord(mainRecorder);
-            return Collections.emptyMap();
-        }
-
-        Set<String> uniqueSanitizedVertexIds = new LinkedHashSet<>();
-        for (String vertexId : vertexIds) {
-            if (StringUtils.isNotBlank(vertexId)) {
-                uniqueSanitizedVertexIds.add(vertexId);
-            }
-        }
-
-        if (uniqueSanitizedVertexIds.isEmpty()) {
-            RequestContext.get().endMetricRecord(mainRecorder);
-            return Collections.emptyMap();
-        }
-
-        try {
-            LOG.debug("Executing concurrent Cassandra calls for batch: IDs={}", uniqueSanitizedVertexIds.size());
-
-            List<CompletableFuture<List<Row>>> futures = new ArrayList<>(uniqueSanitizedVertexIds.size());
-            for (String vertexId : uniqueSanitizedVertexIds) {
-                BoundStatement boundStatement = selectByIdStatement.bind(vertexId)
-                        .setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
-                CompletableFuture<List<Row>> future = session.executeAsync(boundStatement)
-                        .toCompletableFuture()
-                        .thenCompose(this::fetchAllRows);
-                futures.add(future);
-            }
-
-            CompletableFuture<Void> allOf = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
-            try {
-                allOf.join();
-            } catch (CompletionException e) {
-                LOG.warn("One or more Cassandra queries failed in batch; continuing to process remaining results.", e);
-            }
-
-            // 3. Process results.
-            for (CompletableFuture<List<Row>> future : futures) {
-                List<Row> rows;
-                try {
-                    rows = future.join();
-                } catch (CompletionException e) {
-                    LOG.warn("Failed to fetch vertex data in concurrent batch.", e);
-                    continue;
-                }
-                for (Row row : rows) {
-                    String id = row.getString("id");
-                    String jsonData = row.getString("json_data");
-                    try {
-                        AtlasPerfMetrics.MetricRecorder deserializeRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly_DeserializeJson");
-                        Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
-                        RequestContext.get().endMetricRecord(deserializeRecorder);
-
-                        DynamicVertex vertex = new DynamicVertex(props);
-                        if (!vertex.hasProperty("id")) { // Ensure ID is present
-                            vertex.setProperty("id", id);
-                        }
-                        results.put(id, vertex);
-                    } catch (JsonProcessingException e) {
-                        LOG.warn("Failed to parse JSON for DynamicVertex ID {}: {}", id, e.getMessage());
-                    } catch (Exception e) { // Catch broader exceptions during DynamicVertex creation
-                        LOG.warn("Failed to convert or process data for DynamicVertex ID {}: {}", id, e.getMessage());
-                    }
-                }
-            }
-
-            return results;
-
-        } catch (QueryValidationException e) {
-            LOG.error("Invalid query error during concurrent batch fetch strategy:  Error=\'{}\'.", e.getMessage(), e);
-            throw new AtlasBaseException("Invalid query for concurrent batch fetch: " + e.getMessage(), e);
-        } catch (Exception e) {
-            LOG.error("Unexpected error during concurrent batch fetch strategy", e);
-            throw new AtlasBaseException("Failed to fetch vertex data in concurrent batch strategy: " + e.getMessage(), e);
-        } finally {
-            RequestContext.get().endMetricRecord(mainRecorder);
-        }
-    }
-
-    private CompletableFuture<List<Row>> fetchAllRows(AsyncResultSet resultSet) {
-        List<Row> rows = new ArrayList<>();
-        if (!resultSet.hasMorePages()) {
-            return CompletableFuture.completedFuture(rows);
-        }
-
-        return resultSet.fetchNextPage()
+        return session.executeAsync(boundStatement)
                 .toCompletableFuture()
-                .thenCompose(next -> fetchAllRows(next)
-                        .thenApply(nextRows -> {
-                            rows.addAll(nextRows);
-                            return rows;
-                        }));
+                .thenApply(this::fetchSingleRow)
+                .thenApply(row -> row == null ? null : buildDynamicVertex(row.getString("id"), row.getString("json_data")))
+                .exceptionally(e -> {
+                    LOG.warn("Failed to fetch DynamicVertex asynchronously for id {}", vertexId, e);
+                    return null;
+                });
+    }
+
+    private Row fetchSingleRow(AsyncResultSet resultSet) {
+        for (Row row : resultSet.currentPage()) {
+            return row;
+        }
+        return null;
+    }
+
+    private DynamicVertex buildDynamicVertex(String id, String jsonData) {
+        try {
+            AtlasPerfMetrics.MetricRecorder deserializeRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly_DeserializeJson");
+            Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
+            RequestContext.get().endMetricRecord(deserializeRecorder);
+
+            DynamicVertex vertex = new DynamicVertex(props);
+            vertex.setProperty("_atlas_id", id);
+
+            return vertex;
+        } catch (JsonProcessingException e) {
+            LOG.warn("Failed to parse JSON for DynamicVertex ID {}: {}", id, e.getMessage());
+        } catch (Exception e) {
+            LOG.warn("Failed to convert or process data for DynamicVertex ID {}: {}", id, e.getMessage());
+        }
+        return null;
     }
 }
