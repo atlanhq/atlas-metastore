@@ -17,6 +17,8 @@ import java.util.stream.Collectors;
 public enum ConfigKey {
     // Maintenance mode flag
     MAINTENANCE_MODE("MAINTENANCE_MODE", "false"),
+    MAINTENANCE_START_TIME("MAINTENANCE_START_TIME", null),
+    MAINTENANCE_END_TIME("MAINTENANCE_END_TIME", null),
 
     // Maintenance mode activation tracking (set by tag propagation when it stops)
     MAINTENANCE_MODE_ACTIVATED_AT("MAINTENANCE_MODE_ACTIVATED_AT", null),
