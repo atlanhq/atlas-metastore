@@ -23,10 +23,10 @@ global:
   atlasNginx:
     enabled: false
   leangraph:
-    enabled: true
+    enabled: false
     dedicated:
-      enabled: true  # Creates dedicated Cassandra and Elasticsearch StatefulSets
-      active: true   # Uses dedicated resources in configmap
+      enabled: false  # Creates dedicated Cassandra and Elasticsearch StatefulSets
+      active: false   # Uses dedicated resources in configmap
     
 Namespace: atlas
 sentry_flag: disable
