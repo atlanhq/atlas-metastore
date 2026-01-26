@@ -795,7 +795,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
      *
      * @param searchParams the search parameters containing the query
      */
-    private void addClassificationNamesToSourceFields(SearchParams searchParams) {
+    protected void addClassificationNamesToSourceFields(SearchParams searchParams) {
         if (!searchParams.isIncludeClassificationNames()) {
             return;
         }
