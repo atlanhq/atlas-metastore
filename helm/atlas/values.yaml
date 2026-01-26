@@ -117,6 +117,26 @@ atlas:
     async_enable: true
     thread_count: 5
 
+  # Deterministic ID generation for entities
+  deterministicIdGeneration:
+    enabled: true
+
+  # Cassandra Config Store - Dynamic configuration backed by Cassandra
+  # Migration Strategy:
+  # 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis
+  # 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
+  configStore:
+    cassandra:
+      enabled: true           # Enable Cassandra connectivity and data sync
+      activated: false         # Activate Cassandra for reads (use instead of Redis)
+      syncIntervalMs: 60000    # Background sync interval in milliseconds
+      keyspace: config_store   # Cassandra keyspace name
+      table: configs           # Cassandra table name
+      appName: atlas           # Application name for partitioning
+      replicationFactor: 3     # Cassandra replication factor
+      # Consistency level: LOCAL_QUORUM for production (requires 2+ nodes), LOCAL_ONE for local dev (single node)
+      consistencyLevel: LOCAL_QUORUM
+
   podAnnotations:
     backup.velero.io/backup-volumes-excludes: master
 
@@ -171,6 +191,25 @@ atlas:
               app: atlas
           topologyKey: kubernetes.io/hostname
 
+  affinity_lite:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: eks.amazonaws.com/capacityType
+            operator: In
+            values:
+              - ON_DEMAND
+        - matchExpressions:
+          - key: lifecycle
+            operator: In
+            values:
+              - ondemand
+        - matchExpressions:
+          - key: cloud.google.com/gke-provisioning
+            operator: In
+            values:
+              - standard
   # Kubernetes service for atlas
   service:
     portName: atlas
@@ -307,6 +346,14 @@ atlas:
       memory: 6Gi
     requests:
       memory: 20Mi
+
+  resources_lite:
+    limits:
+      cpu: 2000m
+      memory: 8Gi
+    requests:
+      cpu: 1000m
+      memory: 6Gi
 
   # Liveness and readiness probes for atlas
   livenessProbe:

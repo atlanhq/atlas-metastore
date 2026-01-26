@@ -12,12 +12,17 @@ import org.springframework.stereotype.Component;
  *
  * Loads configuration properties from atlas-application.properties:
  * - atlas.config.store.cassandra.enabled: Enable/disable Cassandra config store (default: false)
+ * - atlas.config.store.cassandra.activated: Activate Cassandra for reads instead of Redis (default: false)
  * - atlas.config.store.sync.interval.ms: Background sync interval in milliseconds (default: 60000)
  * - atlas.config.store.cassandra.keyspace: Cassandra keyspace name (default: config_store)
  * - atlas.config.store.cassandra.table: Cassandra table name (default: configs)
  * - atlas.config.store.app.name: Application name for partitioning (default: atlas)
  * - atlas.config.store.cassandra.hostname: Cassandra hostname (falls back to atlas.graph.storage.hostname)
  * - atlas.config.store.cassandra.replication.factor: Replication factor (default: 3)
+ *
+ * Migration Strategy:
+ * 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis
+ * 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
  */
 @Component
 public class DynamicConfigStoreConfig {
@@ -25,6 +30,7 @@ public class DynamicConfigStoreConfig {
 
     // Property keys
     public static final String PROP_ENABLED = "atlas.config.store.cassandra.enabled";
+    public static final String PROP_ACTIVATED = "atlas.config.store.cassandra.activated";
     public static final String PROP_SYNC_INTERVAL_MS = "atlas.config.store.sync.interval.ms";
     public static final String PROP_KEYSPACE = "atlas.config.store.cassandra.keyspace";
     public static final String PROP_TABLE = "atlas.config.store.cassandra.table";
@@ -32,12 +38,14 @@ public class DynamicConfigStoreConfig {
     public static final String PROP_HOSTNAME = "atlas.config.store.cassandra.hostname";
     public static final String PROP_REPLICATION_FACTOR = "atlas.config.store.cassandra.replication.factor";
     public static final String PROP_DATACENTER = "atlas.config.store.cassandra.datacenter";
+    public static final String PROP_CONSISTENCY_LEVEL = "atlas.config.store.cassandra.consistency.level";
 
     // Fallback property key (reuse existing Cassandra hostname config)
     private static final String PROP_GRAPH_STORAGE_HOSTNAME = "atlas.graph.storage.hostname";
 
     // Default values
     private static final boolean DEFAULT_ENABLED = false;
+    private static final boolean DEFAULT_ACTIVATED = false;
     private static final long DEFAULT_SYNC_INTERVAL_MS = 60000L; // 60 seconds
     private static final String DEFAULT_KEYSPACE = "config_store";
     private static final String DEFAULT_TABLE = "configs";
@@ -45,9 +53,12 @@ public class DynamicConfigStoreConfig {
     private static final String DEFAULT_HOSTNAME = "localhost";
     private static final int DEFAULT_REPLICATION_FACTOR = 3;
     private static final String DEFAULT_DATACENTER = "datacenter1";
+    // Consistency level: LOCAL_QUORUM for production (requires 2+ nodes), LOCAL_ONE for local dev (single node)
+    private static final String DEFAULT_CONSISTENCY_LEVEL = "LOCAL_QUORUM";
     public static final int CASSANDRA_PORT = 9042;
 
     private final boolean enabled;
+    private final boolean activated;
     private final long syncIntervalMs;
     private final String keyspace;
     private final String table;
@@ -55,17 +66,20 @@ public class DynamicConfigStoreConfig {
     private final String hostname;
     private final int replicationFactor;
     private final String datacenter;
+    private final String consistencyLevel;
 
     public DynamicConfigStoreConfig() throws AtlasException {
         Configuration props = ApplicationProperties.get();
 
         this.enabled = props.getBoolean(PROP_ENABLED, DEFAULT_ENABLED);
+        this.activated = props.getBoolean(PROP_ACTIVATED, DEFAULT_ACTIVATED);
         this.syncIntervalMs = props.getLong(PROP_SYNC_INTERVAL_MS, DEFAULT_SYNC_INTERVAL_MS);
         this.keyspace = props.getString(PROP_KEYSPACE, DEFAULT_KEYSPACE);
         this.table = props.getString(PROP_TABLE, DEFAULT_TABLE);
         this.appName = props.getString(PROP_APP_NAME, DEFAULT_APP_NAME);
         this.replicationFactor = props.getInt(PROP_REPLICATION_FACTOR, DEFAULT_REPLICATION_FACTOR);
         this.datacenter = props.getString(PROP_DATACENTER, DEFAULT_DATACENTER);
+        this.consistencyLevel = props.getString(PROP_CONSISTENCY_LEVEL, DEFAULT_CONSISTENCY_LEVEL);
 
         // Hostname: use dedicated property or fall back to graph storage hostname
         String configuredHostname = props.getString(PROP_HOSTNAME, null);
@@ -75,12 +89,16 @@ public class DynamicConfigStoreConfig {
             this.hostname = props.getString(PROP_GRAPH_STORAGE_HOSTNAME, DEFAULT_HOSTNAME);
         }
 
-        LOG.info("DynamicConfigStoreConfig initialized - enabled: {}, keyspace: {}, table: {}, hostname: {}, syncInterval: {}ms",
-                enabled, keyspace, table, hostname, syncIntervalMs);
+        LOG.info("DynamicConfigStoreConfig initialized - enabled: {}, activated: {}, keyspace: {}, table: {}, hostname: {}, syncInterval: {}ms, consistencyLevel: {}",
+                enabled, activated, keyspace, table, hostname, syncIntervalMs, consistencyLevel);
     }
 
     public boolean isEnabled() {
         return enabled;
+    }
+
+    public boolean isActivated() {
+        return activated;
     }
 
     public long getSyncIntervalMs() {
@@ -113,5 +131,9 @@ public class DynamicConfigStoreConfig {
 
     public int getCassandraPort() {
         return CASSANDRA_PORT;
+    }
+
+    public String getConsistencyLevel() {
+        return consistencyLevel;
     }
 }
