@@ -2,6 +2,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.CassandraTagOperation;
@@ -15,16 +16,20 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
+import org.apache.atlas.repository.store.graph.v2.versioned.VersionedStore;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasEntityType;
+import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.util.*;
+import java.util.stream.Collectors;
 
 @Service
 public class EntityMutationService {
@@ -64,6 +69,21 @@ public class EntityMutationService {
 
         boolean isGraphTransactionFailed = false;
         try {
+            List<AtlasEntity> entities = new ArrayList<>();
+            while (entityStream.hasNext()) {
+                entities.add(entityStream.next());
+            }
+            entityStream.reset();
+
+            boolean wroteVersionedEntries = writeVersionedEntries(entities, context);
+
+            if (context.isSkipEntityStore()) {
+                if (!wroteVersionedEntries) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "skipEntityStore=true but no versioned entries were written");
+                }
+                return new EntityMutationResponse();
+            }
+
             return entityStore.createOrUpdate(entityStream, context);
         } catch (Throwable e) {
             isGraphTransactionFailed = true;
@@ -73,6 +93,76 @@ public class EntityMutationService {
             executeESPostProcessing(isGraphTransactionFailed);  // Only execute ES operations if no errors occurred
             AtlasPerfTracer.log(perf);
         }
+    }
+
+    private boolean writeVersionedEntries(List<AtlasEntity> entities, BulkRequestContext context) throws AtlasBaseException {
+        if (!context.isVersionedLookup() || entities == null || entities.isEmpty()) {
+            return false;
+        }
+
+        VersionedStore store = VersionedStore.getInstance();
+        boolean wroteAny = false;
+
+        for (AtlasEntity entity : entities) {
+            String typeName = entity.getTypeName();
+            AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+            if (entityType == null) {
+                throw new AtlasBaseException("invalid type name: " + typeName);
+            }
+
+            String originalJson = buildOriginalJson(entity);
+            String baseQualifiedName = resolveBaseQualifiedName(entityType, entity);
+            UUID version = VersionedStore.newVersion();
+            String versionedQualifiedName = baseQualifiedName + "." + version;
+            long createdAtMillis = System.currentTimeMillis();
+
+            store.insert(typeName, baseQualifiedName, version, versionedQualifiedName, createdAtMillis, originalJson);
+            wroteAny = true;
+        }
+
+        return wroteAny;
+    }
+
+    private String resolveBaseQualifiedName(AtlasEntityType entityType, AtlasEntity entity) throws AtlasBaseException {
+        List<String> uniqueAttrNames = entityType.getEntityDef().getAttributeDefs().stream()
+                .filter(def -> Boolean.TRUE.equals(def.getIsUnique()))
+                .map(def -> def.getName())
+                .filter(name -> !"qualifiedName".equals(name))
+                .sorted(Comparator.naturalOrder())
+                .collect(Collectors.toList());
+
+        if (uniqueAttrNames.isEmpty()) {
+            Map<String, AtlasAttribute> uniqueAttrs = entityType.getUniqAttributes();
+            if (uniqueAttrs == null || uniqueAttrs.isEmpty()) {
+                throw new AtlasBaseException("no unique attributes configured for type: " + entityType.getTypeName());
+            }
+
+            uniqueAttrNames = uniqueAttrs.keySet().stream()
+                    .sorted(Comparator.naturalOrder())
+                    .collect(Collectors.toList());
+        }
+
+        Map<String, String> values = new HashMap<>();
+        for (String field : uniqueAttrNames) {
+            Object value = entity.getAttribute(field);
+            if (value == null || StringUtils.isBlank(value.toString())) {
+                throw new AtlasBaseException("unique attribute missing: " + field + " for type: " + entityType.getTypeName());
+            }
+            values.put(field, value.toString());
+        }
+
+        if (uniqueAttrNames.size() == 1) {
+            return values.get(uniqueAttrNames.get(0));
+        }
+
+        return uniqueAttrNames.stream().map(values::get).collect(Collectors.joining("."));
+    }
+
+    private String buildOriginalJson(AtlasEntity entity) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("typeName", entity.getTypeName());
+        payload.put("attributes", new HashMap<>(entity.getAttributes()));
+        return org.apache.atlas.utils.AtlasJson.toJson(payload);
     }
 
     public void setClassifications(AtlasEntityHeaders entityHeaders, boolean overrideClassifications) throws AtlasBaseException {

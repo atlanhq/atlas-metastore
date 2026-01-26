@@ -20,9 +20,7 @@ package org.apache.atlas.web.rest;
 import com.google.common.collect.Lists;
 import com.sun.jersey.core.header.FormDataContentDisposition;
 import com.sun.jersey.multipart.FormDataParam;
-import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.RequestContext;
+import org.apache.atlas.*;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.authorize.*;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
@@ -37,10 +35,12 @@ import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.instance.*;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
+import org.apache.atlas.model.instance.VersionedEntry;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.audit.ESBasedAuditRepository;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.*;
+import org.apache.atlas.repository.store.graph.v2.versioned.VersionedStore;
 import org.apache.atlas.repository.store.graph.v2.repair.AtlasRepairAttributeService;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedVertexIdResult;
 import org.apache.atlas.type.AtlasClassificationType;
@@ -812,7 +812,9 @@ public class EntityREST {
                                                  @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
-                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
+                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration,
+                                                 @QueryParam("skipEntityStore") @DefaultValue("false") boolean skipEntityStore,
+                                                 @QueryParam("versionedLookup") @DefaultValue("false") boolean versionedLookup
     ) throws AtlasBaseException {
 
         if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
@@ -847,11 +849,52 @@ public class EntityREST {
                     .setAppendTags(appendTags)
                     .setReplaceBusinessAttributes(replaceBusinessAttributes)
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
+                    .setSkipEntityStore(skipEntityStore)
+                    .setVersionedLookup(versionedLookup)
                     .build();
             return entityMutationService.createOrUpdate(entityStream, context);
         } finally {
             AtlasPerfTracer.log(perf);
         }
+    }
+
+    /**
+     * List all versions for a versioned asset.
+     */
+    @GET
+    @Path("/versioned/{typeName}/{baseQN}")
+    @Timed
+    public List<VersionedEntry> listAppendVersions(@PathParam("typeName") String typeName,
+                                                   @PathParam("baseQN") String baseQualifiedName) throws AtlasBaseException {
+        ensureEntityType(typeName);
+        return VersionedStore.getInstance().listAll(typeName, baseQualifiedName);
+    }
+
+    /**
+     * Fetch a specific versioned version by its timeuuid.
+     */
+    @GET
+    @Path("/versioned/{typeName}/{baseQN}/version/{version}")
+    @Timed
+    public VersionedEntry getAppendVersion(@PathParam("typeName") String typeName,
+                                           @PathParam("baseQN") String baseQualifiedName,
+                                           @PathParam("version") String version) throws AtlasBaseException {
+        ensureEntityType(typeName);
+
+        UUID versionUuid;
+        try {
+            versionUuid = UUID.fromString(version);
+        } catch (IllegalArgumentException e) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "invalid version UUID: " + version);
+        }
+
+        VersionedEntry entry = VersionedStore.getInstance().getByVersion(typeName, baseQualifiedName, versionUuid);
+        if (entry == null) {
+            throw new AtlasBaseException(AtlasErrorCode.INSTANCE_BY_UNIQUE_ATTRIBUTE_NOT_FOUND,
+                    typeName, "baseQualifiedName=" + baseQualifiedName + ",version=" + version);
+        }
+
+        return entry;
     }
 
 

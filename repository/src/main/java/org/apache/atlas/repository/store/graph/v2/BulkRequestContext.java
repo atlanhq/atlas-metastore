@@ -24,6 +24,8 @@ public class BulkRequestContext {
 
     private boolean replaceBusinessAttributes;
     private boolean isOverwriteBusinessAttributes;
+    private boolean skipEntityStore;
+    private boolean versionedLookup;
 
     public boolean isReplaceClassifications() {
         return replaceClassifications;
@@ -45,6 +47,14 @@ public class BulkRequestContext {
         return isOverwriteBusinessAttributes;
     }
 
+    public boolean isSkipEntityStore() {
+        return skipEntityStore;
+    }
+
+    public boolean isVersionedLookup() {
+        return versionedLookup;
+    }
+
     public BulkRequestContext() {
         this.replaceClassifications = false;
         this.replaceTags = false;
@@ -52,6 +62,8 @@ public class BulkRequestContext {
 
         this.replaceBusinessAttributes = false;
         this.isOverwriteBusinessAttributes = false;
+        this.skipEntityStore = false;
+        this.versionedLookup = false;
     }
 
     private BulkRequestContext(Builder builder) {
@@ -61,6 +73,8 @@ public class BulkRequestContext {
 
         this.replaceBusinessAttributes = builder.replaceBusinessAttributes;
         this.isOverwriteBusinessAttributes = builder.isOverwriteBusinessAttributes;
+        this.skipEntityStore = builder.skipEntityStore;
+        this.versionedLookup = builder.versionedLookup;
     }
 
     public static class Builder {
@@ -70,6 +84,8 @@ public class BulkRequestContext {
 
         private boolean replaceBusinessAttributes = false;
         private boolean isOverwriteBusinessAttributes = false;
+        private boolean skipEntityStore = false;
+        private boolean versionedLookup = false;
 
         public Builder setReplaceClassifications(boolean replaceClassifications) {
             this.replaceClassifications = replaceClassifications;
@@ -108,6 +124,16 @@ public class BulkRequestContext {
 
         public Builder setOverwriteBusinessAttributes(boolean overwriteBusinessAttributes) {
             isOverwriteBusinessAttributes = overwriteBusinessAttributes;
+            return this;
+        }
+
+        public Builder setSkipEntityStore(boolean skipEntityStore) {
+            this.skipEntityStore = skipEntityStore;
+            return this;
+        }
+
+        public Builder setVersionedLookup(boolean versionedLookup) {
+            this.versionedLookup = versionedLookup;
             return this;
         }
 
