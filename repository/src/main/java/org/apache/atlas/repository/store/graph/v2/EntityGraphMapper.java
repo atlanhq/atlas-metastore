@@ -1160,6 +1160,16 @@ public class EntityGraphMapper {
             return false;
         }
         
+        // NEVER skip relationship attributes - they handle term assignments, lineage, etc.
+        if (attribute.isRelationshipAttribute()) {
+            return false;
+        }
+        
+        // Only skip if attribute is:
+        // 1. Not present in payload (user didn't send it)
+        // 2. Optional (required attributes must always be processed)
+        // 3. Has no default value (null default)
+        // 4. Not explicitly marked as "null is default"
         boolean isPresentInPayload = struct.hasAttribute(attribute.getName());
         AtlasAttributeDef attributeDef = attribute.getAttributeDef();
 
