@@ -519,8 +519,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
                 ESConnector.syncToEs(
                         getESPropertiesForUpdateFromMap(updatedVertexList, normalisedAttributesForCassandra, typeRegistry),
+                        docIdsToDelete,
                         true,
-                        docIdsToDelete);
+                        true);
 
                 RequestContext.get().endMetricRecord(recorder);
             } catch (AtlasBaseException e) {
