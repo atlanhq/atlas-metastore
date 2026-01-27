@@ -155,12 +155,15 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     private String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
     private CqlSession cqlSession;
     private DynamicVertexService dynamicVertexService;
-
-    private static DistributedIdGenerator CUSTOM_ID_GENERATOR;
-
+    // One session to for both assets and idgenerator keyspaces (cluster-wide)
+    private static final CqlSession SHARED_SESSION;
+    private static final DistributedIdGenerator CUSTOM_ID_GENERATOR;
+    private static String tableName = "server_ids";
 
     static {
         try {
+            LOG.info("Initializing Global Cassandra Session for AtlasJanusGraph...");
+            
             String hostName = ApplicationProperties.get().getString("atlas.graph.storage.hostname", "localhost");
             int port = ApplicationProperties.get().getInt("atlas.graph.storage.port", 9042);
             String podName = System.getenv("K8S_POD_NAME");
@@ -174,15 +177,45 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                 //throw new RuntimeException(message);
             }
 
-            if (LEAN_GRAPH_ENABLED) {
-                CUSTOM_ID_GENERATOR = new DistributedIdGenerator(hostName, port, podName);
+            // Build the session WITHOUT pinning it to a single keyspace
+            // This allows the same connection pool to query any keyspace in the cluster
+            SHARED_SESSION = getCQLBuilder(hostName).build();
+
+             if (LEAN_GRAPH_ENABLED) {
+                CUSTOM_ID_GENERATOR = new DistributedIdGenerator(
+                    SHARED_SESSION, 
+                getUniqueServerId(), // Logic to get Pod Name/IP
+                tableName // TODO :PARAMETRIZE this or move it to a constant
+            );
+            } else {
+                CUSTOM_ID_GENERATOR = null;
             }
+            
+
+            // Add Shutdown Hook to ensure ID persistence and session cleanup
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                try {
+                    if (CUSTOM_ID_GENERATOR != null) {
+                        CUSTOM_ID_GENERATOR.close(); // Persists final ID
+                    }
+                    if (SHARED_SESSION != null) {
+                        SHARED_SESSION.close();
+                        LOG.info("Global CqlSession closed gracefully.");
+                    }
+                } catch (Exception e) {
+                    LOG.error("Error during Cassandra session shutdown", e);
+                }
+            }));
+
         } catch (AtlasException e) {
             LOG.error("Failed to initialize DistributedIdGenerator for custom vertex ID generation");
             throw new RuntimeException(e);
+        } catch (Exception e) {
+            LOG.error("CRITICAL: Failed to initialize AtlasJanusGraph static resources", e);
+            throw new RuntimeException("Cassandra Session Initialization Failed", e);
         }
     }
-
+   
     public DynamicVertexService getDynamicVertexRetrievalService() {
         return dynamicVertexService;
     }
@@ -1022,12 +1055,11 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         Duration INITIAL_BACKOFF = Duration.ofMillis(100);
         int retryCount = 0;
         Exception lastException;
-
-        try (CqlSession tempCqlSession = getCQLBuilder(hostname).build();) {
-            while (true) {
-                try {
-                    return tempCqlSession.execute(statement);
-                } catch (DriverTimeoutException | WriteTimeoutException | NoHostAvailableException e) {
+        int retryCount = 0;
+        while (true) {
+            try {
+                return SHARED_SESSION.execute(statement);
+            } catch (DriverTimeoutException | WriteTimeoutException | NoHostAvailableException e) {
                     lastException = e;
                     retryCount++;
                     LOG.warn("Retry attempt {} for statement execution due to exception: {}", retryCount, e.toString());
@@ -1041,12 +1073,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                         Thread.currentThread().interrupt();
                         throw new AtlasBaseException("AtlasJAnusGraph: Interrupted during retry backoff", ie);
                     }
-                }
             }
-        } catch (AtlasBaseException be) {
-            throw new RuntimeException(be);
-        }
-
+        } 
         LOG.error("AtlasJAnusGraph: Failed to execute statement after {} retries", MAX_RETRIES, lastException);
         throw new RuntimeException("AtlasJAnusGraph: Failed to execute statement after " + MAX_RETRIES + " retries", lastException);
     }
