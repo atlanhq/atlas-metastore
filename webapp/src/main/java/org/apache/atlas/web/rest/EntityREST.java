@@ -848,7 +848,6 @@ public class EntityREST {
                         replaceBusinessAttributes, isOverwriteBusinessAttributes, skipProcessEdgeRestoration);
             }
 
-            RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
             EntityStream entityStream = new AtlasEntityStream(entities);
 
             BulkRequestContext context = new BulkRequestContext.Builder()
