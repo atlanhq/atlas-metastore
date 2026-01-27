@@ -33,15 +33,25 @@ public class VersionedStore implements AutoCloseable {
     private final PreparedStatement selectByVersionStmt;
 
     static {
-        try {
-            INSTANCE = new VersionedStore();
-        } catch (AtlasBaseException e) {
-            LOG.error("FATAL: Failed to initialize VersionedStore", e);
-            throw new RuntimeException("Could not initialize VersionedStore", e);
+        VersionedStore instance = null;
+        if (VERSIONED_ENABLED) {
+            try {
+                instance = new VersionedStore();
+            } catch (AtlasBaseException e) {
+                LOG.error("FATAL: Failed to initialize VersionedStore", e);
+            }
         }
+        INSTANCE = instance;
+    }
+
+    public static boolean isEnabled() {
+        return VERSIONED_ENABLED;
     }
 
     public static VersionedStore getInstance() {
+        if (!VERSIONED_ENABLED || INSTANCE == null) {
+            throw new IllegalStateException("Versioned metadata is disabled. Set atlas.versioned.enabled=true to enable.");
+        }
         return INSTANCE;
     }
 

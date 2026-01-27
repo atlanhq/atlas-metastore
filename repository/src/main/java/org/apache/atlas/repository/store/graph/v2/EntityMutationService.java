@@ -1,7 +1,6 @@
 package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.collect.Lists;
-import com.google.common.collect.Sets;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -11,6 +10,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutationResponse;
+import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.repository.converters.AtlasInstanceConverter;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
@@ -69,19 +69,12 @@ public class EntityMutationService {
 
         boolean isGraphTransactionFailed = false;
         try {
-            List<AtlasEntity> entities = new ArrayList<>();
-            while (entityStream.hasNext()) {
-                entities.add(entityStream.next());
-            }
-            entityStream.reset();
+            if (context.isVersionedLookup()) {
+                writeVersionedEntries(entityStream, context);
 
-            boolean wroteVersionedEntries = writeVersionedEntries(entities, context);
-
-            if (context.isSkipEntityStore()) {
-                if (!wroteVersionedEntries) {
-                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "skipEntityStore=true but no versioned entries were written");
+                if (context.isSkipEntityStore()) {
+                    return new EntityMutationResponse();
                 }
-                return new EntityMutationResponse();
             }
 
             return entityStore.createOrUpdate(entityStream, context);
@@ -95,13 +88,22 @@ public class EntityMutationService {
         }
     }
 
-    private boolean writeVersionedEntries(List<AtlasEntity> entities, BulkRequestContext context) throws AtlasBaseException {
-        if (!context.isVersionedLookup() || entities == null || entities.isEmpty()) {
-            return false;
+    private void writeVersionedEntries(EntityStream entityStream, BulkRequestContext context) throws AtlasBaseException {
+        List<AtlasEntity> entities = new ArrayList<>();
+        while (entityStream.hasNext()) {
+            entities.add(entityStream.next());
+        }
+        entityStream.reset();
+
+        if (!context.isVersionedLookup() || entities.isEmpty()) {
+            return;
+        }
+
+        if (!VersionedStore.isEnabled()) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "versionedLookup=true requires atlas.versioned.enabled=true");
         }
 
         VersionedStore store = VersionedStore.getInstance();
-        boolean wroteAny = false;
 
         for (AtlasEntity entity : entities) {
             String typeName = entity.getTypeName();
@@ -117,16 +119,13 @@ public class EntityMutationService {
             long createdAtMillis = System.currentTimeMillis();
 
             store.insert(typeName, baseQualifiedName, version, versionedQualifiedName, createdAtMillis, originalJson);
-            wroteAny = true;
         }
-
-        return wroteAny;
     }
 
     private String resolveBaseQualifiedName(AtlasEntityType entityType, AtlasEntity entity) throws AtlasBaseException {
         List<String> uniqueAttrNames = entityType.getEntityDef().getAttributeDefs().stream()
                 .filter(def -> Boolean.TRUE.equals(def.getIsUnique()))
-                .map(def -> def.getName())
+                .map(AtlasStructDef.AtlasAttributeDef::getName)
                 .filter(name -> !"qualifiedName".equals(name))
                 .sorted(Comparator.naturalOrder())
                 .collect(Collectors.toList());
@@ -139,7 +138,7 @@ public class EntityMutationService {
 
             uniqueAttrNames = uniqueAttrs.keySet().stream()
                     .sorted(Comparator.naturalOrder())
-                    .collect(Collectors.toList());
+                    .toList();
         }
 
         Map<String, String> values = new HashMap<>();

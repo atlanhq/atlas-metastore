@@ -841,6 +841,10 @@ public class EntityREST {
 
             validateAttributeLength(entities.getEntities());
 
+            if (versionedLookup && !VersionedStore.isEnabled()) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "versionedLookup=true requires atlas.versioned.enabled=true");
+            }
+
             EntityStream entityStream = new AtlasEntityStream(entities);
 
             BulkRequestContext context = new BulkRequestContext.Builder()
@@ -867,6 +871,9 @@ public class EntityREST {
     public List<VersionedEntry> listAppendVersions(@PathParam("typeName") String typeName,
                                                    @PathParam("baseQN") String baseQualifiedName) throws AtlasBaseException {
         ensureEntityType(typeName);
+        if (!VersionedStore.isEnabled()) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "versioned metadata is disabled");
+        }
         return VersionedStore.getInstance().listAll(typeName, baseQualifiedName);
     }
 
@@ -880,6 +887,9 @@ public class EntityREST {
                                            @PathParam("baseQN") String baseQualifiedName,
                                            @PathParam("version") String version) throws AtlasBaseException {
         ensureEntityType(typeName);
+        if (!VersionedStore.isEnabled()) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "versioned metadata is disabled");
+        }
 
         UUID versionUuid;
         try {

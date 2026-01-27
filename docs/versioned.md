@@ -45,9 +45,12 @@ GET /api/atlas/v2/entity/versioned/{typeName}/{baseQN}/version/{timeuuid}
 
 ### Server configuration
 
-The only server configuration required is the table name (optional):
+Versioned storage is disabled by default. Enable it explicitly and optionally override the table name:
 
 ```
+# Enable versioned metadata storage (default: false)
+atlas.versioned.enabled=false
+
 # Versioned Cassandra table name (stored in metastore keyspace)
 # atlas.versioned.table.name=versioned_entries
 ```
