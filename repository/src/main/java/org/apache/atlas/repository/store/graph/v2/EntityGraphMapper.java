@@ -1161,7 +1161,8 @@ public class EntityGraphMapper {
         }
         
         // NEVER skip relationship attributes - they handle term assignments, lineage, etc.
-        if (attribute.isRelationshipAttribute()) {
+        // An attribute is a relationship attribute if it has a relationshipEdgeLabel
+        if (attribute.getRelationshipEdgeLabel() != null) {
             return false;
         }
         
