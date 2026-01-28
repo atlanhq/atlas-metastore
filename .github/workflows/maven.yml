@@ -27,6 +27,7 @@ on:
       - staging
       - idonlymasterrefreshfiles
       - nbidonlymasterrefreshfiles
+      - ms463
 
 jobs:
   # Detect what changed to optimize workflow execution
