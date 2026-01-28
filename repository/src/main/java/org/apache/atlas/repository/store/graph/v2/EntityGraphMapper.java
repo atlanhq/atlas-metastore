@@ -1173,7 +1173,7 @@ public class EntityGraphMapper {
         // 2. Optional (required attributes must always be processed)
         // 3. Has no default value (null default)
         // 4. Not explicitly marked as "null is default"
-        boolean isPresentInPayload = struct.hasAttribute(attribute.getName());
+        boolean isPresentInPayload = struct.hasAttribute(attribute.getName()) || ((AtlasEntity) struct).hasRelationshipAttribute(attribute.getName());
         AtlasAttributeDef attributeDef = attribute.getAttributeDef();
 
         return !isPresentInPayload && attributeDef.getIsOptional() && attributeDef.getDefaultValue() == null
