@@ -8,9 +8,7 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.configuration.Configuration;
-import org.apache.kafka.clients.admin.AdminClient;
-import org.apache.kafka.clients.admin.AdminClientConfig;
-import org.apache.kafka.clients.admin.NewTopic;
+import org.apache.commons.lang.StringUtils;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
@@ -28,9 +26,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -98,10 +94,10 @@ public abstract class KafkaEventConsumer {
             );
             consumerProperties = buildConsumerProperties(bootstrapServers, configuration, configPrefix, defaultConsumerGroupId());
             errorProducerProperties = buildErrorProducerProperties(bootstrapServers);
-            if (topic != null && !topic.isEmpty()) {
+            if (StringUtils.isBlank(topic)) {
                 throw new RuntimeException("Missing topic: " + topic);
             }
-            if (errorTopic != null && !errorTopic.isEmpty()) {
+            if (StringUtils.isBlank(errorTopic)) {
                 throw new RuntimeException("Missing error topic: " + errorTopic);
             }
         } catch (AtlasException e) {
