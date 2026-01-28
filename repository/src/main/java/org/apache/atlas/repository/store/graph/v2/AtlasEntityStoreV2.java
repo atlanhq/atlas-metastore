@@ -2316,6 +2316,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     private EntityMutationResponse deleteVertices(Collection<AtlasVertex> deletionCandidates) throws AtlasBaseException {
         EntityMutationResponse response = new EntityMutationResponse();
+        long startTimeMs = System.currentTimeMillis();
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("entity.deleteVertices.total");
+        int relationshipCleanupTaskEmitsAttempted = 0;
+        int hasLineageBatchesSent = 0;
+        Collection<AtlasVertex> categories = new ArrayList<>();
+        Collection<AtlasVertex> others = new ArrayList<>();
         try {
             boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
             boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
@@ -2323,16 +2329,14 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             RequestContext req = RequestContext.get();
 
-            Collection<AtlasVertex> categories = new ArrayList<>();
-            Collection<AtlasVertex> others = new ArrayList<>();
-
-            MetricRecorder metric = RequestContext.get().startMetricRecord("filterCategoryVertices");
+            MetricRecorder filterMetric = RequestContext.get().startMetricRecord("filterCategoryVertices");
             for (AtlasVertex vertex : deletionCandidates) {
                 updateModificationMetadata(vertex);
 
                 String typeName = getTypeName(vertex);
 
                 if(ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean() && ENABLE_RELATIONSHIP_CLEANUP.getBoolean()) {
+                    relationshipCleanupTaskEmitsAttempted++;
                     checkAndCreateProcessRelationshipsCleanupTaskNotification(typeRegistry.getEntityTypeByName(typeName), vertex);
                 }
 
@@ -2347,7 +2351,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     others.add(vertex);
                 }
             }
-            RequestContext.get().endMetricRecord(metric);
+            RequestContext.get().endMetricRecord(filterMetric);
 
             if (CollectionUtils.isNotEmpty(categories)) {
                 entityGraphMapper.removeAttrForCategoryDelete(categories);
@@ -2389,6 +2393,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         batchMap.put(e.getKey(), e.getValue());
                     }
                     sendvertexIdsForHaslineageCalculation(batchMap);
+                    hasLineageBatchesSent++;
                 }
             }
         }
@@ -2397,6 +2402,16 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         } catch (Exception e) {
             LOG.error("Delete vertices request failed", e);
             throw new AtlasBaseException(e);
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+            LOG.info("op=entity.deleteVertices candidates_total={} categories_count={} others_count={} " +
+                            "relationship_cleanup_task_emits_attempted={} hasLineage_batches_sent={} duration_ms={}",
+                    deletionCandidates != null ? deletionCandidates.size() : 0,
+                    categories != null ? categories.size() : 0,
+                    others != null ? others.size() : 0,
+                    relationshipCleanupTaskEmitsAttempted,
+                    hasLineageBatchesSent,
+                    System.currentTimeMillis() - startTimeMs);
         }
 
         return response;
