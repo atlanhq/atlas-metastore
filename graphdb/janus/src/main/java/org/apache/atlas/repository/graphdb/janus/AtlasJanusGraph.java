@@ -58,6 +58,7 @@ import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.GraphIndexQueryParameters;
 import org.apache.atlas.repository.graphdb.GremlinVersion;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
@@ -558,7 +559,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
         try {
             for (AtlasVertex vertex : vertices) {
-                rt.put(vertex.getDocId(), getESPropertiesForUpdate(normalisedAttributes.get(vertex.getIdForDisplay()), typeRegistry));
+                Set<String> removedProperties = ((AtlasJanusVertex) vertex).getDynamicVertex().getRemovedProperties();
+                Map<String, Object> esProps = getESPropertiesForUpdate(normalisedAttributes.get(vertex.getIdForDisplay()), removedProperties, typeRegistry);
+                rt.put(vertex.getDocId(), esProps);
             }
         } finally {
             RequestContext.get().endMetricRecord(recorder);
@@ -573,25 +576,42 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             return null;
         }
         try {
-            return vertices.stream().collect(Collectors.toMap(
-                    k -> k.getDocId(),
-                    v -> getESPropertiesForUpdate(((AtlasJanusVertex) v).getDynamicVertex().getAllProperties(), typeRegistry)
-            ));
+            Map<String, Map<String, Object>> rt = new HashMap<>(vertices.size());
+            for (AtlasVertex vertex : vertices) {
+                DynamicVertex dynamicVertex = ((AtlasJanusVertex) vertex).getDynamicVertex();
+                Set<String> removedProperties = dynamicVertex.getRemovedProperties();
+                Map<String, Object> esProps = getESPropertiesForUpdate(dynamicVertex.getAllProperties(), removedProperties, typeRegistry);
+                rt.put(vertex.getDocId(), esProps);
+            }
+            return rt;
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
     }
 
-    private Map<String, Object> getESPropertiesForUpdate(Map<String, Object> properties, AtlasTypeRegistry typeRegistry) {
+    private Map<String, Object> getESPropertiesForUpdate(Map<String, Object> properties, Set<String> removedProperties, AtlasTypeRegistry typeRegistry) {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdate.filter");
         try {
             AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
-            return getEligibleProperties(properties, type).stream()
+            Map<String, Object> result = getEligibleProperties(properties, type).stream()
                     .filter(k -> properties.get(k) != null)
                     .collect(Collectors.toMap(
                             k -> k,
-                            v -> properties.get(v)
+                            k -> properties.get(k),
+                            (v1, v2) -> v1,
+                            HashMap::new
                     ));
+
+            // Add removed properties with null values so ES can remove them
+            if (CollectionUtils.isNotEmpty(removedProperties)) {
+                for (String removedProp : removedProperties) {
+                    if (type.isAttributesForESSync(removedProp) || removedProp.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) {
+                        result.put(removedProp, null);
+                    }
+                }
+            }
+
+            return result;
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
