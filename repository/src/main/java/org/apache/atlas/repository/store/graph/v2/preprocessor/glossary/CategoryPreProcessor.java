@@ -518,7 +518,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         }
 
         String anchorQN = (String) anchor.getAttribute(QUALIFIED_NAME);
-        return DeterministicIdUtils.generateCategoryQN(categoryName, parentCategoryQN, anchorQN) + "@" + anchorQN;
+        return DeterministicIdUtils.getCategoryQN(categoryName, parentCategoryQN, anchorQN) + "@" + anchorQN;
     }
 
 }

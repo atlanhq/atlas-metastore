@@ -114,7 +114,7 @@ public class PurposePreProcessor extends AccessControlPreProcessor {
         String tenantId = getTenantId(entity);
 
         String purposeName = (String) entity.getAttribute(NAME);
-        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, DeterministicIdUtils.generateAccessControlQN("purpose", purposeName, tenantId)));
+        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, DeterministicIdUtils.getAccessControlQN("purpose", purposeName, tenantId)));
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
 
         //create ES alias

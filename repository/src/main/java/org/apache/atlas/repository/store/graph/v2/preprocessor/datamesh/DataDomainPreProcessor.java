@@ -392,7 +392,7 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     }
 
     private static String createQualifiedName(String domainName, String parentDomainQualifiedName) {
-        String nanoId = DeterministicIdUtils.generateDomainQN(domainName, parentDomainQualifiedName);
+        String nanoId = DeterministicIdUtils.getDomainQN(domainName, parentDomainQualifiedName);
         if (StringUtils.isNotEmpty(parentDomainQualifiedName)) {
             return parentDomainQualifiedName + "/domain/" + nanoId;
         } else{

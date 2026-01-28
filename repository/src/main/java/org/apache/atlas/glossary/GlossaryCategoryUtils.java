@@ -657,20 +657,20 @@ public class GlossaryCategoryUtils extends GlossaryUtils {
         if (parentRemoval) {
             AtlasGlossary glossary = dataAccess.load(getGlossarySkeleton(cat.getAnchor().getGlossaryGuid()));
             String glossaryQN = glossary.getQualifiedName();
-            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.generateCategoryQN(cat.getName(), null, glossaryQN) : qName;
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), null, glossaryQN) : qName;
             ret = qName + "@" + glossaryQN;
 
         } else if (parentCategory != null) {
             String[] parentCatQname = parentCategory.getQualifiedName().split("@");
             String parentCatQN = parentCategory.getQualifiedName();
-            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.generateCategoryQN(cat.getName(), parentCatQN, parentCatQname[1]) : qName;
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), parentCatQN, parentCatQname[1]) : qName;
             ret = parentCatQname[0] + "." + qName + "@" + parentCatQname[1];
 
         } else if (cat.getParentCategory() != null) {
             AtlasGlossaryCategory parentCat = dataAccess.load(getAtlasGlossaryCategorySkeleton(cat.getParentCategory().getCategoryGuid()));
             String[] parentCatQname = parentCat.getQualifiedName().split("@");
             String parentCatQN = parentCat.getQualifiedName();
-            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.generateCategoryQN(cat.getName(), parentCatQN, parentCatQname[1]) : qName;
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), parentCatQN, parentCatQname[1]) : qName;
             ret = parentCatQname[0] + "." + qName + "@" + parentCatQname[1];
 
         } else {
@@ -680,7 +680,7 @@ public class GlossaryCategoryUtils extends GlossaryUtils {
                 throw new AtlasBaseException("Glossary not found with guid: " + anchorGlossaryGuid);
             }
             String glossaryQN = glossary.getQualifiedName();
-            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.generateCategoryQN(cat.getName(), null, glossaryQN) : qName;
+            qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getCategoryQN(cat.getName(), null, glossaryQN) : qName;
             ret = qName + "@" + glossaryQN;
         }
         return ret;

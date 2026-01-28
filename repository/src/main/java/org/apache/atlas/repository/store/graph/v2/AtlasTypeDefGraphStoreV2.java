@@ -192,7 +192,7 @@ public class AtlasTypeDefGraphStoreV2 extends AtlasTypeDefGraphStore {
         }
 
         if (StringUtils.isBlank(typeDef.getGuid())) {
-            typeDef.setGuid(DeterministicIdUtils.generateTypeDefGuid(typeDef.getName(), typeDef.getServiceType()));
+            typeDef.setGuid(DeterministicIdUtils.getTypeDefGuid(typeDef.getName(), typeDef.getServiceType()));
         }
 
         if (typeDef.getCreateTime() == null) {

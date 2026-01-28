@@ -202,7 +202,7 @@ public class QueryCollectionPreProcessor implements PreProcessor {
 
     private static String createQualifiedName(String collectionName) {
         String userName = AtlasAuthorizationUtils.getCurrentUserName();
-        return String.format(qualifiedNameFormat, userName, DeterministicIdUtils.generateQueryResourceQN("collection", collectionName, "", userName));
+        return String.format(qualifiedNameFormat, userName, DeterministicIdUtils.getQueryResourceQN("collection", collectionName, "", userName));
     }
 
     private RoleRepresentation createCollectionAdminRole(AtlasEntity collection) throws AtlasBaseException {

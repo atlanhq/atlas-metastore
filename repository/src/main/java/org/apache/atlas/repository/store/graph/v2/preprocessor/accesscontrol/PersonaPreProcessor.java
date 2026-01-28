@@ -150,7 +150,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
         String tenantId = getTenantId(entity);
 
         String personaName = (String) entity.getAttribute(NAME);
-        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, DeterministicIdUtils.generateAccessControlQN("persona", personaName, tenantId)));
+        entity.setAttribute(QUALIFIED_NAME, String.format("%s/%s", tenantId, DeterministicIdUtils.getAccessControlQN("persona", personaName, tenantId)));
         entity.setAttribute(ATTR_ACCESS_CONTROL_ENABLED, entity.getAttributes().getOrDefault(ATTR_ACCESS_CONTROL_ENABLED, true));
 
         //create keycloak role
