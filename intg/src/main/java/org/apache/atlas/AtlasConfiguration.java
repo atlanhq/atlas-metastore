@@ -157,7 +157,6 @@ public enum AtlasConfiguration {
     DELETE_SKIP_HAS_LINEAGE_ON_DELETE("atlas.delete.skipHasLineageOnDelete", false),
     DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK("atlas.delete.emitRelationshipCleanupTask", true),
 
-
     /***
      * OTEL Configuration
      */

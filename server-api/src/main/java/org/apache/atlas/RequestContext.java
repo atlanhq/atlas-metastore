@@ -121,6 +121,8 @@ public class RequestContext {
     private String requestUri;
     private boolean delayTagNotifications = false;
     private boolean skipHasLineageCalculation = false;
+    private boolean asyncCleanupEnabled = false;
+    private boolean deferEsPostProcessing = false;
     private boolean isInvokedByIndexSearch = false;
     private boolean isInvokedByLineage = false;
     private Map<AtlasClassification, Collection<Object>> deletedClassificationAndVertices = new HashMap<>();
@@ -195,6 +197,9 @@ public class RequestContext {
         this.currentTask = null;
         this.skipAuthorizationCheck = false;
         this.delayTagNotifications = false;
+        this.asyncCleanupEnabled = false;
+        this.deferEsPostProcessing = false;
+        this.skipHasLineageCalculation = false;
         deletedClassificationAndVertices.clear();
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
@@ -829,6 +834,22 @@ public class RequestContext {
     }
     public void setSkipHasLineageCalculation(boolean skipHasLineageCalculation) {
         this.skipHasLineageCalculation = skipHasLineageCalculation;
+    }
+
+    public boolean isAsyncCleanupEnabled() {
+        return asyncCleanupEnabled;
+    }
+
+    public void setAsyncCleanupEnabled(boolean asyncCleanupEnabled) {
+        this.asyncCleanupEnabled = asyncCleanupEnabled;
+    }
+
+    public boolean isDeferEsPostProcessing() {
+        return deferEsPostProcessing;
+    }
+
+    public void setDeferEsPostProcessing(boolean deferEsPostProcessing) {
+        this.deferEsPostProcessing = deferEsPostProcessing;
     }
 
     public void setIsInvokedByIndexSearch(boolean isInvokedByIndexSearch) {
