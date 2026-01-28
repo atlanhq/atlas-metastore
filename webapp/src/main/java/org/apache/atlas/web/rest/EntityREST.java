@@ -374,6 +374,7 @@ public class EntityREST {
         Servlets.validateQueryParamLength("typeName", typeName);
 
         AtlasPerfTracer perf = null;
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("entity.deleteByUniqueAttribute.total");
 
         try {
             RequestContext requestContext = RequestContext.get();
@@ -391,6 +392,7 @@ public class EntityREST {
             return entityMutationService.deleteByUniqueAttributes(entityType, attributes);
         } finally {
             AtlasPerfTracer.log(perf);
+            RequestContext.get().endMetricRecord(metric);
         }
     }
 
@@ -466,6 +468,7 @@ public class EntityREST {
         Servlets.validateQueryParamLength("guid", guid);
 
         AtlasPerfTracer perf = null;
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("entity.deleteByGuid.total");
 
         try {
             RequestContext requestContext = RequestContext.get();
@@ -479,6 +482,7 @@ public class EntityREST {
             return entityMutationService.deleteById(guid);
         } finally {
             AtlasPerfTracer.log(perf);
+            RequestContext.get().endMetricRecord(metric);
         }
     }
 
@@ -902,6 +906,7 @@ public class EntityREST {
         }
 
         AtlasPerfTracer perf = null;
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("entity.deleteByGuids.total");
 
         try {
             RequestContext requestContext = RequestContext.get();
@@ -915,6 +920,7 @@ public class EntityREST {
             return entityMutationService.deleteByIds(guids);
         } finally {
             AtlasPerfTracer.log(perf);
+            RequestContext.get().endMetricRecord(metric);
         }
     }
 
@@ -923,6 +929,7 @@ public class EntityREST {
     @Timed
     public EntityMutationResponse bulkDeleteByUniqueAttribute(List<AtlasObjectId> objectIds, @QueryParam("skipHasLineageCalculation") @DefaultValue("false") boolean skipHasLineageCalculation) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("entity.bulkDeleteByUniqueAttribute.total");
         try {
             RequestContext requestContext = RequestContext.get();
             requestContext.setAsyncCleanupEnabled(AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean());
@@ -937,6 +944,7 @@ public class EntityREST {
 
         } finally {
             AtlasPerfTracer.log(perf);
+            RequestContext.get().endMetricRecord(metric);
         }
     }
 
