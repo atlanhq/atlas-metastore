@@ -41,6 +41,7 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.idgenerator.DistributedIdGenerator;
+import org.apache.atlas.idgenerator.IdGenerator;
 import org.apache.atlas.model.discovery.SearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.Constants;
@@ -156,7 +157,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     private CqlSession cqlSession;
     private DynamicVertexService dynamicVertexService;
 
-    private static DistributedIdGenerator CUSTOM_ID_GENERATOR;
+    private static IdGenerator CUSTOM_ID_GENERATOR;
 
 
     static {
