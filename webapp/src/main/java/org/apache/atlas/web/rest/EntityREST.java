@@ -376,6 +376,10 @@ public class EntityREST {
         AtlasPerfTracer perf = null;
 
         try {
+            boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
+            boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
+            boolean unusedDeleteSkipHasLineageOnDelete = AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean();
+            boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             Map<String, Object> attributes = getAttributes(servletRequest);
 
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
@@ -464,6 +468,10 @@ public class EntityREST {
         AtlasPerfTracer perf = null;
 
         try {
+            boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
+            boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
+            boolean unusedDeleteSkipHasLineageOnDelete = AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean();
+            boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuid(" + guid + ")");
             }
@@ -896,6 +904,10 @@ public class EntityREST {
         AtlasPerfTracer perf = null;
 
         try {
+            boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
+            boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
+            boolean unusedDeleteSkipHasLineageOnDelete = AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean();
+            boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuids(" + guids  + ")");
             }
@@ -913,6 +925,10 @@ public class EntityREST {
         AtlasPerfTracer perf = null;
         RequestContext.get().setSkipHasLineageCalculation(skipHasLineageCalculation);
         try {
+            boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
+            boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
+            boolean unusedDeleteSkipHasLineageOnDelete = AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean();
+            boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.bulkDeleteByUniqueAttribute(" + objectIds.size() + ")");
             }

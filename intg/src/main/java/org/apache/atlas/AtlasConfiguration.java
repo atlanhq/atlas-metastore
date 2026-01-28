@@ -151,6 +151,12 @@ public enum AtlasConfiguration {
     // Slow query logging threshold for search endpoints (ms)
     SEARCH_SLOW_QUERY_THRESHOLD_MS("atlas.search.slow.query.threshold.ms", 1000),
 
+    // Delete configurations
+    DELETE_ASYNC_CLEANUP_ENABLED("atlas.delete.asyncCleanup.enabled", false),
+    DELETE_DEFER_ES_POST_PROCESSING("atlas.delete.deferEsPostProcessing", false),
+    DELETE_SKIP_HAS_LINEAGE_ON_DELETE("atlas.delete.skipHasLineageOnDelete", false),
+    DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK("atlas.delete.emitRelationshipCleanupTask", true),
+
 
     /***
      * OTEL Configuration

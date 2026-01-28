@@ -1920,6 +1920,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private void checkAndCreateProcessRelationshipsCleanupTaskNotification(AtlasEntityType entityType, AtlasVertex vertex) {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("checkAndCreateAtlasDistributedTaskNotification");
         try {
+            boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
+            boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
+            boolean unusedDeleteSkipHasLineageOnDelete = AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean();
+            boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             if (RELATIONSHIP_CLEANUP_SUPPORTED_TYPES.stream().anyMatch(type -> entityType.getTypeAndAllSuperTypes().contains(type))) {
                 AtlasDistributedTaskNotification notification = taskNotificationSender.createRelationshipCleanUpTask(vertex.getIdForDisplay(), RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS);
                 taskNotificationSender.send(notification);
@@ -2313,6 +2317,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private EntityMutationResponse deleteVertices(Collection<AtlasVertex> deletionCandidates) throws AtlasBaseException {
         EntityMutationResponse response = new EntityMutationResponse();
         try {
+            boolean unusedDeleteAsyncCleanupEnabled = AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean();
+            boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
+            boolean unusedDeleteSkipHasLineageOnDelete = AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean();
+            boolean unusedDeleteEmitRelationshipCleanupTask = AtlasConfiguration.DELETE_EMIT_RELATIONSHIP_CLEANUP_TASK.getBoolean();
             RequestContext req = RequestContext.get();
 
             Collection<AtlasVertex> categories = new ArrayList<>();

@@ -2,6 +2,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.CassandraTagOperation;
@@ -355,6 +356,7 @@ public class EntityMutationService {
     }
 
     private void executeESPostProcessing(boolean isGraphTransactionFailed) {
+        boolean unusedDeleteDeferEsPostProcessing = AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean();
         if (!isGraphTransactionFailed && !RequestContext.get().getESDeferredOperations().isEmpty()) {
             // This will be skipped for v1 as RequestContext.get().getESDeferredOperations() will be empty
             try {
