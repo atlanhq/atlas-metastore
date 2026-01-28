@@ -934,7 +934,6 @@ public class EntityREST {
             RequestContext requestContext = RequestContext.get();
             requestContext.setAsyncCleanupEnabled(AtlasConfiguration.DELETE_ASYNC_CLEANUP_ENABLED.getBoolean());
             requestContext.setDeferEsPostProcessing(AtlasConfiguration.DELETE_DEFER_ES_POST_PROCESSING.getBoolean());
-            requestContext.setSkipHasLineageCalculation(AtlasConfiguration.DELETE_SKIP_HAS_LINEAGE_ON_DELETE.getBoolean());
             requestContext.setSkipHasLineageCalculation(skipHasLineageCalculation);
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.bulkDeleteByUniqueAttribute(" + objectIds.size() + ")");

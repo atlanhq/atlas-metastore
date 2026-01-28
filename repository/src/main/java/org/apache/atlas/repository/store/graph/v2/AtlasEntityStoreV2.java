@@ -2380,7 +2380,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             for (AtlasEntityHeader entity : req.getUpdatedEntities()) {
                 response.addEntity(UPDATE, entity);
             }
-        if (ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean() && ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+        if (!RequestContext.get().skipHasLineageCalculation()
+                && ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean()
+                && ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
             Map<String, String> typeByVertexId = getRemovedInputOutputVertexTypeMap();
             if (typeByVertexId != null && !typeByVertexId.isEmpty()) {
                 List<Map.Entry<String, String>> entries = new ArrayList<>(typeByVertexId.entrySet());
@@ -2396,6 +2398,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     hasLineageBatchesSent++;
                 }
             }
+        } else if (RequestContext.get().skipHasLineageCalculation()) {
+            LOG.info("op=entity.deleteVertices skip_hasLineage=true");
         }
 
 

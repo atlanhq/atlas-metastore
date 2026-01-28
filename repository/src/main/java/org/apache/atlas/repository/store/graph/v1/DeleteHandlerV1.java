@@ -251,130 +251,148 @@ public abstract class DeleteHandlerV1 {
      * @throws AtlasException
      */
     public Collection<GraphHelper.VertexInfo> getOwnedVertices(AtlasVertex entityVertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("entity.delete.getOwnedVertices.total");
         final Map<String, GraphHelper.VertexInfo> vertexInfoMap    = new HashMap<>();
         final Stack<AtlasVertex>                  vertices         = new Stack<>();
         final boolean                             isPurgeRequested = RequestContext.get().isPurgeRequested();
+        final String                              startGuid        = GraphHelper.getGuid(entityVertex);
+        final String                              startTypeName    = GraphHelper.getTypeName(entityVertex);
+        int                                      visitedCount      = 0;
+        int                                      maxStackDepth     = 0;
 
         vertices.push(entityVertex);
 
-        while (vertices.size() > 0) {
-            AtlasVertex        vertex = vertices.pop();
-            AtlasEntity.Status state  = getState(vertex);
+        try {
+            while (vertices.size() > 0) {
+                maxStackDepth = Math.max(maxStackDepth, vertices.size());
+                AtlasVertex        vertex = vertices.pop();
+                visitedCount++;
+                AtlasEntity.Status state  = getState(vertex);
 
-            //If the vertex marked for deletion, if we are not purging, skip it
-            if (!isPurgeRequested && DELETED.equals(state)) {
-                continue;
-            }
+                //If the vertex marked for deletion, if we are not purging, skip it
+                if (!isPurgeRequested && DELETED.equals(state)) {
+                    continue;
+                }
 
-            String guid = GraphHelper.getGuid(vertex);
+                String guid = GraphHelper.getGuid(vertex);
 
-            if (vertexInfoMap.containsKey(guid)) {
-                continue;
-            }
+                if (vertexInfoMap.containsKey(guid)) {
+                    continue;
+                }
 
-            String typeName = GraphHelper.getTypeName(vertex);
-            AtlasEntityType   entityType = typeRegistry.getEntityTypeByName(typeName);
+                String typeName = GraphHelper.getTypeName(vertex);
+                AtlasEntityType   entityType = typeRegistry.getEntityTypeByName(typeName);
 
-            Set<String> attributes = entityType.getAllAttributes().values().stream()
-                    .filter(x -> x.getAttributeDef().getIncludeInNotification())
-                    .map(x -> x.getAttributeDef().getName()).collect(Collectors.toSet());
+                Set<String> attributes = entityType.getAllAttributes().values().stream()
+                        .filter(x -> x.getAttributeDef().getIncludeInNotification())
+                        .map(x -> x.getAttributeDef().getName()).collect(Collectors.toSet());
 
-            AtlasEntityHeader entity     = entityRetriever.toAtlasEntityHeader(vertex, attributes);
+                AtlasEntityHeader entity     = entityRetriever.toAtlasEntityHeader(vertex, attributes);
 
-            if (entityType == null) {
-                throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), typeName);
-            }
-            entity.setVertexId(vertex.getIdForDisplay());
-            entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
-            entity.setSuperTypeNames(entityType.getAllSuperTypes());
-            vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
+                if (entityType == null) {
+                    throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), typeName);
+                }
+                entity.setVertexId(vertex.getIdForDisplay());
+                entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+                entity.setSuperTypeNames(entityType.getAllSuperTypes());
+                vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
 
-            for (AtlasStructType.AtlasAttribute attributeInfo : entityType.getOwnedRefAttributes()) {
-                String       edgeLabel    = attributeInfo.getRelationshipEdgeLabel();
-                AtlasType    attrType     = attributeInfo.getAttributeType();
-                TypeCategory typeCategory = attrType.getTypeCategory();
+                for (AtlasStructType.AtlasAttribute attributeInfo : entityType.getOwnedRefAttributes()) {
+                    String       edgeLabel    = attributeInfo.getRelationshipEdgeLabel();
+                    AtlasType    attrType     = attributeInfo.getAttributeType();
+                    TypeCategory typeCategory = attrType.getTypeCategory();
 
-                if (typeCategory == OBJECT_ID_TYPE) {
-                    if (attributeInfo.getAttributeDef().isSoftReferenced()) {
-                        String        softRefVal = vertex.getProperty(attributeInfo.getVertexPropertyName(), String.class);
-                        AtlasObjectId refObjId   = AtlasEntityUtil.parseSoftRefValue(softRefVal);
-                        AtlasVertex   refVertex  = refObjId != null ? AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid()) : null;
-                        if (refObjId.getGuid() == null) {
-                            LOG.warn("OBJECT_ID_TYPE type category - null guid passed in findByGuid!");
+                    if (typeCategory == OBJECT_ID_TYPE) {
+                        if (attributeInfo.getAttributeDef().isSoftReferenced()) {
+                            String        softRefVal = vertex.getProperty(attributeInfo.getVertexPropertyName(), String.class);
+                            AtlasObjectId refObjId   = AtlasEntityUtil.parseSoftRefValue(softRefVal);
+                            AtlasVertex   refVertex  = refObjId != null ? AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid()) : null;
+                            if (refObjId.getGuid() == null) {
+                                LOG.warn("OBJECT_ID_TYPE type category - null guid passed in findByGuid!");
+                            }
+                            if (refVertex != null) {
+                                vertices.push(refVertex);
+                            }
+                        } else {
+                            AtlasEdge edge = graphHelper.getEdgeForLabel(vertex, edgeLabel);
+
+                            if (edge == null || (!isPurgeRequested && DELETED.equals(getState(edge)))) {
+                                continue;
+                            }
+
+                            vertices.push(edge.getInVertex());
                         }
-                        if (refVertex != null) {
-                            vertices.push(refVertex);
-                        }
-                    } else {
-                        AtlasEdge edge = graphHelper.getEdgeForLabel(vertex, edgeLabel);
+                    } else if (typeCategory == ARRAY || typeCategory == MAP) {
+                        TypeCategory elementType = null;
 
-                        if (edge == null || (!isPurgeRequested && DELETED.equals(getState(edge)))) {
+                        if (typeCategory == ARRAY) {
+                            elementType = ((AtlasArrayType) attrType).getElementType().getTypeCategory();
+                        } else if (typeCategory == MAP) {
+                            elementType = ((AtlasMapType) attrType).getValueType().getTypeCategory();
+                        }
+
+                        if (elementType != OBJECT_ID_TYPE) {
                             continue;
                         }
 
-                        vertices.push(edge.getInVertex());
-                    }
-                } else if (typeCategory == ARRAY || typeCategory == MAP) {
-                    TypeCategory elementType = null;
+                        if (attributeInfo.getAttributeDef().isSoftReferenced()) {
+                            if (typeCategory == ARRAY) {
+                                List                softRefVal = vertex.getListProperty(attributeInfo.getVertexPropertyName(), List.class);
+                                List<AtlasObjectId> refObjIds  = AtlasEntityUtil.parseSoftRefValue(softRefVal);
 
-                    if (typeCategory == ARRAY) {
-                        elementType = ((AtlasArrayType) attrType).getElementType().getTypeCategory();
-                    } else if (typeCategory == MAP) {
-                        elementType = ((AtlasMapType) attrType).getValueType().getTypeCategory();
-                    }
-
-                    if (elementType != OBJECT_ID_TYPE) {
-                        continue;
-                    }
-
-                    if (attributeInfo.getAttributeDef().isSoftReferenced()) {
-                        if (typeCategory == ARRAY) {
-                            List                softRefVal = vertex.getListProperty(attributeInfo.getVertexPropertyName(), List.class);
-                            List<AtlasObjectId> refObjIds  = AtlasEntityUtil.parseSoftRefValue(softRefVal);
-
-                            if (CollectionUtils.isNotEmpty(refObjIds)) {
-                                for (AtlasObjectId refObjId : refObjIds) {
-                                    AtlasVertex refVertex = AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
-                                    if (refObjId.getGuid() == null) {
-                                        LOG.warn("ARRAY type category - null guid passed in findByGuid!");
+                                if (CollectionUtils.isNotEmpty(refObjIds)) {
+                                    for (AtlasObjectId refObjId : refObjIds) {
+                                        AtlasVertex refVertex = AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
+                                        if (refObjId.getGuid() == null) {
+                                            LOG.warn("ARRAY type category - null guid passed in findByGuid!");
+                                        }
+                                        if (refVertex != null) {
+                                            vertices.push(refVertex);
+                                        }
                                     }
-                                    if (refVertex != null) {
-                                        vertices.push(refVertex);
+                                }
+                            } else if (typeCategory == MAP) {
+                                Map                        softRefVal = vertex.getProperty(attributeInfo.getVertexPropertyName(), Map.class);
+                                Map<String, AtlasObjectId> refObjIds  = AtlasEntityUtil.parseSoftRefValue(softRefVal);
+
+                                if (MapUtils.isNotEmpty(refObjIds)) {
+                                    for (AtlasObjectId refObjId : refObjIds.values()) {
+                                        AtlasVertex refVertex = AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
+                                        if (refObjId.getGuid() == null) {
+                                            LOG.warn("MAP type category - null guid passed in findByGuid!");
+                                        }
+
+                                        if (refVertex != null) {
+                                            vertices.push(refVertex);
+                                        }
                                     }
                                 }
                             }
-                        } else if (typeCategory == MAP) {
-                            Map                        softRefVal = vertex.getProperty(attributeInfo.getVertexPropertyName(), Map.class);
-                            Map<String, AtlasObjectId> refObjIds  = AtlasEntityUtil.parseSoftRefValue(softRefVal);
 
-                            if (MapUtils.isNotEmpty(refObjIds)) {
-                                for (AtlasObjectId refObjId : refObjIds.values()) {
-                                    AtlasVertex refVertex = AtlasGraphUtilsV2.findByGuid(this.graphHelper.getGraph(), refObjId.getGuid());
-                                    if (refObjId.getGuid() == null) {
-                                        LOG.warn("MAP type category - null guid passed in findByGuid!");
+                        } else {
+                            List<AtlasEdge> edges = getCollectionElementsUsingRelationship(vertex, attributeInfo);
+
+                            if (CollectionUtils.isNotEmpty(edges)) {
+                                for (AtlasEdge edge : edges) {
+                                    if (edge == null || (!isPurgeRequested && DELETED.equals(getState(edge)))) {
+                                        continue;
                                     }
 
-                                    if (refVertex != null) {
-                                        vertices.push(refVertex);
-                                    }
+                                    vertices.push(edge.getInVertex());
                                 }
-                            }
-                        }
-
-                    } else {
-                        List<AtlasEdge> edges = getCollectionElementsUsingRelationship(vertex, attributeInfo);
-
-                        if (CollectionUtils.isNotEmpty(edges)) {
-                            for (AtlasEdge edge : edges) {
-                                if (edge == null || (!isPurgeRequested && DELETED.equals(getState(edge)))) {
-                                    continue;
-                                }
-
-                                vertices.push(edge.getInVertex());
                             }
                         }
                     }
                 }
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+            if (visitedCount >= 1000 && LOG.isInfoEnabled()) {
+                LOG.info("op=entity.delete.getOwnedVertices visited={} returned={} max_stack_depth={} start_guid={} start_type={}",
+                        visitedCount, vertexInfoMap.size(), maxStackDepth, startGuid, startTypeName);
+            } else if (LOG.isDebugEnabled()) {
+                LOG.debug("op=entity.delete.getOwnedVertices visited={} returned={} max_stack_depth={} start_guid={} start_type={}",
+                        visitedCount, vertexInfoMap.size(), maxStackDepth, startGuid, startTypeName);
             }
         }
 
