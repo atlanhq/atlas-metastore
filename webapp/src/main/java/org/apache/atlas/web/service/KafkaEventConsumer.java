@@ -8,6 +8,7 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.configuration.Configuration;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.admin.AdminClientConfig;
 import org.apache.kafka.clients.admin.NewTopic;
@@ -98,11 +99,11 @@ public abstract class KafkaEventConsumer {
             );
             consumerProperties = buildConsumerProperties(bootstrapServers, configuration, configPrefix, defaultConsumerGroupId());
             errorProducerProperties = buildErrorProducerProperties(bootstrapServers);
-            if (topic != null && !topic.isEmpty()) {
-                throw new RuntimeException("Missing topic: " + topic);
+            if (StringUtils.isBlank(topic)) {
+                throw new AtlasException("Missing required Kafka topic config: " + configPrefix + ".topic");
             }
-            if (errorTopic != null && !errorTopic.isEmpty()) {
-                throw new RuntimeException("Missing error topic: " + errorTopic);
+            if (StringUtils.isBlank(errorTopic)) {
+                throw new AtlasException("Missing required Kafka error topic config: " + configPrefix + ".error.topic");
             }
         } catch (AtlasException e) {
             log.error("Failed to load Kafka consumer configuration for {}", getClass().getSimpleName(), e);
@@ -208,6 +209,7 @@ public abstract class KafkaEventConsumer {
         props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, StringSerializer.class.getName());
         return props;
     }
+
 
     private KafkaProducer<String, String> getOrCreateErrorProducer() {
         KafkaProducer<String, String> producerRef = errorProducer;
