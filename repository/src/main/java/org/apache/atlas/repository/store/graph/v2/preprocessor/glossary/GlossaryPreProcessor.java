@@ -128,7 +128,7 @@ public class GlossaryPreProcessor implements PreProcessor {
     }
 
     public static String createQualifiedName(String glossaryName) {
-        return DeterministicIdUtils.generateGlossaryQN(glossaryName);
+        return DeterministicIdUtils.getGlossaryQN(glossaryName);
     }
 
     private boolean glossaryExists(String glossaryName) {
