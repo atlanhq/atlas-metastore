@@ -75,7 +75,7 @@ public final class DeterministicIdUtils {
      * @param components Variable number of string components to hash
      * @return A deterministic UUID-formatted string
      */
-    public static String generateGuid(String... components) {
+    static String generateGuid(String... components) {
         String hash = sha256Hash(components);
         // Format as UUID: 8-4-4-4-12
         return String.format("%s-%s-%s-%s-%s",
@@ -106,7 +106,7 @@ public final class DeterministicIdUtils {
      * @param components Variable number of string components to hash
      * @return A deterministic 21-character alphanumeric string
      */
-    public static String generateNanoId(String... components) {
+    static String generateNanoId(String... components) {
         return generateNanoId(NANOID_SIZE_DEFAULT, components);
     }
 
@@ -117,7 +117,7 @@ public final class DeterministicIdUtils {
      * @param components Variable number of string components to hash
      * @return A deterministic alphanumeric string of the specified length
      */
-    public static String generateNanoId(int size, String... components) {
+    static String generateNanoId(int size, String... components) {
         byte[] hashBytes = sha256HashBytes(components);
         StringBuilder result = new StringBuilder(size);
 
@@ -162,7 +162,7 @@ public final class DeterministicIdUtils {
      * @param qualifiedName The entity's qualified name
      * @return A deterministic UUID-formatted GUID
      */
-    public static String generateEntityGuid(String typeName, String qualifiedName) {
+    static String generateEntityGuid(String typeName, String qualifiedName) {
         return generateGuid("entity", typeName, qualifiedName);
     }
 
@@ -173,7 +173,7 @@ public final class DeterministicIdUtils {
      * @param uniqueAttributes Map of unique attribute names to values
      * @return A deterministic UUID-formatted GUID
      */
-    public static String generateEntityGuid(String typeName, Map<String, Object> uniqueAttributes) {
+    static String generateEntityGuid(String typeName, Map<String, Object> uniqueAttributes) {
         List<String> components = new ArrayList<>();
         components.add("entity");
         components.add(typeName);
@@ -200,7 +200,7 @@ public final class DeterministicIdUtils {
      * @param serviceType The service type (optional)
      * @return A deterministic UUID-formatted GUID
      */
-    public static String generateTypeDefGuid(String typeName, String serviceType) {
+    static String generateTypeDefGuid(String typeName, String serviceType) {
         return generateGuid("typedef", typeName,
             StringUtils.isNotEmpty(serviceType) ? serviceType : "atlas");
     }
@@ -214,7 +214,7 @@ public final class DeterministicIdUtils {
      * @param end2Guid GUID of the second end entity
      * @return A deterministic UUID-formatted GUID
      */
-    public static String generateRelationshipGuid(String relationshipType, String end1Guid, String end2Guid) {
+    static String generateRelationshipGuid(String relationshipType, String end1Guid, String end2Guid) {
         // Sort end GUIDs to ensure consistency regardless of direction
         String first = end1Guid.compareTo(end2Guid) <= 0 ? end1Guid : end2Guid;
         String second = end1Guid.compareTo(end2Guid) <= 0 ? end2Guid : end1Guid;
@@ -284,7 +284,7 @@ public final class DeterministicIdUtils {
      * @param glossaryName The glossary name
      * @return A deterministic 21-character NanoId
      */
-    public static String generateGlossaryQN(String glossaryName) {
+    static String generateGlossaryQN(String glossaryName) {
         return generateNanoId("glossary", glossaryName);
     }
 
@@ -308,7 +308,7 @@ public final class DeterministicIdUtils {
      * @param anchorGlossaryQN The anchor glossary's qualified name
      * @return A deterministic 21-character NanoId
      */
-    public static String generateTermQN(String termName, String anchorGlossaryQN) {
+    static String generateTermQN(String termName, String anchorGlossaryQN) {
         return generateNanoId("term", termName, anchorGlossaryQN);
     }
 
@@ -334,7 +334,7 @@ public final class DeterministicIdUtils {
      * @param anchorGlossaryQN The anchor glossary's qualified name
      * @return A deterministic 21-character NanoId
      */
-    public static String generateCategoryQN(String categoryName, String parentCategoryQN, String anchorGlossaryQN) {
+    static String generateCategoryQN(String categoryName, String parentCategoryQN, String anchorGlossaryQN) {
         return generateNanoId("category", categoryName,
             StringUtils.defaultString(parentCategoryQN), anchorGlossaryQN);
     }
@@ -361,7 +361,7 @@ public final class DeterministicIdUtils {
      * @param parentDomainQN The parent domain's qualified name (can be empty for root)
      * @return A deterministic 21-character NanoId
      */
-    public static String generateDomainQN(String domainName, String parentDomainQN) {
+    static String generateDomainQN(String domainName, String parentDomainQN) {
         return generateNanoId("domain", domainName, StringUtils.defaultString(parentDomainQN));
     }
 
@@ -386,7 +386,7 @@ public final class DeterministicIdUtils {
      * @param parentDomainQN The parent domain's qualified name
      * @return A deterministic 21-character NanoId
      */
-    public static String generateProductQN(String productName, String parentDomainQN) {
+    static String generateProductQN(String productName, String parentDomainQN) {
         return generateNanoId("product", productName, parentDomainQN);
     }
 
@@ -413,7 +413,7 @@ public final class DeterministicIdUtils {
      * @param contextQN The context qualified name (tenantId or domainQN)
      * @return A deterministic 22-character NanoId
      */
-    public static String generateAccessControlQN(String type, String name, String contextQN) {
+    static String generateAccessControlQN(String type, String name, String contextQN) {
         return generateNanoId(NANOID_SIZE_ACCESS_CONTROL, type, name, contextQN);
     }
 
@@ -442,7 +442,7 @@ public final class DeterministicIdUtils {
      * @param userName The user name
      * @return A deterministic 21-character NanoId
      */
-    public static String generateQueryResourceQN(String type, String name, String parentQN, String userName) {
+    static String generateQueryResourceQN(String type, String name, String parentQN, String userName) {
         return generateNanoId(type, name, StringUtils.defaultString(parentQN), userName);
     }
 
@@ -470,7 +470,7 @@ public final class DeterministicIdUtils {
      * @param parentEntityQN The parent entity's qualified name
      * @return A deterministic 22-character NanoId
      */
-    public static String generatePolicyQN(String policyName, String parentEntityQN) {
+    static String generatePolicyQN(String policyName, String parentEntityQN) {
         return generateNanoId(NANOID_SIZE_ACCESS_CONTROL, "policy", policyName, parentEntityQN);
     }
 
