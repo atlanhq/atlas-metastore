@@ -525,4 +525,8 @@ data:
 
     ######### Atlas notification configs #########
     atlas.enable.tag.notifications.async={{ .Values.atlas.notification.tag_notifications_async_enabled }}
+
+    ######### Kafka Metadata Consumer #########
+    atlas.kafka.metadata.enabled={{ .Values.atlas.kafka.metadata.enabled }}
+    atlas.kafka.metadata.topic={{ .Values.atlas.kafka.metadata.topic }}
 {{- end }}
