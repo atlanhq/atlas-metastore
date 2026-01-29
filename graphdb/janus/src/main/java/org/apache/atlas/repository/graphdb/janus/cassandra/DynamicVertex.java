@@ -22,6 +22,7 @@ public class DynamicVertex {
     private static final Logger LOG = LoggerFactory.getLogger(DynamicVertex.class);
 
     private final Map<String, Object> properties = new HashMap<>();
+    private final Set<String> removedProperties = new HashSet<>();
 
     /**
      * Default constructor.
@@ -165,7 +166,29 @@ public class DynamicVertex {
      * @return The previous value, or null if no mapping existed
      */
     public Object removeProperty(String key) {
-        return properties.remove(key);
+        Object removed = properties.remove(key);
+        if (removed != null) {
+            removedProperties.add(key);
+        }
+        return removed;
+    }
+
+    /**
+     * Gets the set of property keys that have been removed.
+     * Used for ES sync to explicitly remove these fields from ES documents.
+     *
+     * @return An unmodifiable set of removed property keys
+     */
+    public Set<String> getRemovedProperties() {
+        return Collections.unmodifiableSet(removedProperties);
+    }
+
+    /**
+     * Clears the removed properties tracking set.
+     * Call this after ES sync is complete.
+     */
+    public void clearRemovedProperties() {
+        removedProperties.clear();
     }
 
     @Override

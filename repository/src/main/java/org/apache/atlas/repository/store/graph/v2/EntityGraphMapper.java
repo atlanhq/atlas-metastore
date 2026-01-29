@@ -4892,38 +4892,6 @@ public class EntityGraphMapper {
         return false;
     }
 
-    private AtlasEntity updateClassificationText(AtlasVertex vertex) throws AtlasBaseException {
-        String guid        = graphHelper.getGuid(vertex);
-        AtlasEntity entity = instanceConverter.getAndCacheEntity(guid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
-
-        vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
-        return entity;
-    }
-
-    public void updateClassificationTextAndNames(AtlasVertex vertex) throws AtlasBaseException {
-        if(CollectionUtils.isEmpty(vertex.getPropertyValues(Constants.TRAIT_NAMES_PROPERTY_KEY, String.class)) &&
-                CollectionUtils.isEmpty(vertex.getPropertyValues(Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, String.class))) {
-            return;
-        }
-
-        String guid = graphHelper.getGuid(vertex);
-        AtlasEntity entity = instanceConverter.getAndCacheEntity(guid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
-        List<String> classificationNames = new ArrayList<>();
-        List<String> propagatedClassificationNames = new ArrayList<>();
-
-        for (AtlasClassification classification : entity.getClassifications()) {
-            if (isPropagatedClassification(classification, guid)) {
-                propagatedClassificationNames.add(classification.getTypeName());
-            } else {
-                classificationNames.add(classification.getTypeName());
-            }
-        }
-
-        vertex.setProperty(CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(classificationNames));
-        vertex.setProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(propagatedClassificationNames));
-        vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
-    }
-
     private boolean isPropagatedClassification(AtlasClassification classification, String guid) {
         String classificationEntityGuid = classification.getEntityGuid();
 
@@ -5392,7 +5360,6 @@ public class EntityGraphMapper {
             AtlasEntity entity     = instanceConverter.getAndCacheEntity(entityGuid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
 
             if (entity != null) {
-                vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
                 entityChangeNotifier.onClassificationUpdatedToEntity(entity, updatedClassifications);
             }
         }
@@ -6099,8 +6066,10 @@ public class EntityGraphMapper {
                 }
 
                 if (entity != null) {
-                    String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
-                    vertex.setProperty(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
+                    if (!LEAN_GRAPH_ENABLED) {
+                        String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
+                        vertex.setProperty(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
+                    }
                     propagatedEntities.add(entity);
                 }
             }

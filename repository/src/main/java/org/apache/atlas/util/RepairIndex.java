@@ -96,7 +96,7 @@ public class RepairIndex {
         if (LEAN_GRAPH_ENABLED) {
             Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) atlasGraph).getESPropertiesForUpdateFromVertices(vertices, this.typeRegistry);
             try {
-                ESConnector.syncToEs(toReIndex, true, null);
+                ESConnector.syncToEs(toReIndex, null, true, false);
             } catch (Exception e){
                 LOG.info("Exception: " + e.getMessage());
             }
@@ -206,7 +206,7 @@ public class RepairIndex {
 
                 Map<String, Map<String, Object>> toReIndex = ((AtlasJanusGraph) atlasGraph).getESPropertiesForUpdateFromVertices(currentChunk, this.typeRegistry);
                 try {
-                    ESConnector.syncToEs(toReIndex, true, null);
+                    ESConnector.syncToEs(toReIndex, null, true, false);
                 } catch (Exception e){
                     LOG.info("Exception: " + e.getMessage());
                 }
