@@ -52,6 +52,8 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         deletedEntities      = new HashMap<>();
     private final Map<String, AtlasEntityHeader>         restoreEntities      = new HashMap<>();
     private final Map<String, Map<String, Object>> allInternalAttributesMap     = new HashMap<>();
+    private final List<Object>                           verticesToHardDelete = new ArrayList<>();
+    private final List<Object>                           verticesToSoftDelete = new ArrayList<>();
 
 
     private       Map<String, String>                    lexoRankCache        = null;
@@ -59,6 +61,8 @@ public class RequestContext {
     private final Map<String, AtlasEntityHeader>         entityHeaderCache    = new HashMap<>();
     private final Map<String, AtlasEntityWithExtInfo>    entityExtInfoCache   = new HashMap<>();
     private final Map<String, AtlasEntity>               diffEntityCache      = new HashMap<>();
+    private final Map<String, Object>                    diffVertexCache      = new HashMap<>();
+    private final Map<String, Object>                    guidVertexCache      = new HashMap<>();
     private final Map<String, List<AtlasClassification>> addedPropagations    = new HashMap<>();
     private final Map<String, List<AtlasClassification>> removedPropagations  = new HashMap<>();
     private final Map<String, String>                    requestContextHeaders= new HashMap<>();
@@ -175,6 +179,8 @@ public class RequestContext {
         this.entityHeaderCache.clear();
         this.entityExtInfoCache.clear();
         this.diffEntityCache.clear();
+        this.diffVertexCache.clear();
+        this.guidVertexCache.clear();
         this.addedPropagations.clear();
         this.removedPropagations.clear();
         this.entitiesToSkipUpdate.clear();
@@ -199,6 +205,8 @@ public class RequestContext {
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
+        this.verticesToSoftDelete.clear();
+        this.verticesToHardDelete.clear();
         this.allInternalAttributesMap.clear();
 
         // Reset observability timing fields
@@ -510,6 +518,22 @@ public class RequestContext {
         deletedEdgesIds.add(edgeId);
     }
 
+    public List<Object> getVerticesToHardDelete() {
+        return verticesToHardDelete;
+    }
+
+    public void addVertexToHardDelete(Object vertex) {
+        this.verticesToHardDelete.add(vertex);
+    }
+
+    public List<Object> getVerticesToSoftDelete() {
+        return verticesToSoftDelete;
+    }
+
+    public void addVertexToSoftDelete(Object vertex) {
+        this.verticesToSoftDelete.add(vertex);
+    }
+
     public Set<String> getDeletedEdgesIds() {
         return deletedEdgesIds;
     }
@@ -605,8 +629,15 @@ public class RequestContext {
     }
 
     public void cacheDifferentialEntity(AtlasEntity entity) {
+        cacheDifferentialEntity(entity, null);
+    }
+
+    public void cacheDifferentialEntity(AtlasEntity entity, Object atlasVertex) {
         if (entity != null && entity.getGuid() != null) {
             diffEntityCache.put(entity.getGuid(), entity);
+            if (atlasVertex != null) {
+                diffVertexCache.put(entity.getGuid(), atlasVertex);
+            }
         }
     }
 
@@ -627,7 +658,23 @@ public class RequestContext {
         return diffEntityCache.get(guid);
     }
 
+    public Object getDifferentialVertex(String guid) {
+        return diffVertexCache.get(guid);
+    }
+
     public Collection<AtlasEntity> getDifferentialEntities() { return diffEntityCache.values(); }
+
+    public Set<String> getDifferentialGUIDS() { return diffEntityCache.keySet(); }
+
+    public void cacheVertex(String guid, Object vertex) {
+        if (guid != null && vertex != null) {
+            guidVertexCache.put(guid, vertex);
+        }
+    }
+
+    public Object getCachedVertex(String guid) {
+        return guid != null ? guidVertexCache.get(guid) : null;
+    }
 
     public Map<String,AtlasEntity> getDifferentialEntitiesMap() { return diffEntityCache; }
 

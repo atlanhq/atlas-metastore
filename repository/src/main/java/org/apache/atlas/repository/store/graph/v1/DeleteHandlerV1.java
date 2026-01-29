@@ -1056,7 +1056,7 @@ public abstract class DeleteHandlerV1 {
                 diffEntity.addOrAppendRemovedRelationshipAttribute(inverseEnd.getName(), removedRef);
             }
 
-            requestContext.cacheDifferentialEntity(diffEntity);
+            requestContext.cacheDifferentialEntity(diffEntity, referencedVertex);
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Cached differential entity for guid={} with removed relationship attribute: {}",

@@ -185,7 +185,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.taskNotificationSender = taskNotificationSender;
         this.observabilityService = observabilityService;
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }

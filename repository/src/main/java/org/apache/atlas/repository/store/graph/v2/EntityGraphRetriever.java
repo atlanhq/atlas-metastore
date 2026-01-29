@@ -1582,7 +1582,7 @@ public class EntityGraphRetriever {
         }
     }
 
-    private Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
+    public Map<String, Set<String>> fetchEdgeNames(AtlasEntityType entityType){
         Map<String, Map<String, AtlasAttribute>> relationships = entityType.getRelationshipAttributes();
         Map<String, Set<String>> edgeNames = new HashMap<>();
         relationships.forEach((k,v) -> {

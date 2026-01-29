@@ -21,7 +21,6 @@ package org.apache.atlas.repository;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.service.FeatureFlag;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
@@ -37,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 import static org.apache.atlas.service.FeatureFlag.USE_TEMP_ES_INDEX;
@@ -63,6 +63,24 @@ public final class Constants {
     public static final String FREETEXT_REQUEST_HANDLER         = "/freetext";
     public static final String TERMS_REQUEST_HANDLER            = "/terms";
     public static final String ES_API_ALIASES                   = "/_aliases";
+
+    public enum GraphReadMode {
+        LEANGRAPH,
+        ATLAS
+    }
+
+    public enum CassandraWriteMode {
+        BOTH,
+        LEANGRAPH,
+        ATLAS
+    }
+
+    public static final GraphReadMode GRAPH_READ_MODE = resolveGraphReadMode();
+    public static final CassandraWriteMode CASSANDRA_WRITE_MODE = resolveCassandraWriteMode();
+    public static final boolean LEAN_GRAPH_READ_ENABLED = GRAPH_READ_MODE == GraphReadMode.LEANGRAPH;
+    public static final boolean LEAN_GRAPH_WRITE_ENABLED = CASSANDRA_WRITE_MODE == CassandraWriteMode.BOTH
+            || CASSANDRA_WRITE_MODE == CassandraWriteMode.LEANGRAPH;
+    public static final boolean LEAN_GRAPH_ENABLED = LEAN_GRAPH_READ_ENABLED;
 
     /**
      * Entity type name property key.
@@ -591,5 +609,41 @@ public final class Constants {
         }
 
         return resourceAsString;
+    }
+
+    private static GraphReadMode resolveGraphReadMode() {
+        String mode = AtlasConfiguration.ATLAS_GRAPH_READ_MODE.getString();
+        if (StringUtils.isBlank(mode)) {
+            return GraphReadMode.ATLAS;
+        }
+
+        switch (mode.trim().toLowerCase(Locale.ROOT)) {
+            case "leangraph":
+                return GraphReadMode.LEANGRAPH;
+            case "atlas":
+                return GraphReadMode.ATLAS;
+            default:
+                LOG.warn("Unknown graph read mode '{}'; defaulting to atlas", mode);
+                return GraphReadMode.ATLAS;
+        }
+    }
+
+    private static CassandraWriteMode resolveCassandraWriteMode() {
+        String mode = AtlasConfiguration.ATLAS_GRAPH_WRITE_MODE.getString();
+        if (StringUtils.isBlank(mode)) {
+            return CassandraWriteMode.ATLAS;
+        }
+
+        switch (mode.trim().toLowerCase(Locale.ROOT)) {
+            case "both":
+                return CassandraWriteMode.BOTH;
+            case "leangraph":
+                return CassandraWriteMode.LEANGRAPH;
+            case "atlas":
+                return CassandraWriteMode.ATLAS;
+            default:
+                LOG.warn("Unknown Cassandra write mode '{}'; defaulting to atlas", mode);
+                return CassandraWriteMode.ATLAS;
+        }
     }
 }

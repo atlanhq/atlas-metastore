@@ -95,6 +95,13 @@ public interface AtlasVertex<V, E> extends AtlasElement {
     AtlasVertexQuery<V, E> query();
 
     /**
+     * Whether this vertex represents an asset.
+     */
+    default boolean isAssetVertex() {
+        return false;
+    }
+
+    /**
      * Syntactic sugar to get the vertex as an instance of its
      * implementation type.  This allows the graph database implementation
      * code to be strongly typed.

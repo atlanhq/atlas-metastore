@@ -177,6 +177,17 @@ public enum AtlasConfiguration {
     // ES and Cassandra batch operation configurations
     ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
     CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
+
+    /**
+     * Cassandra Configuration
+     */
+    ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
+    ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "atlas"),
+    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets"),
+    CASSANDRA_REPLICATION_FACTOR_PROPERTY("atlas.graph.storage.cql.replication-factor", "3"),
+    ATLAS_GRAPH_WRITE_MODE("atlas.graph.write.mode", "atlas"),
+    ATLAS_GRAPH_READ_MODE("atlas.graph.read.mode", "atlas"),
+
     ES_MAX_RETRIES("atlas.es.max.retries", 5),
     ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
 

@@ -65,7 +65,7 @@ public class AssetPreProcessor implements PreProcessor {
             this.discovery = discovery;
         } else {
             try {
-                this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
+                this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, null);
             } catch (AtlasException e) {
                 e.printStackTrace();
             }
