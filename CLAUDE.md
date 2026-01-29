@@ -426,7 +426,7 @@ This project uses standard GitHub flow with PR-based merges to `master` branch.
 
 
 
-## External Resources
+## External Resources 
 
 
 
