@@ -443,6 +443,12 @@ atlas:
     slackWebhook: ''
     tag_notifications_async_enabled: false
 
+  # Kafka metadata consumer for async ingestion
+  kafka:
+    metadata:
+      enabled: false
+      topic: ATLAS_EVENTS
+
 cassandra:
 
   updateStrategy:

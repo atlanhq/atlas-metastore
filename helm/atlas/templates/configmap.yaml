@@ -540,3 +540,7 @@ data:
 
     ######### Atlas Entity Attribute Optimization #########
     atlas.entity.skip.optional.attributes={{ .Values.atlas.entity.skip_optional_attributes }}
+
+    ######### Kafka Metadata Consumer #########
+    atlas.kafka.metadata.enabled={{ .Values.atlas.kafka.metadata.enabled }}
+    atlas.kafka.metadata.topic={{ .Values.atlas.kafka.metadata.topic }}

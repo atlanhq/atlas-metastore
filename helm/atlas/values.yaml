@@ -489,6 +489,12 @@ atlas:
     # Improves write performance by reducing unnecessary attribute processing
     skip_optional_attributes: false
 
+  # Kafka metadata consumer for async ingestion
+  kafka:
+    metadata:
+      enabled: true
+      topic: ATLAS_EVENTS
+
 cassandra:
 
   updateStrategy:

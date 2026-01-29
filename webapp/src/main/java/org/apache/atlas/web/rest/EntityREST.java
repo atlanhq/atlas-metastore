@@ -51,6 +51,7 @@ import org.apache.atlas.util.FileUtils;
 import org.apache.atlas.util.RepairIndex;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.web.service.KafkaMetadataProducer;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -108,9 +109,10 @@ public class EntityREST {
     private final EntityMutationService entityMutationService;
     private final AtlasRepairAttributeService repairAttributeService;
     private final RepairIndex repairIndex;
+    private final KafkaMetadataProducer kafkaMetadataProducer;
 
     @Inject
-    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, AtlasRepairAttributeService repairAttributeService, RepairIndex repairIndex) {
+    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, AtlasRepairAttributeService repairAttributeService, RepairIndex repairIndex, KafkaMetadataProducer kafkaMetadataProducer) {
         this.typeRegistry      = typeRegistry;
         this.entitiesStore     = entitiesStore;
         this.esBasedAuditRepository = esBasedAuditRepository;
@@ -118,6 +120,7 @@ public class EntityREST {
         this.entityMutationService = entityMutationService;
         this.repairAttributeService = repairAttributeService;
         this.repairIndex = repairIndex;
+        this.kafkaMetadataProducer = kafkaMetadataProducer;
     }
 
     /**
@@ -806,13 +809,14 @@ public class EntityREST {
     @POST
     @Path("/bulk")
     @Timed
-    public EntityMutationResponse createOrUpdate(AtlasEntitiesWithExtInfo entities,
+    public Response createOrUpdate(AtlasEntitiesWithExtInfo entities,
                                                  @QueryParam("replaceClassifications") @DefaultValue("false") boolean replaceClassifications,
                                                  @QueryParam("replaceTags") @DefaultValue("false") boolean replaceTags,
                                                  @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
-                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
+                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration,
+                                                 @QueryParam("async") @DefaultValue("false") boolean async
     ) throws AtlasBaseException {
 
         if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
@@ -839,6 +843,11 @@ public class EntityREST {
 
             validateAttributeLength(entities.getEntities());
 
+            if (async) {
+                return sendAsyncBulkRequest(entities, replaceClassifications, replaceTags, appendTags,
+                        replaceBusinessAttributes, isOverwriteBusinessAttributes, skipProcessEdgeRestoration);
+            }
+
             EntityStream entityStream = new AtlasEntityStream(entities);
 
             BulkRequestContext context = new BulkRequestContext.Builder()
@@ -848,9 +857,46 @@ public class EntityREST {
                     .setReplaceBusinessAttributes(replaceBusinessAttributes)
                     .setOverwriteBusinessAttributes(isOverwriteBusinessAttributes)
                     .build();
-            return entityMutationService.createOrUpdate(entityStream, context);
+            EntityMutationResponse response = entityMutationService.createOrUpdate(entityStream, context);
+            return Response.ok(response).build();
         } finally {
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    private Response sendAsyncBulkRequest(AtlasEntitiesWithExtInfo entities,
+                                          boolean replaceClassifications,
+                                          boolean replaceTags,
+                                          boolean appendTags,
+                                          boolean replaceBusinessAttributes,
+                                          boolean isOverwriteBusinessAttributes,
+                                          boolean skipProcessEdgeRestoration) {
+        if (kafkaMetadataProducer == null || !kafkaMetadataProducer.isRunning()) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity("Kafka metadata producer is not running")
+                    .build();
+        }
+
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("replaceClassifications", replaceClassifications);
+        metadata.put("replaceTags", replaceTags);
+        metadata.put("appendTags", appendTags);
+        metadata.put("replaceBusinessAttributes", replaceBusinessAttributes);
+        metadata.put("overwriteBusinessAttributes", isOverwriteBusinessAttributes);
+        metadata.put("skipProcessEdgeRestoration", skipProcessEdgeRestoration);
+
+        try {
+            kafkaMetadataProducer.sendBulkRequest(entities, metadata);
+            return Response.status(Response.Status.ACCEPTED).build();
+        } catch (IllegalStateException e) {
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(e.getMessage())
+                    .build();
+        } catch (Exception e) {
+            LOG.error("Kafka publish failed for async bulk request", e);
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity("Kafka publish failed: " + e.getMessage())
+                    .build();
         }
     }
 
