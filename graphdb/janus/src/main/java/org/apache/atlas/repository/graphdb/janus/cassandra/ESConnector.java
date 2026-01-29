@@ -120,7 +120,7 @@ public class ESConnector {
      * @param useScript if true, use painless script to support field removal (null values remove field from ES doc)
      */
     public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, List<String> docIdsToDelete, boolean upsert, boolean useScript) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("syncToEs");
 
         if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
             return;
