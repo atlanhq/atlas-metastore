@@ -19,7 +19,6 @@ package org.apache.atlas.notification;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import kafka.utils.ShutdownableThread;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.EnableConditional;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -96,6 +95,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
@@ -526,20 +526,19 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
     }
 
     @VisibleForTesting
-    class HookConsumer extends ShutdownableThread {
+    class HookConsumer implements Runnable {
         private final NotificationConsumer<HookNotification> consumer;
         private final AtomicBoolean                          shouldRun      = new AtomicBoolean(false);
         private final List<String>                           failedMessages = new ArrayList<>();
         private final AdaptiveWaiter                         adaptiveWaiter = new AdaptiveWaiter(minWaitDuration, maxWaitDuration, minWaitDuration);
+        private final CountDownLatch                         shutdownLatch  = new CountDownLatch(1);
 
         public HookConsumer(NotificationConsumer<HookNotification> consumer) {
-            super("atlas-hook-consumer-thread", false);
-
             this.consumer = consumer;
         }
 
         @Override
-        public void doWork() {
+        public void run() {
             LOG.info("==> HookConsumer doWork()");
 
             shouldRun.set(true);
@@ -576,6 +575,7 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
                 }
 
                 LOG.info("<== HookConsumer doWork()");
+                shutdownLatch.countDown();
             }
         }
 
@@ -960,7 +960,6 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
             return true;
         }
 
-        @Override
         public void shutdown() {
             LOG.info("==> HookConsumer shutdown()");
 
@@ -970,15 +969,17 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
                 return;
             }
 
-            super.initiateShutdown();
-
             shouldRun.set(false);
 
             if (consumer != null) {
                 consumer.wakeup();
             }
 
-            super.awaitShutdown();
+            try {
+                shutdownLatch.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
 
             LOG.info("<== HookConsumer shutdown()");
         }

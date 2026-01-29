@@ -450,6 +450,18 @@ atlas:
     # Improves write performance by reducing unnecessary attribute processing
     skip_optional_attributes: false
 
+  # OpenLineage Aggregator Service configuration
+  # This service aggregates OpenLineage events using Kafka Streams before processing
+  openlineage:
+    aggregator:
+      enabled: true                              # Enable/disable the OpenLineage aggregator service
+      inputTopic: "openlineageevents"             # Input Kafka topic for raw OpenLineage events
+      outputTopic: ""                             # Output topic for aggregated events (defaults to atlas.kafka.metadata.topic)
+      errorTopic: "openlineageevents-errors"      # Error topic for invalid/failed events
+      applicationId: "atlas-openlineage-aggregator"  # Kafka Streams application ID
+      storeType: "ROCK_DB"                        # State store type: ROCK_DB (persistent) or IN_MEM
+      stateDir: ""                                # Optional state directory for Kafka Streams
+
 cassandra:
 
   updateStrategy:
