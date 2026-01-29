@@ -593,7 +593,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdate.filter");
         try {
             AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
-            Map<String, Object> result = getEligibleProperties(properties, type).stream()
+            Map<String, Object> result = getEligibleProperties(properties.keySet(), type).stream()
                     .filter(k -> properties.get(k) != null)
                     .collect(Collectors.toMap(
                             k -> k,
@@ -604,11 +604,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
             // Add removed properties with null values so ES can remove them
             if (CollectionUtils.isNotEmpty(removedProperties)) {
-                for (String removedProp : removedProperties) {
-                    if (type.isAttributesForESSync(removedProp) || removedProp.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) {
-                        result.put(removedProp, null);
-                    }
-                }
+                getEligibleProperties(removedProperties, type).forEach(removedProp -> result.put(removedProp, null));
             }
 
             return result;
@@ -617,9 +613,10 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
         }
     }
 
-    private List<String> getEligibleProperties(Map<String, Object> properties, AtlasEntityType type) {
-        return properties.keySet().stream().filter(x ->
-                        type.isAttributesForESSync(x) || x.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX))
+    private List<String> getEligibleProperties(Set<String> propertyKeys, AtlasEntityType type) {
+        return propertyKeys.stream().filter(x ->
+                        type.isAttributesForESSync(x) || x.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)
+                )
                 .toList();
     }
 
