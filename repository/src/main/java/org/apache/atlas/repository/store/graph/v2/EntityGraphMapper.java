@@ -58,6 +58,7 @@ import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.datamesh.DataProductPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.tags.PaginatedVertexIdResult;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
@@ -89,6 +90,7 @@ import org.springframework.stereotype.Component;
 
 
 import static org.apache.atlas.AtlasConfiguration.LABEL_MAX_LENGTH;
+import static org.apache.atlas.AtlasConfiguration.SKIP_OPTIONAL_ATTRIBUTES;
 import static org.apache.atlas.AtlasConfiguration.STORE_DIFFERENTIAL_AUDITS;
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.model.TypeCategory.ARRAY;
@@ -123,7 +125,6 @@ import static org.apache.atlas.repository.graph.GraphHelper.updateModificationMe
 import static org.apache.atlas.repository.graph.GraphHelper.getEntityHasLineage;
 import static org.apache.atlas.repository.graph.GraphHelper.getPropagatedEdges;
 import static org.apache.atlas.repository.graph.GraphHelper.getClassificationEntityGuid;
-import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.CLIENT_ORIGIN_PLAYBOOK;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.*;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_ADD;
 import static org.apache.atlas.repository.store.graph.v2.ClassificationAssociator.Updater.PROCESS_DELETE;
@@ -210,6 +211,7 @@ public class EntityGraphMapper {
     private final TagDAO                    tagDAO;
     private final TagAttributeMapper        tagAttributeMapper;
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
+    public static final Set<String> CLASSIFICATION_ADD_EXCLUDE_LIST = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
@@ -1072,7 +1074,12 @@ public class EntityGraphMapper {
 
             if (op.equals(CREATE)) {
                 for (AtlasAttribute attribute : structType.getAllAttributes().values()) {
+                    if (shouldSkipAttributeMapping(attribute, struct)) {
+                        continue;
+                    }
+
                     Object attrValue = struct.getAttribute(attribute.getName());
+
                     Object attrOldValue = null;
                     boolean isArrayOfPrimitiveType = false;
                     boolean isArrayOfEnum = false;
@@ -1099,6 +1106,10 @@ public class EntityGraphMapper {
                     AtlasAttribute attribute = structType.getAttribute(attrName);
 
                     if (attribute != null) {
+                        if (shouldSkipAttributeMapping(attribute, struct)) {
+                            continue;
+                        }
+
                         Object attrValue = struct.getAttribute(attrName);
                         Object attrOldValue = null;
                         boolean isArrayOfPrimitiveType = false;
@@ -1146,6 +1157,29 @@ public class EntityGraphMapper {
         }
     }
 
+    private boolean shouldSkipAttributeMapping(AtlasAttribute attribute, AtlasStruct struct) {
+        if (!AtlasConfiguration.SKIP_OPTIONAL_ATTRIBUTES.getBoolean()) {
+            return false;
+        }
+        
+        // NEVER skip relationship attributes - they handle term assignments, lineage, etc.
+        // An attribute is a relationship attribute if it has a relationshipEdgeLabel
+        if (attribute.getRelationshipEdgeLabel() != null) {
+            return false;
+        }
+        
+        // Only skip if attribute is:
+        // 1. Not present in payload (user didn't send it)
+        // 2. Optional (required attributes must always be processed)
+        // 3. Has no default value (null default)
+        // 4. Not explicitly marked as "null is default"
+        boolean isPresentInPayload = struct.hasAttribute(attribute.getName()) || ((AtlasEntity) struct).hasRelationshipAttribute(attribute.getName());
+        AtlasAttributeDef attributeDef = attribute.getAttributeDef();
+
+        return !isPresentInPayload && attributeDef.getIsOptional() && attributeDef.getDefaultValue() == null
+                && !attributeDef.getIsDefaultValueNull();
+    }
+
     private void addValuesToAutoUpdateAttributesList(AtlasAttribute attribute, List<String> userAutoUpdateAttributes, List<String> timestampAutoUpdateAttributes) {
         HashMap<String, ArrayList> autoUpdateAttributes =  attribute.getAttributeDef().getAutoUpdateAttributes();
         if (autoUpdateAttributes != null) {
@@ -1175,16 +1209,24 @@ public class EntityGraphMapper {
                     String         relationType = AtlasEntityUtil.getRelationshipType(attrValue);
                     AtlasAttribute attribute    = entityType.getRelationshipAttribute(attrName, relationType);
 
+                    if (shouldSkipAttributeMapping(attribute, entity)) {
+                        continue;
+                    }
+
                     mapAttribute(attribute, attrValue, vertex, op, context);
                 }
 
             } else if (op.equals(UPDATE) || op.equals(PARTIAL_UPDATE)) {
                 // relationship attributes mapping
                 for (String attrName : entityType.getRelationshipAttributes().keySet()) {
+
                     if (entity.hasRelationshipAttribute(attrName)) {
                         Object         attrValue    = entity.getRelationshipAttribute(attrName);
                         String         relationType = AtlasEntityUtil.getRelationshipType(attrValue);
                         AtlasAttribute attribute    = entityType.getRelationshipAttribute(attrName, relationType);
+                        if (shouldSkipAttributeMapping(attribute, entity)) {
+                            continue;
+                        }
 
                         mapAttribute(attribute, attrValue, vertex, op, context);
                     }
@@ -3768,13 +3810,26 @@ public class EntityGraphMapper {
 
 
     private AtlasEntityHeader constructHeader(AtlasEntity entity, AtlasVertex vertex, AtlasEntityType entityType) throws AtlasBaseException {
-        Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, attributeMap.keySet());
+        Set<String> writtenAttrs = getWrittenAttributeNames(entity, entityType);
+
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, writtenAttrs);
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
         }
 
         return header;
+    }
+
+    private Set<String> getWrittenAttributeNames(AtlasEntity entity, AtlasEntityType entityType) {
+        Set<String> names = new HashSet<>();
+        Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
+        for (Map.Entry<String, AtlasAttribute> entry : attributeMap.entrySet()) {
+            if (!shouldSkipAttributeMapping(entry.getValue(), entity)) {
+                names.add(entry.getKey());
+            }
+        }
+
+        return names;
     }
 
     private void updateInConsistentOwnedMapVertices(AttributeMutationContext ctx, AtlasMapType mapType, Object val) {
@@ -4105,6 +4160,14 @@ public class EntityGraphMapper {
     }
 
     public void handleAddClassifications(final EntityMutationContext context, String guid, List<AtlasClassification> classifications) throws AtlasBaseException {
+        if (CollectionUtils.isNotEmpty(classifications)) {
+            AtlasEntityType entityType = context.getType(guid);
+            if (entityType != null && CLASSIFICATION_ADD_EXCLUDE_LIST.contains(entityType.getTypeName())) {
+                throw new AtlasBaseException(AtlasErrorCode.OPERATION_NOT_SUPPORTED,
+                        String.format("Adding classifications to entity type '%s' is not supported", entityType.getTypeName()));
+            }
+        }
+
         if(!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()){
             addClassificationsV2(context, guid, classifications);
         } else {
@@ -4548,6 +4611,21 @@ public class EntityGraphMapper {
 
         return propagatedEntitiesGuids;
 
+    }
+
+    public PaginatedVertexIdResult getVertexIdFromTagsByIdTableWithPagination(String pagingState, int pageSize) throws AtlasBaseException {
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("==> getVertexIdFromTagsByIdTableWithPagination( pageSize={})", pageSize);
+        }
+
+        PaginatedVertexIdResult result = tagDAO.getVertexIdFromTagsByIdTableWithPagination(pagingState, pageSize);
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("<== getVertexIdFromTagsByIdTableWithPagination(pageSize={}): found {} unique GUIDs, hasMorePages={}",
+                     pageSize, result.getVertexIds().size(), result.hasMorePages());
+        }
+
+        return result;
     }
 
     public int processClassificationPropagationAdditionV2(Map<String, Object> parameters,

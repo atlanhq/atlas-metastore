@@ -60,7 +60,7 @@ public class ActiveServerFilter implements Filter {
     private static final Logger LOG = LoggerFactory.getLogger(ActiveServerFilter.class);
     private static final String MIGRATION_STATUS_STATIC_PAGE = "migration-status.html";
     private static final String[] WHITELISTED_APIS_SIGNATURE = {"search", "lineage", "auditSearch", "accessors"
-        , "evaluator", "featureFlag"};
+        , "evaluator", "featureFlag", "config"};
 
     private final ActiveInstanceState activeInstanceState;
     private ServiceState serviceState;
@@ -89,7 +89,7 @@ public class ActiveServerFilter implements Filter {
     public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse,
                          FilterChain filterChain) throws IOException, ServletException {
         // If maintenance mode is enabled and writes are disabled, return a 503
-        if (isMaintenanceModeEnabled() && isWriteDisabled()) {
+        if (isMaintenanceModeEnabled()) {
             // Block all the POST, PUT, DELETE operations
             HttpServletRequest request = (HttpServletRequest) servletRequest;
             HttpServletResponse response = (HttpServletResponse) servletResponse;
@@ -278,21 +278,6 @@ public class ActiveServerFilter implements Filter {
             LOG.warn("Failed to check maintenance mode from DynamicConfigStore, falling back to config", e);
         }
         return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
-    }
-
-    /**
-     * Check if writes are disabled using DynamicConfigStore (Cassandra).
-     * Returns false if DynamicConfigStore is not available.
-     */
-    private boolean isWriteDisabled() {
-        try {
-            if (DynamicConfigStore.isEnabled()) {
-                return DynamicConfigStore.isWriteDisabled();
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to check write disabled flag from DynamicConfigStore", e);
-        }
-        return false;
     }
 
     @Override

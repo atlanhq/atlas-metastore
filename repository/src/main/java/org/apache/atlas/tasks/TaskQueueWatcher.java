@@ -86,8 +86,7 @@ public class TaskQueueWatcher implements Runnable {
 
     @Override
     public void run() {
-        boolean isMaintenanceMode = AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
-        if (isMaintenanceMode) {
+        if (isMaintenanceModeEnabled()) {
             LOG.info("TaskQueueWatcher: Maintenance mode is enabled, new tasks will not be loaded into the queue until next restart");
             return;
         }
@@ -99,9 +98,10 @@ public class TaskQueueWatcher implements Runnable {
         LOG.info("TaskQueueWatcher: Time constants - pollInterval: {}, TASK_WAIT_TIME_MS: {}", pollInterval, AtlasConstants.TASK_WAIT_TIME_MS);
 
         while (shouldRun.get()) {
-            // Quick check - if MM is enabled, don't bother acquiring lock
-            if (isMaintenanceModeEnabled()) {
-                LOG.info("TaskQueueWatcher: Maintenance mode enabled, pausing task processing for {} ms", pollInterval);
+            // Quick check - if MM is enabled AND we've already recorded activation, skip lock acquisition
+            // We must still acquire lock at least once to set activation metadata
+            if (isMaintenanceModeEnabled() && maintenanceModeActivated.get()) {
+                LOG.info("TaskQueueWatcher: Maintenance mode enabled (already activated), pausing task processing for {} ms", pollInterval);
                 try {
                     Thread.sleep(pollInterval);
                 } catch (InterruptedException e) {

@@ -513,7 +513,7 @@ data:
     atlas.relationship.cleanup.supported.relationship.labels={{ .Values.atlas.distributed_task.cleanup_supported_relationship_labels }}
     {{- end }}
     
-         ######### Atlas Typedefs update configs #########
+    ######### Atlas Typedefs update configs #########
     atlas.types.update.async.enable={{ .Values.atlas.types_update.async_enable }}
     atlas.types.update.thread.count={{ .Values.atlas.types_update.thread_count }}
 
@@ -526,10 +526,17 @@ data:
     atlas.config.store.cassandra.table={{ .Values.atlas.configStore.cassandra.table }}
     atlas.config.store.app.name={{ .Values.atlas.configStore.cassandra.appName }}
     atlas.config.store.cassandra.replication.factor={{ .Values.atlas.configStore.cassandra.replicationFactor }}
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
+    atlas.config.store.cassandra.consistency.level=LOCAL_ONE
+    {{- else }}
     atlas.config.store.cassandra.consistency.level={{ .Values.atlas.configStore.cassandra.consistencyLevel }}
-
+    {{- end }}
     ######### Atlas notification configs #########
     atlas.notification.differential.entity.changes.enabled={{ .Values.atlas.notification.differential_entity_changes_enabled }}
+    atlas.enable.tag.notifications.async={{ .Values.atlas.notification.tag_notifications_async_enabled }}
 
     ######### Deterministic ID Generation #########
     atlas.deterministic.id.generation.enabled={{ .Values.atlas.deterministicIdGeneration.enabled }}
+
+    ######### Atlas Entity Attribute Optimization #########
+    atlas.entity.skip.optional.attributes={{ .Values.atlas.entity.skip_optional_attributes }}
