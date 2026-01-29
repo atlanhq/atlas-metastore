@@ -205,7 +205,7 @@ public enum AtlasConfiguration {
     KEYCLOAK_MUTATIONS_ENABLED("atlas.keycloak.mutations.enabled", true),
 
     ATLAS_GRAPH_LEAN_GRAPH_ENABLED("atlas.graph.lean.graph.enabled", false),
-    ATLAS_GRAPH_INDEX_SEARCH_PREFIX("atlas.graph.index.search.index-name", "janusgraph");
+    ATLAS_GRAPH_INDEX_SEARCH_PREFIX("atlas.leangraph.index.search.index-name", "leangraph_janusgraph");
     private static final Configuration APPLICATION_PROPERTIES;
 
     static {
