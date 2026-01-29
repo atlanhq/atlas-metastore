@@ -511,4 +511,20 @@ data:
     
     ######### Atlas notification configs #########
     atlas.enable.tag.notifications.async={{ .Values.atlas.notification.tag_notifications_async_enabled }}
+
+    ######### OpenLineage Aggregator Service configs #########
+    # Kafka Streams based aggregator for OpenLineage events
+    atlas.kafka.openlineage.aggregator.enabled={{ .Values.atlas.openlineage.aggregator.enabled }}
+{{- if eq .Values.atlas.openlineage.aggregator.enabled true }}
+    atlas.kafka.openlineage.aggregator.inputTopic={{ .Values.atlas.openlineage.aggregator.inputTopic }}
+{{- if .Values.atlas.openlineage.aggregator.outputTopic }}
+    atlas.kafka.openlineage.aggregator.outputTopic={{ .Values.atlas.openlineage.aggregator.outputTopic }}
+{{- end }}
+    atlas.kafka.openlineage.aggregator.errorTopic={{ .Values.atlas.openlineage.aggregator.errorTopic }}
+    atlas.kafka.openlineage.aggregator.applicationId={{ .Values.atlas.openlineage.aggregator.applicationId }}
+    atlas.kafka.openlineage.aggregator.storeType={{ .Values.atlas.openlineage.aggregator.storeType }}
+{{- if .Values.atlas.openlineage.aggregator.stateDir }}
+    atlas.kafka.openlineage.aggregator.stateDir={{ .Values.atlas.openlineage.aggregator.stateDir }}
+{{- end }}
+{{- end }}
 {{- end }} 
