@@ -7371,51 +7371,6 @@
       ]
     },
     {
-      "name": "AuthPolicyAnother",
-      "description": "Model to store an accesscontrol policy in Atlas",
-      "superTypes": [
-        "Asset"
-      ],
-      "serviceType": "atlan",
-      "typeVersion": "1.1",
-      "attributeDefs":
-      [
-        {
-          "name": "policyTypeAnother",
-          "typeName": "AuthPolicyType",
-          "indexType": "STRING",
-          "cardinality": "SINGLE",
-          "isIndexable": false,
-          "isOptional": true,
-          "isUnique": false,
-          "skipScrubbing": true,
-          "includeInNotification": true
-        },
-        {
-          "name": "policyServiceName",
-          "typeName": "string",
-          "indexType": "STRING",
-          "cardinality": "SINGLE",
-          "isIndexable": false,
-          "isOptional": true,
-          "isUnique": false,
-          "skipScrubbing": true,
-          "includeInNotification": true
-        },
-        {
-          "name": "policyCategoryAnother",
-          "typeName": "string",
-          "indexType": "STRING",
-          "cardinality": "SINGLE",
-          "isIndexable": false,
-          "isOptional": true,
-          "isUnique": false,
-          "skipScrubbing": true,
-          "includeInNotification": true
-        }
-      ]
-    },
-    {
       "name": "AccessControl",
       "superTypes": [
         "Asset"
