@@ -19,7 +19,6 @@
 package org.apache.atlas.notification.preprocessor;
 
 import org.apache.atlas.model.instance.AtlasEntity;
-import org.apache.hadoop.fs.Path;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,14 +42,14 @@ public class AWSS3V2Preprocessor {
                 String objectPrefix = (String) entity.getAttribute(ATTRIBUTE_OBJECT_PREFIX);
 
                 if (isObjectPrefixPruneNeeded(qualifiedName, objectPrefix)) {
-                    if (objectPrefix.lastIndexOf(Path.SEPARATOR) == -1) {
-                        objectPrefix = Path.SEPARATOR;
+                    if (objectPrefix.lastIndexOf("/") == -1) {
+                        objectPrefix = "/";
                     } else {
                         if (doesEndsWithPathSeparator(objectPrefix)) {
                             objectPrefix = removeLastPathSeparator(objectPrefix);
                         }
 
-                        objectPrefix = objectPrefix.substring(0, objectPrefix.lastIndexOf(Path.SEPARATOR) + 1);
+                        objectPrefix = objectPrefix.substring(0, objectPrefix.lastIndexOf("/") + 1);
                     }
 
                     LOG.info("Aws S3 V2 Preprocessor: Pruning {} from {} to {}", ATTRIBUTE_OBJECT_PREFIX + QNAME_SEP_CLUSTER_NAME + AWS_S3_V2_DIR_TYPE,
@@ -72,7 +71,7 @@ public class AWSS3V2Preprocessor {
 
             if (StringUtils.isNotEmpty(qualifiedName) && qualifiedName.contains(SCHEME_SEPARATOR)) {
                 int schemeSeparatorEndPosition = qualifiedName.indexOf(SCHEME_SEPARATOR) + SCHEME_SEPARATOR.length();
-                int bucketEndPosition = qualifiedName.indexOf(Path.SEPARATOR, schemeSeparatorEndPosition);
+                int bucketEndPosition = qualifiedName.indexOf("/", schemeSeparatorEndPosition);
                 ret = qualifiedName.substring(0, bucketEndPosition);
             }
 
@@ -80,7 +79,7 @@ public class AWSS3V2Preprocessor {
         }
 
         private boolean doesEndsWithPathSeparator(String path) {
-            return path.endsWith(Path.SEPARATOR);
+            return path.endsWith("/");
         }
 
         private String removeLastPathSeparator(String path) {

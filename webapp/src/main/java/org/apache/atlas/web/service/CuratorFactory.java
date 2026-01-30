@@ -32,7 +32,6 @@ import org.apache.curator.framework.api.ACLProvider;
 import org.apache.curator.framework.recipes.leader.LeaderLatch;
 import org.apache.curator.framework.recipes.locks.InterProcessMutex;
 import org.apache.curator.retry.ExponentialBackoffRetry;
-import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.zookeeper.data.ACL;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,11 +112,7 @@ public class CuratorFactory implements ICuratorFactory {
     }
 
     private String getCurrentUser() {
-        try {
-            return UserGroupInformation.getCurrentUser().getUserName();
-        } catch (IOException ioe) {
-            return "unknown";
-        }
+        return System.getProperty("user.name", "unknown");
     }
 
     private ACLProvider getAclProvider(HAConfiguration.ZookeeperProperties zookeeperProperties) {
