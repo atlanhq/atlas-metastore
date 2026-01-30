@@ -17,7 +17,6 @@
  */
 package org.apache.atlas.repository.store.graph.v2.lineage;
 
-// Claude code reference
 import com.datastax.driver.core.exceptions.NoHostAvailableException;
 import com.datastax.driver.core.exceptions.WriteTimeoutException;
 import com.datastax.oss.driver.api.core.CqlSession;
@@ -29,6 +28,7 @@ import com.datastax.oss.driver.api.core.cql.*;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.lineage.OpenLineageEvent;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -220,26 +220,71 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
         }
     }
 
+
     @Override
-    public List<OpenLineageEvent> getEventsByRunId(String runId) throws AtlasBaseException {
+    public OpenLineageEventPage getEventsByRunId(String runId, int pageSize, String pagingState) throws AtlasBaseException {
+        if (runId == null || runId.isEmpty()) {
+            throw new AtlasBaseException("runId is required");
+        }
+        if (pageSize <= 0) {
+            throw new AtlasBaseException("pageSize must be greater than 0");
+        }
+
+        try {
+            BoundStatement bind = getEventsByRunIdStmt.bind(runId).setPageSize(pageSize);
+            if (StringUtils.isNotEmpty(pagingState)) {
+                PagingState parsedState = PagingState.fromString(pagingState);
+                bind = bind.setPagingState(parsedState);
+            }
+
+            return cassSession.executeAsync(bind).thenApply(asyncRs -> {
+                List<OpenLineageEvent> rows = new ArrayList<>();
+                for (Row row : asyncRs.currentPage()) {
+                    rows.add(mapRowToEvent(row));
+                }
+
+                PagingState nextState = asyncRs.getExecutionInfo().getSafePagingState();
+                String nextToken = (nextState == null) ? null : nextState.toString();
+
+                LOG.debug("Retrieved {} events for runId={} (paged)", rows.size(), runId);
+                return new OpenLineageEventPage(rows, nextToken, pageSize);
+            })
+                    .toCompletableFuture()
+                    .get();
+
+        } catch (IllegalArgumentException e) {
+            LOG.error("Invalid pagingState for runId={}", runId, e);
+            throw new AtlasBaseException("Invalid pagingState", e);
+        } catch (Exception e) {
+            LOG.error("Error retrieving paged events for runId={}", runId, e);
+            throw new AtlasBaseException("Error retrieving paged events for runId: " + runId, e);
+        }
+    }
+
+    @Override
+    public Iterator<OpenLineageEvent> getEventsById(String runId) throws AtlasBaseException {
         if (runId == null || runId.isEmpty()) {
             throw new AtlasBaseException("runId is required");
         }
 
-        List<OpenLineageEvent> events = new ArrayList<>();
         try {
             BoundStatement bound = getEventsByRunIdStmt.bind(runId);
             ResultSet rs = executeWithRetry(bound);
+            Iterator<Row> rowIterator = rs.iterator();
+            return new Iterator<OpenLineageEvent>() {
+                @Override
+                public boolean hasNext() {
+                    return rowIterator.hasNext();
+                }
 
-            for (Row row : rs) {
-                events.add(mapRowToEvent(row));
-            }
-
-            LOG.debug("Retrieved {} events for runId={}", events.size(), runId);
-            return events;
+                @Override
+                public OpenLineageEvent next() {
+                    return mapRowToEvent(rowIterator.next());
+                }
+            };
         } catch (Exception e) {
-            LOG.error("Error retrieving events for runId={}", runId, e);
-            throw new AtlasBaseException("Error retrieving events for runId: " + runId, e);
+            LOG.error("Error retrieving iterator for runId={}", runId, e);
+            throw new AtlasBaseException("Error retrieving events iterator for runId: " + runId, e);
         }
     }
 

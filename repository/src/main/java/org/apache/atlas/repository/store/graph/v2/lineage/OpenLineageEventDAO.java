@@ -20,6 +20,7 @@ package org.apache.atlas.repository.store.graph.v2.lineage;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.lineage.OpenLineageEvent;
 
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -39,13 +40,24 @@ public interface OpenLineageEventDAO {
     void storeEvent(OpenLineageEvent event) throws AtlasBaseException;
 
     /**
-     * Retrieves all events for a specific run ID.
+     * Retrieves events for a specific run ID using cursor-based pagination.
      *
-     * @param runId The run ID to query events for
-     * @return List of OpenLineage events for the given run ID
+     * @param runId       The run ID to query events for
+     * @param pageSize    Maximum number of events to return
+     * @param pagingState Cursor for the next page, or null/empty for first page
+     * @return A page of OpenLineage events with an optional next paging state
      * @throws AtlasBaseException if the query fails
      */
-    List<OpenLineageEvent> getEventsByRunId(String runId) throws AtlasBaseException;
+    OpenLineageEventPage getEventsByRunId(String runId, int pageSize, String pagingState) throws AtlasBaseException;
+
+    /**
+     * Retrieves all events for a specific run ID as an iterator.
+     *
+     * @param runId The run ID to query events for
+     * @return Iterator over OpenLineage events for the given run ID
+     * @throws AtlasBaseException if the query fails
+     */
+    Iterator<OpenLineageEvent> getEventsById(String runId) throws AtlasBaseException;
 
     /**
      * Retrieves a specific event by run ID and event ID.

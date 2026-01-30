@@ -59,7 +59,7 @@ def produce_raw(raw, topic=TOPIC):
     subprocess.run(cmd, input=payload.encode("utf-8"), check=True)
 
 
-def query_rest_once(run_id):
+def query_rest_once(url):
     cmd = [
         "curl",
         "-s",
@@ -67,13 +67,13 @@ def query_rest_once(run_id):
         ATLAS_AUTH,
         "-H",
         "Accept: application/json",
-        f"{ATLAS_URL}/runs/{run_id}",
+        url,
     ]
     output = subprocess.check_output(cmd, text=True, stderr=subprocess.STDOUT)
     return output
 
 
-def query_rest(run_id, timeout_seconds=REST_TIMEOUT_SECONDS, poll_interval=REST_POLL_INTERVAL_SECONDS):
+def query_rest(url, timeout_seconds=REST_TIMEOUT_SECONDS, poll_interval=REST_POLL_INTERVAL_SECONDS):
     start = time.time()
     last_error = None
     first = True
@@ -82,7 +82,7 @@ def query_rest(run_id, timeout_seconds=REST_TIMEOUT_SECONDS, poll_interval=REST_
             time.sleep(poll_interval)
         first = False
         try:
-            return query_rest_once(run_id)
+            return query_rest_once(url)
         except subprocess.CalledProcessError as exc:
             last_error = exc
     if last_error is not None:
@@ -135,7 +135,23 @@ def summarize_rest(raw, max_events=5):
             )
         if len(events) > max_events:
             lines.append(f"- ... ({len(events) - max_events} more)")
+        if data.get("nextPagingState"):
+            lines.append("nextPagingState=(present)")
     return "\n".join(lines)
+
+
+def summarize_event(raw):
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return f"Event response (non-JSON): {raw.strip()}"
+
+    return (
+        f"eventId={data.get('eventId')}\n"
+        f"eventTime={data.get('eventTime')}\n"
+        f"status={data.get('status')}\n"
+        f"runId={data.get('runId')}"
+    )
 
 
 def summarize_error(raw):
@@ -170,9 +186,9 @@ try:
     produce_event(single_event)
 
     print("REST summary:")
-    print(summarize_rest(query_rest(run_id)))
+    print(summarize_rest(query_rest(f"{ATLAS_URL}/runs/{run_id}")))
 
-    print_header("Two events same runId -> REST list")
+    print_header("Two events same runId -> REST list + get-by-id")
     run_id_dupe = str(uuid.uuid4())
     base_time = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -187,8 +203,22 @@ try:
         produce_event(event)
 
     print(f"produce: topic={TOPIC} runId={run_id_dupe} events=2")
-    print("REST summary:")
-    print(summarize_rest(query_rest(run_id_dupe)))
+
+    list_response = query_rest(f"{ATLAS_URL}/runs/{run_id_dupe}")
+    print("REST list summary:")
+    print(summarize_rest(list_response))
+
+    list_data = json.loads(list_response)
+    if list_data.get("events"):
+        print("\nREST get-by-id (first event):")
+        event_id = list_data["events"][0].get("eventId")
+        if event_id:
+            event_response = query_rest(f"{ATLAS_URL}/runs/{run_id_dupe}/events/{event_id}")
+            print(summarize_event(event_response))
+        else:
+            print("(missing eventId in list response)")
+    else:
+        print("(no events returned to fetch by id)")
 
     print_header("Bad event -> error queue")
     bad_event = "}"

@@ -23,9 +23,9 @@ import org.apache.atlas.model.lineage.OpenLineageEvent;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
-import java.util.Arrays;
+import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.Assert.*;
@@ -115,16 +115,16 @@ public class OpenLineageEventServiceTest {
         service.processEvent(eventJson);
 
         // Now retrieve it
-        List<OpenLineageEvent> events = service.getEventsByRunId(testRunId);
-
-        assertNotNull("Events should not be null", events);
-        assertFalse("Should have at least one event", events.isEmpty());
-        assertEquals("First event should have correct runId", testRunId, events.get(0).getRunId());
-        assertEquals("First event should have correct status", "START", events.get(0).getStatus());
+        Iterator<OpenLineageEvent> iterator = service.getEventsById(testRunId);
+        assertNotNull("Events iterator should not be null", iterator);
+        assertTrue("Should have at least one event", iterator.hasNext());
+        OpenLineageEvent first = iterator.next();
+        assertEquals("First event should have correct runId", testRunId, first.getRunId());
+        assertEquals("First event should have correct status", "START", first.getStatus());
     }
 
     @Test
-    public void testEventIdUsesTimeAndRunId() throws Exception {
+    public void testEventIdUsesEventTimeOnly() throws Exception {
         String runId = "timeuuid-run-" + System.currentTimeMillis();
         String eventTime = "2024-01-15T10:30:00.000Z";
         String eventJson = "{\n" +
@@ -138,17 +138,20 @@ public class OpenLineageEventServiceTest {
 
         service.processEvent(eventJson);
 
-        UUID expectedEventId = service.buildTimeUuidFromRunAndTime(runId, service.parseEventTime(eventTime));
-        List<OpenLineageEvent> events = service.getEventsByRunId(runId);
+        UUID expectedEventId = service.buildTimeUuidFromEventTime(service.parseEventTime(eventTime));
+        boolean found = false;
+        for (Iterator<OpenLineageEvent> it = service.getEventsById(runId); it.hasNext(); ) {
+            if (expectedEventId.equals(it.next().getEventId())) {
+                found = true;
+                break;
+            }
+        }
 
-        boolean found = events.stream()
-                .anyMatch(event -> expectedEventId.equals(event.getEventId()));
-
-        assertTrue("EventId should be deterministic from runId + eventTime", found);
+        assertTrue("EventId should be derived from eventTime only", found);
     }
 
     @Test
-    public void testListEventsByRunId() throws Exception {
+    public void testIterateEventsByRunId() throws Exception {
         String runId = "list-run-" + System.currentTimeMillis();
         String[] eventTimes = new String[] {
                 "2024-01-15T10:30:00.000Z",
@@ -168,13 +171,46 @@ public class OpenLineageEventServiceTest {
             service.processEvent(eventJson);
         }
 
-        List<OpenLineageEvent> events = service.getEventsByRunId(runId);
+        List<OpenLineageEvent> events = new ArrayList<>();
+        for (Iterator<OpenLineageEvent> it = service.getEventsById(runId); it.hasNext(); ) {
+            events.add(it.next());
+        }
 
         assertEquals("Should list all events for the runId", eventTimes.length, events.size());
         assertTrue("Events should be ordered by event time desc",
                 events.get(0).getEventTime().compareTo(events.get(1).getEventTime()) >= 0);
         assertTrue("Events should be ordered by event time desc",
                 events.get(1).getEventTime().compareTo(events.get(2).getEventTime()) >= 0);
+    }
+
+    @Test
+    public void testPagedEventsByRunId() throws Exception {
+        String runId = "paged-run-" + System.currentTimeMillis();
+        String[] eventTimes = new String[] {
+                "2024-01-15T10:30:00.000Z",
+                "2024-01-15T10:31:00.000Z",
+                "2024-01-15T10:32:00.000Z"
+        };
+
+        for (String eventTime : eventTimes) {
+            String eventJson = "{\n" +
+                    "  \"eventType\": \"START\",\n" +
+                    "  \"eventTime\": \"" + eventTime + "\",\n" +
+                    "  \"run\": {\n" +
+                    "    \"runId\": \"" + runId + "\"\n" +
+                    "  },\n" +
+                    "  \"producer\": \"https://my-producer.com\"\n" +
+                    "}";
+            service.processEvent(eventJson);
+        }
+
+        OpenLineageEventPage firstPage = service.getEventsByRunId(runId, 2, null);
+        assertEquals("First page size should match", 2, firstPage.getEvents().size());
+        assertNotNull("Paging state should be present when more results exist", firstPage.getPagingState());
+        System.out.println(firstPage.getPagingState());
+
+        OpenLineageEventPage secondPage = service.getEventsByRunId(runId, 2, firstPage.getPagingState());
+        assertEquals("Second page should contain remaining events", 1, secondPage.getEvents().size());
     }
 
     @Test
@@ -193,8 +229,12 @@ public class OpenLineageEventServiceTest {
         service.processEvent(eventJson);
         service.processEvent(eventJson);
 
-        List<OpenLineageEvent> events = service.getEventsByRunId(runId);
-        assertEquals("Duplicate runId + eventTime should store only one event", 1, events.size());
+        int count = 0;
+        for (Iterator<OpenLineageEvent> it = service.getEventsById(runId); it.hasNext(); ) {
+            it.next();
+            count++;
+        }
+        assertEquals("Duplicate runId + eventTime should store only one event", 1, count);
     }
 
     @Test

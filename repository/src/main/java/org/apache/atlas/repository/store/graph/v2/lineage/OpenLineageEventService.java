@@ -31,16 +31,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.Iterator;
 import java.util.List;
 import java.util.TimeZone;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Service layer for OpenLineage event operations.
@@ -106,7 +104,7 @@ public class OpenLineageEventService {
             }
 
             Date parsedEventTime = parseEventTime(eventTime);
-            UUID eventId = buildTimeUuidFromRunAndTime(runId, parsedEventTime);
+            UUID eventId = buildTimeUuidFromEventTime(parsedEventTime);
 
             // Create OpenLineageEvent object
             OpenLineageEvent event = new OpenLineageEvent();
@@ -133,21 +131,45 @@ public class OpenLineageEventService {
         }
     }
 
-    /**
-     * Retrieve all events for a specific run.
-     *
-     * @param runId The run ID to query
-     * @return List of OpenLineage events
-     * @throws AtlasBaseException if query fails
-     */
-    public List<OpenLineageEvent> getEventsByRunId(String runId) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getOpenLineageEventsByRunId");
+    public OpenLineageEventPage getEventsByRunId(String runId, int pageSize, String pagingState) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getOpenLineageEventsByRunIdPaged");
         try {
             if (StringUtils.isEmpty(runId)) {
                 throw new AtlasBaseException("runId cannot be empty");
             }
+            if (pageSize <= 0) {
+                throw new AtlasBaseException("pageSize must be greater than 0");
+            }
 
-            return eventDAO.getEventsByRunId(runId);
+            return eventDAO.getEventsByRunId(runId, pageSize, pagingState);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    public OpenLineageEvent getEventByRunIdAndEventId(String runId, String eventId) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getOpenLineageEventByRunIdAndEventId");
+        try {
+            if (StringUtils.isEmpty(runId)) {
+                throw new AtlasBaseException("runId cannot be empty");
+            }
+            if (StringUtils.isEmpty(eventId)) {
+                throw new AtlasBaseException("eventId cannot be empty");
+            }
+
+            return eventDAO.getEventByRunIdAndEventId(runId, eventId);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    public Iterator<OpenLineageEvent> getEventsById(String runId) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getOpenLineageEventsByIdIterator");
+        try {
+            if (StringUtils.isEmpty(runId)) {
+                throw new AtlasBaseException("runId cannot be empty");
+            }
+            return eventDAO.getEventsById(runId);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -200,31 +222,11 @@ public class OpenLineageEventService {
         }
     }
 
-    protected UUID buildTimeUuidFromRunAndTime(String runId, Date eventTime) throws AtlasBaseException {
-        if (StringUtils.isEmpty(runId) || eventTime == null) {
-            throw new AtlasBaseException("runId and eventTime are required to generate eventId");
+    protected UUID buildTimeUuidFromEventTime(Date eventTime) throws AtlasBaseException {
+        if (eventTime == null) {
+            throw new AtlasBaseException("eventTime is required to generate eventId");
         }
 
-        UUID baseUuid = UUIDs.startOf(eventTime.getTime());
-        long lsb = buildLsbFromRunId(runId);
-        return new UUID(baseUuid.getMostSignificantBits(), lsb);
-    }
-
-    protected long buildLsbFromRunId(String runId) throws AtlasBaseException {
-        byte[] hash = sha256Bytes(runId);
-        long lsb = ByteBuffer.wrap(hash).getLong();
-        // Set IETF variant (10xx...)
-        lsb &= 0x3fffffffffffffffL;
-        lsb |= 0x8000000000000000L;
-        return lsb;
-    }
-
-    protected byte[] sha256Bytes(String value) throws AtlasBaseException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return digest.digest(value.getBytes(StandardCharsets.UTF_8));
-        } catch (NoSuchAlgorithmException e) {
-            throw new AtlasBaseException("SHA-256 is not available for eventId generation", e);
-        }
+        return UUIDs.startOf(eventTime.getTime());
     }
 }

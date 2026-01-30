@@ -21,6 +21,7 @@ package org.apache.atlas.web.rest;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.lineage.OpenLineageEvent;
+import org.apache.atlas.repository.store.graph.v2.lineage.OpenLineageEventPage;
 import org.apache.atlas.repository.store.graph.v2.lineage.OpenLineageEventService;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
@@ -33,10 +34,7 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 /**
  * REST API for OpenLineage event ingestion and retrieval.
@@ -65,55 +63,6 @@ public class OpenLineageREST {
     }
 
     /**
-     * Ingest a single OpenLineage event.
-     *
-     * This endpoint receives OpenLineage events as JSON payloads and stores them
-     * in Cassandra for lineage tracking and analysis.
-     *
-     * @param eventJson The OpenLineage event as a JSON string
-     * @return HTTP 201 if successful, 400 for validation errors, 500 for server errors
-     * @throws AtlasBaseException if event processing fails
-     */
-    @POST
-    @Timed
-    public Response ingestEvent(String eventJson) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "OpenLineageREST.ingestEvent()");
-            }
-
-            if (StringUtils.isEmpty(eventJson)) {
-                LOG.warn("Received empty event payload");
-                return Response.status(Response.Status.BAD_REQUEST)
-                        .entity(createErrorResponse("Event payload cannot be empty"))
-                        .build();
-            }
-
-            eventService.processEvent(eventJson);
-
-            LOG.info("Successfully ingested OpenLineage event");
-            return Response.status(Response.Status.CREATED)
-                    .entity(createSuccessResponse("Event ingested successfully"))
-                    .build();
-
-        } catch (AtlasBaseException e) {
-            LOG.error("Failed to ingest OpenLineage event", e);
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(createErrorResponse(e.getMessage()))
-                    .build();
-        } catch (Exception e) {
-            LOG.error("Unexpected error ingesting OpenLineage event", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(createErrorResponse("Internal server error: " + e.getMessage()))
-                    .build();
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-    /**
      * Retrieve all events for a specific run.
      *
      * @param runId The run ID to query events for
@@ -123,7 +72,9 @@ public class OpenLineageREST {
     @GET
     @Path("/runs/{runId}")
     @Timed
-    public Response getEventsByRunId(@PathParam("runId") String runId) throws AtlasBaseException {
+    public OpenLineageEventsResponse getEventsByRunId(@PathParam("runId") String runId,
+                                                      @QueryParam("pageSize") Integer pageSize,
+                                                      @QueryParam("pagingState") String pagingState) throws AtlasBaseException {
         Servlets.validateQueryParamLength("runId", runId);
 
         AtlasPerfTracer perf = null;
@@ -134,31 +85,72 @@ public class OpenLineageREST {
             }
 
             if (StringUtils.isEmpty(runId)) {
-                return Response.status(Response.Status.BAD_REQUEST)
-                        .entity(createErrorResponse("runId cannot be empty"))
-                        .build();
+                return OpenLineageEventsResponse.error("runId cannot be empty");
+            }
+            int effectivePageSize = pageSize != null ? pageSize : 25;
+            if (effectivePageSize <= 0) {
+                return OpenLineageEventsResponse.error("pageSize must be greater than 0");
             }
 
-            List<OpenLineageEvent> events = eventService.getEventsByRunId(runId);
+            OpenLineageEventPage page = eventService.getEventsByRunId(runId, effectivePageSize, pagingState);
+            List<OpenLineageEvent> events = page.getEvents();
 
-            Map<String, Object> response = new HashMap<>();
-            response.put("runId", runId);
-            response.put("eventCount", events.size());
-            response.put("events", events);
-
-            LOG.debug("Retrieved {} events for runId={}", events.size(), runId);
-            return Response.ok(response).build();
+            LOG.debug("Retrieved events for runId={}", runId);
+            return OpenLineageEventsResponse.success(runId, events, page.getPageSize(), page.getPagingState());
 
         } catch (AtlasBaseException e) {
             LOG.error("Failed to retrieve events for runId={}", runId, e);
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(createErrorResponse(e.getMessage()))
-                    .build();
+            return OpenLineageEventsResponse.error(e.getMessage());
         } catch (Exception e) {
             LOG.error("Unexpected error retrieving events for runId={}", runId, e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(createErrorResponse("Internal server error: " + e.getMessage()))
-                    .build();
+            return OpenLineageEventsResponse.error("Internal server error: " + e.getMessage());
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Retrieve a specific event by runId and eventId.
+     *
+     * @param runId   The run ID to query events for
+     * @param eventId The event ID to query
+     * @return OpenLineage event for the given runId and eventId
+     * @throws AtlasBaseException if query fails
+     */
+    @GET
+    @Path("/runs/{runId}/events/{eventId}")
+    @Timed
+    public OpenLineageEventsResponse getEventByRunIdAndEventId(@PathParam("runId") String runId,
+                                                               @PathParam("eventId") String eventId) throws AtlasBaseException {
+        Servlets.validateQueryParamLength("runId", runId);
+        Servlets.validateQueryParamLength("eventId", eventId);
+
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "OpenLineageREST.getEventByRunIdAndEventId(" + runId + "," + eventId + ")");
+            }
+
+            if (StringUtils.isEmpty(runId)) {
+                return OpenLineageEventsResponse.error("runId cannot be empty");
+            }
+            if (StringUtils.isEmpty(eventId)) {
+                return OpenLineageEventsResponse.error("eventId cannot be empty");
+            }
+
+            OpenLineageEvent event = eventService.getEventByRunIdAndEventId(runId, eventId);
+            if (event == null) {
+                return OpenLineageEventsResponse.error("Event not found");
+            }
+
+            return OpenLineageEventsResponse.success(runId, List.of(event), 1, null);
+        } catch (AtlasBaseException e) {
+            LOG.error("Failed to retrieve event for runId={}, eventId={}", runId, eventId, e);
+            return OpenLineageEventsResponse.error(e.getMessage());
+        } catch (Exception e) {
+            LOG.error("Unexpected error retrieving event for runId={}, eventId={}", runId, eventId, e);
+            return OpenLineageEventsResponse.error("Internal server error: " + e.getMessage());
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -172,7 +164,7 @@ public class OpenLineageREST {
     @GET
     @Path("/health")
     @Timed
-    public Response healthCheck() {
+    public OpenLineageEventsResponse healthCheck() {
         AtlasPerfTracer perf = null;
 
         try {
@@ -183,28 +175,89 @@ public class OpenLineageREST {
             boolean healthy = eventService.isHealthy();
 
             if (healthy) {
-                return Response.ok(createSuccessResponse("OpenLineage event storage is healthy")).build();
+                return OpenLineageEventsResponse.successMessage("OpenLineage event storage is healthy");
             } else {
-                return Response.status(Response.Status.SERVICE_UNAVAILABLE)
-                        .entity(createErrorResponse("OpenLineage event storage is unhealthy"))
-                        .build();
+                return OpenLineageEventsResponse.error("OpenLineage event storage is unhealthy");
             }
         } finally {
             AtlasPerfTracer.log(perf);
         }
     }
 
-    private Map<String, Object> createSuccessResponse(String message) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", true);
-        response.put("message", message);
-        return response;
-    }
+    public static class OpenLineageEventsResponse {
+        private final boolean success;
+        private final String message;
+        private final String error;
+        private final String runId;
+        private final int eventCount;
+        private final List<OpenLineageEvent> events;
+        private final Integer pageSize;
+        private final String nextPagingState;
 
-    private Map<String, Object> createErrorResponse(String errorMessage) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("success", false);
-        response.put("error", errorMessage);
-        return response;
+        private OpenLineageEventsResponse(boolean success,
+                                          String message,
+                                          String error,
+                                          String runId,
+                                          int eventCount,
+                                          List<OpenLineageEvent> events,
+                                          Integer pageSize,
+                                          String nextPagingState) {
+            this.success = success;
+            this.message = message;
+            this.error = error;
+            this.runId = runId;
+            this.eventCount = eventCount;
+            this.events = events;
+            this.pageSize = pageSize;
+            this.nextPagingState = nextPagingState;
+        }
+
+        public static OpenLineageEventsResponse success(String runId,
+                                                        List<OpenLineageEvent> events,
+                                                        Integer pageSize,
+                                                        String nextPagingState) {
+            List<OpenLineageEvent> safeEvents = events != null ? events : List.of();
+            return new OpenLineageEventsResponse(true, null, null, runId, safeEvents.size(), safeEvents, pageSize, nextPagingState);
+        }
+
+        public static OpenLineageEventsResponse successMessage(String message) {
+            return new OpenLineageEventsResponse(true, message, null, null, 0, List.of(), null, null);
+        }
+
+        public static OpenLineageEventsResponse error(String errorMessage) {
+            return new OpenLineageEventsResponse(false, null, errorMessage, null, 0, List.of(), null, null);
+        }
+
+        public boolean isSuccess() {
+            return success;
+        }
+
+        public String getMessage() {
+            return message;
+        }
+
+        public String getError() {
+            return error;
+        }
+
+        public String getRunId() {
+            return runId;
+        }
+
+        public int getEventCount() {
+            return eventCount;
+        }
+
+        public List<OpenLineageEvent> getEvents() {
+            return events;
+        }
+
+        public Integer getPageSize() {
+            return pageSize;
+        }
+
+        public String getNextPagingState() {
+            return nextPagingState;
+        }
     }
 }
