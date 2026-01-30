@@ -36,6 +36,7 @@ import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -105,7 +106,7 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
             isValidLexoRank(lexicographicalSortOrder, glossaryQName, parentQname, this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(termName));
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
                 "create entity: type=", entity.getTypeName());
 
@@ -234,8 +235,9 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
         return updatedQualifiedName;
     }
 
-    private String createQualifiedName() {
-        return getUUID() + "@" + anchor.getAttribute(QUALIFIED_NAME);
+    private String createQualifiedName(String termName) {
+        String anchorQN = (String) anchor.getAttribute(QUALIFIED_NAME);
+        return DeterministicIdUtils.getTermQN(termName, anchorQN) + "@" + anchorQN;
     }
 
     private void setAnchor(AtlasEntity entity, EntityMutationContext context) throws AtlasBaseException {
