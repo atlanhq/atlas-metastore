@@ -18,6 +18,7 @@
 package org.apache.atlas.repository.store.graph.v2.lineage;
 
 // Claude code reference
+import com.datastax.driver.core.utils.UUIDs;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.RequestContext;
@@ -30,9 +31,16 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.*;
+import java.util.Date;
+import java.util.List;
+import java.util.TimeZone;
+import java.util.UUID;
 
 /**
  * Service layer for OpenLineage event operations.
@@ -65,6 +73,7 @@ public class OpenLineageEventService {
      */
     public void processEvent(String eventJson) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("processOpenLineageEvent");
+
         try {
             // Validate JSON
             if (StringUtils.isEmpty(eventJson)) {
@@ -96,13 +105,16 @@ public class OpenLineageEventService {
                 producer = rootNode.get("producer").asText();
             }
 
+            Date parsedEventTime = parseEventTime(eventTime);
+            UUID eventId = buildTimeUuidFromRunAndTime(runId, parsedEventTime);
+
             // Create OpenLineageEvent object
             OpenLineageEvent event = new OpenLineageEvent();
-            event.setEventId(UUID.randomUUID().toString());
+            event.setEventId(eventId);
             event.setSource(producer);
             event.setJobName(jobName);
             event.setRunId(runId);
-            event.setEventTime(parseEventTime(eventTime));
+            event.setEventTime(parsedEventTime);
             event.setEvent(eventJson);
             event.setStatus(eventType);
 
@@ -116,45 +128,6 @@ public class OpenLineageEventService {
         } catch (Exception e) {
             LOG.error("Error processing OpenLineage event", e);
             throw new AtlasBaseException("Error processing OpenLineage event: " + e.getMessage(), e);
-        } finally {
-            RequestContext.get().endMetricRecord(recorder);
-        }
-    }
-
-    /**
-     * Process and store a batch of OpenLineage events.
-     *
-     * @param eventsJson List of OpenLineage events as JSON strings
-     * @return Map of event indices to error messages (empty if all successful)
-     * @throws AtlasBaseException if batch processing fails
-     */
-    public Map<Integer, String> processBatchEvents(List<String> eventsJson) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("processBatchOpenLineageEvents");
-        Map<Integer, String> errors = new HashMap<>();
-
-        try {
-            if (eventsJson == null || eventsJson.isEmpty()) {
-                throw new AtlasBaseException("Event batch cannot be empty");
-            }
-
-            LOG.info("Processing batch of {} OpenLineage events", eventsJson.size());
-
-            for (int i = 0; i < eventsJson.size(); i++) {
-                try {
-                    processEvent(eventsJson.get(i));
-                } catch (Exception e) {
-                    LOG.warn("Error processing event at index {}: {}", i, e.getMessage());
-                    errors.put(i, e.getMessage());
-                }
-            }
-
-            if (errors.isEmpty()) {
-                LOG.info("Successfully processed all {} OpenLineage events", eventsJson.size());
-            } else {
-                LOG.warn("Processed {} events with {} errors", eventsJson.size(), errors.size());
-            }
-
-            return errors;
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -209,7 +182,7 @@ public class OpenLineageEventService {
         return fieldNode.asText();
     }
 
-    private Date parseEventTime(String eventTimeStr) throws AtlasBaseException {
+    protected Date parseEventTime(String eventTimeStr) throws AtlasBaseException {
         try {
             // Try ISO 8601 format
             return ISO_DATE_FORMAT.parse(eventTimeStr);
@@ -224,6 +197,34 @@ public class OpenLineageEventService {
                 throw new AtlasBaseException("Invalid eventTime format: " + eventTimeStr +
                         ". Expected ISO 8601 format (e.g., 2024-01-15T10:30:00.000Z)", e2);
             }
+        }
+    }
+
+    protected UUID buildTimeUuidFromRunAndTime(String runId, Date eventTime) throws AtlasBaseException {
+        if (StringUtils.isEmpty(runId) || eventTime == null) {
+            throw new AtlasBaseException("runId and eventTime are required to generate eventId");
+        }
+
+        UUID baseUuid = UUIDs.startOf(eventTime.getTime());
+        long lsb = buildLsbFromRunId(runId);
+        return new UUID(baseUuid.getMostSignificantBits(), lsb);
+    }
+
+    protected long buildLsbFromRunId(String runId) throws AtlasBaseException {
+        byte[] hash = sha256Bytes(runId);
+        long lsb = ByteBuffer.wrap(hash).getLong();
+        // Set IETF variant (10xx...)
+        lsb &= 0x3fffffffffffffffL;
+        lsb |= 0x8000000000000000L;
+        return lsb;
+    }
+
+    protected byte[] sha256Bytes(String value) throws AtlasBaseException {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return digest.digest(value.getBytes(StandardCharsets.UTF_8));
+        } catch (NoSuchAlgorithmException e) {
+            throw new AtlasBaseException("SHA-256 is not available for eventId generation", e);
         }
     }
 }

@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * Schema:
  * - Keyspace: openlineage
  * - Table: events_by_run
- * - Primary Key: ((runID), eventTime DESC, event_id)
+ * - Primary Key: ((runID), eventId)
  *
  * Following patterns from TagDAOCassandraImpl with singleton pattern,
  * retry logic, and connection pooling.
@@ -126,15 +126,15 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
 
             // Prepare statements
             insertEventStmt = prepare(String.format(
-                    "INSERT INTO %s.%s (event_id, source, jobName, runID, eventTime, event, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO %s.%s (eventId, source, jobName, runID, eventTime, event, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
                     KEYSPACE, TABLE_NAME));
 
             getEventsByRunIdStmt = prepare(String.format(
-                    "SELECT event_id, source, jobName, runID, eventTime, event, status FROM %s.%s WHERE runID = ?",
+                    "SELECT eventId, source, jobName, runID, eventTime, event, status FROM %s.%s WHERE runID = ?",
                     KEYSPACE, TABLE_NAME));
 
             getEventByRunIdAndEventIdStmt = prepare(String.format(
-                    "SELECT event_id, source, jobName, runID, eventTime, event, status FROM %s.%s WHERE runID = ? AND eventTime = ? AND event_id = ?",
+                    "SELECT eventId, source, jobName, runID, eventTime, event, status FROM %s.%s WHERE runID = ? AND eventId = ?",
                     KEYSPACE, TABLE_NAME));
 
             healthCheckStmt = prepare("SELECT release_version FROM system.local");
@@ -148,7 +148,6 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
 
     private PreparedStatement prepare(String cql) {
         return cassSession.prepare(SimpleStatement.builder(cql)
-                .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM)
                 .build());
     }
 
@@ -169,15 +168,15 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
         // Create table
         String createTableQuery = String.format(
                 "CREATE TABLE IF NOT EXISTS %s.%s (" +
-                        "event_id uuid, " +
+                        "eventId timeuuid, " +
                         "source text, " +
                         "jobName text, " +
                         "runID text, " +
                         "eventTime timestamp, " +
                         "event text, " +
                         "status text, " +
-                        "PRIMARY KEY ((runID), eventTime, event_id)" +
-                        ") WITH CLUSTERING ORDER BY (eventTime DESC);",
+                        "PRIMARY KEY ((runID), eventId)" +
+                        ") WITH CLUSTERING ORDER BY (eventId DESC);",
                 KEYSPACE, TABLE_NAME);
         executeWithRetry(SimpleStatement.builder(createTableQuery)
                 .setConsistencyLevel(DefaultConsistencyLevel.ALL)
@@ -200,10 +199,8 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
         }
 
         try {
-            UUID eventId = event.getEventId() != null ? UUID.fromString(event.getEventId()) : UUID.randomUUID();
-
             BoundStatement bound = insertEventStmt.bind()
-                    .setUuid("event_id", eventId)
+                    .setUuid("eventId", event.getEventId())
                     .setString("source", event.getSource())
                     .setString("jobName", event.getJobName())
                     .setString("runID", event.getRunId())
@@ -213,10 +210,10 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
 
             executeWithRetry(bound);
             LOG.info("Successfully stored OpenLineage event: runId={}, eventId={}, status={}",
-                    event.getRunId(), eventId, event.getStatus());
+                    event.getRunId(), event.getEventId(), event.getStatus());
         } catch (IllegalArgumentException e) {
-            LOG.error("Invalid event_id format: {}", event.getEventId(), e);
-            throw new AtlasBaseException("Invalid event_id format: " + event.getEventId(), e);
+            LOG.error("Invalid eventId format: {}", event.getEventId(), e);
+            throw new AtlasBaseException("Invalid eventId format: " + event.getEventId(), e);
         } catch (Exception e) {
             LOG.error("Error storing OpenLineage event: runId={}", event.getRunId(), e);
             throw new AtlasBaseException("Error storing OpenLineage event", e);
@@ -256,18 +253,15 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
         }
 
         try {
-            // Note: This query requires knowing the eventTime, which is part of the clustering key
-            // For a production system, you might want to add a secondary index or
-            // use a different query pattern
-            LOG.warn("getEventByRunIdAndEventId requires eventTime for efficient query. " +
-                    "Consider using getEventsByRunId and filtering in application layer.");
+            UUID parsedEventId = UUID.fromString(eventId);
+            BoundStatement bound = getEventByRunIdAndEventIdStmt.bind(runId, parsedEventId);
+            ResultSet rs = executeWithRetry(bound);
 
-            // For now, we'll get all events for the run and filter
-            List<OpenLineageEvent> events = getEventsByRunId(runId);
-            return events.stream()
-                    .filter(e -> eventId.equals(e.getEventId()))
-                    .findFirst()
-                    .orElse(null);
+            Row row = rs.one();
+            if (row == null) {
+                return null;
+            }
+            return mapRowToEvent(row);
         } catch (Exception e) {
             LOG.error("Error retrieving event: runId={}, eventId={}", runId, eventId, e);
             throw new AtlasBaseException("Error retrieving event", e);
@@ -309,7 +303,7 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
 
     private OpenLineageEvent mapRowToEvent(Row row) {
         OpenLineageEvent event = new OpenLineageEvent();
-        event.setEventId(row.getUuid("event_id").toString());
+        event.setEventId(row.getUuid("eventId"));
         event.setSource(row.getString("source"));
         event.setJobName(row.getString("jobName"));
         event.setRunId(row.getString("runID"));

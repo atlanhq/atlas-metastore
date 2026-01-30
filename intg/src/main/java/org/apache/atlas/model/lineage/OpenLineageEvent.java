@@ -24,6 +24,7 @@ import com.fasterxml.jackson.databind.annotation.JsonSerialize;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.Objects;
+import java.util.UUID;
 
 import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.NONE;
 import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.PUBLIC_ONLY;
@@ -38,7 +39,7 @@ import static com.fasterxml.jackson.annotation.JsonAutoDetect.Visibility.PUBLIC_
 public class OpenLineageEvent implements Serializable {
     private static final long serialVersionUID = 1L;
 
-    private String eventId;      // UUID - primary key component
+    private UUID eventId;      // UUID - primary key component
     private String source;       // Producer/source system URI
     private String jobName;      // Job name from the event
     private String runId;        // Run ID - partition key
@@ -49,7 +50,7 @@ public class OpenLineageEvent implements Serializable {
     public OpenLineageEvent() {
     }
 
-    public OpenLineageEvent(String eventId, String source, String jobName, String runId,
+    public OpenLineageEvent(UUID eventId, String source, String jobName, String runId,
                            Date eventTime, String event, String status) {
         this.eventId = eventId;
         this.source = source;
@@ -60,11 +61,11 @@ public class OpenLineageEvent implements Serializable {
         this.status = status;
     }
 
-    public String getEventId() {
+    public UUID getEventId() {
         return eventId;
     }
 
-    public void setEventId(String eventId) {
+    public void setEventId(UUID eventId) {
         this.eventId = eventId;
     }
 

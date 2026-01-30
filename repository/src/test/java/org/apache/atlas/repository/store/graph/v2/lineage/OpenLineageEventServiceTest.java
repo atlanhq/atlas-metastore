@@ -26,6 +26,7 @@ import org.junit.Test;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.junit.Assert.*;
 
@@ -96,61 +97,6 @@ public class OpenLineageEventServiceTest {
     }
 
     @Test
-    public void testProcessBatchEvents() throws AtlasBaseException {
-        String event1 = "{\n" +
-                "  \"eventType\": \"START\",\n" +
-                "  \"eventTime\": \"2024-01-15T10:30:00.000Z\",\n" +
-                "  \"run\": {\n" +
-                "    \"runId\": \"batch-run-1\"\n" +
-                "  },\n" +
-                "  \"job\": {\n" +
-                "    \"name\": \"batch-job-1\"\n" +
-                "  },\n" +
-                "  \"producer\": \"https://my-producer.com\"\n" +
-                "}";
-
-        String event2 = "{\n" +
-                "  \"eventType\": \"COMPLETE\",\n" +
-                "  \"eventTime\": \"2024-01-15T10:35:00.000Z\",\n" +
-                "  \"run\": {\n" +
-                "    \"runId\": \"batch-run-1\"\n" +
-                "  },\n" +
-                "  \"job\": {\n" +
-                "    \"name\": \"batch-job-1\"\n" +
-                "  },\n" +
-                "  \"producer\": \"https://my-producer.com\"\n" +
-                "}";
-
-        List<String> events = Arrays.asList(event1, event2);
-        Map<Integer, String> errors = service.processBatchEvents(events);
-
-        assertTrue("Batch processing should succeed", errors.isEmpty());
-    }
-
-    @Test
-    public void testProcessBatchWithPartialFailures() throws AtlasBaseException {
-        String validEvent = "{\n" +
-                "  \"eventType\": \"START\",\n" +
-                "  \"eventTime\": \"2024-01-15T10:30:00.000Z\",\n" +
-                "  \"run\": {\n" +
-                "    \"runId\": \"valid-run\"\n" +
-                "  },\n" +
-                "  \"producer\": \"https://my-producer.com\"\n" +
-                "}";
-
-        String invalidEvent = "{\n" +
-                "  \"eventType\": \"START\",\n" +
-                "  \"eventTime\": \"2024-01-15T10:30:00.000Z\"\n" +
-                "}";
-
-        List<String> events = Arrays.asList(validEvent, invalidEvent);
-        Map<Integer, String> errors = service.processBatchEvents(events);
-
-        assertEquals("Should have one error", 1, errors.size());
-        assertTrue("Error should be for second event", errors.containsKey(1));
-    }
-
-    @Test
     public void testGetEventsByRunId() throws AtlasBaseException {
         // First, insert a test event
         String testRunId = "test-run-" + System.currentTimeMillis();
@@ -178,6 +124,80 @@ public class OpenLineageEventServiceTest {
     }
 
     @Test
+    public void testEventIdUsesTimeAndRunId() throws Exception {
+        String runId = "timeuuid-run-" + System.currentTimeMillis();
+        String eventTime = "2024-01-15T10:30:00.000Z";
+        String eventJson = "{\n" +
+                "  \"eventType\": \"START\",\n" +
+                "  \"eventTime\": \"" + eventTime + "\",\n" +
+                "  \"run\": {\n" +
+                "    \"runId\": \"" + runId + "\"\n" +
+                "  },\n" +
+                "  \"producer\": \"https://my-producer.com\"\n" +
+                "}";
+
+        service.processEvent(eventJson);
+
+        UUID expectedEventId = service.buildTimeUuidFromRunAndTime(runId, service.parseEventTime(eventTime));
+        List<OpenLineageEvent> events = service.getEventsByRunId(runId);
+
+        boolean found = events.stream()
+                .anyMatch(event -> expectedEventId.equals(event.getEventId()));
+
+        assertTrue("EventId should be deterministic from runId + eventTime", found);
+    }
+
+    @Test
+    public void testListEventsByRunId() throws Exception {
+        String runId = "list-run-" + System.currentTimeMillis();
+        String[] eventTimes = new String[] {
+                "2024-01-15T10:30:00.000Z",
+                "2024-01-15T10:31:00.000Z",
+                "2024-01-15T10:32:00.000Z"
+        };
+
+        for (String eventTime : eventTimes) {
+            String eventJson = "{\n" +
+                    "  \"eventType\": \"START\",\n" +
+                    "  \"eventTime\": \"" + eventTime + "\",\n" +
+                    "  \"run\": {\n" +
+                    "    \"runId\": \"" + runId + "\"\n" +
+                    "  },\n" +
+                    "  \"producer\": \"https://my-producer.com\"\n" +
+                    "}";
+            service.processEvent(eventJson);
+        }
+
+        List<OpenLineageEvent> events = service.getEventsByRunId(runId);
+
+        assertEquals("Should list all events for the runId", eventTimes.length, events.size());
+        assertTrue("Events should be ordered by event time desc",
+                events.get(0).getEventTime().compareTo(events.get(1).getEventTime()) >= 0);
+        assertTrue("Events should be ordered by event time desc",
+                events.get(1).getEventTime().compareTo(events.get(2).getEventTime()) >= 0);
+    }
+
+    @Test
+    public void testDuplicateRunIdAndEventTimeStoresOnce() throws Exception {
+        String runId = "dup-run-" + System.currentTimeMillis();
+        String eventTime = "2024-01-15T10:30:00.000Z";
+        String eventJson = "{\n" +
+                "  \"eventType\": \"START\",\n" +
+                "  \"eventTime\": \"" + eventTime + "\",\n" +
+                "  \"run\": {\n" +
+                "    \"runId\": \"" + runId + "\"\n" +
+                "  },\n" +
+                "  \"producer\": \"https://my-producer.com\"\n" +
+                "}";
+
+        service.processEvent(eventJson);
+        service.processEvent(eventJson);
+
+        List<OpenLineageEvent> events = service.getEventsByRunId(runId);
+        assertEquals("Duplicate runId + eventTime should store only one event", 1, events.size());
+    }
+
+    @Test
     public void testHealthCheck() {
         boolean healthy = service.isHealthy();
         // The health check result depends on whether Cassandra is running
@@ -185,4 +205,5 @@ public class OpenLineageEventServiceTest {
         // we just verify the method doesn't throw an exception
         assertNotNull("Health check should return a value", healthy);
     }
+
 }

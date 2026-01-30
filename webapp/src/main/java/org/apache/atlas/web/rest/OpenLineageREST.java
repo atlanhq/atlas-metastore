@@ -45,8 +45,6 @@ import java.util.Map;
  * lineage events from data producers and storing them in Cassandra.
  *
  * Endpoints:
- * - POST /api/atlas/v2/openlineage - Ingest a single OpenLineage event
- * - POST /api/atlas/v2/openlineage/batch - Ingest multiple OpenLineage events
  * - GET /api/atlas/v2/openlineage/runs/{runId} - Retrieve events for a specific run
  * - GET /api/atlas/v2/openlineage/health - Health check
  */
@@ -107,67 +105,6 @@ public class OpenLineageREST {
                     .build();
         } catch (Exception e) {
             LOG.error("Unexpected error ingesting OpenLineage event", e);
-            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                    .entity(createErrorResponse("Internal server error: " + e.getMessage()))
-                    .build();
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-    /**
-     * Ingest multiple OpenLineage events in a batch.
-     *
-     * This endpoint allows batch ingestion of OpenLineage events for improved throughput.
-     * Individual event failures do not prevent other events from being processed.
-     *
-     * @param eventsJson List of OpenLineage events as JSON strings
-     * @return HTTP 200 with processing results, 400 for validation errors
-     * @throws AtlasBaseException if batch processing fails
-     */
-    @POST
-    @Path("/batch")
-    @Timed
-    public Response ingestBatchEvents(List<String> eventsJson) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "OpenLineageREST.ingestBatchEvents(count=" +
-                        (eventsJson != null ? eventsJson.size() : 0) + ")");
-            }
-
-            if (eventsJson == null || eventsJson.isEmpty()) {
-                LOG.warn("Received empty batch payload");
-                return Response.status(Response.Status.BAD_REQUEST)
-                        .entity(createErrorResponse("Event batch cannot be empty"))
-                        .build();
-            }
-
-            Map<Integer, String> errors = eventService.processBatchEvents(eventsJson);
-
-            Map<String, Object> response = new HashMap<>();
-            response.put("totalEvents", eventsJson.size());
-            response.put("successfulEvents", eventsJson.size() - errors.size());
-            response.put("failedEvents", errors.size());
-
-            if (!errors.isEmpty()) {
-                response.put("errors", errors);
-                LOG.warn("Batch ingestion completed with {} errors out of {} events",
-                        errors.size(), eventsJson.size());
-            } else {
-                LOG.info("Successfully ingested batch of {} OpenLineage events", eventsJson.size());
-            }
-
-            return Response.ok(response).build();
-
-        } catch (AtlasBaseException e) {
-            LOG.error("Failed to process OpenLineage event batch", e);
-            return Response.status(Response.Status.BAD_REQUEST)
-                    .entity(createErrorResponse(e.getMessage()))
-                    .build();
-        } catch (Exception e) {
-            LOG.error("Unexpected error processing OpenLineage event batch", e);
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
                     .entity(createErrorResponse("Internal server error: " + e.getMessage()))
                     .build();
