@@ -19,8 +19,6 @@
 
 package org.apache.atlas.web.service;
 
-import org.apache.hadoop.metrics2.MetricsSystem;
-import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
 import org.aspectj.lang.Signature;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
@@ -28,8 +26,10 @@ import org.springframework.stereotype.Service;
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
 
-import static org.apache.atlas.web.service.DebugMetricsWrapper.Constants.*;
-
+/**
+ * Wrapper for debug metrics collection.
+ * Hadoop metrics2 dependency has been removed - this is now a no-op implementation.
+ */
 @Lazy()
 @Service
 public class DebugMetricsWrapper {
@@ -40,10 +40,8 @@ public class DebugMetricsWrapper {
 
 	@PostConstruct
 	public void init() {
-		MetricsSystem metricsSystem = DefaultMetricsSystem.initialize(DEBUG_METRICS_CONTEXT);
-		metricsSystem.register(debugMetricsSource);
-        metricsSystem.register(DEBUG_METRICS_REST_SINK, "", debugMetricsRESTSink);
-    }
+		// Hadoop metrics2 system removed - no-op initialization
+	}
 
 	public void update(Signature name, long timeConsumed) {
 		debugMetricsSource.update(name, timeConsumed);
@@ -98,7 +96,6 @@ public class DebugMetricsWrapper {
 		public static final String EntityREST_removeLabels                   = EntityRESTPrefix + "removeLabels(..)";
 		public static final String EntityREST_importBMAttributes             = EntityRESTPrefix + "importBMAttributes(..)";
 
-		//TypesREST
 		public static final String TypesREST_getTypeDefByName                    = TypesRESTPrefix + "getTypeDefByName(..)";
 		public static final String TypesREST_getTypeDefByGuid                    = TypesRESTPrefix + "getTypeDefByGuid(..)";
 		public static final String TypesREST_getTypeDefHeaders                   = TypesRESTPrefix + "getTypeDefHeaders(..)";
@@ -120,7 +117,6 @@ public class DebugMetricsWrapper {
 		public static final String TypesREST_deleteAtlasTypeDefs                 = TypesRESTPrefix + "deleteAtlasTypeDefs(..)";
 		public static final String TypesREST_deleteAtlasTypeByName               = TypesRESTPrefix + "deleteAtlasTypeByName(..)";
 
-		//GlossaryREST
 		public static final String GlossaryREST_getGlossaries                          = GlossaryRESTPrefix + "getGlossaries(..)";
 		public static final String GlossaryREST_getGlossary                            = GlossaryRESTPrefix + "getGlossary(..)";
 		public static final String GlossaryREST_getDetailedGlossary                    = GlossaryRESTPrefix + "getDetailedGlossary(..)";
@@ -153,7 +149,6 @@ public class DebugMetricsWrapper {
 		public static final String GlossaryREST_getRelatedCategories                   = GlossaryRESTPrefix + "getRelatedCategories(..)";
 		public static final String GlossaryREST_importGlossaryData                     = GlossaryRESTPrefix + "importGlossaryData(..)";
 
-		//DiscoveryREST
 		public static final String DiscoveryREST_searchUsingDSL                        = DiscoveryRESTPrefix + "searchUsingDSL(..)";
 		public static final String DiscoveryREST_searchUsingBasic                      = DiscoveryRESTPrefix + "searchUsingBasic(..)";
 		public static final String DiscoveryREST_quickSearch                           = DiscoveryRESTPrefix + "quickSearch(..)";
@@ -170,7 +165,6 @@ public class DebugMetricsWrapper {
 		public static final String DiscoveryREST_executeSavedSearchByGuid              = DiscoveryRESTPrefix + "executeSavedSearchByGuid(..)";
 		public static final String DiscoveryREST_getSuggestions                        = DiscoveryRESTPrefix + "getSuggestions(..)";
 
-		//RelationshipREST
 		public static final String RelationshipREST_create                             = RelationshipRESTPrefix + "create(..)";
 		public static final String RelationshipREST_update                             = RelationshipRESTPrefix + "update(..)";
 		public static final String RelationshipREST_getById                            = RelationshipRESTPrefix + "getById(..)";
@@ -180,7 +174,6 @@ public class DebugMetricsWrapper {
 		public static final String LineageREST_getLineageGraph                         = LineageRESTPrefix + "getLineageGraph(..)";
 		public static final String NotificationHookConsumer_doWork                     = "NotificationHookConsumer.doWork(..)";
 
-		//duplicate short signature apis
 		public static final String EntityREST_createOrUpdateBulk                     = "EntityMutationResponse org.apache.atlas.web.rest.EntityREST.createOrUpdate(AtlasEntitiesWithExtInfo)";
 		public static final String EntityREST_removeLabelsByTypeName                 = "void org.apache.atlas.web.rest.EntityREST.removeLabels(String,Set,HttpServletRequest)";
 		public static final String EntityREST_setLabelsByTypeName                    = "void org.apache.atlas.web.rest.EntityREST.setLabels(String,Set,HttpServletRequest)";
