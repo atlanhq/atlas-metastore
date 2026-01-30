@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - improve-build-time
 
 jobs:
   # Detect what changed to optimize workflow execution
