@@ -1847,6 +1847,48 @@ public abstract class DeleteHandlerV1 {
 
         boolean earlyExitEnabled = DELETE_HASLINEAGE_EARLYEXIT_ENABLED.getBoolean();
 
+        // Phase 2B: Full-defer mode - skip ALL edge iteration when enabled with distributed mode
+        // Prerequisites: distributed mode must be enabled (async workers will handle hasLineage recalculation)
+        boolean fullDeferEnabled = DELETE_HASLINEAGE_FULLDEFER_ENABLED.getBoolean() && distributedHasLineageCalculationEnabled;
+
+        if (fullDeferEnabled) {
+            // Full-defer mode: collect vertex IDs + types directly, skip all edge iteration
+            int verticesCollected = 0;
+
+            for (AtlasVertex vertexToBeDeleted : vertices) {
+                if (ACTIVE.equals(getStatus(vertexToBeDeleted))) {
+                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(getTypeName(vertexToBeDeleted));
+                    boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
+                    boolean isCatalog = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
+
+                    if (isCatalog || isProcess) {
+                        // Collect vertex ID and type for async processing
+                        String vertexId = vertexToBeDeleted.getIdForDisplay();
+                        String typeName = getTypeName(vertexToBeDeleted);
+                        RequestContext.get().getFullDeferHasLineageVertices().put(vertexId, typeName);
+                        verticesCollected++;
+                    } else {
+                        verticesSkippedNonLineageType++;
+                    }
+                }
+            }
+
+            long latencyMs = System.currentTimeMillis() - startTime;
+            RequestContext.get().addLineageCalcTime(latencyMs);
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("removeHasLineageOnDelete full-defer mode: requestId={}, verticesCollected={}, skippedNonLineageType={}, latencyMs={}, flags=[earlyExit={}, fullDefer=true]",
+                        RequestContext.get().getTraceId(),
+                        verticesCollected,
+                        verticesSkippedNonLineageType,
+                        latencyMs,
+                        earlyExitEnabled);
+            }
+
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         for (AtlasVertex vertexToBeDeleted : vertices) {
             if (ACTIVE.equals(getStatus(vertexToBeDeleted))) {
                 AtlasEntityType entityType = typeRegistry.getEntityTypeByName(getTypeName(vertexToBeDeleted));

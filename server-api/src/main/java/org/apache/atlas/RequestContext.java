@@ -79,6 +79,10 @@ public class RequestContext {
     private final Map<String, List<Object>> removedElementsMap = new HashMap<>();
     private final Map<String, List<Object>> newElementsCreatedMap = new HashMap<>();
 
+    // Phase 2B: Full-defer hasLineage - stores vertexId -> typeName for async processing
+    // When full-defer mode is enabled, vertices are collected here instead of iterating edges
+    private final Map<String, String> fullDeferHasLineageVertices = new HashMap<>();
+
     private final Map<String, Set<AtlasRelationship>> relationshipMutationMap = new HashMap<>();
     private final Set<String> edgeLabels = new HashSet<>();
     
@@ -185,6 +189,7 @@ public class RequestContext {
         this.queuedTasks.clear();
         this.newElementsCreatedMap.clear();
         this.removedElementsMap.clear();
+        this.fullDeferHasLineageVertices.clear();
         this.deletedEdgesIds.clear();
         this.processGuidIds.clear();
         this.deletedEdgesIdsForResetHasLineage.clear();
@@ -263,6 +268,15 @@ public class RequestContext {
 
     public Map<String, List<Object>> getNewElementsCreatedMap() {
         return newElementsCreatedMap;
+    }
+
+    /**
+     * Phase 2B: Get vertices collected for full-defer hasLineage calculation.
+     * Map of vertexId -> typeName for Process/DataSet vertices being deleted.
+     * When full-defer mode is enabled, these are collected directly without edge iteration.
+     */
+    public Map<String, String> getFullDeferHasLineageVertices() {
+        return fullDeferHasLineageVertices;
     }
 
     public static String getCurrentUser() {

@@ -2660,7 +2660,25 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 response.addEntity(UPDATE, entity);
             }
         if (ENABLE_DISTRIBUTED_HAS_LINEAGE_CALCULATION.getBoolean() && ATLAS_DISTRIBUTED_TASK_ENABLED.getBoolean()) {
+            // Collect vertices for async hasLineage calculation from both sources:
+            // 1. RemovedElementsMap (edge-based collection from standard distributed mode)
+            // 2. FullDeferHasLineageVertices (direct vertex collection from full-defer mode)
             Map<String, String> typeByVertexId = getRemovedInputOutputVertexTypeMap();
+
+            // Phase 2B: Merge full-defer vertices if any were collected
+            Map<String, String> fullDeferVertices = RequestContext.get().getFullDeferHasLineageVertices();
+            if (!fullDeferVertices.isEmpty()) {
+                if (typeByVertexId == null) {
+                    typeByVertexId = new HashMap<>();
+                }
+                typeByVertexId.putAll(fullDeferVertices);
+
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("deleteVertices: merged {} full-defer vertices for async hasLineage calculation",
+                            fullDeferVertices.size());
+                }
+            }
+
             if (typeByVertexId != null && !typeByVertexId.isEmpty()) {
                 List<Map.Entry<String, String>> entries = new ArrayList<>(typeByVertexId.entrySet());
                 int batchSize = 1000;
