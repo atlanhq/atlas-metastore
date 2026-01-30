@@ -22,6 +22,7 @@ import org.apache.atlas.RequestContext;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.janusgraph.core.EdgeLabel;
+import org.janusgraph.core.VertexLabel;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasGraphIndex;
 import org.apache.atlas.repository.graphdb.janus.query.AtlasJanusGraphQuery;
@@ -154,7 +155,7 @@ public final class GraphDbObjectFactory {
     }
 
     /**
-     * @param label The Gremlin propertyKey.
+     * @param label The Gremlin edge label.
      *
      */
     public static AtlasJanusEdgeLabel createEdgeLabel(EdgeLabel label) {
@@ -162,6 +163,17 @@ public final class GraphDbObjectFactory {
             return null;
         }
         return new AtlasJanusEdgeLabel(label);
+    }
+
+    /**
+     * @param label The Gremlin vertex label.
+     *
+     */
+    public static AtlasJanusVertexLabel createVertexLabel(VertexLabel label) {
+        if (label == null) {
+            return null;
+        }
+        return new AtlasJanusVertexLabel(label);
     }
 
     /**
