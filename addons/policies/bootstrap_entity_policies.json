@@ -3327,7 +3327,6 @@
                 [
                     "entity-type:AIApplication",
                     "entity-type:AIModel",
-                    "entity-type:AIModelVersion",
                     "entity-classification:*",
                     "entity:*",
                     "classification:*"
@@ -3432,7 +3431,6 @@
                 "policyResourceCategory": "ENTITY",
                 "policyResources":
                 [
-                    "entity-type:AIModelVersion",
                     "entity-classification:*",
                     "entity:*"
                 ],
@@ -3583,7 +3581,6 @@
                 [
                     "entity-type:AIApplication",
                     "entity-type:AIModel",
-                    "entity-type:AIModelVersion",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
