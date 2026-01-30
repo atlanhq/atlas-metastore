@@ -26,6 +26,7 @@ on:
       - master
       - staging
       - alcon-v2-418
+      - policyaimodelversion
 
 jobs:
   # Detect what changed to optimize workflow execution
