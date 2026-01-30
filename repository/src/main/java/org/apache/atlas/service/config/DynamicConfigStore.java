@@ -3,7 +3,6 @@ package org.apache.atlas.service.config;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
-import org.apache.atlas.service.metrics.MaintenanceModeMetricsService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.BeansException;
@@ -362,11 +361,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
                 LOG.info("Config set - key: {}, value: {}, by: {} (no cache refresher)", key, value, updatedBy);
             }
 
-            // Update maintenance mode metric when the key changes
-            if (ConfigKey.MAINTENANCE_MODE.getKey().equals(key)) {
-                updateMaintenanceModeMetric("true".equalsIgnoreCase(value));
-            }
-
             // When maintenance mode is disabled, clear the activation flags
             if (ConfigKey.MAINTENANCE_MODE.getKey().equals(key) && "false".equalsIgnoreCase(value)) {
                 clearMaintenanceModeActivation(updatedBy);
@@ -409,20 +403,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
             }
         } catch (Exception e) {
             LOG.error("Failed to clear maintenance mode activation flags", e);
-        }
-    }
-
-    /**
-     * Update the maintenance mode Prometheus metric.
-     * Called when MAINTENANCE_MODE config changes.
-     * 
-     * @param enabled true if maintenance mode is enabled, false otherwise
-     */
-    private void updateMaintenanceModeMetric(boolean enabled) {
-        try {
-            MaintenanceModeMetricsService.updateMetric(enabled);
-        } catch (Exception e) {
-            LOG.debug("Failed to update maintenance mode metric - service may not be initialized yet", e);
         }
     }
 

@@ -9,7 +9,6 @@ import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import javax.inject.Inject;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 
@@ -18,14 +17,11 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
  * 
  * This service registers a gauge metric that exposes the current maintenance mode status.
  * The metric value is:
- *   - 1 when maintenance mode is enabled
- *   - 0 when maintenance mode is disabled
+ *   - 1.0 when maintenance mode is enabled
+ *   - 0.0 when maintenance mode is disabled
  * 
  * The metric is automatically scraped via /api/atlas/admin/metrics/prometheus endpoint
  * and flows to VictoriaMetrics through the existing Telegraf/VMAgent pipeline.
- * 
- * Performance: Uses AtomicInteger for O(1) reads. Call {@link #updateMaintenanceModeMetric(boolean)}
- * when maintenance mode changes to update the metric value.
  */
 @Service
 public class MaintenanceModeMetricsService {
@@ -39,12 +35,6 @@ public class MaintenanceModeMetricsService {
     
     private final MeterRegistry meterRegistry;
     
-    // AtomicInteger for O(1) gauge reads - updated when maintenance mode changes
-    private final AtomicInteger maintenanceModeValue = new AtomicInteger(0);
-    
-    // Singleton instance for static access
-    private static volatile MaintenanceModeMetricsService instance;
-    
     @Inject
     public MaintenanceModeMetricsService() {
         this(getMeterRegistry());
@@ -57,21 +47,19 @@ public class MaintenanceModeMetricsService {
     
     @PostConstruct
     public void init() {
-        instance = this;
         registerMaintenanceModeGauge();
-        // Initialize with current value
-        refreshMaintenanceModeValue();
         LOG.info("MaintenanceModeMetricsService initialized - maintenance mode metric registered");
     }
     
     /**
      * Register the maintenance mode gauge metric.
      * 
-     * Uses AtomicInteger for O(1) reads on each Prometheus scrape.
+     * The gauge uses a supplier function that reads from DynamicConfigStore on each scrape.
+     * This ensures the metric always reflects the current maintenance mode status.
      */
     private void registerMaintenanceModeGauge() {
         try {
-            Gauge.builder(METRIC_NAME, maintenanceModeValue, AtomicInteger::get)
+            Gauge.builder(METRIC_NAME, this::getMaintenanceModeValue)
                     .description("Whether maintenance mode is currently enabled (1=enabled, 0=disabled)")
                     .tag(SERVICE_TAG, SERVICE_NAME)
                     .tag(COMPONENT_TAG, COMPONENT_NAME)
@@ -84,43 +72,16 @@ public class MaintenanceModeMetricsService {
     }
     
     /**
-     * Update the maintenance mode metric value.
-     * Call this method when maintenance mode is enabled or disabled.
+     * Get the current maintenance mode status as a numeric value.
      * 
-     * @param enabled true if maintenance mode is enabled, false otherwise
+     * @return 1.0 if maintenance mode is enabled, 0.0 otherwise
      */
-    public void updateMaintenanceModeMetric(boolean enabled) {
-        int newValue = enabled ? 1 : 0;
-        int oldValue = maintenanceModeValue.getAndSet(newValue);
-        if (oldValue != newValue) {
-            LOG.info("Maintenance mode metric updated: {} -> {}", oldValue, newValue);
-        }
-    }
-    
-    /**
-     * Refresh the metric value from DynamicConfigStore.
-     * Called during initialization and can be called to sync the metric value.
-     */
-    public void refreshMaintenanceModeValue() {
+    private double getMaintenanceModeValue() {
         try {
-            boolean enabled = DynamicConfigStore.isMaintenanceModeEnabled();
-            maintenanceModeValue.set(enabled ? 1 : 0);
-            LOG.debug("Maintenance mode metric refreshed: {}", enabled);
+            return DynamicConfigStore.isMaintenanceModeEnabled() ? 1.0 : 0.0;
         } catch (Exception e) {
-            LOG.warn("Failed to refresh maintenance mode metric, keeping current value", e);
-        }
-    }
-    
-    /**
-     * Static method to update maintenance mode metric.
-     * Can be called from DynamicConfigStore when maintenance mode changes.
-     * 
-     * @param enabled true if maintenance mode is enabled, false otherwise
-     */
-    public static void updateMetric(boolean enabled) {
-        MaintenanceModeMetricsService svc = instance;
-        if (svc != null) {
-            svc.updateMaintenanceModeMetric(enabled);
+            LOG.warn("Failed to read maintenance mode status, returning 0.0", e);
+            return 0.0;
         }
     }
 }
