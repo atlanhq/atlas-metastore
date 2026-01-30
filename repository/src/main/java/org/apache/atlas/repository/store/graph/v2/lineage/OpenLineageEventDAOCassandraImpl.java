@@ -176,12 +176,14 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
                         "event text, " +
                         "status text, " +
                         "PRIMARY KEY ((runID), eventId)" +
-                        ") WITH CLUSTERING ORDER BY (eventId DESC);",
+                        ") WITH CLUSTERING ORDER BY (eventId DESC) " +
+                        "AND default_time_to_live = 1209600;",
                 KEYSPACE, TABLE_NAME);
         executeWithRetry(SimpleStatement.builder(createTableQuery)
                 .setConsistencyLevel(DefaultConsistencyLevel.ALL)
                 .build());
         LOG.info("Ensured table {}.{} exists", KEYSPACE, TABLE_NAME);
+
     }
 
     @Override

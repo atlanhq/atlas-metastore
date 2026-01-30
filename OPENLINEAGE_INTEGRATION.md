@@ -50,7 +50,8 @@ CREATE TABLE events_by_run (
     event text,
     status text,
     PRIMARY KEY ((runID), eventId)
-) WITH CLUSTERING ORDER BY (eventId DESC);
+) WITH CLUSTERING ORDER BY (eventId DESC)
+  AND default_time_to_live = 1209600;
 ```
 
 **Design Rationale:**
