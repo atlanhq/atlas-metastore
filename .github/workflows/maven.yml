@@ -139,88 +139,12 @@ jobs:
       # GitHub runners have ~14GB free but pre-installed
       # software consumes most of it. This frees ~30GB.
       # ============================================
-      - name: Free up disk space (aggressive)
+      # Fast disk cleanup - only rm -rf commands, skip slow apt-get
+      - name: Free up disk space
         run: |
-          echo "=========================================="
-          echo "INITIAL DISK SPACE"
-          echo "=========================================="
+          echo "Freeing disk space..."
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift || true
           df -h / | tail -1
-          
-          echo ""
-          echo "=========================================="
-          echo "REMOVING PRE-INSTALLED SOFTWARE"
-          echo "=========================================="
-          
-          # Remove Android SDK (~12GB)
-          sudo rm -rf /usr/local/lib/android || true
-          
-          # Remove .NET (~2GB)
-          sudo rm -rf /usr/share/dotnet || true
-          
-          # Remove Haskell/GHC (~5GB)
-          sudo rm -rf /opt/ghc || true
-          sudo rm -rf /usr/local/.ghcup || true
-          
-          # Remove Swift (~2GB)
-          sudo rm -rf /usr/share/swift || true
-          
-          # Remove CodeQL (~1GB)
-          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
-          
-          # Remove Go (~1GB)
-          sudo rm -rf /opt/hostedtoolcache/go || true
-          
-          # Remove Python versions we don't need
-          sudo rm -rf /opt/hostedtoolcache/Python/3.7.* || true
-          sudo rm -rf /opt/hostedtoolcache/Python/3.8.* || true
-          sudo rm -rf /opt/hostedtoolcache/Python/3.9.* || true
-          
-          # Remove Ruby
-          sudo rm -rf /opt/hostedtoolcache/Ruby || true
-          
-          # Remove Node.js versions
-          sudo rm -rf /opt/hostedtoolcache/node || true
-          
-          # Remove PyPy
-          sudo rm -rf /opt/hostedtoolcache/PyPy || true
-          
-          # Remove large apt packages
-          sudo apt-get remove -y '^dotnet-.*' '^llvm-.*' 'php.*' '^mongodb-.*' '^mysql-.*' azure-cli google-cloud-cli google-chrome-stable firefox powershell mono-devel libgl1-mesa-dri --fix-missing 2>/dev/null || true
-          sudo apt-get autoremove -y || true
-          sudo apt-get clean || true
-          
-          # Clean apt cache
-          sudo rm -rf /var/lib/apt/lists/* || true
-          sudo rm -rf /var/cache/apt/archives/* || true
-          
-          # Remove swap file (~4GB)
-          sudo swapoff -a || true
-          sudo rm -f /swapfile || true
-          sudo rm -f /mnt/swapfile || true
-          
-          # Clean Docker (just in case there are pre-pulled images)
-          docker system prune -af --volumes 2>/dev/null || true
-          
-          # Remove other large directories
-          sudo rm -rf /usr/local/share/boost || true
-          sudo rm -rf /usr/local/graalvm || true
-          sudo rm -rf /usr/local/julia* || true
-          
-          echo ""
-          echo "=========================================="
-          echo "DISK SPACE AFTER CLEANUP"
-          echo "=========================================="
-          df -h / | tail -1
-          
-          # Verify we have enough space
-          AVAILABLE_GB=$(df -BG / | tail -1 | awk '{print $4}' | sed 's/G//')
-          echo "Available space: ${AVAILABLE_GB}GB"
-          
-          if [ "$AVAILABLE_GB" -lt 25 ]; then
-            echo "⚠️  Warning: Less than 25GB available, build might fail"
-          else
-            echo "✅ Sufficient disk space available (${AVAILABLE_GB}GB)"
-          fi
 
       - uses: actions/checkout@v3
 
