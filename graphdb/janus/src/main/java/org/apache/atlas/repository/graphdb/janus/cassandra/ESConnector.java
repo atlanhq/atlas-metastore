@@ -47,6 +47,12 @@ public class ESConnector {
     private static String GET_DOCS_BY_ID = VERTEX_INDEX_NAME + "/_mget";
     public static final String JG_ES_DOC_ID_PREFIX = "S"; // S fot string type custom vertex ID
 
+    // Painless script that sets non-null values and removes null values from ES doc.
+    // This preserves fields not in the update (like tag attributes) while allowing field removal.
+    private static final String UPSERT_SCRIPT = "for (entry in params.updates.entrySet()) { " +
+            "if (entry.getValue() == null) { ctx._source.remove(entry.getKey()); } " +
+            "else { ctx._source[entry.getKey()] = entry.getValue(); } }";
+
 
 
     public static final String INDEX_BACKEND_CONF = "atlas.graph.index.search.hostname";
@@ -88,8 +94,33 @@ public class ESConnector {
         writeTagProperties(entitiesMap, false);
     }
 
-    public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, boolean upsert, List<String> docIdsToDelete) {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("writeTagPropertiesES");
+    /**
+     * Updates and writes tag properties for multiple entities to Elasticsearch index.
+     *
+     * This method processes the provided entities map to prepare an Elasticsearch bulk
+     * request for updating tag properties and denormalized attributes. The modifications
+     * include attributes specified in the {@code DENORM_ATTRS} field and a modification
+     * timestamp. The bulk request is then executed using a low-level client.
+     *
+     * @param entitiesMap A map where the keys represent the entity vertex IDs (as strings),
+     *                    and the values are maps containing the attributes to be updated
+     *                    for each entity.
+     * @param upsert A boolean flag that indicates whether the update operation should upsert
+     *               (create new doc if not found) the document in the Elasticsearch index.
+     */
+    public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
+        syncToEs(entitiesMap, null, upsert, false);
+    }
+
+    /**
+     * Updates attributes on ES docs. Fields with null values will be REMOVED from ES doc.
+     * @param entitiesMapForUpdate map to update on ES. Null values indicate field removal.
+     * @param docIdsToDelete Doc Ids to delete from ES
+     * @param upsert if true, helps to avoid document_missing_exception if doc is not present while creating/updating asset
+     * @param useScript if true, use painless script to support field removal (null values remove field from ES doc)
+     */
+    public static void syncToEs(Map<String, Map<String, Object>> entitiesMapForUpdate, List<String> docIdsToDelete, boolean upsert, boolean useScript) {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("syncToEs");
 
         if (MapUtils.isEmpty(entitiesMapForUpdate) && CollectionUtils.isEmpty(docIdsToDelete)) {
             return;
@@ -101,18 +132,42 @@ public class ESConnector {
                 for (String assetDocId : entitiesMapForUpdate.keySet()) {
                     Map<String, Object> toUpdate = new HashMap<>(entitiesMapForUpdate.get(assetDocId));
 
-                    bulkRequestBody.append("{\"update\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",\"_id\":\"" + assetDocId + "\" }}\n");
+                    // Check if there are any null values that need to be removed
+                    boolean hasNullValues = useScript && toUpdate.values().stream().anyMatch(v -> v == null);
 
-                    bulkRequestBody.append("{");
+                    bulkRequestBody.append("{\"update\":{\"_index\":\"");
+                    bulkRequestBody.append(VERTEX_INDEX_NAME).append("\",\"_id\":\"").append(assetDocId).append("\"}}\n");
 
-                    String attrsToUpdate = AtlasType.toJson(toUpdate);
-                    bulkRequestBody.append("\"doc\":" + attrsToUpdate);
+                    if (hasNullValues) {
+                        // Use script to support field removal: null values remove field, non-null values set field
+                        // This preserves fields not in the update (like tag attributes)
+                        Map<String, Object> scriptBody = new HashMap<>();
+                        Map<String, Object> script = new HashMap<>();
+                        script.put("source", UPSERT_SCRIPT);
+                        script.put("lang", "painless");
+                        script.put("params", Collections.singletonMap("updates", toUpdate));
+                        scriptBody.put("script", script);
 
-                    if (upsert) {
-                        bulkRequestBody.append(",\"upsert\":" + attrsToUpdate);
+                        if (upsert) {
+                            // For upsert, filter out null values since the doc doesn't exist yet
+                            Map<String, Object> upsertDoc = new HashMap<>();
+                            for (Map.Entry<String, Object> entry : toUpdate.entrySet()) {
+                                if (entry.getValue() != null) {
+                                    upsertDoc.put(entry.getKey(), entry.getValue());
+                                }
+                            }
+                            scriptBody.put("upsert", upsertDoc);
+                        }
+                        bulkRequestBody.append(AtlasType.toJson(scriptBody)).append("\n");
+                    } else {
+                        // Simple doc merge (no null values, just adds/updates)
+                        String attrsToUpdate = AtlasType.toJson(toUpdate);
+                        bulkRequestBody.append("{\"doc\":").append(attrsToUpdate);
+                        if (upsert) {
+                            bulkRequestBody.append(",\"upsert\":").append(attrsToUpdate);
+                        }
+                        bulkRequestBody.append("}\n");
                     }
-
-                    bulkRequestBody.append("}\n");
                 }
             }
 
@@ -167,24 +222,6 @@ public class ESConnector {
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
-    }
-
-    /**
-     * Updates and writes tag properties for multiple entities to Elasticsearch index.
-     *
-     * This method processes the provided entities map to prepare an Elasticsearch bulk
-     * request for updating tag properties and denormalized attributes. The modifications
-     * include attributes specified in the {@code DENORM_ATTRS} field and a modification
-     * timestamp. The bulk request is then executed using a low-level client.
-     *
-     * @param entitiesMap A map where the keys represent the entity vertex IDs (as strings),
-     *                    and the values are maps containing the attributes to be updated
-     *                    for each entity.
-     * @param upsert A boolean flag that indicates whether the update operation should upsert
-     *               (create new doc if not found) the document in the Elasticsearch index.
-     */
-    public static void writeTagProperties(Map<String, Map<String, Object>> entitiesMap, boolean upsert) {
-        syncToEs(entitiesMap, upsert, null);
     }
 
     private static List<HttpHost> getHttpHosts() throws AtlasException {

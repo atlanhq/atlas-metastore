@@ -22,6 +22,7 @@ public class DynamicVertex {
     private static final Logger LOG = LoggerFactory.getLogger(DynamicVertex.class);
 
     private final Map<String, Object> properties = new HashMap<>();
+    private final Set<String> removedProperties = new HashSet<>();
 
     /**
      * Default constructor.
@@ -86,6 +87,7 @@ public class DynamicVertex {
 
     /**
      * Sets a property value.
+     * If the property was previously removed in this transaction, it will no longer be marked for removal.
      *
      * @param key   The property key
      * @param value The property value
@@ -93,6 +95,7 @@ public class DynamicVertex {
      */
     public DynamicVertex setProperty(String key, Object value) {
         properties.put(key, value);
+        removedProperties.remove(key);
         return this;
     }
 
@@ -113,6 +116,7 @@ public class DynamicVertex {
             if (!values.contains(value)) {
                 values.add(value);
                 properties.put(key, values);
+                removedProperties.remove(key);
             }
         } catch (ClassCastException cce) {
             throw new RuntimeException(cce);
@@ -124,7 +128,7 @@ public class DynamicVertex {
             List<Object> values = (List<Object>) properties.getOrDefault(key, new ArrayList<>(1));
             values.add(value);
             properties.put(key, values);
-
+            removedProperties.remove(key);
         } catch (ClassCastException cce) {
             throw new RuntimeException(cce);
         }
@@ -165,7 +169,29 @@ public class DynamicVertex {
      * @return The previous value, or null if no mapping existed
      */
     public Object removeProperty(String key) {
-        return properties.remove(key);
+        Object removed = properties.remove(key);
+        if (removed != null) {
+            removedProperties.add(key);
+        }
+        return removed;
+    }
+
+    /**
+     * Gets the set of property keys that have been removed.
+     * Used for ES sync to explicitly remove these fields from ES documents.
+     *
+     * @return An unmodifiable set of removed property keys
+     */
+    public Set<String> getRemovedProperties() {
+        return Collections.unmodifiableSet(removedProperties);
+    }
+
+    /**
+     * Clears the removed properties tracking set.
+     * Call this after ES sync is complete.
+     */
+    public void clearRemovedProperties() {
+        removedProperties.clear();
     }
 
     @Override
