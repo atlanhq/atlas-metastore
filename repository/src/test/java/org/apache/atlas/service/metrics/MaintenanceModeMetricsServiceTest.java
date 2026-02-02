@@ -25,7 +25,6 @@ class MaintenanceModeMetricsServiceTest {
 
     @Test
     void testMaintenanceModeGaugeIsRegistered() {
-        // Then - verify the gauge is registered with correct name
         Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled")
                 .tag("service", "atlas-metastore")
                 .tag("component", "config")
@@ -35,45 +34,62 @@ class MaintenanceModeMetricsServiceTest {
     }
 
     @Test
-    void testMaintenanceModeGaugeHasCorrectTags() {
-        // Then - verify all expected tags are present
-        Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled")
+    void testDynamicConfigStoreGaugeIsRegistered() {
+        Gauge gauge = meterRegistry.find("atlas_dynamic_config_store_enabled")
                 .tag("service", "atlas-metastore")
-                .gauge();
-
-        assertNotNull(gauge, "Gauge should have service tag");
-
-        gauge = meterRegistry.find("atlas_maintenance_mode_enabled")
                 .tag("component", "config")
                 .gauge();
 
-        assertNotNull(gauge, "Gauge should have component tag");
+        assertNotNull(gauge, "DynamicConfigStore enabled gauge should be registered");
+    }
+
+    @Test
+    void testMaintenanceModeGaugeHasCorrectTags() {
+        Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled")
+                .tag("service", "atlas-metastore")
+                .tag("component", "config")
+                .gauge();
+
+        assertNotNull(gauge, "Gauge should have service and component tags");
     }
 
     @Test
     void testMaintenanceModeGaugeDefaultValue() {
-        // When AtlasConfiguration is not set (test environment),
-        // the gauge should return 0.0 (default value for atlas.maintenance.mode)
-        Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled")
-                .tag("service", "atlas-metastore")
-                .tag("component", "config")
-                .gauge();
+        // In test environment, maintenance mode defaults to disabled (0.0)
+        Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled").gauge();
 
         assertNotNull(gauge);
-        // Default value should be 0.0 (maintenance mode disabled)
         assertEquals(0.0, gauge.value(), 0.01, 
             "Gauge should return 0.0 when maintenance mode is disabled (default)");
     }
 
     @Test
+    void testDynamicConfigStoreGaugeDefaultValue() {
+        // In test environment, DynamicConfigStore is not enabled (0.0)
+        Gauge gauge = meterRegistry.find("atlas_dynamic_config_store_enabled").gauge();
+
+        assertNotNull(gauge);
+        assertEquals(0.0, gauge.value(), 0.01, 
+            "Gauge should return 0.0 when DynamicConfigStore is not enabled");
+    }
+
+    @Test
     void testMaintenanceModeGaugeHasDescription() {
-        // Then - verify the gauge has a description
-        Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled")
-                .gauge();
+        Gauge gauge = meterRegistry.find("atlas_maintenance_mode_enabled").gauge();
 
         assertNotNull(gauge);
         assertNotNull(gauge.getId().getDescription(), "Gauge should have a description");
         assertTrue(gauge.getId().getDescription().contains("maintenance mode"),
             "Description should mention maintenance mode");
+    }
+
+    @Test
+    void testDynamicConfigStoreGaugeHasDescription() {
+        Gauge gauge = meterRegistry.find("atlas_dynamic_config_store_enabled").gauge();
+
+        assertNotNull(gauge);
+        assertNotNull(gauge.getId().getDescription(), "Gauge should have a description");
+        assertTrue(gauge.getId().getDescription().contains("DynamicConfigStore"),
+            "Description should mention DynamicConfigStore");
     }
 }
