@@ -3,8 +3,6 @@ package org.apache.atlas.service.metrics;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.service.config.ConfigKey;
-import org.apache.atlas.service.config.DynamicConfigStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -21,6 +19,8 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
  * The metric value is:
  *   - 1.0 when maintenance mode is enabled
  *   - 0.0 when maintenance mode is disabled
+ * 
+ * Reads directly from atlas.maintenance.mode config property.
  * 
  * The metric is automatically scraped via /api/atlas/admin/metrics/prometheus endpoint
  * and flows to VictoriaMetrics through the existing Telegraf/VMAgent pipeline.
@@ -55,9 +55,6 @@ public class MaintenanceModeMetricsService {
     
     /**
      * Register the maintenance mode gauge metric.
-     * 
-     * The gauge uses a supplier function that reads maintenance mode status on each scrape.
-     * This ensures the metric always reflects the current maintenance mode status.
      */
     private void registerMaintenanceModeGauge() {
         try {
@@ -75,33 +72,16 @@ public class MaintenanceModeMetricsService {
     
     /**
      * Get the current maintenance mode status as a numeric value.
-     * 
-     * Uses the same logic as TaskQueueWatcher, EntityGraphMapper, and ActiveServerFilter
-     * to ensure consistent behavior across the codebase.
+     * Reads directly from atlas.maintenance.mode config property.
      * 
      * @return 1.0 if maintenance mode is enabled, 0.0 otherwise
      */
     private double getMaintenanceModeValue() {
-        return isMaintenanceModeEnabled() ? 1.0 : 0.0;
-    }
-    
-    /**
-     * Check if maintenance mode is enabled.
-     * 
-     * Logic mirrors TaskQueueWatcher, EntityGraphMapper, and ActiveServerFilter:
-     * 1. If DynamicConfigStore is enabled, read from Cassandra cache
-     * 2. Otherwise, fall back to static AtlasConfiguration
-     * 
-     * @return true if maintenance mode is enabled, false otherwise
-     */
-    private boolean isMaintenanceModeEnabled() {
         try {
-            if (DynamicConfigStore.isEnabled()) {
-                return DynamicConfigStore.getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
-            }
+            return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean() ? 1.0 : 0.0;
         } catch (Exception e) {
-            LOG.debug("Error checking DynamicConfigStore for maintenance mode, falling back to static config", e);
+            LOG.warn("Failed to read maintenance mode from config, returning 0.0", e);
+            return 0.0;
         }
-        return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
     }
 }
