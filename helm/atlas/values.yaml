@@ -24,6 +24,7 @@ global:
     enabled: false
   leangraph:
     enabled: false
+    service: "atlas-leangraph-service.atlas.svc.cluster.local"
     dedicated:
       enabled: false  # Creates dedicated Cassandra and Elasticsearch StatefulSets
       active: false   # Uses dedicated resources in configmap
@@ -45,6 +46,7 @@ hpa:
     averageUtilization: 85
 
 atlas:
+  primaryImage: ghcr.io/atlanhq/atlas-metastore-master:97e7ca3abcd
   name: atlas
   maintenanceMode: false
   cache:
@@ -124,6 +126,16 @@ atlas:
   types_update:
     async_enable: true
     thread_count: 5
+  
+  leangraph:
+    enabled: true
+    replicaCount: 2
+    service:
+      portName: leangraph
+      type: ClusterIP
+      path: /api/atlas/v2/
+      port: 80
+      targetPort: 21000
 
   # Cassandra Config Store - Dynamic configuration backed by Cassandra
   # Migration Strategy:
@@ -148,7 +160,8 @@ atlas:
     repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
     tag: ATLAS_LATEST_IMAGE_TAG
     pullPolicy: IfNotPresent
-  imagePullSecrets: {}
+  imagePullSecrets:
+    - name: github-docker-registry
   tolerations: []
 
   # Affinity rules for atlas

@@ -32,6 +32,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.atlas.repository.Constants.INDEX_PREFIX;
+import static org.apache.atlas.repository.Constants.VERTEX_INDEX;
 import static org.apache.atlas.web.integration.AtlasDockerIntegrationTest.ES_URL;
 import static org.apache.atlas.web.integration.utils.TestUtil.sleep;
 import static org.apache.atlas.web.integration.utils.TestUtil.verifyESDocumentNotPresent;
@@ -40,7 +42,7 @@ public class ESUtil {
 
     private static final Logger       LOG = LoggerFactory.getLogger(ESUtil.class);
     public static RestHighLevelClient highLevelClient;
-    public static String              JG_VERTEX_INDEX = "janusgraph_vertex_index";
+    public static String              JG_VERTEX_INDEX = INDEX_PREFIX + VERTEX_INDEX;
     public static String              index_access_logs = "ranger-audit";
 
     private static RequestOptions requestOptions = RequestOptions.DEFAULT;
@@ -155,7 +157,7 @@ public class ESUtil {
 
             ObjectMapper mapper = new ObjectMapper();
             TypeReference<HashMap<String,Object>> typeRef = new TypeReference<HashMap<String,Object>>() {};
-            return mapper.readValue(response.getAliases().get("janusgraph_vertex_index").iterator().next().filter().toString(), typeRef);
+            return mapper.readValue(response.getAliases().get(JG_VERTEX_INDEX).iterator().next().filter().toString(), typeRef);
 
         } catch (Exception e) {
             LOG.info("Re-creating highLevelClient");

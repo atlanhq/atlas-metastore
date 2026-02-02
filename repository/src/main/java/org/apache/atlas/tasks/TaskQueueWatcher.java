@@ -56,7 +56,7 @@ public class TaskQueueWatcher implements Runnable {
 
     private static long pollInterval = AtlasConfiguration.TASKS_REQUEUE_POLL_INTERVAL.getLong();
     private static final String TASK_LOCK = "/task-lock";
-    private static final String ATLAS_TASK_LOCK = "atlas:task:lock";
+    private static final String ATLAS_TASK_LOCK = "task:lock";
 
     private final AtomicBoolean shouldRun = new AtomicBoolean(false);
     private final AtomicBoolean maintenanceModeActivated = new AtomicBoolean(false);

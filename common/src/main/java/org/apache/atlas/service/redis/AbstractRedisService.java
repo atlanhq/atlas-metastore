@@ -1,7 +1,9 @@
 package org.apache.atlas.service.redis;
 
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.ArrayUtils;
@@ -69,32 +71,33 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public boolean acquireDistributedLock(String key) throws Exception {
-        getLogger().info("Attempting to acquire distributed lock for {}, host:{}", key, getHostAddress());
-        RLock lock = redisClient.getFairLock(key);
+        String namespacedKey = convertToNamespace(key);
+        getLogger().info("Attempting to acquire distributed lock for {}, host:{}", namespacedKey, getHostAddress());
+        RLock lock = redisClient.getFairLock(namespacedKey);
         String currentThreadName = Thread.currentThread().getName();
         try {
             // Redisson automatically handles lock renewal via its watchdog mechanism
             // when leaseTime is -1 (which is the default for tryLock without leaseTime)
             boolean isLockAcquired = lock.tryLock(waitTimeInMS, TimeUnit.MILLISECONDS);
             if (isLockAcquired) {
-                getLogger().info("Lock with key {} is acquired, host: {}, thread: {}", key, getHostAddress(), currentThreadName);
+                getLogger().info("Lock with key {} is acquired, host: {}, thread: {}", namespacedKey, getHostAddress(), currentThreadName);
 
                 // Store lock information
-                keyLockMap.put(key, lock);
+                keyLockMap.put(namespacedKey, lock);
                 LockInfo lockInfo = new LockInfo(lock, currentThreadName);
-                activeLocks.put(key, lockInfo);
+                activeLocks.put(namespacedKey, lockInfo);
 
                 // Start health monitoring (not renewal - Redisson handles that automatically)
                 ScheduledFuture<?> healthCheckTask = heartbeatExecutor.scheduleAtFixedRate(() -> {
-                    monitorLockHealth(key, lockInfo);
+                    monitorLockHealth(namespacedKey, lockInfo);
                 }, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
                 lockInfo.healthCheckTask = healthCheckTask;
             } else {
-                getLogger().info("Attempt failed as fair lock {} is already acquired, host: {}", key, getHostAddress());
+                getLogger().info("Attempt failed as fair lock {} is already acquired, host: {}", namespacedKey, getHostAddress());
             }
             return isLockAcquired;
         } catch (InterruptedException e) {
-            getLogger().error("Failed to acquire distributed lock for {}, host: {}", key, getHostAddress(), e);
+            getLogger().error("Failed to acquire distributed lock for {}, host: {}", namespacedKey, getHostAddress(), e);
             throw new AtlasException(e);
         }
     }
@@ -118,22 +121,23 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public Lock acquireDistributedLockV2(String key) throws Exception {
-        getLogger().info("Attempting to acquire distributed lock for {}, host:{}", key, getHostAddress());
+        String namespacedKey = convertToNamespace(key);
+        getLogger().info("Attempting to acquire distributed lock for {}, host:{}", namespacedKey, getHostAddress());
         RLock lock = null;
         try {
-            lock = redisClient.getFairLock(key);
+            lock = redisClient.getFairLock(namespacedKey);
             // Use Redisson's automatic renewal by not specifying leaseTime
             boolean isLockAcquired = lock.tryLock(waitTimeInMS, TimeUnit.MILLISECONDS);
             if (isLockAcquired) {
-                getLogger().info("Lock with key {} is acquired, host: {}.", key, getHostAddress());
+                getLogger().info("Lock with key {} is acquired, host: {}.", namespacedKey, getHostAddress());
                 return lock;
             } else {
-                getLogger().info("Attempt failed as fair lock {} is already acquired, host: {}.", key, getHostAddress());
+                getLogger().info("Attempt failed as fair lock {} is already acquired, host: {}.", namespacedKey, getHostAddress());
                 return null;
             }
 
         } catch (InterruptedException e) {
-            getLogger().error("Failed to acquire distributed lock for {}, host: {}", key, getHostAddress(), e);
+            getLogger().error("Failed to acquire distributed lock for {}, host: {}", namespacedKey, getHostAddress(), e);
             if (lock != null && lock.isHeldByCurrentThread()) {
                 lock.unlock();
             }
@@ -144,21 +148,22 @@ public abstract class AbstractRedisService implements RedisService {
 
     @Override
     public void releaseDistributedLock(String key) {
-        if (!keyLockMap.containsKey(key)) {
+        String namespacedKey = convertToNamespace(key);
+        if (!keyLockMap.containsKey(namespacedKey)) {
             return;
         }
         try {
-            RLock lock = keyLockMap.get(key);
+            RLock lock = keyLockMap.get(namespacedKey);
             if (lock != null && lock.isHeldByCurrentThread()) {
                 lock.unlock();
-                getLogger().info("Released distributed lock for {}", key);
+                getLogger().info("Released distributed lock for {}", namespacedKey);
             }
             // Cleanup monitoring and tracking
-            cleanupLockMonitoring(key);
-            keyLockMap.remove(key);
+            cleanupLockMonitoring(namespacedKey);
+            keyLockMap.remove(namespacedKey);
 
         } catch (Exception e) {
-            getLogger().error("Failed to release distributed lock for {}", key, e);
+            getLogger().error("Failed to release distributed lock for {}", namespacedKey, e);
         }
     }
 
@@ -263,8 +268,12 @@ public abstract class AbstractRedisService implements RedisService {
     }
 
     private String convertToNamespace(String key){
-        // Append key with namespace :atlas
-        return "atlas:"+key;
+        // Append key with configurable namespace prefix only when lean graph is enabled
+        if (Constants.LEAN_GRAPH_ENABLED) {
+            String namespace = AtlasConfiguration.REDIS_NAMESPACE.getString();
+            return namespace + ":" + key;
+        }
+        return key;
     }
 
     Config getLocalConfig() throws AtlasException {

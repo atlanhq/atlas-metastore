@@ -19,6 +19,7 @@
 package org.apache.atlas.repository.store.users;
 
 import org.apache.atlas.exception.AtlasBaseException;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -48,6 +49,10 @@ public class KeycloakStore {
         this.saveGroupsToAttributes  = saveGroupsToAttributes;
     }
 
+    public static boolean isKeycloakMutationsEnabled() {
+        return Constants.LEAN_GRAPH_ENABLED;
+    }
+
     public RoleRepresentation createRole(String name) throws AtlasBaseException {
         return createRole(name, false, null, null, null, null);
     }
@@ -59,6 +64,10 @@ public class KeycloakStore {
 
     public RoleRepresentation createRoleForConnection(String name, boolean isComposite,
                                                       List<String> users, List<String> groups, List<String> roles) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping createRoleForConnection for role: {}", name);
+            return null;
+        }
 
         List<UserRepresentation> roleUsers = new ArrayList<>();
 
@@ -136,6 +145,10 @@ public class KeycloakStore {
     public RoleRepresentation createRole(String name, boolean isComposite,
                                          List<String> users, List<String> groups, List<String> roles,
                                          Map<String, List<String>> attributes) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping createRole for role: {}", name);
+            return null;
+        }
 
         List<UserRepresentation> roleUsers = new ArrayList<>();
 
@@ -235,6 +248,10 @@ public class KeycloakStore {
     }
 
     public RoleRepresentation createRole(RoleRepresentation role) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping createRole for role: {}", role.getName());
+            return null;
+        }
         getKeycloakClient().createRole(role);
         return getKeycloakClient().getRoleByName(role.getName());
     }
@@ -252,6 +269,10 @@ public class KeycloakStore {
     public void updateRoleUsers(String roleName,
                                 List<String> existingUsers, List<String> newUsers,
                                 RoleRepresentation roleRepresentation) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateRoleUsers for role: {}", roleName);
+            return;
+        }
 
         if (roleRepresentation == null) {
             throw new AtlasBaseException("Failed to updateRoleUsers as roleRepresentation is null");
@@ -296,6 +317,10 @@ public class KeycloakStore {
     public void updateRoleGroups(String roleName,
                                  List<String> existingGroups, List<String> newGroups,
                                  RoleRepresentation roleRepresentation) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateRoleGroups for role: {}", roleName);
+            return;
+        }
 
         if (roleRepresentation == null) {
             throw new AtlasBaseException("Failed to updateRoleGroups as roleRepresentation is null");
@@ -340,6 +365,10 @@ public class KeycloakStore {
     public void updateRoleRoles(String roleName,
                                 List<String> existingRoles, List<String> newRoles,
                                 RoleRepresentation roleRepresentation) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateRoleRoles for role: {}", roleName);
+            return;
+        }
 
         if (roleRepresentation == null) {
             throw new AtlasBaseException("Failed to updateRoleRoles as roleRepresentation is null");
@@ -370,12 +399,21 @@ public class KeycloakStore {
     }
 
     public void removeRole(String roleId) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping removeRole for roleId: {}", roleId);
+            return;
+        }
         if (StringUtils.isNotEmpty(roleId)) {
             getKeycloakClient().deleteRoleById(roleId);
             LOG.info("Removed keycloak role with id {}", roleId);
         }
     }
+
     public void removeRoleByName(String roleName) throws AtlasBaseException {
+        if (!isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping removeRoleByName for role: {}", roleName);
+            return;
+        }
         if (StringUtils.isNotEmpty(roleName)) {
             getKeycloakClient().deleteRoleByName(roleName);
             LOG.info("Removed keycloak role with name {}", roleName);

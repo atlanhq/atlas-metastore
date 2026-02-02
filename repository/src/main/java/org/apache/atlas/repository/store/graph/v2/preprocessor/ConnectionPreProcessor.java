@@ -183,6 +183,14 @@ public class ConnectionPreProcessor implements PreProcessor {
             if (emptyName && emptyGroup && emptyRole) {
                 throw new AtlasBaseException(AtlasErrorCode.ADMIN_LIST_SHOULD_NOT_BE_EMPTY, existingConnEntity.getTypeName());
             }
+
+            // Skip Keycloak role updates if mutations are disabled
+            if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+                LOG.info("Keycloak mutations disabled - skipping role updates for connection: {}", connection.getGuid());
+                RequestContext.get().endMetricRecord(metricRecorder);
+                return;
+            }
+
             // Update Keycloak roles
             RoleRepresentation representation = getKeycloakClient().getRoleByName(roleName);
             List<String> finalStateUsers = determineFinalState(newAdminUsers, currentAdminUsers);

@@ -231,6 +231,11 @@ public class QueryCollectionPreProcessor implements PreProcessor {
     }
 
     private void updateCollectionAdminRole(AtlasEntity collection, AtlasEntityHeader existingCollEntity, AtlasVertex vertex) throws AtlasBaseException {
+        if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateCollectionAdminRole for collection: {}", collection.getGuid());
+            return;
+        }
+
         String adminRoleName = String.format(COLL_ADMIN_ROLE_PATTERN, collection.getGuid());
 
         RoleRepresentation representation = getKeycloakClient().getRoleByName(adminRoleName);
@@ -269,6 +274,11 @@ public class QueryCollectionPreProcessor implements PreProcessor {
     }
 
     private void updateCollectionViewerRole(AtlasEntity collection, AtlasEntityHeader existingCollEntity) throws AtlasBaseException {
+        if (!KeycloakStore.isKeycloakMutationsEnabled()) {
+            LOG.info("Keycloak mutations disabled - skipping updateCollectionViewerRole for collection: {}", collection.getGuid());
+            return;
+        }
+
         String viewerRoleName = String.format(COLL_VIEWER_ROLE_PATTERN, collection.getGuid());
         RoleRepresentation representation = getKeycloakClient().getRoleByName(viewerRoleName);
 
