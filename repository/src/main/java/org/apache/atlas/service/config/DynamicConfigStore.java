@@ -1,5 +1,6 @@
 package org.apache.atlas.service.config;
 
+import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
@@ -279,7 +280,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
             return getConfigAsBoolean(ConfigKey.MAINTENANCE_MODE.getKey());
         }
         // Fall back to FeatureFlagStore (Redis)
-        return FeatureFlagStore.evaluate(ConfigKey.MAINTENANCE_MODE.getKey(), "true");
+        return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
     }
 
     /**
