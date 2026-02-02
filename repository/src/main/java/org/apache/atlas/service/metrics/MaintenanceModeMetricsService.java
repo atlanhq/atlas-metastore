@@ -74,31 +74,14 @@ public class MaintenanceModeMetricsService {
      * Get the current maintenance mode status as a numeric value.
      * Reads directly from atlas.maintenance.mode config property.
      * 
-     * Uses the same logic as TaskQueueWatcher, EntityGraphMapper, and ActiveServerFilter
-     * to ensure consistent behavior across the codebase.
-     * 
      * @return 1.0 if maintenance mode is enabled, 0.0 otherwise
      */
     private double getMaintenanceModeValue() {
-        return isMaintenanceModeEnabled() ? 1.0 : 0.0;
-    }
-    
-    /**
-     * Check if maintenance mode is enabled.
-     * 
-     * Logic mirrors TaskQueueWatcher, EntityGraphMapper, and ActiveServerFilter:
-     * 1. If DynamicConfigStore is enabled, read from Cassandra cache
-     * 2. Otherwise, fall back to static AtlasConfiguration
-     * 
-     * @return true if maintenance mode is enabled, false otherwise
-     */
-    private boolean isMaintenanceModeEnabled() {
         try {
             return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean() ? 1.0 : 0.0;
         } catch (Exception e) {
             LOG.warn("Failed to read maintenance mode from config, returning 0.0", e);
             return 0.0;
         }
-        return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
     }
 }
