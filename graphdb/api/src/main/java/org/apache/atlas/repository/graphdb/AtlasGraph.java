@@ -67,6 +67,17 @@ public interface AtlasGraph<V, E> {
     AtlasVertex<V, E> addVertex();
 
     /**
+     * Adds a vertex with a caller-supplied id. Implementations may fall back to addVertex()
+     * if custom ids are not supported.
+     *
+     * @param vertexId
+     * @return
+     */
+    default AtlasVertex<V, E> addVertex(String vertexId) {
+        return addVertex();
+    }
+
+    /**
      * Removes the specified edge from the graph.
      *
      * @param edge

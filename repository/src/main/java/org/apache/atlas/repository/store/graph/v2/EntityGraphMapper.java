@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import com.google.common.annotations.VisibleForTesting;
 
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -149,6 +150,7 @@ import static org.apache.atlas.type.Constants.MEANING_NAMES_PROPERTY_KEY;
 @Component
 public class EntityGraphMapper {
     private static final Logger LOG      = LoggerFactory.getLogger(EntityGraphMapper.class);
+    private static final boolean DETERMINISTIC_IDS_ENABLED = getDeterministicIdsFlag();
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("entityGraphMapper");
 
     private static final String  SOFT_REF_FORMAT                   = "%s:%s";
@@ -242,7 +244,13 @@ public class EntityGraphMapper {
     }
 
     public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
-        final String guid = UUID.randomUUID().toString();
+        String guid = null;
+        if (DETERMINISTIC_IDS_ENABLED) {
+            guid = computeDeterministicGuid(entity);
+        }
+        if (guid == null) {
+            guid = UUID.randomUUID().toString();
+        }
         return createVertexWithGuid(entity, guid);
     }
 
@@ -251,9 +259,15 @@ public class EntityGraphMapper {
             LOG.debug("==> createShellEntityVertex({})", objectId.getTypeName());
         }
 
-        final String    guid       = UUID.randomUUID().toString();
+        String          guid       = null;
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(objectId.getTypeName());
-        AtlasVertex     ret        = createStructVertex(objectId);
+        if (DETERMINISTIC_IDS_ENABLED) {
+            guid = computeDeterministicGuid(objectId, entityType);
+        }
+        if (guid == null) {
+            guid = UUID.randomUUID().toString();
+        }
+        AtlasVertex     ret        = createStructVertex(objectId.getTypeName(), guid);
 
         for (String superTypeName : entityType.getAllSuperTypes()) {
             AtlasGraphUtilsV2.addEncodedProperty(ret, SUPER_TYPES_PROPERTY_KEY, superTypeName);
@@ -288,13 +302,20 @@ public class EntityGraphMapper {
         }
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
-        AtlasVertex     ret        = createStructVertex(entity);
+        String          effectiveGuid = guid;
+        if (DETERMINISTIC_IDS_ENABLED) {
+            String deterministicGuid = computeDeterministicGuid(entity);
+            if (deterministicGuid != null) {
+                effectiveGuid = deterministicGuid;
+            }
+        }
+        AtlasVertex     ret        = createStructVertex(entity.getTypeName(), effectiveGuid);
 
         for (String superTypeName : entityType.getAllSuperTypes()) {
             AtlasGraphUtilsV2.addEncodedProperty(ret, SUPER_TYPES_PROPERTY_KEY, superTypeName);
         }
 
-        AtlasGraphUtilsV2.setEncodedProperty(ret, GUID_PROPERTY_KEY, guid);
+        AtlasGraphUtilsV2.setEncodedProperty(ret, GUID_PROPERTY_KEY, effectiveGuid);
         AtlasGraphUtilsV2.setEncodedProperty(ret, VERSION_PROPERTY_KEY, getEntityVersion(entity));
 
         setCustomAttributes(ret, entity);
@@ -1012,19 +1033,30 @@ public class EntityGraphMapper {
     }
 
     private AtlasVertex createStructVertex(AtlasStruct struct) {
-        return createStructVertex(struct.getTypeName());
+        return createStructVertex(struct.getTypeName(), null);
     }
 
     private AtlasVertex createStructVertex(AtlasObjectId objectId) {
-        return createStructVertex(objectId.getTypeName());
+        return createStructVertex(objectId.getTypeName(), null);
     }
 
     private AtlasVertex createStructVertex(String typeName) {
+        return createStructVertex(typeName, null);
+    }
+
+    private AtlasVertex createStructVertex(String typeName, String vertexId) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> createStructVertex({})", typeName);
         }
 
-        final AtlasVertex ret = graph.addVertex();
+        AtlasVertex ret = null;
+        if (StringUtils.isNotEmpty(vertexId)) {
+            ret = getVertexIfExists(vertexId);
+            if (ret != null) {
+                return ret;
+            }
+        }
+        ret = (StringUtils.isNotEmpty(vertexId)) ? graph.addVertex(vertexId) : graph.addVertex();
 
         AtlasGraphUtilsV2.setEncodedProperty(ret, ENTITY_TYPE_PROPERTY_KEY, typeName);
         AtlasGraphUtilsV2.setEncodedProperty(ret, STATE_PROPERTY_KEY, AtlasEntity.Status.ACTIVE.name());
@@ -1038,6 +1070,69 @@ public class EntityGraphMapper {
         }
 
         return ret;
+    }
+
+    private AtlasVertex getVertexIfExists(String vertexId) {
+        if (StringUtils.isEmpty(vertexId)) {
+            return null;
+        }
+        AtlasVertex vertex = graph.getVertex(vertexId);
+        if (vertex != null && vertex.exists()) {
+            return vertex;
+        }
+        return null;
+    }
+
+    private static boolean getDeterministicIdsFlag() {
+        try {
+            return ApplicationProperties.get().getBoolean("atlas.graph.deterministic.ids", false);
+        } catch (AtlasException e) {
+            return false;
+        }
+    }
+
+    private String computeDeterministicGuid(AtlasEntity entity) {
+        if (entity == null) {
+            return null;
+        }
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
+        if (entityType == null) {
+            return null;
+        }
+        return computeDeterministicGuid(entityType, name -> entity.getAttribute(name));
+    }
+
+    private String computeDeterministicGuid(AtlasObjectId objectId, AtlasEntityType entityType) {
+        if (objectId == null || entityType == null) {
+            return null;
+        }
+        Map<String, Object> uniqueAttributes = objectId.getUniqueAttributes();
+        if (uniqueAttributes == null || uniqueAttributes.isEmpty()) {
+            return null;
+        }
+        return computeDeterministicGuid(entityType, uniqueAttributes::get);
+    }
+
+    private String computeDeterministicGuid(AtlasEntityType entityType, java.util.function.Function<String, Object> valueProvider) {
+        Map<String, AtlasAttribute> uniqAttrs = entityType.getUniqAttributes();
+        if (uniqAttrs == null || uniqAttrs.isEmpty()) {
+            return null;
+        }
+        List<String> attrNames = new ArrayList<>(uniqAttrs.keySet());
+        Collections.sort(attrNames);
+
+        StringBuilder sb = new StringBuilder(entityType.getTypeName());
+        for (String attrName : attrNames) {
+            Object rawValue = valueProvider.apply(attrName);
+            if (rawValue == null) {
+                return null;
+            }
+            AtlasAttribute attribute = uniqAttrs.get(attrName);
+            Object normalized = attribute.getAttributeType().getNormalizedValue(rawValue);
+            sb.append('|').append(attrName).append('=').append(normalized);
+        }
+        String uuid = UUID.nameUUIDFromBytes(sb.toString().getBytes(StandardCharsets.UTF_8)).toString();
+        return uuid.replace("-", "");
     }
 
     private AtlasVertex createClassificationVertex(AtlasClassification classification) {
@@ -5829,7 +5924,7 @@ public class EntityGraphMapper {
             header.setAttribute(NAME, vertex.getProperty(NAME, String.class));
             header.setAttribute(QUALIFIED_NAME, vertex.getProperty(QUALIFIED_NAME, String.class));
 
-            header.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            header.setDocId(vertex.getIdForDisplay());
             header.setSuperTypeNames(typeRegistry.getEntityTypeByName(header.getTypeName()).getAllSuperTypes());
 
             if (!req.isUpdatedEntity(header.getGuid())) {

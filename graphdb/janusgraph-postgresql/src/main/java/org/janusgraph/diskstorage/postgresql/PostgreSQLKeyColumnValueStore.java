@@ -71,8 +71,9 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             LOG.info("Lock read on store {}", storeName);
         }
 
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement ps = connection.prepareStatement(sql)) {
+        boolean[] close = new boolean[1];
+        Connection connection = getConnection(txh, close);
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, storeName);
             ps.setBytes(2, asBytes(query.getKey()));
             ps.setBytes(3, asBytes(query.getSliceStart()));
@@ -90,6 +91,8 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             return EntryArrayList.of(entries);
         } catch (SQLException e) {
             throw new PermanentBackendException("Failed to read slice from PostgreSQL", e);
+        } finally {
+            closeIfNeeded(connection, close[0]);
         }
     }
 
@@ -100,11 +103,12 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             return result;
         }
 
+        String placeholders = String.join(", ", java.util.Collections.nCopies(keys.size(), "?"));
         String sql = "SELECT key_bytes, column_bytes, value_bytes FROM (" +
             " SELECT key_bytes, column_bytes, value_bytes," +
             " row_number() OVER (PARTITION BY key_bytes ORDER BY column_bytes) AS rn" +
             " FROM " + getQualifiedTable() +
-            " WHERE store_name = ? AND key_bytes = ANY(?) AND column_bytes >= ? AND column_bytes < ?" +
+            " WHERE store_name = ? AND key_bytes IN (" + placeholders + ") AND column_bytes >= ? AND column_bytes < ?" +
             ") ranked WHERE rn <= ? ORDER BY key_bytes, column_bytes";
 
         Map<StaticBuffer, List<Entry>> entriesByKey = new HashMap<>(keys.size());
@@ -112,18 +116,17 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             entriesByKey.put(key, new ArrayList<>());
         }
 
-        Object[] keyArray = new Object[keys.size()];
-        for (int i = 0; i < keys.size(); i++) {
-            keyArray[i] = asBytes(keys.get(i));
-        }
-
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement ps = connection.prepareStatement(sql)) {
-            ps.setString(1, storeName);
-            ps.setArray(2, connection.createArrayOf("bytea", keyArray));
-            ps.setBytes(3, asBytes(query.getSliceStart()));
-            ps.setBytes(4, asBytes(query.getSliceEnd()));
-            ps.setInt(5, query.getLimit());
+        boolean[] close = new boolean[1];
+        Connection connection = getConnection(txh, close);
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
+            int paramIndex = 1;
+            ps.setString(paramIndex++, storeName);
+            for (StaticBuffer key : keys) {
+                ps.setBytes(paramIndex++, asBytes(key));
+            }
+            ps.setBytes(paramIndex++, asBytes(query.getSliceStart()));
+            ps.setBytes(paramIndex++, asBytes(query.getSliceEnd()));
+            ps.setInt(paramIndex, query.getLimit());
 
             try (ResultSet rs = ps.executeQuery()) {
                 while (rs.next()) {
@@ -138,6 +141,8 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             }
         } catch (SQLException e) {
             throw new PermanentBackendException("Failed to multi-read slices from PostgreSQL", e);
+        } finally {
+            closeIfNeeded(connection, close[0]);
         }
 
         for (Map.Entry<StaticBuffer, List<Entry>> entry : entriesByKey.entrySet()) {
@@ -154,45 +159,48 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             LOG.info("Lock write on store {} (additions={}, deletions={})", storeName, additionsCount, deletionsCount);
         }
 
-        try (Connection connection = dataSource.getConnection()) {
-            if (deletions != null && !deletions.isEmpty()) {
-                String deleteSql = "DELETE FROM " + getQualifiedTable() +
-                    " WHERE store_name = ? AND key_bytes = ? AND column_bytes = ?";
-                try (PreparedStatement ps = connection.prepareStatement(deleteSql)) {
-                    for (StaticBuffer column : deletions) {
-                        ps.setString(1, storeName);
-                        ps.setBytes(2, asBytes(key));
-                        ps.setBytes(3, asBytes(column));
-                        ps.addBatch();
-                    }
-                    ps.executeBatch();
+        boolean[] close = new boolean[1];
+        Connection connection = getConnection(txh, close);
+        if (deletions != null && !deletions.isEmpty()) {
+            String deleteSql = "DELETE FROM " + getQualifiedTable() +
+                " WHERE store_name = ? AND key_bytes = ? AND column_bytes = ?";
+            try (PreparedStatement ps = connection.prepareStatement(deleteSql)) {
+                for (StaticBuffer column : deletions) {
+                    ps.setString(1, storeName);
+                    ps.setBytes(2, asBytes(key));
+                    ps.setBytes(3, asBytes(column));
+                    ps.addBatch();
                 }
+                ps.executeBatch();
+            } catch (SQLException e) {
+                throw new PermanentBackendException("Failed to mutate PostgreSQL data", e);
             }
-
-            if (additions != null && !additions.isEmpty()) {
-                String insertSql = "INSERT INTO " + getQualifiedTable() +
-                    " (store_name, key_bytes, column_bytes, value_bytes) VALUES (?, ?, ?, ?)" +
-                    " ON CONFLICT (store_name, key_bytes, column_bytes)" +
-                    " DO UPDATE SET value_bytes = EXCLUDED.value_bytes";
-                try (PreparedStatement ps = connection.prepareStatement(insertSql)) {
-                    for (Entry entry : additions) {
-                        ps.setString(1, storeName);
-                        ps.setBytes(2, asBytes(key));
-                        ps.setBytes(3, asBytes(entry.getColumnAs(StaticBuffer.STATIC_FACTORY)));
-                        ps.setBytes(4, asBytes(entry.getValueAs(StaticBuffer.STATIC_FACTORY)));
-                        ps.addBatch();
-                    }
-                    ps.executeBatch();
-                }
-            }
-        } catch (SQLException e) {
-            throw new PermanentBackendException("Failed to mutate PostgreSQL data", e);
         }
+
+        if (additions != null && !additions.isEmpty()) {
+            String insertSql = "INSERT INTO " + getQualifiedTable() +
+                " (store_name, key_bytes, column_bytes, value_bytes) VALUES (?, ?, ?, ?)" +
+                " ON CONFLICT (store_name, key_bytes, column_bytes)" +
+                " DO UPDATE SET value_bytes = EXCLUDED.value_bytes";
+            try (PreparedStatement ps = connection.prepareStatement(insertSql)) {
+                for (Entry entry : additions) {
+                    ps.setString(1, storeName);
+                    ps.setBytes(2, asBytes(key));
+                    ps.setBytes(3, asBytes(entry.getColumnAs(StaticBuffer.STATIC_FACTORY)));
+                    ps.setBytes(4, asBytes(entry.getValueAs(StaticBuffer.STATIC_FACTORY)));
+                    ps.addBatch();
+                }
+                ps.executeBatch();
+            } catch (SQLException e) {
+                throw new PermanentBackendException("Failed to mutate PostgreSQL data", e);
+            }
+        }
+        closeIfNeeded(connection, close[0]);
     }
 
     @Override
     public void acquireLock(StaticBuffer key, StaticBuffer column, StaticBuffer expectedValue, StoreTransaction txh) throws BackendException {
-        throw new UnsupportedOperationException("PostgreSQL backend does not support explicit locking");
+        // No-op
     }
 
     @Override
@@ -205,8 +213,9 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
         String sql = "SELECT DISTINCT key_bytes FROM " + getQualifiedTable() +
             " WHERE store_name = ? AND column_bytes >= ? AND column_bytes < ? ORDER BY key_bytes";
         List<StaticBuffer> keys = new ArrayList<>();
-        try (Connection connection = dataSource.getConnection();
-             PreparedStatement ps = connection.prepareStatement(sql)) {
+        boolean[] close = new boolean[1];
+        Connection connection = getConnection(txh, close);
+        try (PreparedStatement ps = connection.prepareStatement(sql)) {
             ps.setString(1, storeName);
             ps.setBytes(2, asBytes(query.getSliceStart()));
             ps.setBytes(3, asBytes(query.getSliceEnd()));
@@ -217,6 +226,8 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             }
         } catch (SQLException e) {
             throw new PermanentBackendException("Failed to scan keys from PostgreSQL", e);
+        } finally {
+            closeIfNeeded(connection, close[0]);
         }
 
         return new SimpleKeyIterator(keys, query, txh, this);
@@ -239,6 +250,30 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
 
     private static byte[] asBytes(StaticBuffer buffer) {
         return buffer.as(StaticBuffer.ARRAY_FACTORY);
+    }
+
+    private Connection getConnection(StoreTransaction txh, boolean[] close) {
+        PostgreSQLTransaction pgTx = (PostgreSQLTransaction) txh;
+        Connection connection = pgTx.getConnection();
+        if (connection != null) {
+            close[0] = false;
+            return connection;
+        }
+        close[0] = true;
+        try {
+            return dataSource.getConnection();
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void closeIfNeeded(Connection connection, boolean close) {
+        if (close && connection != null) {
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+            }
+        }
     }
 
     private boolean isLockStore() {

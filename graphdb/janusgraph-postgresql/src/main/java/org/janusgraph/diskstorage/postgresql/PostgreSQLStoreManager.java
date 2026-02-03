@@ -64,6 +64,8 @@ import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.ST
 
 public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
 
+    private static final boolean USE_TRANSACTIONS = false;
+
     private final ConcurrentHashMap<String, PostgreSQLKeyColumnValueStore> stores = new ConcurrentHashMap<>();
     private final StoreFeatures features;
     private final String jdbcUrl;
@@ -145,9 +147,9 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
             .keyOrdered(false)
             .multiQuery(true)
             .batchMutation(true)
-            .locking(false)
+            .locking(true)
             .distributed(false)
-            .transactional(true)
+            .transactional(USE_TRANSACTIONS)
             .keyConsistent(GraphDatabaseConfiguration.buildGraphConfiguration())
             .persists(true)
             .optimisticLocking(false)
@@ -156,8 +158,24 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
 
     @Override
     public StoreTransaction beginTransaction(BaseTransactionConfig config) throws BackendException {
-        // Non-transactional: do not acquire a connection here.
-        return new PostgreSQLTransaction(config);
+        if (!USE_TRANSACTIONS) {
+            return new PostgreSQLTransaction(config);
+        }
+        Connection connection = null;
+        try {
+            connection = dataSource.getConnection();
+            connection.setAutoCommit(false);
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+            return new PostgreSQLTransaction(connection, config);
+        } catch (SQLException e) {
+            if (connection != null) {
+                try {
+                    connection.close();
+                } catch (SQLException ignored) {
+                }
+            }
+            throw new PermanentBackendException("Could not open PostgreSQL transaction", e);
+        }
     }
 
     @Override

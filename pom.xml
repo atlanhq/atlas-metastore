@@ -759,7 +759,7 @@
         <projectBaseDir>${project.basedir}</projectBaseDir>
         <skipCheck>false</skipCheck>
         <skipDocs>true</skipDocs>
-        <skipEnunciate>false</skipEnunciate>
+        <skipEnunciate>true</skipEnunciate>
         <skipITs>false</skipITs>
         <skipSite>true</skipSite>
         <skipTests>false</skipTests>

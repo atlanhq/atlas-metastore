@@ -14,23 +14,69 @@
 
 package org.janusgraph.diskstorage.postgresql;
 
-import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.BaseTransactionConfig;
+import org.janusgraph.diskstorage.BackendException;
+import org.janusgraph.diskstorage.PermanentBackendException;
 import org.janusgraph.diskstorage.common.AbstractStoreTransaction;
+
+import java.sql.Connection;
+import java.sql.SQLException;
 
 public class PostgreSQLTransaction extends AbstractStoreTransaction {
 
+    private final Connection connection;
+
     public PostgreSQLTransaction(BaseTransactionConfig config) {
         super(config);
+        this.connection = null;
+    }
+
+    public PostgreSQLTransaction(Connection connection, BaseTransactionConfig config) {
+        super(config);
+        this.connection = connection;
+    }
+
+    public Connection getConnection() {
+        return connection;
+    }
+
+    public boolean isTransactional() {
+        return connection != null;
     }
 
     @Override
     public void commit() throws BackendException {
         super.commit();
+        if (connection == null) {
+            return;
+        }
+        try {
+            connection.commit();
+        } catch (SQLException e) {
+            throw new PermanentBackendException("Failed to commit PostgreSQL transaction", e);
+        } finally {
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+            }
+        }
     }
 
     @Override
     public void rollback() throws BackendException {
         super.rollback();
+        if (connection == null) {
+            return;
+        }
+        try {
+            connection.rollback();
+        } catch (SQLException e) {
+            throw new PermanentBackendException("Failed to rollback PostgreSQL transaction", e);
+        } finally {
+            try {
+                connection.close();
+            } catch (SQLException ignored) {
+            }
+        }
     }
 }

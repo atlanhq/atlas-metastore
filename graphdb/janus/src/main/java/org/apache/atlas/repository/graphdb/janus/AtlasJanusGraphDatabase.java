@@ -118,6 +118,10 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
         janusConfig.setProperty("attributes.custom.attribute4.attribute-class", BigDecimal.class.getName());
         janusConfig.setProperty("attributes.custom.attribute4.serializer-class", BigDecimalSerializer.class.getName());
 
+        // Force custom vertex IDs for Atlas deterministic IDs
+        janusConfig.setProperty("set-vertex-id", true);
+        janusConfig.setProperty("allow-custom-vid-types", true);
+
         return janusConfig;
     }
 

@@ -750,7 +750,20 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
     public static int calculateBucket(String vertexId) {
         int numBuckets = 2 << BUCKET_POWER; // 2 * 2^5 = 64
-        return (int) (Long.parseLong(vertexId) % numBuckets);
+        if (vertexId == null) {
+            return 0;
+        }
+        try {
+            return (int) (Long.parseLong(vertexId) % numBuckets);
+        } catch (NumberFormatException e) {
+            // Support non-numeric vertex ids (e.g., UUID hex) by hashing deterministically
+            try {
+                java.math.BigInteger value = new java.math.BigInteger(vertexId, 16);
+                return value.mod(java.math.BigInteger.valueOf(numBuckets)).intValue();
+            } catch (NumberFormatException ignored) {
+                return Math.floorMod(vertexId.hashCode(), numBuckets);
+            }
+        }
     }
 
     public static AtlasClassification convertToAtlasClassification(String tagMetaJson) throws AtlasBaseException {
@@ -829,4 +842,3 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         }
     }
 }
-

@@ -1454,7 +1454,7 @@ public class EntityGraphRetriever {
 
             mapSystemAttributes(entityVertex, entity);
 
-            entity.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            entity.setDocId(entityVertex.getIdForDisplay());
             entity.setSuperTypeNames(typeRegistry.getEntityTypeByName(entity.getTypeName()).getAllSuperTypes());
 
             mapBusinessAttributes(entityVertex, entity);
@@ -1736,7 +1736,7 @@ public class EntityGraphRetriever {
             }
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
-            ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            ret.setDocId(entityVertex.getIdForDisplay());
             if (entityType != null) {
                 ret.setSuperTypeNames(entityType.getAllSuperTypes());
                 for (AtlasAttribute headerAttribute : entityType.getHeaderAttributes().values()) {
@@ -1845,7 +1845,7 @@ public class EntityGraphRetriever {
             }
             AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
 
-            ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            ret.setDocId(entityVertex.getIdForDisplay());
 
             if (entityType != null) {
                 ret.setSuperTypeNames(entityType.getAllSuperTypes());
@@ -1923,7 +1923,7 @@ public class EntityGraphRetriever {
             ret.setTypeName(typeName);
             ret.setGuid(guid);
 
-            ret.setDocId(LongEncoding.encode(Long.parseLong(entityVertex.getIdForDisplay())));
+            ret.setDocId(entityVertex.getIdForDisplay());
             if (entityType != null) {
                 ret.setSuperTypeNames(entityType.getAllSuperTypes());
             } else {

@@ -38,6 +38,7 @@ import org.janusgraph.diskstorage.keycolumnvalue.scan.ScanJobFuture;
 import org.janusgraph.diskstorage.keycolumnvalue.scan.StandardScanner;
 import org.janusgraph.diskstorage.locking.Locker;
 import org.janusgraph.diskstorage.locking.LockerProvider;
+import org.janusgraph.diskstorage.locking.NoOpLocker;
 import org.janusgraph.diskstorage.locking.consistentkey.ConsistentKeyLocker;
 import org.janusgraph.diskstorage.locking.consistentkey.ExpectedValueCheckingStoreManager;
 import org.janusgraph.diskstorage.log.Log;
@@ -145,9 +146,10 @@ public class Backend implements LockerProvider, AutoCloseable {
     };
 
     private final Map<String, Function<String, Locker>> REGISTERED_LOCKERS = Collections.unmodifiableMap(
-        new HashMap<String, Function<String, Locker>>(2){{
+        new HashMap<String, Function<String, Locker>>(3){{
             put("consistentkey", CONSISTENT_KEY_LOCKER_CREATOR);
             put("test", TEST_LOCKER_CREATOR);
+            put("none", lockerName -> new NoOpLocker());
         }});
 
     private final KeyColumnValueStoreManager storeManager;

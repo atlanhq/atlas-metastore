@@ -60,6 +60,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep;
 import org.apache.tinkerpop.gremlin.process.traversal.step.util.ImmutablePath;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Element;
+import org.apache.tinkerpop.gremlin.structure.T;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.structure.io.IoCore;
 import org.apache.tinkerpop.gremlin.structure.io.graphson.GraphSONMapper;
@@ -260,6 +261,16 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex() {
         Vertex result = getGraph().addVertex();
+
+        return GraphDbObjectFactory.createVertex(this, result);
+    }
+
+    @Override
+    public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> addVertex(String vertexId) {
+        if (vertexId == null) {
+            return addVertex();
+        }
+        Vertex result = getGraph().addVertex(T.id, vertexId);
 
         return GraphDbObjectFactory.createVertex(this, result);
     }

@@ -61,6 +61,7 @@ import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.IN
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.INDEX_DIRECTORY;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.INDEX_NS;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.ROOT_NS;
+import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.ALLOW_CUSTOM_VERTEX_ID_TYPES;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.STORAGE_BACKEND;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.STORAGE_CONF_FILE;
 import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.STORAGE_DIRECTORY;
@@ -163,11 +164,12 @@ public class AtlasJanusGraphFactory extends JanusGraphFactory {
      */
     public static JanusGraph open(ReadConfiguration configuration, String backupName) {
         final ModifiableConfiguration config = new ModifiableConfiguration(ROOT_NS, (WriteConfiguration) configuration, BasicConfiguration.Restriction.NONE);
+        config.set(ALLOW_CUSTOM_VERTEX_ID_TYPES, true);
         final String graphName = config.has(GRAPH_NAME) ? config.get(GRAPH_NAME) : backupName;
         final JanusGraphManager jgm = JanusGraphManagerUtility.getInstance();
         if (null != graphName) {
             Preconditions.checkNotNull(jgm, JANUS_GRAPH_MANAGER_EXPECTED_STATE_MSG);
-            return (JanusGraph) jgm.openGraph(graphName, gName -> new AtlasStandardJanusGraph(new GraphDatabaseConfigurationBuilder().build(configuration)));
+            return (JanusGraph) jgm.openGraph(graphName, gName -> new AtlasStandardJanusGraph(new GraphDatabaseConfigurationBuilder().build(config.getConfiguration())));
         } else {
             if (jgm != null) {
                 log.warn("You should supply \"graph.graphname\" in your .properties file configuration if you are opening " +
@@ -178,7 +180,7 @@ public class AtlasJanusGraphFactory extends JanusGraphFactory {
                         "\"graph.graphname\" so these graphs should be accessed dynamically by supplying a .properties file here " +
                         "or by using the ConfiguredGraphFactory.");
             }
-            return new AtlasStandardJanusGraph(new GraphDatabaseConfigurationBuilder().build(configuration));
+            return new AtlasStandardJanusGraph(new GraphDatabaseConfigurationBuilder().build(config.getConfiguration()));
         }
     }
 

@@ -979,7 +979,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
                         return esDocIdMapping;
                     }
 
-                    final String docId = JanusUtils.toLongEncoding(relationshipEndToVertexIdMap.get(atlasObjectId));
+                    final String docId = (String)relationshipEndToVertexIdMap.get(atlasObjectId);
                     String guid = atlasObjectId.getGuid();
                     AtlasObjectId end1 = r.getEnd1();
                     AtlasObjectId end2 = r.getEnd2();
