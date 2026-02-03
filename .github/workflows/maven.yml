@@ -25,6 +25,7 @@ on:
       - beta
       - master
       - staging
+      - ware-48-golc
 
 jobs:
   # Detect what changed to optimize workflow execution
