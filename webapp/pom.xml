@@ -101,6 +101,12 @@
         </dependency>
 
         <dependency>
+            <artifactId>janusgraph-postgresql</artifactId>
+            <groupId>org.apache.atlas</groupId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-repository</artifactId>
             <exclusions>
@@ -559,12 +565,12 @@
                 </exclusion>
             </exclusions>
         </dependency>
-
+        <!-- Source: https://mvnrepository.com/artifact/org.elasticsearch/elasticsearch -->
         <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-server-api</artifactId>
+            <groupId>org.elasticsearch</groupId>
+            <artifactId>elasticsearch</artifactId>
+            <version>7.17.15</version>
         </dependency>
-
         <dependency>
             <groupId>com.webcohesion.enunciate</groupId>
             <artifactId>enunciate-core-annotations</artifactId>
