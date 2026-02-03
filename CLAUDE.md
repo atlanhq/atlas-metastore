@@ -40,13 +40,13 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homeb
 
 # Webapp module
 
-JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl webapp -am -DskipTests -Drat.skip=true
+JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl webapp -am -DskipShade=true -DskipTests -Drat.skip=true -DskipEnunciate=true -T 2C \
 
  
 
 # Integration module
 
-JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl intg -am -DskipTests -Drat.skip=true
+JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl intg -am -DskipShade=true -DskipTests -Drat.skip=true -DskipEnunciate=true -T 2C \
 
 ```
 

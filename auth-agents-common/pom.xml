@@ -105,8 +105,9 @@
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <skip>false</skip>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
-                            <minimizeJar>true</minimizeJar>
+                            <minimizeJar>false</minimizeJar>
                             <filters>
                                 <filter>
                                     <artifact>*:*</artifact>
