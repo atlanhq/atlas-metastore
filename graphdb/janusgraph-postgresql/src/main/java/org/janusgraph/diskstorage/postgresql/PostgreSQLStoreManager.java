@@ -64,7 +64,7 @@ import static org.janusgraph.graphdb.configuration.GraphDatabaseConfiguration.ST
 
 public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
 
-    private static final boolean USE_TRANSACTIONS = false;
+    private static final boolean USE_TRANSACTIONS = true;
 
     private final ConcurrentHashMap<String, PostgreSQLKeyColumnValueStore> stores = new ConcurrentHashMap<>();
     private final StoreFeatures features;
@@ -236,8 +236,12 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
         for (Map.Entry<String, Map<StaticBuffer, KCVMutation>> storeMut : mutations.entrySet()) {
             KeyColumnValueStore store = stores.get(storeMut.getKey());
             Preconditions.checkNotNull(store);
-            for (Map.Entry<StaticBuffer, KCVMutation> keyMut : storeMut.getValue().entrySet()) {
-                store.mutate(keyMut.getKey(), keyMut.getValue().getAdditions(), keyMut.getValue().getDeletions(), txh);
+            if (store instanceof PostgreSQLKeyColumnValueStore) {
+                ((PostgreSQLKeyColumnValueStore) store).mutateMany(storeMut.getValue(), txh);
+            } else {
+                for (Map.Entry<StaticBuffer, KCVMutation> keyMut : storeMut.getValue().entrySet()) {
+                    store.mutate(keyMut.getKey(), keyMut.getValue().getAdditions(), keyMut.getValue().getDeletions(), txh);
+                }
             }
         }
     }

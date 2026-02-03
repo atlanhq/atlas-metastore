@@ -24,6 +24,7 @@ import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.exception.NotFoundException;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
@@ -52,6 +53,7 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
     private static final ThreadLocal<Boolean>                   isTxnOpen                  = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private static final ThreadLocal<Boolean>                   innerFailure               = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private static final ThreadLocal<Map<String, AtlasVertex>>  guidVertexCache            = ThreadLocal.withInitial(() -> new HashMap<>());
+    private static final ThreadLocal<Map<String, AtlasEdge>>    edgeCache                  = ThreadLocal.withInitial(() -> new HashMap<>());
 
     private final AtlasGraph     graph;
 
@@ -244,11 +246,24 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
         return cache.get(guid);
     }
 
+    public static void addToEdgeCache(String key, AtlasEdge edge) {
+        Map<String, AtlasEdge> cache = edgeCache.get();
+
+        cache.put(key, edge);
+    }
+
+    public static AtlasEdge getEdgeFromCache(String key) {
+        Map<String, AtlasEdge> cache = edgeCache.get();
+
+        return cache.get(key);
+    }
+
     public static void clearCache() {
         guidVertexCache.get().clear();
         vertexGuidCache.get().clear();
         vertexStateCache.get().clear();
         edgeStateCache.get().clear();
+        edgeCache.get().clear();
     }
 
     boolean logException(Throwable t) {

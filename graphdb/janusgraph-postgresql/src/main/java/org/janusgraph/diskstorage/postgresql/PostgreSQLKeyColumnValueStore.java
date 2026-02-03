@@ -19,14 +19,7 @@ import org.janusgraph.diskstorage.Entry;
 import org.janusgraph.diskstorage.EntryList;
 import org.janusgraph.diskstorage.PermanentBackendException;
 import org.janusgraph.diskstorage.StaticBuffer;
-import org.janusgraph.diskstorage.keycolumnvalue.KeyColumnValueStore;
-import org.janusgraph.diskstorage.keycolumnvalue.KeyIterator;
-import org.janusgraph.diskstorage.keycolumnvalue.KeyRangeQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.KeySliceQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.KeySlicesIterator;
-import org.janusgraph.diskstorage.keycolumnvalue.MultiSlicesQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.SliceQuery;
-import org.janusgraph.diskstorage.keycolumnvalue.StoreTransaction;
+import org.janusgraph.diskstorage.keycolumnvalue.*;
 import org.janusgraph.diskstorage.util.EntryArrayList;
 import org.janusgraph.diskstorage.util.RecordIterator;
 import org.janusgraph.diskstorage.util.StaticArrayBuffer;
@@ -42,6 +35,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import javax.sql.DataSource;
 
 public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
@@ -196,6 +192,64 @@ public class PostgreSQLKeyColumnValueStore implements KeyColumnValueStore {
             }
         }
         closeIfNeeded(connection, close[0]);
+    }
+
+    public void mutateMany(Map<StaticBuffer, KCVMutation> keyMutations, StoreTransaction txh) throws BackendException {
+        if (keyMutations == null || keyMutations.isEmpty()) {
+            return;
+        }
+        boolean[] close = new boolean[1];
+        Connection connection = null;
+        connection = getConnection(txh, close);
+
+        String deleteSql = "DELETE FROM " + getQualifiedTable() +
+            " WHERE store_name = ? AND key_bytes = ? AND column_bytes = ?";
+        String insertSql = "INSERT INTO " + getQualifiedTable() +
+            " (store_name, key_bytes, column_bytes, value_bytes) VALUES (?, ?, ?, ?)" +
+            " ON CONFLICT (store_name, key_bytes, column_bytes)" +
+            " DO UPDATE SET value_bytes = EXCLUDED.value_bytes";
+
+        try (PreparedStatement deletePs = connection.prepareStatement(deleteSql);
+             PreparedStatement insertPs = connection.prepareStatement(insertSql)) {
+            for (Map.Entry<StaticBuffer, KCVMutation> entry : keyMutations.entrySet()) {
+                StaticBuffer key = entry.getKey();
+                KCVMutation mutation = entry.getValue();
+
+                List<StaticBuffer> deletions = mutation.getDeletions();
+                if (deletions != null && !deletions.isEmpty()) {
+                    Set<StaticBuffer> uniqueDeletes = new LinkedHashSet<>(deletions);
+                    for (StaticBuffer column : uniqueDeletes) {
+                        deletePs.setString(1, storeName);
+                        deletePs.setBytes(2, asBytes(key));
+                        deletePs.setBytes(3, asBytes(column));
+                        deletePs.addBatch();
+                    }
+                }
+
+                List<Entry> additions = mutation.getAdditions();
+                if (additions != null && !additions.isEmpty()) {
+                    Map<StaticBuffer, Entry> uniqueAdds = new LinkedHashMap<>();
+                    for (Entry add : additions) {
+                        StaticBuffer column = add.getColumnAs(StaticBuffer.STATIC_FACTORY);
+                        uniqueAdds.put(column, add);
+                    }
+                    for (Map.Entry<StaticBuffer, Entry> addEntry : uniqueAdds.entrySet()) {
+                        Entry add = addEntry.getValue();
+                        insertPs.setString(1, storeName);
+                        insertPs.setBytes(2, asBytes(key));
+                        insertPs.setBytes(3, asBytes(add.getColumnAs(StaticBuffer.STATIC_FACTORY)));
+                        insertPs.setBytes(4, asBytes(add.getValueAs(StaticBuffer.STATIC_FACTORY)));
+                        insertPs.addBatch();
+                    }
+                }
+            }
+            deletePs.executeBatch();
+            insertPs.executeBatch();
+        } catch (SQLException e) {
+            throw new PermanentBackendException("Failed to batch mutate PostgreSQL data", e);
+        } finally {
+            closeIfNeeded(connection, close[0]);
+        }
     }
 
     @Override

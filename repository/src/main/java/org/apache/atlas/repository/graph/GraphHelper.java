@@ -146,7 +146,14 @@ public final class GraphHelper {
             throw new AtlasBaseException(RELATIONSHIP_CREATE_INVALID_PARAMS, fromGuid);
         }
 
-        ret = graph.addEdge(fromVertex, toVertex, edgeLabel);
+        String cacheKey = buildEdgeCacheKey(fromVertex, toVertex, edgeLabel);
+        ret = GraphTransactionInterceptor.getEdgeFromCache(cacheKey);
+        if (ret == null) {
+            ret = graph.getEdgeBetweenVertices(fromVertex, toVertex, edgeLabel);
+        }
+        if (ret == null) {
+            ret = graph.addEdge(fromVertex, toVertex, edgeLabel);
+        }
 
         if (ret != null) {
             AtlasGraphUtilsV2.setEncodedProperty(ret, STATE_PROPERTY_KEY, ACTIVE.name());
@@ -154,6 +161,7 @@ public final class GraphHelper {
             AtlasGraphUtilsV2.setEncodedProperty(ret, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
             AtlasGraphUtilsV2.setEncodedProperty(ret, CREATED_BY_KEY, RequestContext.get().getUser());
             AtlasGraphUtilsV2.setEncodedProperty(ret, MODIFIED_BY_KEY, RequestContext.get().getUser());
+            GraphTransactionInterceptor.addToEdgeCache(cacheKey, ret);
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Added {}", string(ret));
@@ -178,6 +186,11 @@ public final class GraphHelper {
     public AtlasEdge getOrCreateEdge(AtlasVertex outVertex, AtlasVertex inVertex, String edgeLabel) throws RepositoryException, AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getOrCreateEdge");
         boolean skipRetry = false;
+        String cacheKey = buildEdgeCacheKey(outVertex, inVertex, edgeLabel);
+        AtlasEdge cached = GraphTransactionInterceptor.getEdgeFromCache(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
 
         for (int numRetries = 0; numRetries < maxRetries; numRetries++) {
             try {
@@ -187,11 +200,16 @@ public final class GraphHelper {
 
                 AtlasEdge edge = graph.getEdgeBetweenVertices(outVertex, inVertex, edgeLabel);
                 if (edge != null) {
+                    GraphTransactionInterceptor.addToEdgeCache(cacheKey, edge);
                     return edge;
                 }
 
                 try {
-                    return addEdge(outVertex, inVertex, edgeLabel);
+                    AtlasEdge created = addEdge(outVertex, inVertex, edgeLabel);
+                    if (created != null) {
+                        GraphTransactionInterceptor.addToEdgeCache(cacheKey, created);
+                    }
+                    return created;
                 } catch (AtlasBaseException abe) {
                     if (abe.getAtlasErrorCode().getErrorCode().equals(RELATIONSHIP_CREATE_INVALID_PARAMS.getErrorCode())) {
                         skipRetry = true;
@@ -222,6 +240,12 @@ public final class GraphHelper {
 
         RequestContext.get().endMetricRecord(metric);
         return null;
+    }
+
+    private static String buildEdgeCacheKey(AtlasVertex fromVertex, AtlasVertex toVertex, String edgeLabel) {
+        String fromId = fromVertex != null ? fromVertex.getIdForDisplay() : "null";
+        String toId = toVertex != null ? toVertex.getIdForDisplay() : "null";
+        return edgeLabel + "|" + fromId + "->" + toId;
     }
 
     public AtlasEdge getEdgeByEdgeId(AtlasVertex outVertex, String edgeLabel, String edgeId) {
