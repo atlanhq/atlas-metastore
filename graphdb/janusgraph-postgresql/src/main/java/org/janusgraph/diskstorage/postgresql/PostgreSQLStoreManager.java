@@ -14,9 +14,9 @@
 
 package org.janusgraph.diskstorage.postgresql;
 
+import com.google.common.base.Preconditions;
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
-import com.google.common.base.Preconditions;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.BaseTransactionConfig;
 import org.janusgraph.diskstorage.PermanentBackendException;
@@ -38,6 +38,8 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -71,6 +73,18 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
     private final String table;
     private final String qualifiedTable;
     private final HikariDataSource dataSource;
+    private final String qualifiedDefaultPartition;
+    private final String qualifiedLockTable;
+
+    private static final String LOCK_STORE_SUFFIX = "_lock_";
+    private static final String LOCK_TABLE_SUFFIX = "_locks";
+    private static final String[] ATLAS_KNOWN_STORES = new String[] {
+        "edgestore",
+        "graphindex",
+        "janusgraph_ids",
+        "systemlog",
+        "txlog"
+    };
 
     public PostgreSQLStoreManager() {
         this(Configuration.EMPTY);
@@ -112,6 +126,8 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
         this.schema = configuration.getOrDefault(SCHEMA);
         this.table = configuration.getOrDefault(TABLE);
         this.qualifiedTable = quoteIdentifier(schema) + "." + quoteIdentifier(table);
+        this.qualifiedDefaultPartition = quoteIdentifier(schema) + "." + quoteIdentifier(buildPartitionTableName("default"));
+        this.qualifiedLockTable = quoteIdentifier(schema) + "." + quoteIdentifier(table + LOCK_TABLE_SUFFIX);
 
         this.dataSource = buildDataSource(configuration);
 
@@ -140,21 +156,8 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
 
     @Override
     public StoreTransaction beginTransaction(BaseTransactionConfig config) throws BackendException {
-        Connection connection = null;
-        try {
-            connection = dataSource.getConnection();
-            connection.setAutoCommit(false);
-            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
-            return new PostgreSQLTransaction(connection, config);
-        } catch (SQLException e) {
-            if (connection != null) {
-                try {
-                    connection.close();
-                } catch (SQLException ignored) {
-                }
-            }
-            throw new PermanentBackendException("Could not open PostgreSQL transaction", e);
-        }
+        // Non-transactional: do not acquire a connection here.
+        return new PostgreSQLTransaction(config);
     }
 
     @Override
@@ -200,7 +203,10 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
     @Override
     public KeyColumnValueStore openDatabase(String name, StoreMetaData.Container metaData) throws BackendException {
         if (!stores.containsKey(name)) {
-            stores.putIfAbsent(name, new PostgreSQLKeyColumnValueStore(name, qualifiedTable));
+            if (!isLockStore(name)) {
+                ensurePartitionForStore(name);
+            }
+            stores.putIfAbsent(name, new PostgreSQLKeyColumnValueStore(name, qualifiedTable, qualifiedLockTable, dataSource));
         }
         KeyColumnValueStore store = stores.get(name);
         Preconditions.checkNotNull(store);
@@ -228,8 +234,12 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
         return jdbcUrl;
     }
 
-    Connection getConnection(StoreTransaction txh) {
-        return ((PostgreSQLTransaction) txh).getConnection();
+    Connection getConnection() throws SQLException {
+        Connection connection = dataSource.getConnection();
+        if (!connection.getAutoCommit()) {
+            connection.setAutoCommit(true);
+        }
+        return connection;
     }
 
     String getQualifiedTable() {
@@ -246,7 +256,12 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
                 "column_bytes BYTEA NOT NULL, " +
                 "value_bytes BYTEA NOT NULL, " +
                 "PRIMARY KEY (store_name, key_bytes, column_bytes)" +
-                ")");
+                ") PARTITION BY LIST (store_name)");
+            statement.execute("CREATE TABLE IF NOT EXISTS " + qualifiedDefaultPartition +
+                " PARTITION OF " + qualifiedTable + " DEFAULT");
+            createPartitionIndexes(statement, qualifiedDefaultPartition, buildPartitionTableName("default"));
+            createLockTable(statement);
+            precreateAtlasPartitions(statement);
         } catch (SQLException e) {
             throw new PermanentBackendException("Failed to initialize PostgreSQL schema", e);
         }
@@ -254,6 +269,100 @@ public class PostgreSQLStoreManager implements KeyColumnValueStoreManager {
 
     private static String quoteIdentifier(String identifier) {
         return '"' + identifier.replace("\"", "\"\"") + '"';
+    }
+
+    private void ensurePartitionForStore(String storeName) throws BackendException {
+        String partitionTableName = buildPartitionTableName(storeName);
+        String qualifiedPartition = quoteIdentifier(schema) + "." + quoteIdentifier(partitionTableName);
+        String escapedStoreName = escapeLiteral(storeName);
+
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE IF NOT EXISTS " + qualifiedPartition +
+                " PARTITION OF " + qualifiedTable +
+                " FOR VALUES IN ('" + escapedStoreName + "')");
+            createPartitionIndexes(statement, qualifiedPartition, partitionTableName);
+        } catch (SQLException e) {
+            throw new PermanentBackendException("Failed to create PostgreSQL partition for store " + storeName, e);
+        }
+    }
+
+    private void createPartitionIndexes(Statement statement, String qualifiedPartition, String partitionTableName) throws SQLException {
+        String keyColumnIndexName = quoteIdentifier(buildIndexName(partitionTableName, "kc"));
+        String columnKeyIndexName = quoteIdentifier(buildIndexName(partitionTableName, "ck"));
+        statement.execute("CREATE INDEX IF NOT EXISTS " + keyColumnIndexName +
+            " ON " + qualifiedPartition + " (key_bytes, column_bytes)");
+        statement.execute("CREATE INDEX IF NOT EXISTS " + columnKeyIndexName +
+            " ON " + qualifiedPartition + " (column_bytes, key_bytes)");
+    }
+
+    private void createLockTable(Statement statement) throws SQLException {
+        statement.execute("CREATE UNLOGGED TABLE IF NOT EXISTS " + qualifiedLockTable + " (" +
+            "store_name TEXT NOT NULL, " +
+            "key_bytes BYTEA NOT NULL, " +
+            "column_bytes BYTEA NOT NULL, " +
+            "value_bytes BYTEA NOT NULL, " +
+            "PRIMARY KEY (store_name, key_bytes, column_bytes)" +
+            ")");
+        String keyColumnIndexName = quoteIdentifier(buildIndexName(table + LOCK_TABLE_SUFFIX, "kc"));
+        statement.execute("CREATE INDEX IF NOT EXISTS " + keyColumnIndexName +
+            " ON " + qualifiedLockTable + " (key_bytes, column_bytes)");
+    }
+
+    private void precreateAtlasPartitions(Statement statement) throws SQLException {
+        for (String storeName : ATLAS_KNOWN_STORES) {
+            String partitionTableName = buildPartitionTableName(storeName);
+            String qualifiedPartition = quoteIdentifier(schema) + "." + quoteIdentifier(partitionTableName);
+            String escapedStoreName = escapeLiteral(storeName);
+            statement.execute("CREATE TABLE IF NOT EXISTS " + qualifiedPartition +
+                " PARTITION OF " + qualifiedTable +
+                " FOR VALUES IN ('" + escapedStoreName + "')");
+            createPartitionIndexes(statement, qualifiedPartition, partitionTableName);
+        }
+    }
+
+    private static String escapeLiteral(String literal) {
+        return literal.replace("'", "''");
+    }
+
+    private String buildPartitionTableName(String storeName) {
+        String hash = shortHash(storeName);
+        String base = table + "_p_" + hash;
+        return shortenIdentifier(base, 55);
+    }
+
+    private static String buildIndexName(String baseName, String suffix) {
+        String base = baseName + "_" + suffix + "_idx";
+        return shortenIdentifier(base, 63);
+    }
+
+    private static String shortenIdentifier(String identifier, int maxLength) {
+        if (identifier.length() <= maxLength) {
+            return identifier;
+        }
+        return identifier.substring(0, maxLength);
+    }
+
+    private static String shortHash(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(16);
+            for (int i = 0; i < 8; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (NoSuchAlgorithmException e) {
+            return Integer.toHexString(value.hashCode());
+        }
+    }
+
+    private static boolean isLockStore(String storeName) {
+        return storeName.endsWith(LOCK_STORE_SUFFIX);
+    }
+
+    HikariDataSource getDataSource() {
+        return dataSource;
     }
 
     private HikariDataSource buildDataSource(Configuration configuration) {
