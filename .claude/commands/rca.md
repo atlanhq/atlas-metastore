@@ -1,7 +1,7 @@
 ---
 description: Perform Root Cause Analysis on a Linear ticket
 argument-hint: <TICKET-ID>
-allowed-tools: [Bash, Read, Grep, Glob, Task]
+allowed-tools: [Bash, Read, Grep, Glob, Task, Edit, Write, AskUserQuestion, EnterPlanMode]
 model: sonnet
 ---
 
@@ -125,6 +125,31 @@ JSONEOF
 
 Use heredoc (as shown above) to properly handle multiline RCA content with special characters.
 
+## Phase 7: Implementation (Optional)
+
+After the RCA is posted (or if the user declines posting), offer to implement one of the proposed solutions.
+
+1. Use AskUserQuestion to ask:
+   - Question: "Would you like me to implement one of the proposed solutions?"
+   - Options:
+     - "Short-term fix" - Implement the quick fix/workaround
+     - "Long-term solution" - Implement the proper fix
+     - "No, just the RCA" - End here
+
+2. If the user selects an implementation option:
+   - Use EnterPlanMode to design the implementation approach
+   - In plan mode:
+     - Identify the specific files that need changes
+     - Outline the code modifications required
+     - Note any tests that need to be added/updated
+     - Consider backward compatibility
+   - After plan approval, implement the changes using Edit/Write tools
+   - Run the build command to verify: `JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl repository -am -DskipTests -Drat.skip=true`
+
+3. After implementation:
+   - Summarize what was changed
+   - Ask if the user wants to commit the changes
+
 ## Important Notes
 
 - Always show the draft RCA before posting
@@ -132,3 +157,5 @@ Use heredoc (as shown above) to properly handle multiline RCA content with speci
 - Avoid code snippets in the final RCA (use plain language)
 - Include file:line references only in the exploration phase, not in final RCA
 - Compare with existing patterns (like how tags handle similar issues)
+- Implementation is optional - respect if the user only wants analysis
+- Always enter plan mode before implementing to get user approval on the approach
