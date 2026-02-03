@@ -2,7 +2,6 @@
 description: Perform Root Cause Analysis on a Linear ticket
 argument-hint: <TICKET-ID>
 allowed-tools: [Bash, Read, Grep, Glob, Task, Edit, Write, AskUserQuestion, EnterPlanMode]
-model: sonnet
 ---
 
 # Root Cause Analysis for Linear Ticket
