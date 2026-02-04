@@ -156,6 +156,7 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             // Include accessControl attribute to get the Purpose reference
             searchParams.setAttributes(new HashSet<>(Arrays.asList(ATTR_ACCESS_CONTROL)));
             searchParams.setRelationAttributes(new HashSet<>(Arrays.asList("guid", "typeName")));
+            searchParams.setIncludeRelationshipAttributes(true);
             searchParams.setSuppressLogs(true);
 
             // Set index search context flag (required for relationship attribute processing)
@@ -165,8 +166,11 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
             if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
+                LOG.info("No AuthPolicies found for user: {}, groups: {}", request.getUsername(), request.getGroups());
                 return Collections.emptySet();
             }
+
+            LOG.info("Found {} AuthPolicies for user: {}", searchResult.getEntities().size(), request.getUsername());
 
             // Extract unique Purpose GUIDs from accessControl relationship
             Set<String> purposeGuids = new LinkedHashSet<>();
@@ -246,6 +250,8 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
 
         Object accessControl = policy.getAttribute(ATTR_ACCESS_CONTROL);
         if (accessControl == null) {
+            LOG.info("accessControl is null for policy: {}, available attrs: {}",
+                    policy.getGuid(), policy.getAttributes() != null ? policy.getAttributes().keySet() : "null");
             return null;
         }
 
