@@ -221,9 +221,6 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
         dsl.put("size", maxPolicyFetchSize);
         dsl.put("query", Collections.singletonMap("bool", boolQuery));
 
-        // Only return the fields we need
-        dsl.put("_source", Arrays.asList(ATTR_GUID, ATTR_ACCESS_CONTROL));
-
         if (LOG.isDebugEnabled()) {
             try {
                 LOG.debug("AuthPolicy query DSL: {}", mapper.writeValueAsString(dsl));
