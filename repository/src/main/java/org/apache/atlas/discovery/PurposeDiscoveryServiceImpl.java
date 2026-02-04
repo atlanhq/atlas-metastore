@@ -28,6 +28,7 @@ import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.discovery.PurposeUserRequest;
 import org.apache.atlas.model.discovery.PurposeUserResponse;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
@@ -255,8 +256,10 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             return null;
         }
 
-        // accessControl can be a Map or AtlasObjectId
-        if (accessControl instanceof Map) {
+        // accessControl can be AtlasObjectId, Map, or AtlasEntityHeader
+        if (accessControl instanceof AtlasObjectId) {
+            return ((AtlasObjectId) accessControl).getGuid();
+        } else if (accessControl instanceof Map) {
             Map<String, Object> acMap = (Map<String, Object>) accessControl;
             Object guid = acMap.get("guid");
             return guid != null ? guid.toString() : null;
