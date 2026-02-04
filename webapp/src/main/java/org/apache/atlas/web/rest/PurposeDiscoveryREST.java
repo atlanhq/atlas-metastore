@@ -48,7 +48,7 @@ import javax.ws.rs.core.MediaType;
  *
  * @see PurposeDiscoveryService
  */
-@Path("meta/purposes")
+@Path("purposes")
 @Singleton
 @Service
 @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})

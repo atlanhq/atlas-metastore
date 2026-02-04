@@ -2,7 +2,7 @@
 
 ## API Endpoint
 
-**POST** `/api/atlas/v2/meta/purposes/user`
+**POST** `/api/meta/purposes/user`
 
 Discovers all Purpose entities accessible to a user based on their username and group memberships.
 
@@ -42,7 +42,7 @@ Discovers all Purpose entities accessible to a user based on their username and 
 ### 1b. Basic Request - User without access (empty result expected)
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -58,7 +58,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 ### 2. Request with Specific Attributes
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -86,7 +86,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 ### 3. Pagination - Second Page
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -102,7 +102,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 ### 4. Public Purposes Only (Empty Groups)
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -122,7 +122,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 ### 5. Error Case - Missing Username (Should Return 400)
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -143,7 +143,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 ### 6. Error Case - Missing Groups (Should Return 400)
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -164,7 +164,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 ### 7. Error Case - Invalid Limit (Should Return 400)
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
   -H 'content-type: application/json' \
@@ -191,7 +191,7 @@ curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
 Replace `<YOUR_TOKEN>` with your Bearer token from browser dev tools.
 
 ```bash
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
+curl 'https://staging.atlan.com/api/meta/purposes/user' \
   -H 'accept: application/json, text/plain, */*' \
   -H 'accept-language: en-CA,en-GB;q=0.9,en-US;q=0.8,en;q=0.7' \
   -H 'authorization: Bearer <YOUR_TOKEN>' \
