@@ -26,6 +26,7 @@ on:
       - staging
       - lite_master
       - alcon-v2-418
+      - MS-456
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
