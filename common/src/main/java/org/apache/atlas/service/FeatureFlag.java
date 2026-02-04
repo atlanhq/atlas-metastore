@@ -9,7 +9,8 @@ public enum FeatureFlag {
     ENABLE_JANUS_OPTIMISATION("ENABLE_JANUS_OPTIMISATION", false),
     ENABLE_PERSONA_HIERARCHY_FILTER("enable_persona_hierarchy_filter", false),
     DISABLE_WRITE_FLAG("disable_writes", false),
-    USE_TEMP_ES_INDEX("use_temp_es_index", false);
+    USE_TEMP_ES_INDEX("use_temp_es_index", false),
+    ENABLE_ASYNC_EXECUTION("enable_async_execution", false);
 
     private final String key;
     private final boolean defaultValue;

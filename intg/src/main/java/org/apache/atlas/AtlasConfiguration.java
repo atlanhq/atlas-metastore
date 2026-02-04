@@ -206,7 +206,19 @@ public enum AtlasConfiguration {
 
     // Logging thresholds for delete operations
     DELETE_SLOW_QUERY_THRESHOLD_MS("atlas.delete.slow.query.threshold.ms", 1000),
-    DELETE_LARGE_BATCH_THRESHOLD("atlas.delete.large.batch.threshold", 500);
+    DELETE_LARGE_BATCH_THRESHOLD("atlas.delete.large.batch.threshold", 500),
+
+    // Async executor configuration
+    ASYNC_EXECUTOR_CORE_POOL_SIZE("atlas.async.executor.core.pool.size", 10),
+    ASYNC_EXECUTOR_MAX_POOL_SIZE("atlas.async.executor.max.pool.size", 50),
+    ASYNC_EXECUTOR_QUEUE_CAPACITY("atlas.async.executor.queue.capacity", 200),
+    ASYNC_EXECUTOR_KEEP_ALIVE_SECONDS("atlas.async.executor.keep.alive.seconds", 60),
+    ASYNC_EXECUTOR_DEFAULT_TIMEOUT_MS("atlas.async.executor.default.timeout.ms", 30000),
+
+    // Async batching configuration for entity retrieval
+    ASYNC_ENTITY_BATCH_SIZE("atlas.async.entity.batch.size", 50),
+    ASYNC_HEADER_BATCH_SIZE("atlas.async.header.batch.size", 100),
+    ASYNC_MIN_ENTITIES_FOR_PARALLEL("atlas.async.min.entities.for.parallel", 5);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

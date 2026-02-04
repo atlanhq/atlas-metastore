@@ -263,6 +263,34 @@ public class EntityGraphRetriever {
         return atlasVertex != null ? mapVertexToAtlasEntityHeader(atlasVertex, attributes, vertexEdgePropertiesCache) : null;
     }
 
+    /**
+     * Batch convert vertices to entity headers.
+     * Sequential processing to maintain original behavior and transaction semantics.
+     *
+     * @param vertices     List of vertices to convert
+     * @param attributes   Attributes to include in the header
+     * @param cache        Pre-fetched vertex properties cache (optional)
+     * @return List of AtlasEntityHeader in the same order as input vertices
+     */
+    public List<AtlasEntityHeader> toAtlasEntityHeadersBatch(List<AtlasVertex> vertices, Set<String> attributes,
+                                                             VertexEdgePropertiesCache cache) throws AtlasBaseException {
+        if (vertices == null || vertices.isEmpty()) {
+            return new ArrayList<>();
+        }
+
+        List<AtlasEntityHeader> headers = new ArrayList<>(vertices.size());
+        for (AtlasVertex vertex : vertices) {
+            AtlasEntityHeader header;
+            if (cache != null) {
+                header = toAtlasEntityHeader(vertex, attributes, cache);
+            } else {
+                header = toAtlasEntityHeader(vertex, attributes);
+            }
+            headers.add(header);
+        }
+        return headers;
+    }
+
     public AtlasEntityHeader toAtlasEntityHeaderWithClassifications(String guid) throws AtlasBaseException {
         return toAtlasEntityHeaderWithClassifications(getEntityVertex(guid), Collections.emptySet());
     }

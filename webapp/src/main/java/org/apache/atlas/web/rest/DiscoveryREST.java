@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.SortOrder;
 import org.apache.atlas.annotation.Timed;
+import org.apache.atlas.async.AsyncExecutorService;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -31,6 +32,8 @@ import org.apache.atlas.model.searchlog.SearchLogSearchResult;
 import org.apache.atlas.model.searchlog.SearchRequestLogData.SearchRequestLogDataBuilder;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.searchlog.SearchLoggingManagement;
+import org.apache.atlas.service.FeatureFlag;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -48,9 +51,13 @@ import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
+import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.Arrays;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
@@ -75,19 +82,22 @@ public class DiscoveryREST {
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasDiscoveryService discoveryService;
     private final SearchLoggingManagement loggerManagement;
+    private final AsyncExecutorService asyncExecutorService;
 
     private static final String INDEXSEARCH_TAG_NAME = "indexsearch";
     private static final Set<String> TRACKING_UTM_TAGS = new HashSet<>(Arrays.asList("ui_main_list", "ui_popup_searchbar"));
     private static final String UTM_TAG_FROM_PRODUCT = "project_webapp";
     @Inject
     public DiscoveryREST(AtlasTypeRegistry typeRegistry, AtlasDiscoveryService discoveryService,
-                         SearchLoggingManagement loggerManagement, Configuration configuration) {
+                         SearchLoggingManagement loggerManagement, Configuration configuration,
+                         AsyncExecutorService asyncExecutorService) {
         this.typeRegistry           = typeRegistry;
         this.discoveryService       = discoveryService;
         this.loggerManagement       = loggerManagement;
         this.maxFullTextQueryLength = configuration.getInt(Constants.MAX_FULLTEXT_QUERY_STR_LENGTH, 4096);
         this.maxDslQueryLength      = configuration.getInt(Constants.MAX_DSL_QUERY_STR_LENGTH, 4096);
         this.enableSearchLogging    = AtlasConfiguration.ENABLE_SEARCH_LOGGER.getBoolean();
+        this.asyncExecutorService   = asyncExecutorService;
     }
 
     /**
@@ -240,7 +250,13 @@ public class DiscoveryREST {
             if(LOG.isDebugEnabled()){
                 LOG.debug("Performing indexsearch for the params ({})", parameters);
             }
-            AtlasSearchResult result = discoveryService.directIndexSearch(parameters, true);
+
+            AtlasSearchResult result;
+            // Note: Async wrapper for single operations adds thread overhead without performance benefit.
+            // The sync path is used directly. Timeout handling can be added at service layer if needed.
+            // Async is only beneficial for parallel operations (bulk entity fetch, lineage BOTH direction).
+            result = discoveryService.directIndexSearch(parameters, true);
+
             if (result == null) {
                 return null;
             }
@@ -282,6 +298,62 @@ public class DiscoveryREST {
                 RequestContext.get().addApplicationMetrics(indexsearchMetric);
             }
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Execute index search asynchronously with timeout handling.
+     */
+    private AtlasSearchResult executeIndexSearchAsync(IndexSearchParams parameters) throws AtlasBaseException {
+        long timeoutMs = asyncExecutorService.getDefaultTimeoutMs();
+
+        // Capture RequestContext for propagation to async thread
+        RequestContext parentContext = RequestContext.get();
+        RequestContext asyncContext = parentContext.copyForAsync();
+
+        CompletableFuture<AtlasSearchResult> future = asyncExecutorService.supplyAsync(
+            () -> {
+                try {
+                    // Propagate RequestContext to async thread
+                    RequestContext.setCurrentContext(asyncContext);
+                    return discoveryService.directIndexSearch(parameters, true);
+                } catch (AtlasBaseException e) {
+                    throw new CompletionException(e);
+                } finally {
+                    // Clean up RequestContext in async thread
+                    RequestContext.clear();
+                }
+            },
+            "indexSearch"
+        );
+
+        // Apply timeout
+        future = asyncExecutorService.withTimeout(future, Duration.ofMillis(timeoutMs), "indexSearch");
+
+        try {
+            return future.join();
+        } catch (CompletionException ce) {
+            Throwable cause = ce.getCause();
+            if (cause instanceof TimeoutException) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_SEARCH_FAILED_DUE_TO_TIMEOUT,
+                    String.valueOf(timeoutMs / 1000) + "s");
+            }
+            if (cause instanceof AtlasBaseException) {
+                throw (AtlasBaseException) cause;
+            }
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, cause.getMessage());
+        }
+    }
+
+    /**
+     * Check if async execution is enabled via feature flag.
+     */
+    private boolean isAsyncExecutionEnabled() {
+        try {
+            return FeatureFlagStore.evaluate(FeatureFlag.ENABLE_ASYNC_EXECUTION.getKey(), "true");
+        } catch (Exception e) {
+            LOG.debug("Failed to evaluate async execution feature flag, defaulting to false", e);
+            return false;
         }
     }
 

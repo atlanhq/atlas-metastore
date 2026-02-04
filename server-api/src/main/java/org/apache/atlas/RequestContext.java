@@ -961,4 +961,77 @@ public class RequestContext {
         return this.lineageCalcTime.get();
     }
 
+    /**
+     * Copy read-only properties from this context to be used for propagation to worker threads.
+     * This creates a snapshot of flags and settings that should be consistent across async operations.
+     *
+     * NOTE: This does NOT copy mutable state like caches, entity updates, etc.
+     * Each worker thread should have its own mutable state.
+     *
+     * @return A new RequestContext with copied read-only properties
+     */
+    public RequestContext copyForAsync() {
+        RequestContext copy = new RequestContext();
+
+        // Copy user info
+        copy.user = this.user;
+        copy.userGroups = this.userGroups != null ? new HashSet<>(this.userGroups) : null;
+        copy.clientIPAddress = this.clientIPAddress;
+        copy.forwardedAddresses = this.forwardedAddresses != null ? new ArrayList<>(this.forwardedAddresses) : null;
+        copy.clientOrigin = this.clientOrigin;
+        copy.playbookName = this.playbookName;
+
+        // Copy flags that affect behavior
+        copy.isInvokedByIndexSearch = this.isInvokedByIndexSearch;
+        copy.isInvokedByLineage = this.isInvokedByLineage;
+        copy.skipAuthorizationCheck = this.skipAuthorizationCheck;
+        copy.skipFailedEntities = this.skipFailedEntities;
+        copy.allowDeletedRelationsIndexsearch = this.allowDeletedRelationsIndexsearch;
+        copy.includeMeanings = this.includeMeanings;
+        copy.includeClassifications = this.includeClassifications;
+        copy.includeRelationshipAttributes = this.includeRelationshipAttributes;
+        copy.includeClassificationNames = this.includeClassificationNames;
+        copy.deleteType = this.deleteType;
+        copy.isImportInProgress = this.isImportInProgress;
+        copy.createShellEntityForNonExistingReference = this.createShellEntityForNonExistingReference;
+        copy.delayTagNotifications = this.delayTagNotifications;
+        copy.skipHasLineageCalculation = this.skipHasLineageCalculation;
+
+        // Copy search attributes
+        if (CollectionUtils.isNotEmpty(this.relationAttrsForSearch)) {
+            copy.relationAttrsForSearch.addAll(this.relationAttrsForSearch);
+        }
+
+        // Copy request headers
+        if (MapUtils.isNotEmpty(this.requestContextHeaders)) {
+            copy.requestContextHeaders.putAll(this.requestContextHeaders);
+        }
+
+        // Copy trace ID for logging correlation
+        copy.traceId = this.traceId;
+        copy.requestUri = this.requestUri;
+        copy.metricsRegistry = this.metricsRegistry;
+
+        return copy;
+    }
+
+    /**
+     * Set this RequestContext as the current context for the calling thread.
+     * Used to propagate context to worker threads in async execution.
+     */
+    public static void setCurrentContext(RequestContext context) {
+        if (context != null) {
+            RequestContext existing = CURRENT_CONTEXT.get();
+            if (existing != null) {
+                synchronized (ACTIVE_REQUESTS) {
+                    ACTIVE_REQUESTS.remove(existing);
+                }
+            }
+            CURRENT_CONTEXT.set(context);
+            synchronized (ACTIVE_REQUESTS) {
+                ACTIVE_REQUESTS.add(context);
+            }
+        }
+    }
+
 }
