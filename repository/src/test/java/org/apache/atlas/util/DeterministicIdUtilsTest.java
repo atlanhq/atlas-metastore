@@ -113,10 +113,37 @@ public class DeterministicIdUtilsTest {
 
     @Test
     public void testGenerateTermQN_Deterministic() {
-        String qn1 = DeterministicIdUtils.generateTermQN("Revenue", "glossary123");
-        String qn2 = DeterministicIdUtils.generateTermQN("Revenue", "glossary123");
+        String qn1 = DeterministicIdUtils.generateTermQN("Revenue", "category123", "glossary123");
+        String qn2 = DeterministicIdUtils.generateTermQN("Revenue", "category123", "glossary123");
 
         assertEquals(qn1, qn2, "Same term should produce identical QN");
+    }
+
+    @Test
+    public void testGenerateTermQN_WithNullParentCategory() {
+        String qn1 = DeterministicIdUtils.generateTermQN("Revenue", null, "glossary123");
+        String qn2 = DeterministicIdUtils.generateTermQN("Revenue", null, "glossary123");
+
+        assertEquals(qn1, qn2, "Term with null parent category should produce identical QN");
+    }
+
+    @Test
+    public void testGenerateTermQN_DifferentParentCategories() {
+        String qn1 = DeterministicIdUtils.generateTermQN("Revenue", "category-finance", "glossary123");
+        String qn2 = DeterministicIdUtils.generateTermQN("Revenue", "category-sales", "glossary123");
+        String qn3 = DeterministicIdUtils.generateTermQN("Revenue", null, "glossary123");
+
+        assertNotEquals(qn1, qn2, "Same term in different categories should produce different QNs");
+        assertNotEquals(qn1, qn3, "Term in category vs no category should produce different QNs");
+        assertNotEquals(qn2, qn3, "Term in category vs no category should produce different QNs");
+    }
+
+    @Test
+    public void testGenerateTermQN_NullVsEmptyParentCategory() {
+        String qnNull = DeterministicIdUtils.generateTermQN("Revenue", null, "glossary123");
+        String qnEmpty = DeterministicIdUtils.generateTermQN("Revenue", "", "glossary123");
+
+        assertEquals(qnNull, qnEmpty, "Null and empty parent category should produce same QN");
     }
 
     @Test
@@ -211,8 +238,8 @@ public class DeterministicIdUtilsTest {
 
     @Test
     public void testGenerateTermQN_SameTermDifferentGlossaries() {
-        String qn1 = DeterministicIdUtils.generateTermQN("Revenue", "glossary-finance");
-        String qn2 = DeterministicIdUtils.generateTermQN("Revenue", "glossary-marketing");
+        String qn1 = DeterministicIdUtils.generateTermQN("Revenue", null, "glossary-finance");
+        String qn2 = DeterministicIdUtils.generateTermQN("Revenue", null, "glossary-marketing");
 
         assertNotEquals(qn1, qn2,
                 "Same term name in different glossaries should produce different QNs");
@@ -507,5 +534,180 @@ public class DeterministicIdUtilsTest {
         // Verify determinism
         String qn2 = DeterministicIdUtils.generateGlossaryQN("Enterprise Data Glossary");
         assertEquals(qn, qn2);
+    }
+
+    // ========== Time Bucket Tests ==========
+    // These tests verify determinism within the same time bucket for entities that allow duplicates
+
+    @Test
+    public void testTimeBucket_Constant() {
+        // Within a single test execution, time bucket should remain constant
+        String bucket1 = DeterministicIdUtils.getTimeBucket();
+        String bucket2 = DeterministicIdUtils.getTimeBucket();
+
+        assertEquals(bucket1, bucket2, "Time bucket should be constant within a short period");
+    }
+
+    @Test
+    public void testGenerateNanoIdWithTimeBucket_Deterministic() {
+        // Within the same time bucket, same inputs should produce same output
+        String nanoId1 = DeterministicIdUtils.generateNanoIdWithTimeBucket("test", "input");
+        String nanoId2 = DeterministicIdUtils.generateNanoIdWithTimeBucket("test", "input");
+
+        assertEquals(nanoId1, nanoId2,
+                "Same inputs within same time bucket should produce identical NanoIds");
+    }
+
+    @Test
+    public void testGenerateNanoIdWithTimeBucket_DifferentInputs() {
+        String nanoId1 = DeterministicIdUtils.generateNanoIdWithTimeBucket("input1");
+        String nanoId2 = DeterministicIdUtils.generateNanoIdWithTimeBucket("input2");
+
+        assertNotEquals(nanoId1, nanoId2,
+                "Different inputs should produce different NanoIds even within same time bucket");
+    }
+
+    @Test
+    public void testGenerateNanoIdWithTimeBucket_CustomSize() {
+        String nanoId = DeterministicIdUtils.generateNanoIdWithTimeBucket(22, "test", "input");
+
+        assertEquals(nanoId.length(), 22, "Custom size NanoId should have specified length");
+    }
+
+    @Test
+    public void testGenerateDomainQN_UsesTimeBucket() {
+        // Domain uses time bucket because duplicate names are allowed
+        String qn1 = DeterministicIdUtils.generateDomainQN("Sales", "default/domain/root");
+        String qn2 = DeterministicIdUtils.generateDomainQN("Sales", "default/domain/root");
+
+        // Within same time bucket, should be deterministic
+        assertEquals(qn1, qn2, "Same domain should produce identical QN within same time bucket");
+        assertEquals(qn1.length(), 21, "Domain QN should be 21 characters");
+    }
+
+    @Test
+    public void testGenerateAccessControlQN_UsesTimeBucket() {
+        // AccessControl uses time bucket because duplicate names are allowed
+        String qn1 = DeterministicIdUtils.generateAccessControlQN("persona", "Admin", "tenant1");
+        String qn2 = DeterministicIdUtils.generateAccessControlQN("persona", "Admin", "tenant1");
+
+        // Within same time bucket, should be deterministic
+        assertEquals(qn1, qn2, "Same persona should produce identical QN within same time bucket");
+        assertEquals(qn1.length(), 22, "AccessControl QN should be 22 characters");
+    }
+
+    @Test
+    public void testGenerateQueryResourceQN_UsesTimeBucket() {
+        // QueryResource uses time bucket because duplicate names are allowed
+        String qn1 = DeterministicIdUtils.generateQueryResourceQN("collection", "MyCollection", "", "user1");
+        String qn2 = DeterministicIdUtils.generateQueryResourceQN("collection", "MyCollection", "", "user1");
+
+        // Within same time bucket, should be deterministic
+        assertEquals(qn1, qn2, "Same collection should produce identical QN within same time bucket");
+        assertEquals(qn1.length(), 21, "QueryResource QN should be 21 characters");
+    }
+
+    @Test
+    public void testGeneratePolicyQN_UsesTimeBucket() {
+        // Policy uses time bucket because duplicate names are allowed
+        String qn1 = DeterministicIdUtils.generatePolicyQN("ReadAccess", "persona/admin");
+        String qn2 = DeterministicIdUtils.generatePolicyQN("ReadAccess", "persona/admin");
+
+        // Within same time bucket, should be deterministic
+        assertEquals(qn1, qn2, "Same policy should produce identical QN within same time bucket");
+        assertEquals(qn1.length(), 22, "Policy QN should be 22 characters");
+    }
+
+    @Test
+    public void testTimeBucket_EntitiesWithDuplicateNames_StillUnique() {
+        // Even with time bucket, different inputs should produce unique outputs
+        String persona1 = DeterministicIdUtils.generateAccessControlQN("persona", "Admin", "tenant1");
+        String persona2 = DeterministicIdUtils.generateAccessControlQN("persona", "Admin", "tenant2");
+        String purpose1 = DeterministicIdUtils.generateAccessControlQN("purpose", "Admin", "tenant1");
+
+        assertNotEquals(persona1, persona2, "Same name in different tenants should be unique");
+        assertNotEquals(persona1, purpose1, "Same name with different types should be unique");
+    }
+
+    @Test
+    public void testTimeBucket_DomainHierarchy_StillUnique() {
+        String rootDomain = DeterministicIdUtils.generateDomainQN("Sales", "");
+        String childDomain = DeterministicIdUtils.generateDomainQN("Sales", "default/domain/parent");
+
+        assertNotEquals(rootDomain, childDomain,
+                "Same domain name at different hierarchy levels should be unique");
+    }
+
+    @Test
+    public void testTimeBucket_QueryResources_DifferentTypes_StillUnique() {
+        String collection = DeterministicIdUtils.generateQueryResourceQN("collection", "MyResource", "", "user1");
+        String folder = DeterministicIdUtils.generateQueryResourceQN("folder", "MyResource", "", "user1");
+        String query = DeterministicIdUtils.generateQueryResourceQN("query", "MyResource", "", "user1");
+
+        assertNotEquals(collection, folder, "Collection and Folder with same name should be unique");
+        assertNotEquals(folder, query, "Folder and Query with same name should be unique");
+        assertNotEquals(collection, query, "Collection and Query with same name should be unique");
+    }
+
+    @Test
+    public void testTimeBucket_AccessControlTypes_AllDeterministic() {
+        // Test all access control types use time bucket consistently
+        String persona = DeterministicIdUtils.generateAccessControlQN("persona", "TestEntity", "context");
+        String purpose = DeterministicIdUtils.generateAccessControlQN("purpose", "TestEntity", "context");
+        String stakeholder = DeterministicIdUtils.generateAccessControlQN("stakeholder", "TestEntity", "context");
+        String stakeholderTitle = DeterministicIdUtils.generateAccessControlQN("stakeholdertitle", "TestEntity", "context");
+
+        // Re-generate to verify determinism
+        assertEquals(persona, DeterministicIdUtils.generateAccessControlQN("persona", "TestEntity", "context"));
+        assertEquals(purpose, DeterministicIdUtils.generateAccessControlQN("purpose", "TestEntity", "context"));
+        assertEquals(stakeholder, DeterministicIdUtils.generateAccessControlQN("stakeholder", "TestEntity", "context"));
+        assertEquals(stakeholderTitle, DeterministicIdUtils.generateAccessControlQN("stakeholdertitle", "TestEntity", "context"));
+
+        // All should be unique from each other
+        Set<String> uniqueQNs = new HashSet<>();
+        uniqueQNs.add(persona);
+        uniqueQNs.add(purpose);
+        uniqueQNs.add(stakeholder);
+        uniqueQNs.add(stakeholderTitle);
+        assertEquals(uniqueQNs.size(), 4, "All access control types should produce unique QNs");
+    }
+
+    // ========== Non-Time-Bucket Tests (entities with unique names) ==========
+    // These entities do NOT use time bucket because they have unique name constraints
+
+    @Test
+    public void testGlossaryQN_DoesNotUseTimeBucket() {
+        // Glossary has unique names, so doesn't need time bucket
+        String qn1 = DeterministicIdUtils.generateGlossaryQN("MyGlossary");
+        String qn2 = DeterministicIdUtils.generateGlossaryQN("MyGlossary");
+
+        assertEquals(qn1, qn2, "Glossary QN should be deterministic without time bucket");
+    }
+
+    @Test
+    public void testTermQN_DoesNotUseTimeBucket() {
+        // Terms are unique within glossary, so doesn't need time bucket
+        String qn1 = DeterministicIdUtils.generateTermQN("MyTerm", "category1", "glossary1");
+        String qn2 = DeterministicIdUtils.generateTermQN("MyTerm", "category1", "glossary1");
+
+        assertEquals(qn1, qn2, "Term QN should be deterministic without time bucket");
+    }
+
+    @Test
+    public void testCategoryQN_DoesNotUseTimeBucket() {
+        // Categories are unique within glossary, so doesn't need time bucket
+        String qn1 = DeterministicIdUtils.generateCategoryQN("MyCategory", "parent1", "glossary1");
+        String qn2 = DeterministicIdUtils.generateCategoryQN("MyCategory", "parent1", "glossary1");
+
+        assertEquals(qn1, qn2, "Category QN should be deterministic without time bucket");
+    }
+
+    @Test
+    public void testProductQN_DoesNotUseTimeBucket() {
+        // Products are unique within domain, so doesn't need time bucket
+        String qn1 = DeterministicIdUtils.generateProductQN("MyProduct", "domain1");
+        String qn2 = DeterministicIdUtils.generateProductQN("MyProduct", "domain1");
+
+        assertEquals(qn1, qn2, "Product QN should be deterministic without time bucket");
     }
 }
