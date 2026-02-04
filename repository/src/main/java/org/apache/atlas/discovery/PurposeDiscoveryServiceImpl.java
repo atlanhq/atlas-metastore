@@ -153,7 +153,8 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             // Create IndexSearchParams
             IndexSearchParams searchParams = new IndexSearchParams();
             searchParams.setDsl(dsl);
-            searchParams.setAttributes(new HashSet<>()); // We only need relationship data
+            // Include accessControl attribute to get the Purpose reference
+            searchParams.setAttributes(new HashSet<>(Arrays.asList(ATTR_ACCESS_CONTROL)));
             searchParams.setRelationAttributes(new HashSet<>(Arrays.asList("guid", "typeName")));
             searchParams.setSuppressLogs(true);
 
