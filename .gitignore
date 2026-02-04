@@ -15,12 +15,13 @@
 # limitations under the License.
 
 # Maven
-target*
+/target/
+**/target/
 dependency-reduced-pom.xml
 core*.dmp
 pom.xml.releaseBackup
 
-# IntelliJ
+# IntelliJ IDEA
 *.iml
 *.ipr
 *.iws
@@ -29,15 +30,17 @@ pom.xml.releaseBackup
 # gemini
 gemini.md
 
-# Eclipse
+# Eclipse / STS
 .cache
 .classpath
 .project
 .checkstyle
-
 .settings
 .externalToolBuilders
 maven-eclipse.xml
+
+# VS Code
+.vscode/
 
 #binary files
 #**/bin/**
@@ -58,8 +61,11 @@ test-output
 # review board
 .reviewboardrc
 
-# other files
+# OS / editor files
 .DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
 *.swp
 
 #atlas data directory creates when tests are run from IDE
@@ -85,6 +91,13 @@ distro/solr/*.tgz
 
 # local models and configurations
 /deploy
-**.class
+*.class
+**/*.class
 */bin.vscode/
 **/bin
+
+# local env
+.env
+.env.*
+.direnv/
+.tool-versions
