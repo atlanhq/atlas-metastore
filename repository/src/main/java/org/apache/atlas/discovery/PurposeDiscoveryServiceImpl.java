@@ -158,6 +158,9 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setRelationAttributes(new HashSet<>(Arrays.asList("guid", "typeName")));
             searchParams.setSuppressLogs(true);
 
+            // Set index search context flag (required for relationship attribute processing)
+            RequestContext.get().setIsInvokedByIndexSearch(true);
+
             // Execute the query with bulk fetching enabled to populate relationship attributes
             AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
@@ -293,6 +296,9 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             }
             searchParams.setAttributes(attributes);
             searchParams.setSuppressLogs(true);
+
+            // Set index search context flag (required for proper attribute processing)
+            RequestContext.get().setIsInvokedByIndexSearch(true);
 
             // Execute the query with bulk fetching enabled
             AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
