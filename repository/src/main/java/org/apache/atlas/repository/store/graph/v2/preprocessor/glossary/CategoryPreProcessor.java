@@ -138,8 +138,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             isValidLexoRank(lexicographicalSortOrder, glossaryQualifiedName, parentQname, this.discovery);
         }
 
-        String parentCategoryQN = parentCategory != null ? (String) parentCategory.getAttribute(QUALIFIED_NAME) : null;
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(vertex, catName, parentCategoryQN));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(vertex, catName, parentQname));
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
                 "create entity: type=", entity.getTypeName());
 

@@ -23,7 +23,9 @@ import org.apache.commons.lang3.StringUtils;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -54,6 +56,21 @@ public final class DeterministicIdUtils {
 
     /** NanoId size for access control entities (AuthPolicy, Persona, Purpose, Stakeholder) for backward compatibility */
     public static final int NANOID_SIZE_ACCESS_CONTROL = 22;
+
+    /**
+     * Time bucket size in seconds for deterministic ID generation when duplicates are allowed.
+     *
+     * This value is chosen to balance two requirements:
+     * 1. Small enough that two separate duplicate creation requests will fall into different buckets
+     *    (humans cannot create two entities in under 5 seconds)
+     * 2. Large enough to account for clock skew between mirrored Atlas instances
+     *    (cloud NTP keeps clocks within milliseconds, so 5 seconds is more than sufficient)
+     *
+     * When two Atlas instances receive the same mirrored request, they will process it within
+     * the same 5-second bucket, generating identical IDs. When a user creates two entities
+     * with duplicate names, they will be in different time buckets, generating unique IDs.
+     */
+    public static final int TIME_BUCKET_SIZE_SECONDS = 5;
 
     private DeterministicIdUtils() {
         // Utility class - prevent instantiation
@@ -154,6 +171,79 @@ public final class DeterministicIdUtils {
         }
         return NanoIdUtils.randomNanoId(size);
     }
+
+    // ==================== TIME BUCKET METHODS ====================
+    // These methods are used for entities that allow duplicate names.
+    // The time bucket ensures:
+    // 1. Same request on mirrored instances -> same ID (within bucket window)
+    // 2. Different requests (even with duplicate names) -> different IDs (different time buckets)
+
+    /**
+     * Get the current time bucket value.
+     * The bucket changes every TIME_BUCKET_SIZE_SECONDS seconds.
+     *
+     * @return The current time bucket as a string
+     */
+    static String getTimeBucket() {
+        long timeBucket = Instant.now().getEpochSecond() / TIME_BUCKET_SIZE_SECONDS;
+        return String.valueOf(timeBucket);
+    }
+
+    /**
+     * Generate a deterministic NanoId with time bucket for entities that allow duplicate names.
+     * The time bucket ensures uniqueness across separate creation requests while maintaining
+     * determinism for the same request processed by mirrored Atlas instances.
+     *
+     * @param components Variable number of string components to hash
+     * @return A deterministic 21-character alphanumeric string
+     */
+    static String generateNanoIdWithTimeBucket(String... components) {
+        return generateNanoIdWithTimeBucket(NANOID_SIZE_DEFAULT, components);
+    }
+
+    /**
+     * Generate a deterministic NanoId with time bucket and specified size.
+     *
+     * @param size The length of the NanoId to generate
+     * @param components Variable number of string components to hash
+     * @return A deterministic alphanumeric string of the specified length
+     */
+    static String generateNanoIdWithTimeBucket(int size, String... components) {
+        String[] allComponents = Arrays.copyOf(components, components.length + 1);
+        allComponents[components.length] = getTimeBucket();
+        return generateNanoId(size, allComponents);
+    }
+
+    /**
+     * Get a NanoId with time bucket, using deterministic generation if enabled, or random NanoId if disabled.
+     * Use this for entities that allow duplicate names (e.g., Persona, Purpose, DataDomain, Collection).
+     *
+     * @param components Variable number of string components to hash (used only if deterministic generation is enabled)
+     * @return A 21-character alphanumeric string (deterministic with time bucket, or random based on configuration)
+     */
+    public static String getNanoIdWithTimeBucket(String... components) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateNanoIdWithTimeBucket(components);
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
+    /**
+     * Get a NanoId with time bucket and specified size, using deterministic generation if enabled.
+     * Use this for entities that allow duplicate names.
+     *
+     * @param size The length of the NanoId to generate
+     * @param components Variable number of string components to hash (used only if deterministic generation is enabled)
+     * @return An alphanumeric string of the specified length (deterministic with time bucket, or random based on configuration)
+     */
+    public static String getNanoIdWithTimeBucket(int size, String... components) {
+        if (isDeterministicIdGenerationEnabled()) {
+            return generateNanoIdWithTimeBucket(size, components);
+        }
+        return NanoIdUtils.randomNanoId(size);
+    }
+
+    // ==================== END TIME BUCKET METHODS ====================
 
     /**
      * Generate entity GUID from type name and qualified name.
@@ -302,26 +392,28 @@ public final class DeterministicIdUtils {
     }
 
     /**
-     * Generate Term QualifiedName (prefix) from term name and anchor glossary QN.
+     * Generate Term QualifiedName (prefix) from term name, parent category QN, and anchor glossary QN.
      *
      * @param termName The term name
+     * @param parentCategoryQN The parent category's qualified name (can be null if term is not in a category)
      * @param anchorGlossaryQN The anchor glossary's qualified name
      * @return A deterministic 21-character NanoId
      */
-    static String generateTermQN(String termName, String anchorGlossaryQN) {
-        return generateNanoId("term", termName, anchorGlossaryQN);
+    static String generateTermQN(String termName, String parentCategoryQN, String anchorGlossaryQN) {
+        return generateNanoId("term", termName, StringUtils.defaultString(parentCategoryQN), anchorGlossaryQN);
     }
 
     /**
      * Get Term QualifiedName prefix, using deterministic generation if enabled.
      *
      * @param termName The term name
+     * @param parentCategoryQN The parent category's qualified name (can be null if term is not in a category)
      * @param anchorGlossaryQN The anchor glossary's qualified name
      * @return A 21-character NanoId (deterministic or random based on configuration)
      */
-    public static String getTermQN(String termName, String anchorGlossaryQN) {
+    public static String getTermQN(String termName, String parentCategoryQN, String anchorGlossaryQN) {
         if (isDeterministicIdGenerationEnabled()) {
-            return generateTermQN(termName, anchorGlossaryQN);
+            return generateTermQN(termName, parentCategoryQN, anchorGlossaryQN);
         }
         return NanoIdUtils.randomNanoId();
     }
@@ -356,17 +448,19 @@ public final class DeterministicIdUtils {
 
     /**
      * Generate DataDomain QualifiedName suffix from domain name and parent domain QN.
+     * Uses time bucket because domain names can be duplicated.
      *
      * @param domainName The domain name
      * @param parentDomainQN The parent domain's qualified name (can be empty for root)
      * @return A deterministic 21-character NanoId
      */
     static String generateDomainQN(String domainName, String parentDomainQN) {
-        return generateNanoId("domain", domainName, StringUtils.defaultString(parentDomainQN));
+        return generateNanoIdWithTimeBucket("domain", domainName, StringUtils.defaultString(parentDomainQN));
     }
 
     /**
      * Get DataDomain QualifiedName suffix, using deterministic generation if enabled.
+     * Uses time bucket because domain names can be duplicated.
      *
      * @param domainName The domain name
      * @param parentDomainQN The parent domain's qualified name (can be empty for root)
@@ -407,6 +501,7 @@ public final class DeterministicIdUtils {
     /**
      * Generate Persona/Purpose/Stakeholder QualifiedName suffix from name and context.
      * Uses 22-character NanoId for backward compatibility with existing access control entities.
+     * Uses time bucket because these entity types allow duplicate names.
      *
      * @param type The access control type (persona, purpose, stakeholder, stakeholdertitle)
      * @param name The entity name
@@ -414,12 +509,13 @@ public final class DeterministicIdUtils {
      * @return A deterministic 22-character NanoId
      */
     static String generateAccessControlQN(String type, String name, String contextQN) {
-        return generateNanoId(NANOID_SIZE_ACCESS_CONTROL, type, name, contextQN);
+        return generateNanoIdWithTimeBucket(NANOID_SIZE_ACCESS_CONTROL, type, name, contextQN);
     }
 
     /**
      * Get Persona/Purpose/Stakeholder QualifiedName suffix, using deterministic generation if enabled.
      * Uses 22-character NanoId for backward compatibility with existing access control entities.
+     * Uses time bucket because these entity types allow duplicate names.
      *
      * @param type The access control type (persona, purpose, stakeholder, stakeholdertitle)
      * @param name The entity name
@@ -435,6 +531,7 @@ public final class DeterministicIdUtils {
 
     /**
      * Generate Query/Folder/Collection QualifiedName suffix.
+     * Uses time bucket because these entity types allow duplicate names.
      *
      * @param type The resource type (collection, folder, query)
      * @param name The resource name
@@ -443,11 +540,12 @@ public final class DeterministicIdUtils {
      * @return A deterministic 21-character NanoId
      */
     static String generateQueryResourceQN(String type, String name, String parentQN, String userName) {
-        return generateNanoId(type, name, StringUtils.defaultString(parentQN), userName);
+        return generateNanoIdWithTimeBucket(type, name, StringUtils.defaultString(parentQN), userName);
     }
 
     /**
      * Get Query/Folder/Collection QualifiedName suffix, using deterministic generation if enabled.
+     * Uses time bucket because these entity types allow duplicate names.
      *
      * @param type The resource type (collection, folder, query)
      * @param name The resource name
@@ -465,18 +563,20 @@ public final class DeterministicIdUtils {
     /**
      * Generate Policy QualifiedName suffix from policy name and parent entity QN.
      * Uses 22-character NanoId for backward compatibility with existing policy entities.
+     * Uses time bucket because policy names can be duplicated.
      *
      * @param policyName The policy name
      * @param parentEntityQN The parent entity's qualified name
      * @return A deterministic 22-character NanoId
      */
     static String generatePolicyQN(String policyName, String parentEntityQN) {
-        return generateNanoId(NANOID_SIZE_ACCESS_CONTROL, "policy", policyName, parentEntityQN);
+        return generateNanoIdWithTimeBucket(NANOID_SIZE_ACCESS_CONTROL, "policy", policyName, parentEntityQN);
     }
 
     /**
      * Get Policy QualifiedName suffix, using deterministic generation if enabled.
      * Uses 22-character NanoId for backward compatibility with existing policy entities.
+     * Uses time bucket because policy names can be duplicated.
      *
      * @param policyName The policy name
      * @param parentEntityQN The parent entity's qualified name

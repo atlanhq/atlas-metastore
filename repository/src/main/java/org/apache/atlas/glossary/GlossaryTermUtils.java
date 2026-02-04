@@ -1038,7 +1038,8 @@ public class GlossaryTermUtils extends GlossaryUtils {
             throw new AtlasBaseException("Glossary not found with guid: " + anchorGlossaryGuid);
         }
         String glossaryQN = glossary.getQualifiedName();
-        qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getTermQN(term.getName(), glossaryQN) : qName;
+        // Note: parentCategoryQN is null here as category QN is not readily available from AtlasGlossaryTerm
+        qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getTermQN(term.getName(), null, glossaryQN) : qName;
 
         return qName + "@" + glossaryQN;
     }
