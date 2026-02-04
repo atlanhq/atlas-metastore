@@ -37,17 +37,6 @@ Discovers all Purpose entities accessible to a user based on their username and 
 
 ```bash
 # User hritik.rai.testmember2 has access to 3 purposes on staging
-curl 'https://staging.atlan.com/api/atlas/v2/meta/purposes/user' \
-  -H 'accept: application/json, text/plain, */*' \
-  -H 'authorization: Bearer <YOUR_TOKEN>' \
-  -H 'content-type: application/json' \
-  -H 'x-atlan-client-origin: product_webapp' \
-  --data-raw '{
-    "username": "hritik.rai.testmember2",
-    "groups": [],
-    "limit": 20,
-    "offset": 0
-  }'
 ```
 
 ### 1b. Basic Request - User without access (empty result expected)
