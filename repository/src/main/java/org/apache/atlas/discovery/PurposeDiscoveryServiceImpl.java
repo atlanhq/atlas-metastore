@@ -158,8 +158,8 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setRelationAttributes(new HashSet<>(Arrays.asList("guid", "typeName")));
             searchParams.setSuppressLogs(true);
 
-            // Execute the query
-            AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams);
+            // Execute the query with bulk fetching enabled to populate relationship attributes
+            AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
             if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
                 return Collections.emptySet();
@@ -294,8 +294,8 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setAttributes(attributes);
             searchParams.setSuppressLogs(true);
 
-            // Execute the query
-            AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams);
+            // Execute the query with bulk fetching enabled
+            AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
             if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
                 LOG.warn("No Purpose entities found for GUIDs: {}", guids);
