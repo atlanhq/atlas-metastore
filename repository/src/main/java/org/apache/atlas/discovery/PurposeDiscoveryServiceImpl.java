@@ -93,8 +93,8 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             this.maxAggregationSize = config.getInt(CONFIG_MAX_AGGREGATION_SIZE, DEFAULT_MAX_AGGREGATION_SIZE);
             this.maxPolicyFetchSize = config.getInt(CONFIG_MAX_POLICY_FETCH_SIZE, DEFAULT_MAX_POLICY_FETCH_SIZE);
         } catch (Exception e) {
-            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR,
-                    "Failed to load configuration for PurposeDiscoveryService", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e,
+                    "Failed to load configuration for PurposeDiscoveryService");
         }
 
         LOG.info("PurposeDiscoveryServiceImpl initialized with maxAggregationSize={}, maxPolicyFetchSize={}",
@@ -239,11 +239,11 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
      */
     @SuppressWarnings("unchecked")
     private String extractPurposeGuid(AtlasEntityHeader policy) {
-        if (policy == null || policy.getRelationshipAttributes() == null) {
+        if (policy == null) {
             return null;
         }
 
-        Object accessControl = policy.getRelationshipAttributes().get(ATTR_ACCESS_CONTROL);
+        Object accessControl = policy.getAttribute(ATTR_ACCESS_CONTROL);
         if (accessControl == null) {
             return null;
         }
