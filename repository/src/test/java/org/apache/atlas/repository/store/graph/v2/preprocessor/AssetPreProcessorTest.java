@@ -9,6 +9,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.plugin.util.RangerUserStore;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -50,6 +51,9 @@ public class AssetPreProcessorTest {
     private EntityGraphRetriever entityRetriever;
 
     @Mock
+    private DynamicVertexService dynamicVertexService;
+
+    @Mock
     private AtlasGraph graph;
 
     @Mock
@@ -70,8 +74,7 @@ public class AssetPreProcessorTest {
         closeable = MockitoAnnotations.openMocks(this);
         
         // Create the validator with default UsersStore
-        UserGroupAttributeValidator validator = new UserGroupAttributeValidator();
-        preProcessor = new AssetPreProcessor(typeRegistry, entityRetriever, graph, discovery, retrieverNoRelation, validator);
+        preProcessor = new AssetPreProcessor(typeRegistry, entityRetriever, graph, dynamicVertexService);
         originalUserStore = UsersStore.getInstance().getUserStore();
 
         // Setup default valid users/groups

@@ -55,7 +55,8 @@ public class AtlasJsonProvider extends JacksonJaxbJsonProvider {
     private HttpServletRequest httpServletRequest;
 
     public AtlasJsonProvider() {
-        super(mapper, JacksonJaxbJsonProvider.DEFAULT_ANNOTATIONS);
+        super(new ObjectMapper()
+                .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true), JacksonJaxbJsonProvider.DEFAULT_ANNOTATIONS);
 
         LOG.info("AtlasJsonProvider() instantiated");
     }

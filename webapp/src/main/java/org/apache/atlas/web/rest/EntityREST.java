@@ -1996,7 +1996,7 @@ public class EntityREST {
 
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Classifications");
         try {
-            Set<Long> vertexIds = entitiesStore.getVertexIdFromTags(fetchSize);
+            Set<String> vertexIds = entitiesStore.getVertexIdFromTags(fetchSize);
             entityMutationService.repairClassificationMappingsByVertexIds(vertexIds, batchSize, delay);
 
         } catch (Exception e) {

@@ -16,6 +16,7 @@ import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
@@ -47,28 +48,16 @@ public class AssetPreProcessor implements PreProcessor {
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
-    public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
-        this(typeRegistry, entityRetriever, graph, null);
-    }
-
-    public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, EntityDiscoveryService discovery) {
-        this(typeRegistry, entityRetriever, graph, discovery, new EntityGraphRetriever(entityRetriever, true), new UserGroupAttributeValidator());
-    }
-
-    AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, EntityDiscoveryService discovery, EntityGraphRetriever retrieverNoRelation, UserGroupAttributeValidator userGroupAttributeValidator) {
+    public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, DynamicVertexService dynamicVertexService) {
         this.typeRegistry = typeRegistry;
         this.entityRetriever = entityRetriever;
-        this.retrieverNoRelation = retrieverNoRelation;
-        this.userGroupAttributeValidator = userGroupAttributeValidator;
+        this.retrieverNoRelation = new EntityGraphRetriever(entityRetriever, true);
+        this.userGroupAttributeValidator = new UserGroupAttributeValidator();
 
-        if (discovery != null) {
-            this.discovery = discovery;
-        } else {
-            try {
-                this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null);
-            } catch (AtlasException e) {
-                e.printStackTrace();
-            }
+        try {
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, dynamicVertexService, null, entityRetriever);
+        } catch (AtlasException e) {
+            e.printStackTrace();
         }
     }
 

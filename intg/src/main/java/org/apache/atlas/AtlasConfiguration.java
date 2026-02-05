@@ -38,6 +38,9 @@ public enum AtlasConfiguration {
     REST_API_ENABLE_DELETE_TYPE_OVERRIDE("atlas.rest.enable.delete.type.override", false),
     NOTIFICATION_RELATIONSHIPS_ENABLED("atlas.notification.relationships.enabled", true),
 
+    ENABLE_ENTITY_NOTIFICATIONS("atlas.enable.entity.notifications", true),
+    ENABLE_ENTITY_AUDITS("atlas.enable.entity.audits", true),
+
     NOTIFICATION_HOOK_TOPIC_NAME("atlas.notification.hook.topic.name", "ATLAS_HOOK"),
     NOTIFICATION_ENTITIES_TOPIC_NAME("atlas.notification.entities.topic.name", "ATLAS_ENTITIES"),
     NOTIFICATION_RELATIONSHIPS_TOPIC_NAME("atlas.notification.relationships.topic.name", "ATLAS_RELATIONSHIPS"),
@@ -177,6 +180,16 @@ public enum AtlasConfiguration {
     // ES and Cassandra batch operation configurations
     ES_BULK_BATCH_SIZE("atlas.es.bulk.batch.size", 500),
     CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 100),
+
+    /**
+     * Cassabdra Configuration
+     */
+    ATLAS_CASSANDRA_BATCH_SIZE("atlas.cassandra.batch.size", 10),
+    ATLAS_CASSANDRA_VANILLA_KEYSPACE("atlas.cassandra.vanilla.keyspace", "leangraph_janusgraph"),
+    ATLAS_CASSANDRA_VERTEX_TABLE("atlas.cassandra.vertex.table", "assets"),
+    CASSANDRA_REPLICATION_FACTOR_PROPERTY("atlas.graph.storage.cql.replication-factor", "3"),
+
+
     ES_MAX_RETRIES("atlas.es.max.retries", 5),
     ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
 
@@ -186,7 +199,12 @@ public enum AtlasConfiguration {
     // Task resource management configuration
     TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 75),
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
-    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3);
+    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
+
+    REDIS_IS_LOCAL("redis.run.mode.local", false),
+
+    ATLAS_GRAPH_LEAN_GRAPH_ENABLED("atlas.graph.lean.graph.enabled", false),
+    ATLAS_GRAPH_INDEX_SEARCH_PREFIX("atlas.graph.index.search.index-name", "janusgraph");
 
     private static final Configuration APPLICATION_PROPERTIES;
 

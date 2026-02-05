@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasEdgeLabel;
+import org.apache.atlas.repository.graphdb.AtlasVertexLabel;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 
 import org.apache.commons.collections.MapUtils;
@@ -37,6 +38,7 @@ import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.janusgraph.core.Cardinality;
 import org.janusgraph.core.EdgeLabel;
+import org.janusgraph.core.VertexLabel;
 import org.janusgraph.core.JanusGraph;
 import org.janusgraph.core.JanusGraphElement;
 import org.janusgraph.core.JanusGraphFactory;
@@ -232,6 +234,18 @@ public class AtlasJanusGraphManagement implements AtlasGraphManagement {
     @Override
     public AtlasEdgeLabel getEdgeLabel(String label) {
         return GraphDbObjectFactory.createEdgeLabel(management.getEdgeLabel(label));
+    }
+
+    @Override
+    public AtlasVertexLabel getVertexLabel(String label) {
+        return GraphDbObjectFactory.createVertexLabel(management.getVertexLabel(label));
+    }
+
+    @Override
+    public AtlasVertexLabel makeVertexLabel(String label) {
+        VertexLabel vertexLabel = management.makeVertexLabel(label).make();
+
+        return GraphDbObjectFactory.createVertexLabel(vertexLabel);
     }
 
     @Override
