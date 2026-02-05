@@ -192,7 +192,16 @@ public enum AtlasConfiguration {
     // Batch sizes for various delete operations
     DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
     DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
-    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100);
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100),
+
+    // Async Delete Configuration
+    ASYNC_DELETE_ENABLED("atlas.delete.async.enabled", false),
+    ASYNC_DELETE_TOPIC_NAME("atlas.delete.async.topic.name", "ATLAS_ENTITY_DELETE_ASYNC"),
+    ASYNC_DELETE_DLQ_TOPIC_NAME("atlas.delete.async.dlq.topic.name", "ATLAS_ENTITY_DELETE_DLQ"),
+    ASYNC_DELETE_CONSUMER_TOPIC_NAMES("atlas.delete.async.consumer.topic.names", "ATLAS_ENTITY_DELETE_ASYNC"),
+    ASYNC_DELETE_MAX_RETRIES("atlas.delete.async.max.retries", 3),
+    ASYNC_DELETE_RETRY_DELAY_MS("atlas.delete.async.retry.delay.ms", 1000),
+    ASYNC_DELETE_CONSUMER_THREADS("atlas.delete.async.consumer.threads", 2);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

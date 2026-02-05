@@ -18,6 +18,7 @@
 package org.apache.atlas.notification;
 
 import org.apache.atlas.model.notification.MessageSource;
+import org.apache.atlas.notification.asyncdelete.AsyncDeleteMessageDeserializer;
 import org.apache.atlas.notification.entity.EntityMessageDeserializer;
 import org.apache.atlas.notification.hook.HookMessageDeserializer;
 import org.apache.atlas.notification.task.AtlasDistributedTaskMessageDeserializer;
@@ -52,7 +53,13 @@ public interface NotificationInterface {
 
         RELATIONSHIPS(new EntityMessageDeserializer()),
 
-        ATLAS_DISTRIBUTED_TASKS(new AtlasDistributedTaskMessageDeserializer());
+        ATLAS_DISTRIBUTED_TASKS(new AtlasDistributedTaskMessageDeserializer()),
+
+        // Async delete notifications
+        ASYNC_DELETE(new AsyncDeleteMessageDeserializer()),
+
+        // Dead letter queue for failed async deletes
+        ASYNC_DELETE_DLQ(new AsyncDeleteMessageDeserializer());
 
         private final AtlasNotificationMessageDeserializer deserializer;
 

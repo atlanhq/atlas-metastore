@@ -96,6 +96,16 @@ atlas:
     batch_lookup_size: 500
     uniqueattr_batch_size: 200
     owned_batch_size: 100
+    # Async Delete Configuration (requires Kafka)
+    async:
+      enabled: false
+      topic_name: ATLAS_ENTITY_DELETE_ASYNC
+      dlq_topic_name: ATLAS_ENTITY_DELETE_DLQ
+      consumer_topic_names: ATLAS_ENTITY_DELETE_ASYNC
+      max_retries: 3
+      retry_delay_ms: 1000
+      consumer_threads: 2
+      consumer_group_id: atlas-async-delete
   authorizer:
     enable_delta_based_refresh: true
     enable_abac: false

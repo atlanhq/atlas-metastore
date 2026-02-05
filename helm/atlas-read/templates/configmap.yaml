@@ -529,4 +529,15 @@ data:
     atlas.delete.batch.lookup.size={{ .Values.atlas.delete.batch_lookup_size }}
     atlas.delete.uniqueattr.batch.size={{ .Values.atlas.delete.uniqueattr_batch_size }}
     atlas.delete.owned.batch.size={{ .Values.atlas.delete.owned_batch_size }}
+
+    ######### Async Delete Configuration #########
+    # Enable async delete feature (requires Kafka)
+    atlas.delete.async.enabled={{ .Values.atlas.delete.async.enabled }}
+    atlas.delete.async.topic.name={{ .Values.atlas.delete.async.topic_name }}
+    atlas.delete.async.dlq.topic.name={{ .Values.atlas.delete.async.dlq_topic_name }}
+    atlas.delete.async.consumer.topic.names={{ .Values.atlas.delete.async.consumer_topic_names }}
+    atlas.delete.async.max.retries={{ .Values.atlas.delete.async.max_retries }}
+    atlas.delete.async.retry.delay.ms={{ .Values.atlas.delete.async.retry_delay_ms }}
+    atlas.delete.async.consumer.threads={{ .Values.atlas.delete.async.consumer_threads }}
+    atlas.kafka.async_delete.group.id={{ .Values.atlas.delete.async.consumer_group_id }}
 {{- end }}
