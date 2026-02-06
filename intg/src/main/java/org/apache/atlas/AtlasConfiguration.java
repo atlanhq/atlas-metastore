@@ -186,7 +186,22 @@ public enum AtlasConfiguration {
     // Task resource management configuration
     TASK_MEMORY_THRESHOLD_PERCENT("atlas.tasks.memory.threshold.percent", 75),
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
-    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3);
+    TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
+
+    DELETE_BATCH_OPERATIONS_ENABLED("atlas.delete.batch.enabled", false),
+    // Batch sizes for various delete operations
+    DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
+    DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100),
+
+    // Async Delete Configuration
+    ASYNC_DELETE_ENABLED("atlas.delete.async.enabled", false),
+    ASYNC_DELETE_TOPIC_NAME("atlas.delete.async.topic.name", "ATLAS_ENTITY_DELETE_ASYNC"),
+    ASYNC_DELETE_DLQ_TOPIC_NAME("atlas.delete.async.dlq.topic.name", "ATLAS_ENTITY_DELETE_DLQ"),
+    ASYNC_DELETE_CONSUMER_TOPIC_NAMES("atlas.delete.async.consumer.topic.names", "ATLAS_ENTITY_DELETE_ASYNC"),
+    ASYNC_DELETE_MAX_RETRIES("atlas.delete.async.max.retries", 3),
+    ASYNC_DELETE_RETRY_DELAY_MS("atlas.delete.async.retry.delay.ms", 1000),
+    ASYNC_DELETE_CONSUMER_THREADS("atlas.delete.async.consumer.threads", 2);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

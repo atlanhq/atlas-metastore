@@ -37,6 +37,9 @@ import org.apache.atlas.model.discovery.AtlasSearchResult;
 import org.apache.atlas.model.instance.*;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
+import org.apache.atlas.model.notification.AsyncDeleteNotification;
+import org.apache.atlas.model.notification.AsyncDeleteNotification.DeleteEndpointType;
+import org.apache.atlas.model.notification.AsyncDeleteNotification.DeletePayload;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.repository.audit.ESBasedAuditRepository;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
@@ -51,6 +54,8 @@ import org.apache.atlas.util.FileUtils;
 import org.apache.atlas.util.RepairIndex;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.web.service.AsyncDeleteProducer;
+import org.apache.atlas.web.service.DeleteMetrics;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -109,9 +114,11 @@ public class EntityREST {
     private final EntityMutationService entityMutationService;
     private final AtlasRepairAttributeService repairAttributeService;
     private final RepairIndex repairIndex;
+    private final AsyncDeleteProducer asyncDeleteProducer;
+    private final DeleteMetrics deleteMetrics;
 
     @Inject
-    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, AtlasRepairAttributeService repairAttributeService, RepairIndex repairIndex) {
+    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, AtlasRepairAttributeService repairAttributeService, RepairIndex repairIndex, AsyncDeleteProducer asyncDeleteProducer, DeleteMetrics deleteMetrics) {
         this.typeRegistry      = typeRegistry;
         this.entitiesStore     = entitiesStore;
         this.esBasedAuditRepository = esBasedAuditRepository;
@@ -119,6 +126,8 @@ public class EntityREST {
         this.entityMutationService = entityMutationService;
         this.repairAttributeService = repairAttributeService;
         this.repairIndex = repairIndex;
+        this.asyncDeleteProducer = asyncDeleteProducer;
+        this.deleteMetrics = deleteMetrics;
     }
 
     /**
@@ -363,14 +372,16 @@ public class EntityREST {
      * DELETE /v2/entity/uniqueAttribute/type/aType?attr:aTypeAttribute=someValue
      *
      * @param  typeName - entity type to be deleted
+     * @param  async if true, delete request is processed asynchronously via Kafka
      * @param  servletRequest - request containing unique attributes/values
-     * @return EntityMutationResponse
+     * @return EntityMutationResponse for sync delete, or AsyncDeleteResponse (202 Accepted) for async delete
      */
     @DELETE
     @Path("/uniqueAttribute/type/{typeName}")
     @Timed
-    public EntityMutationResponse deleteByUniqueAttribute(@PathParam("typeName") String typeName,
-                                                          @Context HttpServletRequest servletRequest) throws AtlasBaseException {
+    public Response deleteByUniqueAttribute(@PathParam("typeName") String typeName,
+                                            @QueryParam("async") @DefaultValue("false") boolean async,
+                                            @Context HttpServletRequest servletRequest) throws AtlasBaseException {
         Servlets.validateQueryParamLength("typeName", typeName);
 
         AtlasPerfTracer perf = null;
@@ -379,12 +390,43 @@ public class EntityREST {
             Map<String, Object> attributes = getAttributes(servletRequest);
 
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByUniqueAttribute(" + typeName + "," + attributes + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByUniqueAttribute(" + typeName + "," + attributes + ", async=" + async + ")");
             }
+
+            deleteMetrics.incrementTotalDeleteRequests();
 
             AtlasEntityType entityType = ensureEntityType(typeName);
 
-            return entityMutationService.deleteByUniqueAttributes(entityType, attributes);
+            if (async && AtlasConfiguration.ASYNC_DELETE_ENABLED.getBoolean()) {
+                deleteMetrics.incrementAsyncDeleteRequests();
+
+                // Create and publish async delete request
+                DeletePayload payload = new DeletePayload();
+                payload.setTypeName(typeName);
+                payload.setUniqueAttributes(attributes);
+
+                AsyncDeleteNotification notification = new AsyncDeleteNotification(
+                        UUID.randomUUID().toString(),
+                        DeleteEndpointType.UNIQUE_ATTR_DELETE,
+                        System.currentTimeMillis(),
+                        RequestContext.get().getUser(),
+                        AtlasConfiguration.ASYNC_DELETE_MAX_RETRIES.getInt(),
+                        payload
+                );
+
+                asyncDeleteProducer.send(notification);
+
+                AsyncDeleteResponse asyncResponse = new AsyncDeleteResponse(
+                        notification.getRequestId(),
+                        "Delete request accepted for async processing"
+                );
+
+                return Response.status(Response.Status.ACCEPTED).entity(asyncResponse).build();
+            } else {
+                deleteMetrics.incrementSyncDeleteRequests();
+                EntityMutationResponse response = entityMutationService.deleteByUniqueAttributes(entityType, attributes);
+                return Response.ok(response).build();
+            }
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -453,22 +495,54 @@ public class EntityREST {
     /**
      * Delete an entity identified by its GUID.
      * @param  guid GUID for the entity
-     * @return EntityMutationResponse
+     * @param  async if true, delete request is processed asynchronously via Kafka
+     * @return EntityMutationResponse for sync delete, or AsyncDeleteResponse (202 Accepted) for async delete
      */
     @DELETE
     @Path("/guid/{guid}")
     @Timed
-    public EntityMutationResponse deleteByGuid(@PathParam("guid") final String guid) throws AtlasBaseException {
+    public Response deleteByGuid(@PathParam("guid") final String guid,
+                                 @QueryParam("async") @DefaultValue("false") boolean async) throws AtlasBaseException {
         Servlets.validateQueryParamLength("guid", guid);
 
         AtlasPerfTracer perf = null;
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuid(" + guid + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuid(" + guid + ", async=" + async + ")");
             }
 
-            return entityMutationService.deleteById(guid);
+            deleteMetrics.incrementTotalDeleteRequests();
+
+            if (async && AtlasConfiguration.ASYNC_DELETE_ENABLED.getBoolean()) {
+                deleteMetrics.incrementAsyncDeleteRequests();
+
+                // Create and publish async delete request
+                DeletePayload payload = new DeletePayload();
+                payload.setGuids(Collections.singletonList(guid));
+
+                AsyncDeleteNotification notification = new AsyncDeleteNotification(
+                        UUID.randomUUID().toString(),
+                        DeleteEndpointType.GUID_DELETE,
+                        System.currentTimeMillis(),
+                        RequestContext.get().getUser(),
+                        AtlasConfiguration.ASYNC_DELETE_MAX_RETRIES.getInt(),
+                        payload
+                );
+
+                asyncDeleteProducer.send(notification);
+
+                AsyncDeleteResponse asyncResponse = new AsyncDeleteResponse(
+                        notification.getRequestId(),
+                        "Delete request accepted for async processing"
+                );
+
+                return Response.status(Response.Status.ACCEPTED).entity(asyncResponse).build();
+            } else {
+                deleteMetrics.incrementSyncDeleteRequests();
+                EntityMutationResponse response = entityMutationService.deleteById(guid);
+                return Response.ok(response).build();
+            }
         } finally {
             AtlasPerfTracer.log(perf);
         }
@@ -882,11 +956,15 @@ public class EntityREST {
 
     /**
      * Bulk API to delete list of entities identified by its GUIDs
+     * @param guids list of GUIDs for the entities to delete
+     * @param async if true, delete request is processed asynchronously via Kafka
+     * @return EntityMutationResponse for sync delete, or AsyncDeleteResponse (202 Accepted) for async delete
      */
     @DELETE
     @Path("/bulk")
     @Timed
-    public EntityMutationResponse deleteByGuids(@QueryParam("guid") final List<String> guids) throws AtlasBaseException {
+    public Response deleteByGuids(@QueryParam("guid") final List<String> guids,
+                                  @QueryParam("async") @DefaultValue("false") boolean async) throws AtlasBaseException {
         if (CollectionUtils.isNotEmpty(guids)) {
             for (String guid : guids) {
                 Servlets.validateQueryParamLength("guid", guid);
@@ -897,27 +975,100 @@ public class EntityREST {
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuids(" + guids  + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.deleteByGuids(" + guids + ", async=" + async + ")");
             }
 
-            return entityMutationService.deleteByIds(guids);
+            deleteMetrics.incrementTotalDeleteRequests();
+
+            if (async && AtlasConfiguration.ASYNC_DELETE_ENABLED.getBoolean()) {
+                deleteMetrics.incrementAsyncDeleteRequests();
+
+                // Create and publish async delete request
+                DeletePayload payload = new DeletePayload();
+                payload.setGuids(guids);
+
+                AsyncDeleteNotification notification = new AsyncDeleteNotification(
+                        UUID.randomUUID().toString(),
+                        DeleteEndpointType.BULK_GUID_DELETE,
+                        System.currentTimeMillis(),
+                        RequestContext.get().getUser(),
+                        AtlasConfiguration.ASYNC_DELETE_MAX_RETRIES.getInt(),
+                        payload
+                );
+
+                asyncDeleteProducer.send(notification);
+
+                AsyncDeleteResponse asyncResponse = new AsyncDeleteResponse(
+                        notification.getRequestId(),
+                        "Bulk delete request accepted for async processing",
+                        guids != null ? guids.size() : 0
+                );
+
+                return Response.status(Response.Status.ACCEPTED).entity(asyncResponse).build();
+            } else {
+                deleteMetrics.incrementSyncDeleteRequests();
+                EntityMutationResponse response = entityMutationService.deleteByIds(guids);
+                return Response.ok(response).build();
+            }
         } finally {
             AtlasPerfTracer.log(perf);
         }
     }
 
+    /**
+     * Bulk API to delete entities by unique attributes
+     * @param objectIds list of AtlasObjectId containing typeName and unique attributes
+     * @param skipHasLineageCalculation if true, skip has lineage calculation
+     * @param async if true, delete request is processed asynchronously via Kafka
+     * @return EntityMutationResponse for sync delete, or AsyncDeleteResponse (202 Accepted) for async delete
+     */
     @DELETE
     @Path("/bulk/uniqueAttribute")
     @Timed
-    public EntityMutationResponse bulkDeleteByUniqueAttribute(List<AtlasObjectId> objectIds, @QueryParam("skipHasLineageCalculation") @DefaultValue("false") boolean skipHasLineageCalculation) throws AtlasBaseException {
+    public Response bulkDeleteByUniqueAttribute(List<AtlasObjectId> objectIds,
+                                                @QueryParam("skipHasLineageCalculation") @DefaultValue("false") boolean skipHasLineageCalculation,
+                                                @QueryParam("async") @DefaultValue("false") boolean async) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
-        RequestContext.get().setSkipHasLineageCalculation(skipHasLineageCalculation);
+
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.bulkDeleteByUniqueAttribute(" + objectIds.size() + ")");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.bulkDeleteByUniqueAttribute(" + objectIds.size() + ", async=" + async + ")");
             }
 
-            return entityMutationService.deleteByUniqueAttributes(objectIds);
+            deleteMetrics.incrementTotalDeleteRequests();
+
+            if (async && AtlasConfiguration.ASYNC_DELETE_ENABLED.getBoolean()) {
+                deleteMetrics.incrementAsyncDeleteRequests();
+
+                // Create and publish async delete request
+                DeletePayload payload = new DeletePayload();
+                payload.setObjectIds(objectIds);
+                payload.setSkipHasLineageCalculation(skipHasLineageCalculation);
+
+                AsyncDeleteNotification notification = new AsyncDeleteNotification(
+                        UUID.randomUUID().toString(),
+                        DeleteEndpointType.BULK_UNIQUE_ATTR_DELETE,
+                        System.currentTimeMillis(),
+                        RequestContext.get().getUser(),
+                        AtlasConfiguration.ASYNC_DELETE_MAX_RETRIES.getInt(),
+                        payload
+                );
+
+                asyncDeleteProducer.send(notification);
+
+                AsyncDeleteResponse asyncResponse = new AsyncDeleteResponse(
+                        notification.getRequestId(),
+                        "Bulk delete by unique attributes request accepted for async processing",
+                        objectIds != null ? objectIds.size() : 0
+                );
+
+                return Response.status(Response.Status.ACCEPTED).entity(asyncResponse).build();
+            } else {
+                deleteMetrics.incrementSyncDeleteRequests();
+                RequestContext.get().setSkipHasLineageCalculation(skipHasLineageCalculation);
+                EntityMutationResponse response = entityMutationService.deleteByUniqueAttributes(objectIds);
+                return Response.ok(response).build();
+            }
 
         } finally {
             AtlasPerfTracer.log(perf);
