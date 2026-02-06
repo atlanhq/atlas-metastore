@@ -312,7 +312,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
      */
     public static boolean isActivated() {
         DynamicConfigStore store = getInstance();
-        return store != null && store.config.isEnabled();
+        return store != null && store.config.isEnabled() && store.config.isActivated();
     }
 
     // ================== Feature Flag Helper Methods ==================
@@ -582,7 +582,9 @@ public class DynamicConfigStore implements ApplicationContextAware {
                 try {
                     DynamicConfigStoreConfig config = new DynamicConfigStoreConfig();
                     DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
-                    new DynamicConfigStore(config, cacheStore, null).initialize();
+                    DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
+                    store.initialize();
+                    instance = store;
                 } catch (Exception e) {
                     LOG.warn("Failed to eagerly initialize DynamicConfigStore: {}", e.getMessage());
                 }

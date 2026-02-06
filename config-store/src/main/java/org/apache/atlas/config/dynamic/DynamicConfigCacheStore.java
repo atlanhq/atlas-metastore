@@ -22,7 +22,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class DynamicConfigCacheStore {
     private static final Logger LOG = LoggerFactory.getLogger(DynamicConfigCacheStore.class);
 
-    private final ConcurrentHashMap<String, ConfigEntry> cache = new ConcurrentHashMap<>();
+    private volatile ConcurrentHashMap<String, ConfigEntry> cache = new ConcurrentHashMap<>();
 
     /**
      * Get a config entry from cache.
@@ -89,11 +89,15 @@ public class DynamicConfigCacheStore {
     /**
      * Replace the entire cache atomically.
      * Used during background sync to update all values at once.
+     *
+     * Uses volatile reference swap so that concurrent readers never see
+     * an empty or partially-populated cache.
+     *
      * @param entries new entries to replace the cache with
      */
     public void replaceAll(Map<String, ConfigEntry> entries) {
-        cache.clear();
-        cache.putAll(entries);
+        ConcurrentHashMap<String, ConfigEntry> newCache = new ConcurrentHashMap<>(entries);
+        this.cache = newCache;  // Atomic reference swap via volatile write
         LOG.info("Cache replaced with {} entries", entries.size());
     }
 
