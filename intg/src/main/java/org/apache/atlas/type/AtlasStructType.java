@@ -714,7 +714,7 @@ public class AtlasStructType extends AtlasType {
         return Collections.unmodifiableMap(ret);
     }
 
-    private AtlasStruct getStructFromValue(Object val) {
+    public AtlasStruct getStructFromValue(Object val) {
         final AtlasStruct ret;
 
         if (val instanceof AtlasStruct) {
@@ -732,7 +732,8 @@ public class AtlasStructType extends AtlasType {
             if (map == null) {
                 ret = null;
             } else {
-                ret = new AtlasStruct((Map) val);
+                ret = new AtlasStruct(map, this.allAttributes, true);
+                ret.setTypeName(this.getTypeName());
             }
         } else {
             ret = null;
@@ -771,6 +772,7 @@ public class AtlasStructType extends AtlasType {
 
         private boolean isDynAttribute            = false;
         private boolean isDynAttributeEvalTrigger = false;
+        private boolean isSyncToESRequired        = false;
 
         // Cached rank_feature field status for O(1) access during entity mutations
         private final boolean isRankFeatureField;
@@ -832,6 +834,17 @@ public class AtlasStructType extends AtlasType {
                     break;
             }
 
+            if (getName() != null && getName().startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) {
+                this.isSyncToESRequired = true;
+            } else {
+                this.isSyncToESRequired = this.attributeType.getTypeCategory() == TypeCategory.PRIMITIVE || this.attributeType.getTypeCategory() == TypeCategory.ENUM;
+
+                if (!this.isSyncToESRequired && attributeType.getTypeCategory() == TypeCategory.ARRAY) {
+                    TypeCategory typeCategory = ((AtlasArrayType) this.attributeType).getElementType().getTypeCategory();
+                    this.isSyncToESRequired = typeCategory == TypeCategory.PRIMITIVE || typeCategory == TypeCategory.ENUM;
+                }
+            }
+
             // Compute rank_feature field status from indexTypeESFields for O(1) access
             boolean rankFeatureField = false;
             float   minValue         = Float.MIN_NORMAL;
@@ -885,6 +898,11 @@ public class AtlasStructType extends AtlasType {
             this.isDynAttributeEvalTrigger = false;
             this.isRankFeatureField        = other.isRankFeatureField;
             this.rankFeatureMinValue       = other.rankFeatureMinValue;
+            this.isSyncToESRequired        = other.isSyncToESRequired;
+        }
+
+        public boolean isSyncToESRequired() {
+            return isSyncToESRequired;
         }
 
         public AtlasStructType getDefinedInType() { return definedInType; }

@@ -56,6 +56,9 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
         }
 
         if (force) {
+            if (instanceVertex.isAssetVertex()) {
+                RequestContext.get().addVertexToHardDelete(instanceVertex);
+            }
             graphHelper.removeVertex(instanceVertex);
         } else {
             Status state = AtlasGraphUtilsV2.getState(instanceVertex);
@@ -64,6 +67,7 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
                 AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, STATE_PROPERTY_KEY, DELETED.name());
                 AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
                 AtlasGraphUtilsV2.setEncodedProperty(instanceVertex, MODIFIED_BY_KEY, RequestContext.get().getUser());
+                RequestContext.get().addVertexToSoftDelete(instanceVertex);
             }
         }
     }

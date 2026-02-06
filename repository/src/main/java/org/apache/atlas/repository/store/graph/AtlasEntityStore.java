@@ -308,9 +308,9 @@ public interface AtlasEntityStore {
 
     List<AtlasClassification> getClassifications(String guid) throws AtlasBaseException;
 
-    Set<AtlasVertex> getVertices(Set<Long> vertexIds);
+    Set<AtlasVertex> getVertices(Set<String> vertexIds);
 
-    Set<Long> getVertexIdFromTags(int fetchSize) throws AtlasBaseException;
+    Set<String> getVertexIdFromTags(int fetchSize) throws AtlasBaseException;
 
     AtlasClassification getClassification(String guid, String classificationName) throws AtlasBaseException;
 

@@ -3,9 +3,12 @@ package org.apache.atlas.repository.store.graph.v2.preprocessor;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
+import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.SoftDeleteHandlerV1;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 
 import java.util.HashSet;
@@ -34,5 +37,13 @@ public interface PreProcessor {
 
     default boolean isDeleteTypeSoft(DeleteHandlerDelegate deleteDelegate) {
         return deleteDelegate.getHandler().getClass().equals(SoftDeleteHandlerV1.class);
+    }
+
+    default DynamicVertexService getDynamicVertex(AtlasGraph graph) {
+        DynamicVertexService dynamicVertexService = null;
+        if (graph instanceof AtlasJanusGraph) {
+            dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
+        }
+        return dynamicVertexService;
     }
 }

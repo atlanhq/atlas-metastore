@@ -68,6 +68,8 @@ public abstract class ClassificationTask extends AbstractTask {
     protected final AtlasRelationshipStore relationshipStore;
     protected final TaskMetricsService taskMetricsService;
 
+    private static String tenant = System.getenv("DOMAIN_NAME");
+
 
     public ClassificationTask(AtlasTask task,
                               AtlasGraph graph,
@@ -81,6 +83,9 @@ public abstract class ClassificationTask extends AbstractTask {
         this.deleteDelegate    = deleteDelegate;
         this.relationshipStore = relationshipStore;
         this.taskMetricsService = taskMetricsService;
+        if (StringUtils.isEmpty(tenant)) {
+            tenant = "local";
+        }
     }
 
     @Override

@@ -240,20 +240,20 @@ public class EntityMutationService {
         }
     }
 
-    public void repairClassificationMappingsByVertexIds(Set<Long> vertexIds, int batchSize, int delay) throws AtlasBaseException {
+    public void repairClassificationMappingsByVertexIds(Set<String> vertexIds, int batchSize, int delay) throws AtlasBaseException {
         int totalGuidsProcessed = 0;
         if (vertexIds.isEmpty()) {
             LOG.info("No GUIDs found to repair");
             return;
         }
 
-        List<Long> vertexIdList = new ArrayList<>(vertexIds);
-        List<List<Long>> vertexIdBatches = Lists.partition(vertexIdList, batchSize);
+        List<String> vertexIdList = new ArrayList<>(vertexIds);
+        List<List<String>> vertexIdBatches = Lists.partition(vertexIdList, batchSize);
 
         LOG.info("Processing {} GUIDs in {} batches of size {}", vertexIdList.size(), vertexIdBatches.size(), batchSize);
 
         for (int i = 0; i < vertexIdBatches.size(); i++) {
-            List<Long> batch = vertexIdBatches.get(i);
+            List<String> batch = vertexIdBatches.get(i);
             LOG.info("Processing batch {}/{} with {} GUIDs", (i + 1), vertexIdBatches.size(), batch.size());
 
             long batchStartTime = System.currentTimeMillis();
@@ -282,7 +282,7 @@ public class EntityMutationService {
 
     }
 
-    private void repairClassificationMappingsBatch(List<Long> vertexIds) throws AtlasBaseException {
+    private void repairClassificationMappingsBatch(List<String> vertexIds) throws AtlasBaseException {
         Set<AtlasVertex> vertices = entitiesStore.getVertices(new HashSet<>(vertexIds));
         List<String> guids = vertices.stream().map(GraphHelper::getGuid).toList();
         repairClassificationMappings(guids);
