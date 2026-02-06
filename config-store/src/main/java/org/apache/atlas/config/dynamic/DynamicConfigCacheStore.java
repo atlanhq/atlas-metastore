@@ -1,4 +1,4 @@
-package org.apache.atlas.service.config;
+package org.apache.atlas.config.dynamic;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

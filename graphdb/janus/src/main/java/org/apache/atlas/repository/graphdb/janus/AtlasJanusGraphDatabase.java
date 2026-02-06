@@ -21,6 +21,7 @@ package org.apache.atlas.repository.graphdb.janus;
 import com.google.common.annotations.VisibleForTesting;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.config.dynamic.DynamicConfigStore;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.GraphDatabase;
 import org.apache.atlas.repository.graphdb.janus.graphv3.AtlasJanusGraphFactory;
@@ -117,6 +118,21 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
         janusConfig.setProperty("attributes.custom.attribute4.attribute-class", BigDecimal.class.getName());
         janusConfig.setProperty("attributes.custom.attribute4.serializer-class", BigDecimalSerializer.class.getName());
+
+        // Override storage.cql.keyspace and index.search.index-name from dynamic config if set
+        String dynamicCqlKeyspace = DynamicConfigStore.getJanusCqlKeyspace();
+        if (dynamicCqlKeyspace != null) {
+            janusConfig.setProperty("storage.cql.keyspace", dynamicCqlKeyspace);
+        }
+
+        String dynamicIndexName = DynamicConfigStore.getJanusIndexName();
+        if (dynamicIndexName != null) {
+            janusConfig.setProperty("index.search.index-name", dynamicIndexName);
+        }
+
+        LOG.info("JanusGraph config - storage.cql.keyspace={}, index.search.index-name={}",
+                janusConfig.getString("storage.cql.keyspace", "atlas"),
+                janusConfig.getString("index.search.index-name", "janusgraph"));
 
         return janusConfig;
     }

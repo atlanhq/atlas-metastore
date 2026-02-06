@@ -145,79 +145,79 @@ public class DLQReplayService {
      * Start replaying DLQ messages
      */
     @PostConstruct
-    public synchronized void startReplay() {
-        if (isRunning.get()) {
-            log.warn("DLQ replay is already running");
-            return;
-        }
-
-        log.info("Starting DLQ replay service for topic: {} with consumer group: {}", dlqTopic, consumerGroupId);
-
-        Properties consumerProps = new Properties();
-        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
-        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
-        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
-        consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
-        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
-
-        // Optimized settings for long-running message processing with pause/resume pattern
-        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, String.valueOf(maxPollRecords));
-        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, String.valueOf(maxPollIntervalMs));
-        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, String.valueOf(sessionTimeoutMs));
-        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, String.valueOf(heartbeatIntervalMs));
-
-        consumer = new KafkaConsumer<>(consumerProps);
-        consumer.subscribe(Collections.singletonList(dlqTopic), new ConsumerRebalanceListener() {
-            @Override
-            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
-                log.warn("Consumer group partitions revoked. Partitions: {}", partitions);
-
-                // Clean up retry tracker and backoff tracker for revoked partitions to prevent memory leak
-                for (TopicPartition partition : partitions) {
-                    String partitionPrefix = partition.partition() + "-";
-                    retryTracker.keySet().removeIf(key -> key.startsWith(partitionPrefix));
-                    backoffTracker.keySet().removeIf(key -> key.startsWith(partitionPrefix));
-                    log.info("Cleaned up retry and backoff trackers for revoked partition: {}", partition);
-                }
-            }
-
-            @Override
-            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
-                log.info("Consumer group partitions assigned: {}", partitions);
-
-                // Log offset information for each partition
-                for (TopicPartition partition : partitions) {
-                    try {
-                        long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
-                        long committedOffset = -1;
-                        OffsetAndMetadata committed = consumer.committed(Collections.singleton(partition)).get(partition);
-                        if (committed != null) {
-                            committedOffset = committed.offset();
-                        }
-                        long position = consumer.position(partition);
-
-                        log.info("Partition {} - End offset: {}, Committed offset: {}, Current position: {}, " +
-                                        "Messages available: {}",
-                                partition, endOffset, committedOffset, position,
-                                endOffset - position);
-                    } catch (Exception e) {
-                        log.error("Error checking offsets for partition: " + partition, e);
-                    }
-                }
-            }
-        });
-
-        isRunning.set(true);
-        isHealthy.set(true);
-
-        // Start processing in a separate thread
-        replayThread = new Thread(this::processMessages, "DLQ-Replay-Thread");
-        replayThread.setDaemon(false);
-        replayThread.start();
-
-        log.info("DLQ replay service started successfully");
-    }
+//    public synchronized void startReplay() {
+//        if (isRunning.get()) {
+//            log.warn("DLQ replay is already running");
+//            return;
+//        }
+//
+//        log.info("Starting DLQ replay service for topic: {} with consumer group: {}", dlqTopic, consumerGroupId);
+//
+//        Properties consumerProps = new Properties();
+//        consumerProps.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+//        consumerProps.put(ConsumerConfig.GROUP_ID_CONFIG, consumerGroupId);
+//        consumerProps.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+//        consumerProps.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+//        consumerProps.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false"); // Manual commit after success
+//        consumerProps.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+//
+//        // Optimized settings for long-running message processing with pause/resume pattern
+//        consumerProps.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, String.valueOf(maxPollRecords));
+//        consumerProps.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, String.valueOf(maxPollIntervalMs));
+//        consumerProps.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, String.valueOf(sessionTimeoutMs));
+//        consumerProps.put(ConsumerConfig.HEARTBEAT_INTERVAL_MS_CONFIG, String.valueOf(heartbeatIntervalMs));
+//
+//        consumer = new KafkaConsumer<>(consumerProps);
+//        consumer.subscribe(Collections.singletonList(dlqTopic), new ConsumerRebalanceListener() {
+//            @Override
+//            public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
+//                log.warn("Consumer group partitions revoked. Partitions: {}", partitions);
+//
+//                // Clean up retry tracker and backoff tracker for revoked partitions to prevent memory leak
+//                for (TopicPartition partition : partitions) {
+//                    String partitionPrefix = partition.partition() + "-";
+//                    retryTracker.keySet().removeIf(key -> key.startsWith(partitionPrefix));
+//                    backoffTracker.keySet().removeIf(key -> key.startsWith(partitionPrefix));
+//                    log.info("Cleaned up retry and backoff trackers for revoked partition: {}", partition);
+//                }
+//            }
+//
+//            @Override
+//            public void onPartitionsAssigned(Collection<TopicPartition> partitions) {
+//                log.info("Consumer group partitions assigned: {}", partitions);
+//
+//                // Log offset information for each partition
+//                for (TopicPartition partition : partitions) {
+//                    try {
+//                        long endOffset = consumer.endOffsets(Collections.singleton(partition)).get(partition);
+//                        long committedOffset = -1;
+//                        OffsetAndMetadata committed = consumer.committed(Collections.singleton(partition)).get(partition);
+//                        if (committed != null) {
+//                            committedOffset = committed.offset();
+//                        }
+//                        long position = consumer.position(partition);
+//
+//                        log.info("Partition {} - End offset: {}, Committed offset: {}, Current position: {}, " +
+//                                        "Messages available: {}",
+//                                partition, endOffset, committedOffset, position,
+//                                endOffset - position);
+//                    } catch (Exception e) {
+//                        log.error("Error checking offsets for partition: " + partition, e);
+//                    }
+//                }
+//            }
+//        });
+//
+//        isRunning.set(true);
+//        isHealthy.set(true);
+//
+//        // Start processing in a separate thread
+//        replayThread = new Thread(this::processMessages, "DLQ-Replay-Thread");
+//        replayThread.setDaemon(false);
+//        replayThread.start();
+//
+//        log.info("DLQ replay service started successfully");
+//    }
 
     /**
      * Gracefully shutdown the DLQ replay service with proper thread join
