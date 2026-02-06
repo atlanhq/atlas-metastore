@@ -112,12 +112,15 @@ jobs:
                - Workflow correctness
 
             ## Review Style
-            - ALWAYS use the mcp__github_inline_comment__create_inline_comment tool to add review comments directly on the relevant code lines in the diff
-            - Use inline comments for specific code issues — this is the preferred way to give feedback
-            - Use a single top-level PR comment only for a brief overall summary
+            - ONLY comment on things that actually need attention: bugs, security issues, performance problems, missing error handling, or meaningful suggestions
+            - DO NOT leave "looks good" or positive affirmation comments on individual lines — these are noise
+            - DO NOT comment on every changed line — only the ones with actual issues or non-obvious suggestions
+            - Use inline comments (mcp__github_inline_comment__create_inline_comment) for specific code issues
+            - Use a single top-level PR comment for overall summary — if everything looks good, just say so briefly there
             - Flag blocking issues as "BLOCKING:" prefix
             - Flag suggestions as "SUGGESTION:" prefix
-            - If the PR looks good, say so briefly — don't invent issues
+            - If the PR is clean with no issues, a short top-level "LGTM" summary is sufficient — do NOT create inline comments just to say things look fine
+            - Aim for signal, not volume — fewer high-quality comments are better than many low-value ones
 
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
