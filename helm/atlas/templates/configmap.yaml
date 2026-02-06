@@ -62,7 +62,12 @@ data:
     #atlas.graph.storage.port=
     atlas.graph.storage.backend=cql
     atlas.graph.storage.hostname={{ .Chart.Name }}-cassandra
+    {{- if .Values.global.leangraph.enabled }}
+    atlas.graph.storage.cql.keyspace=leangraph_janusgraph
+    atlas.leangraph.index.search.index-name=leangraph_janusgraph
+    {{- else }}
     atlas.graph.storage.cql.keyspace={{ .Chart.Name }}
+    {{- end }}
     {{- if eq .Values.global.Deployment_Type "Lite" }}
     atlas.graph.storage.cql.replication-factor=1
     {{- else }}
@@ -539,3 +544,6 @@ data:
 
     ######### Atlas Entity Attribute Optimization #########
     atlas.entity.skip.optional.attributes={{ .Values.atlas.entity.skip_optional_attributes }}
+
+    ######### Atlas Leangraph configs #########
+    atlas.graph.lean.graph.enabled={{ .Values.global.leangraph.enabled }}
