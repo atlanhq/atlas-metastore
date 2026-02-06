@@ -1,4 +1,4 @@
-{{ if .Values.global.leangraph.dedicated.enabled }}
+{{ if .Values.global.leangraph.shadow.dedicated.enabled }}
 ---
 {{- $isAWSCloud := eq .Values.global.cloud "aws" }}
 apiVersion: apps/v1
