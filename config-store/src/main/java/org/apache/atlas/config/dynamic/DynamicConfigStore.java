@@ -1,14 +1,13 @@
-package org.apache.atlas.config.dynamic;
+package org.apache.atlas.service.config;
 
-import org.apache.atlas.ApplicationProperties;
+import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlag;
 import org.apache.atlas.service.FeatureFlagStore;
-import org.apache.atlas.config.dynamic.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -21,7 +20,6 @@ import org.springframework.stereotype.Component;
 import javax.annotation.PostConstruct;
 import javax.annotation.PreDestroy;
 import javax.inject.Inject;
-import java.time.Instant;
 import java.util.Map;
 import java.util.Objects;
 
@@ -54,8 +52,7 @@ import java.util.Objects;
 public class DynamicConfigStore implements ApplicationContextAware {
     private static final Logger LOG = LoggerFactory.getLogger(DynamicConfigStore.class);
 
-    private static volatile DynamicConfigStore instance;
-    private static volatile ApplicationContext context;
+    private static ApplicationContext context;
 
     private final DynamicConfigStoreConfig config;
     private final DynamicConfigCacheStore cacheStore;
@@ -65,6 +62,10 @@ public class DynamicConfigStore implements ApplicationContextAware {
     private volatile boolean cassandraAvailable = false;
 
     private static final String METRIC_COMPONENT = "atlas_classification";
+    private static final String METRIC_PREFIX = "atlas_config_store";
+    private static final String METRIC_FLAG_VALUE = METRIC_PREFIX + "_flag_value";
+    private static final String METRIC_DEFAULT_FALLBACK = METRIC_PREFIX + "_default_fallback_total";
+    private static final String METRIC_REDIS_RECOVERY = METRIC_PREFIX + "_redis_recovery_total";
 
     @Inject
     public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore,
@@ -82,7 +83,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
         if (!config.isEnabled()) {
             LOG.info("Dynamic config store is disabled (atlas.config.store.cassandra.enabled=false)");
             initialized = true;
-            instance = this;
             return;
         }
 
@@ -106,21 +106,39 @@ public class DynamicConfigStore implements ApplicationContextAware {
             // Load initial data into cache from Cassandra
             loadAllConfigsIntoCache();
 
-            initialized = true;
-            instance = this;
+            // DEFENSIVE CHECK: If activated but Cassandra has no/partial rows, a previous
+            // Phase 1 deployment may have been missed (e.g., ArgoCD sync gap). Recover by
+            // syncing from Redis so we don't serve empty defaults.
+            if (config.isActivated()) {
+                int loadedCount = cacheStore.size();
+                int expectedCount = ConfigKey.values().length;
 
+                if (loadedCount < expectedCount) {
+                    LOG.warn("CONFIG STORE RECOVERY: Activated store has {}/{} config rows in Cassandra. " +
+                            "Phase 1 (Redis sync) may have been missed for this tenant. " +
+                            "Performing recovery sync from Redis...", loadedCount, expectedCount);
+
+                    syncFeatureFlagsFromRedis();
+                    loadAllConfigsIntoCache();
+
+                    int recoveredCount = cacheStore.size();
+                    LOG.warn("CONFIG STORE RECOVERY: After Redis sync, store has {}/{} config rows",
+                            recoveredCount, expectedCount);
+
+                    recordRecoveryMetric();
+                }
+            }
+
+            initialized = true;
             long duration = System.currentTimeMillis() - startTime;
             LOG.info("DynamicConfigStore initialization completed in {}ms - {} configs loaded",
                     duration, cacheStore.size());
 
-            // Add version tracking metric
-            MeterRegistry meterRegistry = org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
-            Gauge.builder(METRIC_COMPONENT + "_atlas_version_enabled",
-                            this,
-                            ref -> isTagV2Enabled() ? 2.0 : 1.0)
-                    .description("Indicates which Tag propagation version is enabled (2.0 = v2, 1.0 = v1)")
-                    .tag("component", "version")
-                    .register(meterRegistry);
+            // Log all flag values with their source for debugging
+            logAllFlagValues();
+
+            // Register all metrics
+            registerMetrics();
 
         } catch (Exception e) {
             LOG.error("Failed to initialize DynamicConfigStore - Cassandra config store will be unavailable", e);
@@ -158,21 +176,25 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
-     * Sync feature flags from Redis to Cassandra.
+     * Sync feature flags from Redis to Cassandra and seed defaults for all ConfigKeys.
      * This is Phase 1 of the migration: populate Cassandra with current Redis values.
-     * Only syncs keys that exist in both FeatureFlag (Redis) and ConfigKey (Cassandra).
+     * Also seeds any ConfigKey that does not have a corresponding Redis flag with its default value,
+     * ensuring Cassandra always has a complete set of rows after sync.
      */
     private void syncFeatureFlagsFromRedis() {
         LOG.info("Starting feature flag sync from Redis to Cassandra...");
-        int syncedCount = 0;
+        int syncedFromRedis = 0;
+        int seededWithDefault = 0;
         int skippedCount = 0;
 
         try {
             CassandraConfigDAO dao = CassandraConfigDAO.getInstance();
 
-            // Iterate through all Redis feature flags
+            // Track which ConfigKeys were populated from Redis
+            java.util.Set<String> populatedKeys = new java.util.HashSet<>();
+
+            // Step 1: Sync flags that exist in both FeatureFlag (Redis) and ConfigKey (Cassandra)
             for (String flagKey : FeatureFlag.getAllKeys()) {
-                // Only sync if the key also exists in ConfigKey (Cassandra schema)
                 if (!ConfigKey.isValidKey(flagKey)) {
                     LOG.debug("Skipping Redis flag '{}' - not defined in ConfigKey", flagKey);
                     skippedCount++;
@@ -180,25 +202,48 @@ public class DynamicConfigStore implements ApplicationContextAware {
                 }
 
                 try {
-                    // Get current value from Redis
                     String redisValue = FeatureFlagStore.getFlag(flagKey);
 
                     if (StringUtils.isNotEmpty(redisValue)) {
-                        // Write to Cassandra
                         dao.putConfig(flagKey, redisValue, "redis-sync");
-                        syncedCount++;
+                        populatedKeys.add(flagKey);
+                        syncedFromRedis++;
                         LOG.debug("Synced flag '{}' from Redis to Cassandra: {}", flagKey, redisValue);
                     } else {
                         LOG.debug("Skipping flag '{}' - no value in Redis", flagKey);
                         skippedCount++;
                     }
                 } catch (Exception e) {
-                    LOG.warn("Failed to sync flag '{}' from Redis - will use default value", flagKey, e);
+                    LOG.warn("Failed to sync flag '{}' from Redis - will seed default", flagKey, e);
                     skippedCount++;
                 }
             }
 
-            LOG.info("Feature flag sync from Redis completed - synced: {}, skipped: {}", syncedCount, skippedCount);
+            // Step 2: Seed defaults for ConfigKeys not populated from Redis
+            // This ensures Cassandra has a row for every ConfigKey, preventing empty store issues
+            for (ConfigKey configKey : ConfigKey.values()) {
+                if (populatedKeys.contains(configKey.getKey())) {
+                    continue; // Already synced from Redis
+                }
+
+                String defaultValue = configKey.getDefaultValue();
+                if (defaultValue != null) {
+                    try {
+                        // Only seed if no row exists yet (don't overwrite existing Cassandra values)
+                        ConfigEntry existing = dao.getConfig(configKey.getKey());
+                        if (existing == null) {
+                            dao.putConfig(configKey.getKey(), defaultValue, "default-seed");
+                            seededWithDefault++;
+                            LOG.debug("Seeded default for '{}' in Cassandra: {}", configKey.getKey(), defaultValue);
+                        }
+                    } catch (Exception e) {
+                        LOG.warn("Failed to seed default for '{}'", configKey.getKey(), e);
+                    }
+                }
+            }
+
+            LOG.info("Feature flag sync completed - syncedFromRedis: {}, seededWithDefault: {}, skipped: {}",
+                    syncedFromRedis, seededWithDefault, skippedCount);
 
         } catch (Exception e) {
             LOG.error("Failed to sync feature flags from Redis to Cassandra", e);
@@ -393,54 +438,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
         return FeatureFlagStore.evaluate(ConfigKey.USE_TEMP_ES_INDEX.getKey(), "true");
     }
 
-    /**
-     * Get the JanusGraph CQL keyspace name.
-     * Falls back to the value from ApplicationProperties (atlas.graph.storage.cql.keyspace)
-     * if DynamicConfigStore is not activated.
-     *
-     * @return the CQL keyspace name
-     */
-    public static String getJanusCqlKeyspace() {
-        if (isActivated()) {
-            String value = getConfig(ConfigKey.JANUS_CQL_KEYSPACE.getKey());
-            if (StringUtils.isNotEmpty(value)) {
-                return value;
-            }
-        }
-        // Fall back to ApplicationProperties
-        try {
-            return ApplicationProperties.get().getString("atlas.graph.storage.cql.keyspace",
-                    ConfigKey.JANUS_CQL_KEYSPACE.getDefaultValue());
-        } catch (AtlasException e) {
-            LOG.warn("Failed to read atlas.graph.storage.cql.keyspace from ApplicationProperties", e);
-            return ConfigKey.JANUS_CQL_KEYSPACE.getDefaultValue();
-        }
-    }
-
-    /**
-     * Get the JanusGraph ES index name.
-     * Falls back to the value from ApplicationProperties (atlas.graph.index.search.index-name)
-     * if DynamicConfigStore is not activated.
-     *
-     * @return the ES index name
-     */
-    public static String getJanusIndexName() {
-        if (isActivated()) {
-            String value = getConfig(ConfigKey.JANUS_INDEX_NAME.getKey());
-            if (StringUtils.isNotEmpty(value)) {
-                return value;
-            }
-        }
-        // Fall back to ApplicationProperties
-        try {
-            return ApplicationProperties.get().getString("atlas.graph.index.search.index-name",
-                    ConfigKey.JANUS_INDEX_NAME.getDefaultValue());
-        } catch (AtlasException e) {
-            LOG.warn("Failed to read atlas.graph.index.search.index-name from ApplicationProperties", e);
-            return ConfigKey.JANUS_INDEX_NAME.getDefaultValue();
-        }
-    }
-
     // ================== Internal Methods ==================
 
     String getConfigInternal(String key) {
@@ -453,6 +450,14 @@ public class DynamicConfigStore implements ApplicationContextAware {
         ConfigEntry entry = cacheStore.get(key);
         if (entry != null) {
             return entry.getValue();
+        }
+
+        // Cache miss on an activated store is abnormal — it means Cassandra had no row
+        // for this key, likely because Phase 1 sync was missed or the key was never written.
+        if (config.isActivated()) {
+            LOG.warn("CONFIG STORE FALLBACK: Cache miss for key '{}' on activated store. " +
+                    "Returning default value. This may indicate Phase 1 sync was missed.", key);
+            recordDefaultFallbackMetric(key);
         }
 
         // Return default value if not in cache
@@ -576,36 +581,153 @@ public class DynamicConfigStore implements ApplicationContextAware {
         return null;
     }
 
-    private static DynamicConfigStore getInstance() {
-        if (instance != null) {
-            return instance;
+    // ================== Metrics & Observability ==================
+
+    /**
+     * Register all Prometheus metrics for config store observability.
+     * Includes: per-flag gauges, store state gauges, version tracking, and counters.
+     */
+    private void registerMetrics() {
+        MeterRegistry meterRegistry = org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
+
+        // Version tracking metric (existing)
+        Gauge.builder(METRIC_COMPONENT + "_atlas_version_enabled",
+                        this,
+                        ref -> isTagV2Enabled() ? 2.0 : 1.0)
+                .description("Indicates which Tag propagation version is enabled (2.0 = v2, 1.0 = v1)")
+                .tag("component", "version")
+                .register(meterRegistry);
+
+        // Config store state gauges
+        Gauge.builder(METRIC_PREFIX + "_enabled",
+                        this,
+                        ref -> ref.config.isEnabled() ? 1.0 : 0.0)
+                .description("Whether the dynamic config store is enabled (1.0 = yes, 0.0 = no)")
+                .register(meterRegistry);
+
+        Gauge.builder(METRIC_PREFIX + "_activated",
+                        this,
+                        ref -> ref.config.isActivated() ? 1.0 : 0.0)
+                .description("Whether the dynamic config store is activated for reads (1.0 = yes, 0.0 = no)")
+                .register(meterRegistry);
+
+        Gauge.builder(METRIC_PREFIX + "_loaded_keys_count",
+                        this,
+                        ref -> ref.cacheStore.size())
+                .description("Number of config keys currently loaded in the cache")
+                .register(meterRegistry);
+
+        Gauge.builder(METRIC_PREFIX + "_expected_keys_count",
+                        this,
+                        ref -> ConfigKey.values().length)
+                .description("Number of expected config keys defined in ConfigKey enum")
+                .register(meterRegistry);
+
+        // Per-flag gauges — allows Grafana dashboards per tenant per flag
+        for (ConfigKey configKey : ConfigKey.values()) {
+            final String flagKey = configKey.getKey();
+            Gauge.builder(METRIC_FLAG_VALUE,
+                            this,
+                            ref -> {
+                                String val = ref.getConfigInternal(flagKey);
+                                if ("true".equalsIgnoreCase(val)) return 1.0;
+                                if ("false".equalsIgnoreCase(val)) return 0.0;
+                                return val != null ? -1.0 : -2.0; // -1 = non-boolean value, -2 = null
+                            })
+                    .description("Current value of config flag (1.0=true, 0.0=false, -1.0=non-boolean, -2.0=null)")
+                    .tag("flag", flagKey)
+                    .register(meterRegistry);
         }
 
-        // Try to resolve via Spring context
-        if (context != null) {
-            try {
-                return context.getBean(DynamicConfigStore.class);
-            } catch (Exception e) {
-                LOG.debug("DynamicConfigStore bean not available yet: {}", e.getMessage());
+        LOG.info("Registered {} config store Prometheus metrics ({} per-flag gauges + store state gauges)",
+                ConfigKey.values().length + 4, ConfigKey.values().length);
+    }
+
+    /**
+     * Log all flag values with their source on startup for debugging.
+     * Makes it immediately visible in pod logs what config state the tenant has.
+     */
+    private void logAllFlagValues() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("Config store flag values on startup (activated=").append(config.isActivated()).append("):\n");
+
+        for (ConfigKey configKey : ConfigKey.values()) {
+            String key = configKey.getKey();
+            ConfigEntry entry = cacheStore.get(key);
+            String value;
+            String source;
+
+            if (entry != null) {
+                value = entry.getValue();
+                source = "cassandra";
+            } else {
+                value = configKey.getDefaultValue();
+                source = "default";
             }
-        }
 
-        // Pre-Spring: bootstrap directly from ApplicationProperties
-        synchronized (DynamicConfigStore.class) {
-            if (instance == null) {
+            sb.append("  ").append(key).append(" = ").append(value)
+                    .append(" [source=").append(source).append("]");
+
+            // For flags that also exist in FeatureFlag (Redis), show the Redis value for comparison
+            if (FeatureFlag.isValidFlag(key)) {
                 try {
-                    DynamicConfigStoreConfig config = new DynamicConfigStoreConfig();
-                    DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
-                    DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
-                    store.initialize();
-                    instance = store;
+                    String redisValue = FeatureFlagStore.getFlag(key);
+                    sb.append(" [redis=").append(redisValue).append("]");
+                    if (!StringUtils.equals(value, redisValue)) {
+                        sb.append(" [MISMATCH]");
+                    }
                 } catch (Exception e) {
-                    LOG.warn("Failed to eagerly initialize DynamicConfigStore: {}", e.getMessage());
+                    sb.append(" [redis=ERROR]");
                 }
             }
+            sb.append("\n");
         }
 
-        return instance;
+        LOG.info(sb.toString());
+    }
+
+    /**
+     * Record a metric when we fall back to defaults on an activated store.
+     * Non-zero values of this counter indicate Phase 1 sync was missed.
+     */
+    private void recordDefaultFallbackMetric(String key) {
+        try {
+            Counter.builder(METRIC_DEFAULT_FALLBACK)
+                    .description("Count of times a config read fell back to default on an activated store")
+                    .tag("flag", key)
+                    .register(org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry())
+                    .increment();
+        } catch (Exception e) {
+            LOG.debug("Failed to record default fallback metric for key: {}", key, e);
+        }
+    }
+
+    /**
+     * Record a metric when Redis recovery sync is triggered on an activated store.
+     */
+    private void recordRecoveryMetric() {
+        try {
+            Counter.builder(METRIC_REDIS_RECOVERY)
+                    .description("Count of times Redis recovery sync was triggered on an activated store with missing rows")
+                    .register(org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry())
+                    .increment();
+        } catch (Exception e) {
+            LOG.debug("Failed to record Redis recovery metric", e);
+        }
+    }
+
+    private static DynamicConfigStore getInstance() {
+        if (context == null) {
+            LOG.debug("ApplicationContext not available");
+            return null;
+        }
+
+        try {
+            return context.getBean(DynamicConfigStore.class);
+        } catch (Exception e) {
+            LOG.debug("DynamicConfigStore bean not available: {}", e.getMessage());
+            return null;
+        }
     }
 
     @Override
