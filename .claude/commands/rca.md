@@ -1,12 +1,19 @@
 ---
-description: Perform Root Cause Analysis on a Linear ticket
+description: Perform Root Cause Analysis on a Linear ticket (with automatic performance analysis via Atlas Observability MCP)
 argument-hint: <TICKET-ID>
-allowed-tools: [Bash, Read, Grep, Glob, Task, Edit, Write, AskUserQuestion, EnterPlanMode]
+allowed-tools: [Bash, Read, Grep, Glob, Task, Edit, Write, AskUserQuestion, EnterPlanMode, mcp__atlas-observability]
 ---
 
 # Root Cause Analysis for Linear Ticket
 
 Ticket ID: $ARGUMENTS
+
+**Features:**
+- Fetches ticket details from Linear
+- **Automatically analyzes performance metrics** when ticket mentions slowness, timeouts, or latency
+- Explores codebase in parallel
+- Generates structured RCA document
+- Optionally posts RCA to Linear and implements fixes
 
 ## Phase 1: Fetch Ticket Details
 
@@ -36,6 +43,26 @@ From the ticket response, extract and note:
 - **Symptoms** - what the user observed (timeouts, failures, errors)
 - **Stack traces or logs** - if any are attached or mentioned
 - **Timeline** - when did it start, any correlating events
+- **Tenant name** - domain like `acme.atlan.com` or tenant identifier (needed for observability)
+
+## Phase 2.5: Observability Analysis (Automatic for Performance Issues)
+
+**This phase is automatically triggered** when the ticket contains performance-related keywords:
+`slow`, `timeout`, `latency`, `performance`, `degradation`, `OOM`, `response time`, `bottleneck`
+
+**What happens:**
+1. Extract tenant name from ticket
+2. Determine time range from ticket timeline (default: last 4 hours)
+3. Run Atlas Observability MCP tools:
+
+| Tool | When Used | What It Shows |
+|------|-----------|---------------|
+| `get_health_metrics` | Always (first check) | RPS, error rate, P95/P99 latency, health status |
+| `analyze_slowness` | If latency issues | Bottleneck breakdown (ES vs Cassandra vs General) |
+| `analyze_es_query_complexity` | If search/ES issues | Query complexity scores, optimization hints |
+| `analyze_workload_patterns` | If unusual load | SDK vs WebApp vs Workflow distribution |
+
+**Skip this phase** if the issue is clearly NOT performance-related (e.g., data integrity, authorization, UI bugs).
 
 ## Phase 3: Parallel Codebase Exploration
 
@@ -52,11 +79,12 @@ Prompt: "Search for how similar problems are handled elsewhere in the codebase. 
 
 ## Phase 4: Synthesize Root Cause
 
-After all exploration agents complete, combine their findings to identify:
+After all exploration agents complete, combine their findings AND observability data to identify:
 
 1. **Direct Cause** - The immediate technical reason for the failure
 2. **Why it happened** - The architectural or design gap that allowed this
 3. **Contributing factors** - What made the problem worse
+4. **Performance insights** (if Phase 2.5 was executed) - Which component is the bottleneck, specific metrics
 
 ## Phase 5: Generate RCA Document
 
@@ -158,3 +186,18 @@ After the RCA is posted (or if the user declines posting), offer to implement on
 - Compare with existing patterns (like how tags handle similar issues)
 - Implementation is optional - respect if the user only wants analysis
 - Always enter plan mode before implementing to get user approval on the approach
+
+## Observability Integration
+
+This command automatically uses **Atlas Observability MCP** for performance analysis when:
+- Ticket mentions slowness, timeouts, latency, or performance degradation
+- A tenant name can be extracted from the ticket
+
+**Available MCP tools:**
+- `get_health_metrics` - System health overview
+- `analyze_slowness` - Bottleneck breakdown (ES vs Cassandra vs General)
+- `analyze_es_query_complexity` - Query optimization analysis
+- `analyze_workload_patterns` - Traffic pattern analysis
+- `get_ingestion_rate` - Bulk operation capacity
+
+**MCP Server:** Configured in `.claude/settings.json` pointing to `https://atlas-mcp.atlan.com`

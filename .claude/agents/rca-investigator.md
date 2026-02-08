@@ -1,8 +1,8 @@
 ---
 name: rca-investigator
-description: "Investigates Linear tickets for root cause analysis. Use when user asks to investigate a ticket, do RCA, analyze issue, or provides a Linear ticket ID."
+description: "Investigates Linear tickets for root cause analysis. Use when user asks to investigate a ticket, do RCA, analyze issue, or provides a Linear ticket ID. Automatically uses Atlas Observability MCP for performance issues."
 color: red
-tools: ["Bash", "Read", "Grep", "Glob", "Task", "Edit", "Write", "AskUserQuestion", "EnterPlanMode"]
+tools: ["Bash", "Read", "Grep", "Glob", "Task", "Edit", "Write", "AskUserQuestion", "EnterPlanMode", "mcp__atlas-observability"]
 ---
 
 # ⛔⛔⛔ READ THIS FIRST - MANDATORY REQUIREMENTS ⛔⛔⛔
@@ -127,6 +127,75 @@ Extract from the response:
 - Symptoms described
 - Logs or stack traces
 - Timeline of events
+- **Tenant name** (domain like `acme.atlan.com` or tenant identifier)
+
+### Phase 2.5: Observability Analysis (For Performance Issues)
+
+**Trigger**: If ticket title, description, or comments contain any of these keywords:
+- `slow`, `slowness`, `timeout`, `timed out`
+- `latency`, `high latency`, `response time`
+- `performance`, `degradation`, `degraded`
+- `OOM`, `out of memory`, `memory`
+- `bottleneck`, `stuck`, `hanging`
+- `ES slow`, `Elasticsearch`, `Cassandra slow`
+
+**Skip this phase** if the issue is clearly NOT performance-related (e.g., data integrity, authorization, UI bugs).
+
+**Steps:**
+
+1. **Extract tenant name** from ticket (look for domain like `xyz.atlan.com` or tenant name in description/comments)
+
+2. **Determine time range** from ticket timeline:
+   - If specific dates mentioned, use those
+   - Default: last 4-6 hours from ticket creation time
+
+3. **Run observability analysis using Atlas Observability MCP tools:**
+
+**Step 3a - Health Check (ALWAYS do this first):**
+```
+Use the get_health_metrics tool with:
+- tenant: '<tenant-name>'
+- timeRange: '4h' (or appropriate range)
+```
+
+Review the health status:
+- HEALTHY: May not need further analysis unless specific bottleneck suspected
+- WARNING/CRITICAL: Proceed with deeper analysis
+
+**Step 3b - Slowness Analysis (if health shows issues OR latency mentioned):**
+```
+Use the analyze_slowness tool with:
+- tenant: '<tenant-name>'
+- startDate: '<YYYY-MM-DD HH:MM:SS>'
+- endDate: '<YYYY-MM-DD HH:MM:SS>'
+- slowThreshold: 3000 (or higher if extreme latency reported)
+```
+
+This will show:
+- Bottleneck breakdown (ES vs Cassandra vs General processing)
+- Top slow traces
+- ES shard health
+
+**Step 3c - ES Query Complexity (if search/indexing issues OR ES identified as bottleneck):**
+```
+Use the analyze_es_query_complexity tool with:
+- tenant: '<tenant-name>'
+- startDate: '<YYYY-MM-DD HH:MM:SS>'
+- endDate: '<YYYY-MM-DD HH:MM:SS>'
+```
+
+**Step 3d - Workload Patterns (if unusual load suspected):**
+```
+Use the analyze_workload_patterns tool with:
+- tenant: '<tenant-name>'
+- timeRange: '24h'
+```
+
+4. **Document observability findings** for inclusion in RCA:
+   - Health status and key metrics (RPS, error rate, P95/P99)
+   - Bottleneck breakdown percentages
+   - Any anomalies or spikes identified
+   - Query complexity issues if found
 
 ### Phase 3: Parallel Codebase Exploration
 
@@ -146,10 +215,14 @@ The three exploration focuses:
 
 ### Phase 4: Synthesize Findings
 
-Combine exploration results to identify:
+Combine exploration results AND observability data to identify:
 - **Direct cause**: What technically went wrong
 - **Why it happened**: The gap in design/architecture
 - **Contributing factors**: What made it worse
+- **Performance data** (if Phase 2.5 was executed):
+  - Which component is the bottleneck (ES, Cassandra, or general processing)
+  - Specific metrics that indicate the problem
+  - Any correlation between code patterns and performance issues
 
 ### Phase 5: Generate RCA Document
 
@@ -166,6 +239,18 @@ Create RCA in this format:
 ### What Happened
 - **First symptom:** [What user saw]
 - **Underlying issue:** [Technical cause]
+
+---
+
+### Observability Findings (include if Phase 2.5 was executed)
+| Metric | Value |
+|--------|-------|
+| Health Status | [HEALTHY/WARNING/CRITICAL] |
+| Error Rate | [X%] |
+| P95 Latency | [Xms] |
+| Primary Bottleneck | [ES/Cassandra/General - X%] |
+
+[Brief summary of what the metrics reveal about the issue]
 
 ---
 
@@ -279,3 +364,30 @@ Fields: id, identifier, title, description, state, assignee, labels, comments
 POST https://api.linear.app/graphql
 Mutation: commentCreate(input: { issueId: "UUID", body: "content" })
 ```
+
+## Atlas Observability MCP Tools Reference
+
+The `atlas-observability` MCP server provides these tools for performance analysis:
+
+| Tool | Purpose | Key Parameters |
+|------|---------|----------------|
+| `get_health_metrics` | Overall system health check | `tenant`, `timeRange` (e.g., "4h", "24h") |
+| `analyze_slowness` | Deep performance bottleneck analysis | `tenant`, `startDate`, `endDate`, `slowThreshold` |
+| `analyze_es_query_complexity` | Elasticsearch query optimization | `tenant`, `startDate`, `endDate` |
+| `analyze_workload_patterns` | SDK vs WebApp vs Workflow distribution | `tenant`, `timeRange` |
+| `get_ingestion_rate` | Bulk operation capacity analysis | `tenant`, `timeRange` |
+
+**When to use each tool:**
+
+- **get_health_metrics**: ALWAYS start here for any performance investigation. Gives RPS, error rate, P95/P99 latency.
+- **analyze_slowness**: Use when latency/timeout issues reported. Shows ES vs Cassandra vs General breakdown.
+- **analyze_es_query_complexity**: Use when search is slow or `mapper_parsing_exception` mentioned.
+- **analyze_workload_patterns**: Use when investigating unusual load or capacity issues.
+- **get_ingestion_rate**: Use when bulk operations or sync delays are reported.
+
+**Health Status Thresholds:**
+- CRITICAL: Error rate > 5% OR P95 > 3000ms
+- WARNING: Error rate > 2% OR P95 > 2000ms
+- HEALTHY: All metrics within acceptable ranges
+
+**Date format for tools:** `YYYY-MM-DD HH:MM:SS` (e.g., `2025-02-08 10:00:00`)
