@@ -82,6 +82,12 @@ spec:
                 operator: In
                 values:
                 - metastore
+            {{- else if eq $cloud "gcp" }}
+            - matchExpressions:
+              - key: purpose
+                operator: In
+                values:
+                - atlas
             {{- else }}
             - matchExpressions:
               - key: node.kubernetes.io/instance-type
@@ -209,7 +215,7 @@ spec:
         {{- end }}
 {{- end }}
         env:
-        {{- $seed_size := 1 -}}
+        {{- $seed_size := default 1 .Values.config.seed_size | int -}}
         {{- if eq .Values.Deployment_Type "Lite" -}}
           {{- $seed_size = 1 -}}
         {{- else -}}

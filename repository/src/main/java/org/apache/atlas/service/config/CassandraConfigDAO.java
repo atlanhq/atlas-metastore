@@ -14,7 +14,6 @@ import com.datastax.oss.driver.api.core.cql.Statement;
 import com.datastax.driver.core.exceptions.NoHostAvailableException;
 import com.datastax.driver.core.exceptions.WriteTimeoutException;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -230,8 +229,8 @@ public class CassandraConfigDAO implements AutoCloseable {
      * @return map of config key to config entry
      * @throws AtlasBaseException if query fails
      */
-    public Map<String, ConfigEntry> getAllConfigs() throws AtlasBaseException {
-        Map<String, ConfigEntry> configs = new HashMap<>();
+    public Map<String, DynamicConfigCacheStore.ConfigEntry> getAllConfigs() throws AtlasBaseException {
+        Map<String, DynamicConfigCacheStore.ConfigEntry> configs = new HashMap<>();
         try {
             BoundStatement bound = selectAllStmt.bind(appName);
             ResultSet rs = executeWithRetry(bound);
@@ -242,7 +241,7 @@ public class CassandraConfigDAO implements AutoCloseable {
                 String updatedBy = row.getString("updated_by");
                 Instant lastUpdated = row.getInstant("last_updated");
 
-                configs.put(key, new ConfigEntry(value, updatedBy, lastUpdated));
+                configs.put(key, new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated));
             }
 
             LOG.debug("Retrieved {} configs from Cassandra", configs.size());
@@ -260,7 +259,7 @@ public class CassandraConfigDAO implements AutoCloseable {
      * @return config entry or null if not found
      * @throws AtlasBaseException if query fails
      */
-    public ConfigEntry getConfig(String key) throws AtlasBaseException {
+    public DynamicConfigCacheStore.ConfigEntry getConfig(String key) throws AtlasBaseException {
         try {
             BoundStatement bound = selectOneStmt.bind(appName, key);
             ResultSet rs = executeWithRetry(bound);
@@ -275,7 +274,7 @@ public class CassandraConfigDAO implements AutoCloseable {
             String updatedBy = row.getString("updated_by");
             Instant lastUpdated = row.getInstant("last_updated");
 
-            return new ConfigEntry(value, updatedBy, lastUpdated);
+            return new DynamicConfigCacheStore.ConfigEntry(value, updatedBy, lastUpdated);
 
         } catch (Exception e) {
             LOG.error("Error fetching config for key: {}", key, e);

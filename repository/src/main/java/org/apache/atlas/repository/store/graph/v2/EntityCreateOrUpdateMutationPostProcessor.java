@@ -40,10 +40,10 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
 
             LOG.info("Executing {} ES operations", esDeferredOperations.size());
 
-            // MS-456: Group by entity ID instead of operation type to avoid overwrites.
-            // When multiple operations target the same entity (e.g., UPDATE + ADD), 
-            // we keep only the operation with the most complete denorm data.
-            // ADD operations are processed last and contain the complete tag list.
+            /* MS-456: Group by entity ID instead of operation type to avoid overwrites.
+             When multiple operations target the same entity (e.g., UPDATE + ADD),
+             we keep only the operation with the most complete denorm data.
+             ADD operations are processed last and contain the complete tag list. */
             Map<String, ESDeferredOperation> latestOpByEntity = new LinkedHashMap<>();
 
             for (ESDeferredOperation op : esDeferredOperations) {
@@ -58,31 +58,50 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
             LOG.info("Merged {} ES operations into {} unique entity updates", 
                     esDeferredOperations.size(), latestOpByEntity.size());
 
-            // Process merged operations in batches
-            int batchSize = AtlasConfiguration.ES_BULK_BATCH_SIZE.getInt();
-            List<ESDeferredOperation> mergedOps = new ArrayList<>(latestOpByEntity.values());
+            List<ESDeferredOperation> addOps = new ArrayList<>();
+            List<ESDeferredOperation> otherOps = new ArrayList<>();
 
-            for (int i = 0; i < mergedOps.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, mergedOps.size());
-                List<ESDeferredOperation> batch = mergedOps.subList(i, end);
-
-                Map<String, Map<String, Object>> batchPayload = new HashMap<>();
-                for (ESDeferredOperation op : batch) {
-                    Map<String, Map<String, Object>> payload = op.getPayload();
-                    if (payload != null) {
-                        batchPayload.putAll(payload);
-                    }
-                }
-
-                if (!batchPayload.isEmpty()) {
-                    // Use upsert=false since we're updating existing documents
-                    ESConnector.writeTagProperties(batchPayload, false);
+            for (ESDeferredOperation op : latestOpByEntity.values()) {
+                if (op.getOperationType() == ESDeferredOperation.OperationType.TAG_DENORM_FOR_ADD_CLASSIFICATIONS) {
+                    addOps.add(op);
+                } else {
+                    otherOps.add(op);
                 }
             }
+
+            int batchSize = AtlasConfiguration.ES_BULK_BATCH_SIZE.getInt();
+            processOperationBatch(addOps, batchSize, true);
+            processOperationBatch(otherOps, batchSize, false);
 
             LOG.info("Completed execution of ES operations.");
         } finally {
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Process a batch of ES operations with the specified upsert setting.
+     */
+    private void processOperationBatch(List<ESDeferredOperation> ops, int batchSize, boolean upsert) {
+        if (ops.isEmpty()) {
+            return;
+        }
+
+        for (int i = 0; i < ops.size(); i += batchSize) {
+            int end = Math.min(i + batchSize, ops.size());
+            List<ESDeferredOperation> batch = ops.subList(i, end);
+
+            Map<String, Map<String, Object>> batchPayload = new HashMap<>();
+            for (ESDeferredOperation op : batch) {
+                Map<String, Map<String, Object>> payload = op.getPayload();
+                if (payload != null) {
+                    batchPayload.putAll(payload);
+                }
+            }
+
+            if (!batchPayload.isEmpty()) {
+                ESConnector.writeTagProperties(batchPayload, upsert);
+            }
         }
     }
 

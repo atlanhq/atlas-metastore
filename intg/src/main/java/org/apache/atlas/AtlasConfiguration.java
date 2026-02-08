@@ -111,6 +111,7 @@ public enum AtlasConfiguration {
     ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS("atlas.relationship.cleanup.supported.relationship.labels", "__Process.inputs,__Process.outputs,__AirflowTask.inputs,__AirflowTask.outputs"),
     REST_API_XSS_FILTER_MASK_STRING("atlas.rest.xss.filter.mask.string", "map<[a-zA-Z _,:<>0-9\\x60]*>|struct<[a-zA-Z _,:<>0-9\\x60]*>|array<[a-zA-Z _,:<>0-9\\x60]*>|\\{\\{[a-zA-Z _,-:0-9\\x60\\{\\}]*\\}\\}"),
     REST_API_XSS_FILTER_EXLUDE_SERVER_NAME("atlas.rest.xss.filter.exclude.server.name", "atlas-service-atlas.atlas.svc.cluster.local"),
+    REST_API_BULK_ERROR_LOG_BODY_MAX_SIZE("atlas.rest.bulk.error.log.body.maxsize", 102400),
 
 
     INDEX_CLIENT_CONNECTION_TIMEOUT("atlas.index.client.connection.timeout.ms", 900000),
@@ -190,7 +191,27 @@ public enum AtlasConfiguration {
     // Deterministic ID generation configuration
     // When enabled, generates deterministic GUIDs and QualifiedNames based on entity attributes
     // This enables consistent IDs across multiple Atlas instances for shadow/failover scenarios
-    DETERMINISTIC_ID_GENERATION_ENABLED("atlas.deterministic.id.generation.enabled", false);
+    DETERMINISTIC_ID_GENERATION_ENABLED("atlas.deterministic.id.generation.enabled", false),
+
+    // Batch Vertex Lookups (by GUID)
+    DELETE_BATCH_LOOKUP_ENABLED("atlas.delete.batch.lookup.enabled", false),
+    DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
+
+    // Batch Unique Attribute Resolution
+    DELETE_UNIQUEATTR_BATCH_ENABLED("atlas.delete.uniqueattr.batch.enabled", false),
+    DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
+
+    // Early Exit for No-Lineage Entities
+    DELETE_HASLINEAGE_EARLYEXIT_ENABLED("atlas.delete.haslineage.earlyexit.enabled", false),
+
+    // Owned Vertices Optimization
+    DELETE_OWNED_SHADOW_ENABLED("atlas.delete.owned.shadow.enabled", false),
+    DELETE_OWNED_OPTIMIZED_ENABLED("atlas.delete.owned.optimized.enabled", false),
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100),
+
+    // Logging thresholds for delete operations
+    DELETE_SLOW_QUERY_THRESHOLD_MS("atlas.delete.slow.query.threshold.ms", 1000),
+    DELETE_LARGE_BATCH_THRESHOLD("atlas.delete.large.batch.threshold", 500);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

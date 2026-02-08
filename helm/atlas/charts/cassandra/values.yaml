@@ -476,5 +476,5 @@ reaper:
     image:
       repository: ghcr.io/atlanhq/cassandra-keyspace-init-atlan-v2
       tag: 1.0.1-multiarch
-      pullPolicy: IfNotPresent 
+      pullPolicy: IfNotPresent
   
