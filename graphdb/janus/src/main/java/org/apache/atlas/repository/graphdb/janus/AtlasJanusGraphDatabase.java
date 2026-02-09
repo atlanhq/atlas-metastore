@@ -127,7 +127,7 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
         String dynamicIndexName = DynamicConfigStore.getJanusIndexName();
         if (dynamicIndexName != null) {
-            janusConfig.setProperty("index.search.index-name", dynamicIndexName);
+            janusConfig.setProperty("index.search.index-name", "janusgraph");
         }
 
         LOG.info("JanusGraph config - storage.cql.keyspace={}, index.search.index-name={}",

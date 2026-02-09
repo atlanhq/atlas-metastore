@@ -394,6 +394,20 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
+     * Check if lean graph is enabled.
+     * Falls back to AtlasConfiguration (atlas.graph.lean.graph.enabled) if DynamicConfigStore is not activated.
+     *
+     * @return true if enabled, false otherwise
+     */
+    public static boolean isLeanGraphEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.LEAN_GRAPH_ENABLED.getKey());
+        }
+        // Fall back to AtlasConfiguration (configmap / atlas-application.properties)
+        return AtlasConfiguration.ATLAS_GRAPH_LEAN_GRAPH_ENABLED.getBoolean();
+    }
+
+    /**
      * Get the JanusGraph CQL keyspace name.
      * Falls back to the value from ApplicationProperties (atlas.graph.storage.cql.keyspace)
      * if DynamicConfigStore is not activated.
