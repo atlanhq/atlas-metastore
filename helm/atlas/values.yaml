@@ -131,8 +131,8 @@ atlas:
   # 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
   configStore:
     cassandra:
-      enabled: false           # Enable Cassandra connectivity and data sync
-      activated: false         # Activate Cassandra for reads (use instead of Redis)
+      enabled: true           # Enable Cassandra connectivity and data sync
+      activated: true         # Activate Cassandra for reads (use instead of Redis)
       syncIntervalMs: 60000    # Background sync interval in milliseconds
       keyspace: config_store   # Cassandra keyspace name
       table: configs           # Cassandra table name
@@ -195,6 +195,25 @@ atlas:
               app: atlas
           topologyKey: kubernetes.io/hostname
 
+  affinity_lite:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: eks.amazonaws.com/capacityType
+            operator: In
+            values:
+              - ON_DEMAND
+        - matchExpressions:
+          - key: lifecycle
+            operator: In
+            values:
+              - ondemand
+        - matchExpressions:
+          - key: cloud.google.com/gke-provisioning
+            operator: In
+            values:
+              - standard
   # Kubernetes service for atlas
   service:
     portName: atlas
@@ -331,6 +350,14 @@ atlas:
       memory: 6Gi
     requests:
       memory: 20Mi
+
+  resources_lite:
+    limits:
+      cpu: 2000m
+      memory: 8Gi
+    requests:
+      cpu: 1000m
+      memory: 6Gi
 
   # Liveness and readiness probes for atlas
   livenessProbe:

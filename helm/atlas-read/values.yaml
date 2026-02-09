@@ -111,8 +111,8 @@ atlas:
   # 2. Set enabled=true, activated=true: Switches reads to use Cassandra instead of Redis
   configStore:
     cassandra:
-      enabled: false           # Enable Cassandra connectivity and data sync
-      activated: false         # Activate Cassandra for reads (use instead of Redis)
+      enabled: true           # Enable Cassandra connectivity and data sync
+      activated: true         # Activate Cassandra for reads (use instead of Redis)
       syncIntervalMs: 60000    # Background sync interval in milliseconds
       keyspace: config_store   # Cassandra keyspace name
       table: configs           # Cassandra table name

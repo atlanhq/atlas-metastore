@@ -1,5 +1,7 @@
 package org.apache.atlas.service.config;
 
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlag;
@@ -59,6 +61,8 @@ public class DynamicConfigStore implements ApplicationContextAware {
     private volatile boolean initialized = false;
     private volatile boolean cassandraAvailable = false;
 
+    private static final String METRIC_COMPONENT = "atlas_classification";
+
     @Inject
     public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore,
                               ConfigCacheRefresher cacheRefresher) {
@@ -67,6 +71,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
         this.cacheRefresher = cacheRefresher; // Can be null in tests
 
         LOG.info("DynamicConfigStore created - enabled: {}, activated: {}", config.isEnabled(), config.isActivated());
+
     }
 
     @PostConstruct
@@ -101,6 +106,15 @@ public class DynamicConfigStore implements ApplicationContextAware {
             long duration = System.currentTimeMillis() - startTime;
             LOG.info("DynamicConfigStore initialization completed in {}ms - {} configs loaded",
                     duration, cacheStore.size());
+
+            // Add version tracking metric
+            MeterRegistry meterRegistry = org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry();
+            Gauge.builder(METRIC_COMPONENT + "_atlas_version_enabled",
+                            this,
+                            ref -> isTagV2Enabled() ? 2.0 : 1.0)
+                    .description("Indicates which Tag propagation version is enabled (2.0 = v2, 1.0 = v1)")
+                    .tag("component", "version")
+                    .register(meterRegistry);
 
         } catch (Exception e) {
             LOG.error("Failed to initialize DynamicConfigStore - Cassandra config store will be unavailable", e);
@@ -318,14 +332,14 @@ public class DynamicConfigStore implements ApplicationContextAware {
 
     /**
      * Check if Tag V2 (Janus optimization) is enabled.
-     * Note: The flag ENABLE_JANUS_OPTIMISATION being "false" means Tag V2 is ENABLED.
+     * Note: The flag ENABLE_JANUS_OPTIMISATION being "true" means Tag V2 is ENABLED.
      * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
      *
      * @return true if Tag V2 is enabled, false otherwise
      */
     public static boolean isTagV2Enabled() {
         if (isActivated()) {
-            return !getConfigAsBoolean(ConfigKey.ENABLE_JANUS_OPTIMISATION.getKey());
+            return getConfigAsBoolean(ConfigKey.ENABLE_JANUS_OPTIMISATION.getKey());
         }
         // Fall back to FeatureFlagStore (Redis)
         return FeatureFlagStore.isTagV2Enabled();
