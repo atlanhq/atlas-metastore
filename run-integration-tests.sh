@@ -46,7 +46,8 @@ done
 # Step 1: Build Atlas WAR if not skipping
 if [ "$SKIP_BUILD" = false ]; then
     echo -e "${YELLOW}Building Atlas WAR package...${NC}"
-    mvn clean -Dos.detected.classifier=osx-x86_64 -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist
+    mvn clean -Dos.detected.classifier=osx-x86_64 -DskipShade=true -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true package -Pdist -T 2C
+
 
     if [ $? -ne 0 ]; then
         echo -e "${RED}Failed to build Atlas WAR${NC}"

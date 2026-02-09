@@ -40,13 +40,13 @@ JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homeb
 
 # Webapp module
 
-JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl webapp -am -DskipTests -Drat.skip=true
+JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl webapp -am -DskipShade=true -DskipTests -Drat.skip=true -DskipEnunciate=true -T 2C \
 
  
 
 # Integration module
 
-JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl intg -am -DskipTests -Drat.skip=true
+JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-17.jdk/Contents/Home /opt/homebrew/bin/mvn compile -pl intg -am -DskipShade=true -DskipTests -Drat.skip=true -DskipEnunciate=true -T 2C \
 
 ```
 
@@ -426,9 +426,12 @@ This project uses standard GitHub flow with PR-based merges to `master` branch.
 
 
 
+## Internal Documentation
+
+- [Adding ConfigMap Properties to Helm Charts](docs/helm/adding-configmap-properties.md) - Guide for adding new configuration properties to Atlas Helm charts
+- [Delete Asset Flow Analysis](docs/internals/delete-asset-flow.md) - Comprehensive analysis of delete operation, graph traversals, and optimization strategies
+
 ## External Resources
-
-
 
 - [Apache Atlas Documentation](https://atlas.apache.org/documentation.html)
 

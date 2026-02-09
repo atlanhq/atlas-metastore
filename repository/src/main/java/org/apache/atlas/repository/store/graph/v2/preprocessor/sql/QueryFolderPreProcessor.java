@@ -32,6 +32,7 @@ import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessor;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -90,7 +91,8 @@ public class QueryFolderPreProcessor implements PreProcessor {
             throw new AtlasBaseException(AtlasErrorCode.MISSING_MANDATORY_ATTRIBUTE, entity.getTypeName(), COLLECTION_QUALIFIED_NAME);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(collectionQualifiedName));
+        String folderName = (String) entity.getAttribute(NAME);
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(folderName, collectionQualifiedName));
     }
 
     private void processUpdate(AtlasEntity entity, AtlasVertex vertex, EntityMutationContext context) throws AtlasBaseException {
@@ -267,7 +269,8 @@ public class QueryFolderPreProcessor implements PreProcessor {
     }
 
 
-    public static String createQualifiedName(String collectionQualifiedName) {
-        return String.format(qualifiedNameFormat, collectionQualifiedName, AtlasAuthorizationUtils.getCurrentUserName(), getUUID());
+    public static String createQualifiedName(String folderName, String collectionQualifiedName) {
+        String userName = AtlasAuthorizationUtils.getCurrentUserName();
+        return String.format(qualifiedNameFormat, collectionQualifiedName, userName, DeterministicIdUtils.getQueryResourceQN("folder", folderName, collectionQualifiedName, userName));
     }
 }

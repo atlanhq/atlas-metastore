@@ -188,6 +188,11 @@ public enum AtlasConfiguration {
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
     TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
 
+    // Deterministic ID generation configuration
+    // When enabled, generates deterministic GUIDs and QualifiedNames based on entity attributes
+    // This enables consistent IDs across multiple Atlas instances for shadow/failover scenarios
+    DETERMINISTIC_ID_GENERATION_ENABLED("atlas.deterministic.id.generation.enabled", false),
+
     // Batch Vertex Lookups (by GUID)
     DELETE_BATCH_LOOKUP_ENABLED("atlas.delete.batch.lookup.enabled", false),
     DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),

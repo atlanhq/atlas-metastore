@@ -35,6 +35,7 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -112,7 +113,7 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             entity.removeAttribute(SUPER_DOMAIN_QN_ATTR);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(domainName, parentDomainQualifiedName));
 
 
         entity.setCustomAttributes(customAttributes);
@@ -215,7 +216,7 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
             }
             else{
                 if(StringUtils.isEmpty(sourceDomainQualifiedName)){
-                    updatedQualifiedName = createQualifiedName(targetDomainQualifiedName);
+                    updatedQualifiedName = createQualifiedName(domainName, targetDomainQualifiedName);
                 }else {
                     updatedQualifiedName = currentDomainQualifiedName.replace(sourceDomainQualifiedName, targetDomainQualifiedName);
                 }
@@ -390,11 +391,12 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
         }
     }
 
-    private static String createQualifiedName(String parentDomainQualifiedName) {
+    private static String createQualifiedName(String domainName, String parentDomainQualifiedName) {
+        String nanoId = DeterministicIdUtils.getDomainQN(domainName, parentDomainQualifiedName);
         if (StringUtils.isNotEmpty(parentDomainQualifiedName)) {
-            return parentDomainQualifiedName + "/domain/" + getUUID();
+            return parentDomainQualifiedName + "/domain/" + nanoId;
         } else{
-            return "default/domain/" + getUUID() + "/super";
+            return "default/domain/" + nanoId + "/super";
         }
     }
 

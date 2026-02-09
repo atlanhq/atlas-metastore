@@ -522,6 +522,10 @@ data:
     atlas.config.store.app.name={{ .Values.atlas.configStore.cassandra.appName }}
     atlas.config.store.cassandra.replication.factor={{ .Values.atlas.configStore.cassandra.replicationFactor }}
     atlas.config.store.cassandra.consistency.level={{ .Values.atlas.configStore.cassandra.consistencyLevel }}
+    
+    ######### Deterministic ID Generation #########
+    atlas.deterministic.id.generation.enabled={{ .Values.atlas.deterministicIdGeneration.enabled }}
+
 
     ######### Delete Optimization Configs #########
     # Batch GUID lookup for deleteByIds
