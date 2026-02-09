@@ -2,11 +2,11 @@ package org.apache.atlas.web.rest;
 
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.service.config.CassandraConfigDAO;
-import org.apache.atlas.service.config.ConfigKey;
-import org.apache.atlas.service.config.DynamicConfigCacheStore;
-import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.config.dynamic.CassandraConfigDAO;
+import org.apache.atlas.config.dynamic.ConfigKey;
+import org.apache.atlas.config.dynamic.DynamicConfigCacheStore;
+import org.apache.atlas.config.dynamic.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.atlas.config.dynamic.DynamicConfigStore;
 import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
