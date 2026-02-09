@@ -1,4 +1,4 @@
-package org.apache.atlas.service.config;
+package org.apache.atlas.config.dynamic;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -35,7 +35,13 @@ public enum ConfigKey {
     ENABLE_PERSONA_HIERARCHY_FILTER("enable_persona_hierarchy_filter", "false"),
 
     // Temporary ES index usage flag
-    USE_TEMP_ES_INDEX("use_temp_es_index", "false");
+    USE_TEMP_ES_INDEX("use_temp_es_index", "false"),
+
+    // JanusGraph CQL keyspace override
+    JANUS_CQL_KEYSPACE("janus_cql_keyspace", "atlas"),
+
+    // JanusGraph ES index name override
+    JANUS_INDEX_NAME("janus_index_name", "janusgraph");
 
     private final String key;
     private final String defaultValue;
