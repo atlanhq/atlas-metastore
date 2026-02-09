@@ -322,6 +322,10 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                 LOG.debug("Created index : {}", FULLTEXT_INDEX);
             }
 
+            if (LEAN_GRAPH_ENABLED) {
+                createVertexLabel(management, ASSET_VERTEX_LABEL);
+            }
+
             HashMap<String, Object> ES_DATE_FIELD = new HashMap<>();
             ES_DATE_FIELD.put("type", "date");
             ES_DATE_FIELD.put("format", "epoch_millis");
@@ -824,6 +828,20 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             management.makeEdgeLabel(label);
 
             LOG.info("Created edge label {} ", label);
+        }
+    }
+
+    private void createVertexLabel(final AtlasGraphManagement management, final String label) {
+        if (StringUtils.isEmpty(label)) {
+            return;
+        }
+
+        org.apache.atlas.repository.graphdb.AtlasVertexLabel vertexLabel = management.getVertexLabel(label);
+
+        if (vertexLabel == null) {
+            management.makeVertexLabel(label);
+
+            LOG.info("Created vertex label {} ", label);
         }
     }
 

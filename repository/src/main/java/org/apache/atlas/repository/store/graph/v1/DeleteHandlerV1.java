@@ -67,7 +67,6 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSo
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -285,7 +284,7 @@ public abstract class DeleteHandlerV1 {
                 throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_INVALID, TypeCategory.ENTITY.name(), typeName);
             }
             entity.setVertexId(vertex.getIdForDisplay());
-            entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            entity.setDocId(vertex.getDocId());
             entity.setSuperTypeNames(entityType.getAllSuperTypes());
             vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
 
@@ -1056,7 +1055,7 @@ public abstract class DeleteHandlerV1 {
                 diffEntity.addOrAppendRemovedRelationshipAttribute(inverseEnd.getName(), removedRef);
             }
 
-            requestContext.cacheDifferentialEntity(diffEntity);
+            requestContext.cacheDifferentialEntity(diffEntity, referencedVertex);
 
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Cached differential entity for guid={} with removed relationship attribute: {}",

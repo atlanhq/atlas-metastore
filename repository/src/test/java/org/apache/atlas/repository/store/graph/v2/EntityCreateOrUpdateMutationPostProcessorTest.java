@@ -3,6 +3,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.model.ESDeferredOperation;
 import org.apache.atlas.model.ESDeferredOperation.OperationType;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.junit.jupiter.api.*;
 import org.mockito.ArgumentCaptor;
