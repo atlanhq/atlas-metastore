@@ -4158,7 +4158,8 @@ public class EntityGraphMapper {
 
                 Map<String, Object> minAssetMap = getMinimalAssetMap(entityVertex);
 
-                //addToClassificationNames(entityVertex, classificationName);
+                // Update vertex properties so JanusGraph can auto-index to ES (MS-601)
+                addToClassificationNames(entityVertex, classificationName);
                 List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
                 currentTags.add(classification);
 
@@ -4850,6 +4851,15 @@ public class EntityGraphMapper {
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
         deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
+
+        // Update vertex properties so JanusGraph can auto-index to ES (MS-601)
+        entityVertex.removePropertyValue(TRAIT_NAMES_PROPERTY_KEY, classificationName);
+        entityVertex.removeProperty(CLASSIFICATION_NAMES_KEY);
+        List<String> remainingTraitNames = currentTags.stream()
+                .filter(tag -> tag.getEntityGuid() != null && tag.getEntityGuid().equals(entityGuid))
+                .map(AtlasClassification::getTypeName)
+                .collect(Collectors.toList());
+        entityVertex.setProperty(CLASSIFICATION_NAMES_KEY, getClassificationNamesString(remainingTraitNames));
 
         // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
