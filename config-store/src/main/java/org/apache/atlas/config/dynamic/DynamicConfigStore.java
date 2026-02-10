@@ -1,15 +1,13 @@
-package org.apache.atlas.config.dynamic;
+package org.apache.atlas.service.config;
 
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlag;
 import org.apache.atlas.service.FeatureFlagStore;
-import org.apache.atlas.config.dynamic.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -54,8 +52,7 @@ import java.util.Objects;
 public class DynamicConfigStore implements ApplicationContextAware {
     private static final Logger LOG = LoggerFactory.getLogger(DynamicConfigStore.class);
 
-    private static volatile DynamicConfigStore instance;
-    private static volatile ApplicationContext context;
+    private static ApplicationContext context;
 
     private final DynamicConfigStoreConfig config;
     private final DynamicConfigCacheStore cacheStore;
@@ -86,7 +83,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
         if (!config.isEnabled()) {
             LOG.info("Dynamic config store is disabled (atlas.config.store.cassandra.enabled=false)");
             initialized = true;
-            instance = this;
             return;
         }
 
@@ -134,8 +130,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
             }
 
             initialized = true;
-            instance = this;
-
             long duration = System.currentTimeMillis() - startTime;
             LOG.info("DynamicConfigStore initialization completed in {}ms - {} configs loaded",
                     duration, cacheStore.size());
@@ -145,6 +139,13 @@ public class DynamicConfigStore implements ApplicationContextAware {
 
             // Register all metrics
             registerMetrics();
+
+            Gauge.builder("atlas_delete_batch_enabled",
+                            this,
+                            ref -> isDeleteBatchEnabled() ? 1.0 : 0.0)
+                    .description("Whether delete batch optimization is enabled (1=enabled, 0=disabled)")
+                    .tag("component", "delete")
+                    .register(meterRegistry);
 
         } catch (Exception e) {
             LOG.error("Failed to initialize DynamicConfigStore - Cassandra config store will be unavailable", e);
@@ -445,51 +446,16 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
-     * Get the JanusGraph CQL keyspace name.
-     * Falls back to the value from ApplicationProperties (atlas.graph.storage.cql.keyspace)
-     * if DynamicConfigStore is not activated.
+     * Check if delete batch operations are enabled.
+     * Only enabled when DynamicConfigStore is activated and the flag is set to true.
      *
-     * @return the CQL keyspace name
+     * @return true if batch delete operations are enabled, false otherwise
      */
-    public static String getJanusCqlKeyspace() {
+    public static boolean isDeleteBatchEnabled() {
         if (isActivated()) {
-            String value = getConfig(ConfigKey.JANUS_CQL_KEYSPACE.getKey());
-            if (StringUtils.isNotEmpty(value)) {
-                return value;
-            }
+            return getConfigAsBoolean(ConfigKey.DELETE_BATCH_ENABLED.getKey());
         }
-        // Fall back to ApplicationProperties
-        try {
-            return ApplicationProperties.get().getString("atlas.graph.storage.cql.keyspace",
-                    ConfigKey.JANUS_CQL_KEYSPACE.getDefaultValue());
-        } catch (AtlasException e) {
-            LOG.warn("Failed to read atlas.graph.storage.cql.keyspace from ApplicationProperties", e);
-            return ConfigKey.JANUS_CQL_KEYSPACE.getDefaultValue();
-        }
-    }
-
-    /**
-     * Get the JanusGraph ES index name.
-     * Falls back to the value from ApplicationProperties (atlas.graph.index.search.index-name)
-     * if DynamicConfigStore is not activated.
-     *
-     * @return the ES index name
-     */
-    public static String getJanusIndexName() {
-        if (isActivated()) {
-            String value = getConfig(ConfigKey.JANUS_INDEX_NAME.getKey());
-            if (StringUtils.isNotEmpty(value)) {
-                return value;
-            }
-        }
-        // Fall back to ApplicationProperties
-        try {
-            return ApplicationProperties.get().getString("atlas.graph.index.search.index-name",
-                    ConfigKey.JANUS_INDEX_NAME.getDefaultValue());
-        } catch (AtlasException e) {
-            LOG.warn("Failed to read atlas.graph.index.search.index-name from ApplicationProperties", e);
-            return ConfigKey.JANUS_INDEX_NAME.getDefaultValue();
-        }
+        return false;
     }
 
     // ================== Internal Methods ==================
@@ -771,35 +737,17 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     private static DynamicConfigStore getInstance() {
-        if (instance != null) {
-            return instance;
+        if (context == null) {
+            LOG.debug("ApplicationContext not available");
+            return null;
         }
 
-        // Try to resolve via Spring context
-        if (context != null) {
-            try {
-                return context.getBean(DynamicConfigStore.class);
-            } catch (Exception e) {
-                LOG.debug("DynamicConfigStore bean not available yet: {}", e.getMessage());
-            }
+        try {
+            return context.getBean(DynamicConfigStore.class);
+        } catch (Exception e) {
+            LOG.debug("DynamicConfigStore bean not available: {}", e.getMessage());
+            return null;
         }
-
-        // Pre-Spring: bootstrap directly from ApplicationProperties
-        synchronized (DynamicConfigStore.class) {
-            if (instance == null) {
-                try {
-                    DynamicConfigStoreConfig config = new DynamicConfigStoreConfig();
-                    DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
-                    DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
-                    store.initialize();
-                    instance = store;
-                } catch (Exception e) {
-                    LOG.warn("Failed to eagerly initialize DynamicConfigStore: {}", e.getMessage());
-                }
-            }
-        }
-
-        return instance;
     }
 
     @Override

@@ -1,4 +1,4 @@
-package org.apache.atlas.config.dynamic;
+package org.apache.atlas.service.config;
 
 import java.util.Arrays;
 import java.util.Map;
@@ -37,11 +37,8 @@ public enum ConfigKey {
     // Temporary ES index usage flag
     USE_TEMP_ES_INDEX("use_temp_es_index", "false"),
 
-    // JanusGraph CQL keyspace override
-    JANUS_CQL_KEYSPACE("janus_cql_keyspace", "atlas"),
-
-    // JanusGraph ES index name override
-    JANUS_INDEX_NAME("janus_index_name", "janusgraph");
+    // Delete batch operations flag
+    DELETE_BATCH_ENABLED("atlas.delete.batch.enabled", "false");
 
     private final String key;
     private final String defaultValue;
