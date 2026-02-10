@@ -165,7 +165,6 @@ data:
     {{- else }}
     atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
     {{- end }}
-    
     atlas.kafka.auto.commit.interval.ms=1000
     atlas.kafka.hook.group.id=atlas
     atlas.kafka.enable.auto.commit=false
@@ -527,14 +526,21 @@ data:
     atlas.config.store.cassandra.table={{ .Values.atlas.configStore.cassandra.table }}
     atlas.config.store.app.name={{ .Values.atlas.configStore.cassandra.appName }}
     atlas.config.store.cassandra.replication.factor={{ .Values.atlas.configStore.cassandra.replicationFactor }}
+    {{- if eq .Values.global.Deployment_Type "Lite" }}
+    atlas.config.store.cassandra.consistency.level=LOCAL_ONE
+    {{- else }}
     atlas.config.store.cassandra.consistency.level={{ .Values.atlas.configStore.cassandra.consistencyLevel }}
-
+    {{- end }}
     ######### Atlas notification configs #########
     atlas.notification.differential.entity.changes.enabled={{ .Values.atlas.notification.differential_entity_changes_enabled }}
     atlas.enable.tag.notifications.async={{ .Values.atlas.notification.tag_notifications_async_enabled }}
 
     ######### Atlas Entity Attribute Optimization #########
     atlas.entity.skip.optional.attributes={{ .Values.atlas.entity.skip_optional_attributes }}
+
+    ######### Kafka Metadata Consumer #########
+    atlas.kafka.metadata.enabled={{ .Values.atlas.kafka.metadata.enabled }}
+    atlas.kafka.metadata.topic={{ .Values.atlas.kafka.metadata.topic }}
 
     ######### Delete Optimization Configs #########
     # Batch GUID lookup for deleteByIds
