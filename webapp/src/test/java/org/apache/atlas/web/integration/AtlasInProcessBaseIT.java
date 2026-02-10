@@ -61,7 +61,7 @@ public abstract class AtlasInProcessBaseIT {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasInProcessBaseIT.class);
 
-    private static final int MAX_STARTUP_WAIT_SECONDS = 100; // 5 minutes
+    private static final int MAX_STARTUP_WAIT_SECONDS = 300; // 5 minutes
 
     // Singleton containers (shared across all test classes, stopped by JVM shutdown hook)
     private static final CassandraContainer<?> cassandra;
@@ -118,6 +118,16 @@ public abstract class AtlasInProcessBaseIT {
         if (serverStarted) {
             LOG.info("Atlas server already running on port {}", atlasPort);
             return;
+        }
+
+        // Stop any leftover server from a previous failed attempt
+        if (atlasServer != null && atlasServer.isRunning()) {
+            LOG.info("Stopping leftover Atlas server from previous failed attempt");
+            try {
+                atlasServer.stop();
+            } catch (Exception e) {
+                LOG.warn("Error stopping leftover Atlas server", e);
+            }
         }
 
         setupConfiguration();
