@@ -96,7 +96,7 @@ public class SoftDeleteHandlerV1 extends DeleteHandlerV1 {
 
             try {
                 if (DEFERRED_ACTION_ENABLED && RequestContext.get().getCurrentTask() == null) {
-                    Collection propagatableTags = org.apache.atlas.config.dynamic.DynamicConfigStore.isTagV2Enabled()
+                    Collection propagatableTags = org.apache.atlas.service.config.DynamicConfigStore.isTagV2Enabled()
                             ? getPropagatableClassificationsV2(edge)
                             : getPropagatableClassifications(edge);
                     if (CollectionUtils.isNotEmpty(propagatableTags)) {

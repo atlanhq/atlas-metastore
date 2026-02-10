@@ -791,7 +791,6 @@
         <module>intg</module>
         <module>common</module>
         <module>server-api</module>
-        <module>config-store</module>
         <module>notification</module>
         <module>client</module>
         <module>client-auth</module>
@@ -1357,12 +1356,6 @@
             <dependency>
                 <groupId>org.apache.atlas</groupId>
                 <artifactId>atlas-server-api</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>org.apache.atlas</groupId>
-                <artifactId>atlas-config-store</artifactId>
                 <version>${project.version}</version>
             </dependency>
 

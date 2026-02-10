@@ -13,7 +13,7 @@ import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFactory;
-import org.apache.atlas.config.dynamic.DynamicConfigStore;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
