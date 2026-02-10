@@ -1,4 +1,4 @@
-package org.apache.atlas.config.dynamic;
+package org.apache.atlas.service.config;
 
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;

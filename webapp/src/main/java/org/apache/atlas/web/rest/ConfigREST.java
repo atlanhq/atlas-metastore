@@ -17,13 +17,12 @@
  */
 package org.apache.atlas.web.rest;
 
-import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.config.dynamic.ConfigKey;
-import org.apache.atlas.config.dynamic.DynamicConfigCacheStore.ConfigEntry;
-import org.apache.atlas.config.dynamic.DynamicConfigStore;
+import org.apache.atlas.service.config.ConfigKey;
+import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.lang3.StringUtils;
@@ -334,115 +333,6 @@ public class ConfigREST {
         }
     }
 
-    /**
-     * Get JanusGraph configuration details.
-     *
-     * Returns the current JanusGraph config values from multiple layers:
-     * - Dynamic config store (Cassandra cache)
-     * - ApplicationProperties (what JanusGraph is actually using at runtime)
-     * - Default values
-     *
-     * This is useful for debugging because JanusGraph config overrides only take
-     * effect at graph initialization time (singleton). Changing them via the config
-     * REST API will NOT affect an already-running graph instance -- a pod restart
-     * is required.
-     *
-     * @param request HTTP servlet request
-     * @return JanusConfigResponse with config details for each JanusGraph key
-     * @throws AtlasBaseException if operation fails
-     */
-    @GET
-    @Path("janus")
-    @Timed
-    public JanusConfigResponse getJanusConfigs(@Context HttpServletRequest request) throws AtlasBaseException {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> ConfigREST.getJanusConfigs()");
-        }
-
-        AtlasPerfTracer perf = null;
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "ConfigREST.getJanusConfigs()");
-            }
-
-            JanusConfigResponse response = new JanusConfigResponse();
-            response.setTimestamp(new Date());
-
-            org.apache.commons.configuration.Configuration appConfig = null;
-            try {
-                appConfig = ApplicationProperties.get();
-            } catch (Exception e) {
-                LOG.warn("Failed to read ApplicationProperties for JanusGraph config", e);
-            }
-
-            // CQL Keyspace
-            JanusConfigDetail cqlKeyspace = new JanusConfigDetail();
-            cqlKeyspace.setConfigKey(ConfigKey.JANUS_CQL_KEYSPACE.getKey());
-            cqlKeyspace.setApplicationPropertiesKey("atlas.graph.storage.cql.keyspace");
-            cqlKeyspace.setDefaultValue(ConfigKey.JANUS_CQL_KEYSPACE.getDefaultValue());
-
-            if (appConfig != null) {
-                cqlKeyspace.setActiveValue(appConfig.getString("atlas.graph.storage.cql.keyspace",
-                        ConfigKey.JANUS_CQL_KEYSPACE.getDefaultValue()));
-            }
-
-            if (DynamicConfigStore.isEnabled()) {
-                Map<String, ConfigEntry> allConfigs = DynamicConfigStore.getAllConfigs();
-                ConfigEntry cqlEntry = allConfigs.get(ConfigKey.JANUS_CQL_KEYSPACE.getKey());
-                if (cqlEntry != null) {
-                    cqlKeyspace.setDynamicConfigValue(cqlEntry.getValue());
-                    cqlKeyspace.setUpdatedBy(cqlEntry.getUpdatedBy());
-                    cqlKeyspace.setLastUpdated(cqlEntry.getLastUpdated() != null ?
-                            Date.from(cqlEntry.getLastUpdated()) : null);
-                }
-            }
-
-            cqlKeyspace.setEffectiveValue(DynamicConfigStore.getJanusCqlKeyspace());
-            response.setCqlKeyspace(cqlKeyspace);
-
-            // ES Index Name
-            JanusConfigDetail indexName = new JanusConfigDetail();
-            indexName.setConfigKey(ConfigKey.JANUS_INDEX_NAME.getKey());
-            indexName.setApplicationPropertiesKey("atlas.graph.index.search.index-name");
-            indexName.setDefaultValue(ConfigKey.JANUS_INDEX_NAME.getDefaultValue());
-
-            if (appConfig != null) {
-                indexName.setActiveValue(appConfig.getString("atlas.graph.index.search.index-name",
-                        ConfigKey.JANUS_INDEX_NAME.getDefaultValue()));
-            }
-
-            if (DynamicConfigStore.isEnabled()) {
-                Map<String, ConfigEntry> allConfigs = DynamicConfigStore.getAllConfigs();
-                ConfigEntry indexEntry = allConfigs.get(ConfigKey.JANUS_INDEX_NAME.getKey());
-                if (indexEntry != null) {
-                    indexName.setDynamicConfigValue(indexEntry.getValue());
-                    indexName.setUpdatedBy(indexEntry.getUpdatedBy());
-                    indexName.setLastUpdated(indexEntry.getLastUpdated() != null ?
-                            Date.from(indexEntry.getLastUpdated()) : null);
-                }
-            }
-
-            indexName.setEffectiveValue(DynamicConfigStore.getJanusIndexName());
-            response.setIndexName(indexName);
-
-            // Store status
-            response.setDynamicConfigStoreEnabled(DynamicConfigStore.isEnabled());
-            response.setDynamicConfigStoreActivated(DynamicConfigStore.isActivated());
-            response.setRestartRequiredNote(
-                    "JanusGraph config overrides only take effect at graph initialization time. " +
-                    "If activeValue differs from dynamicConfigValue, a pod restart is required.");
-
-            return response;
-
-        } finally {
-            AtlasPerfTracer.log(perf);
-
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("<== ConfigREST.getJanusConfigs()");
-            }
-        }
-    }
-
     // ================== DTOs ==================
 
     /**
@@ -527,81 +417,5 @@ public class ConfigREST {
 
         public Date getTimestamp() { return timestamp; }
         public void setTimestamp(Date timestamp) { this.timestamp = timestamp; }
-    }
-
-    /**
-     * Response containing JanusGraph configuration details.
-     */
-    public static class JanusConfigResponse {
-        private JanusConfigDetail cqlKeyspace;
-        private JanusConfigDetail indexName;
-        private boolean dynamicConfigStoreEnabled;
-        private boolean dynamicConfigStoreActivated;
-        private String restartRequiredNote;
-        private Date timestamp;
-
-        public JanusConfigDetail getCqlKeyspace() { return cqlKeyspace; }
-        public void setCqlKeyspace(JanusConfigDetail cqlKeyspace) { this.cqlKeyspace = cqlKeyspace; }
-
-        public JanusConfigDetail getIndexName() { return indexName; }
-        public void setIndexName(JanusConfigDetail indexName) { this.indexName = indexName; }
-
-        public boolean isDynamicConfigStoreEnabled() { return dynamicConfigStoreEnabled; }
-        public void setDynamicConfigStoreEnabled(boolean dynamicConfigStoreEnabled) { this.dynamicConfigStoreEnabled = dynamicConfigStoreEnabled; }
-
-        public boolean isDynamicConfigStoreActivated() { return dynamicConfigStoreActivated; }
-        public void setDynamicConfigStoreActivated(boolean dynamicConfigStoreActivated) { this.dynamicConfigStoreActivated = dynamicConfigStoreActivated; }
-
-        public String getRestartRequiredNote() { return restartRequiredNote; }
-        public void setRestartRequiredNote(String restartRequiredNote) { this.restartRequiredNote = restartRequiredNote; }
-
-        public Date getTimestamp() { return timestamp; }
-        public void setTimestamp(Date timestamp) { this.timestamp = timestamp; }
-    }
-
-    /**
-     * Detail for a single JanusGraph config property showing values from all layers.
-     */
-    public static class JanusConfigDetail {
-        /** The dynamic config key (e.g. janus_cql_keyspace) */
-        private String configKey;
-        /** The ApplicationProperties key (e.g. atlas.graph.storage.cql.keyspace) */
-        private String applicationPropertiesKey;
-        /** The hardcoded default value */
-        private String defaultValue;
-        /** Value currently in ApplicationProperties (what JanusGraph is actually using) */
-        private String activeValue;
-        /** Value stored in the dynamic config store (Cassandra cache) */
-        private String dynamicConfigValue;
-        /** The effective value returned by the helper method (considering fallback chain) */
-        private String effectiveValue;
-        /** Who last updated the dynamic config value */
-        private String updatedBy;
-        /** When the dynamic config value was last updated */
-        private Date lastUpdated;
-
-        public String getConfigKey() { return configKey; }
-        public void setConfigKey(String configKey) { this.configKey = configKey; }
-
-        public String getApplicationPropertiesKey() { return applicationPropertiesKey; }
-        public void setApplicationPropertiesKey(String applicationPropertiesKey) { this.applicationPropertiesKey = applicationPropertiesKey; }
-
-        public String getDefaultValue() { return defaultValue; }
-        public void setDefaultValue(String defaultValue) { this.defaultValue = defaultValue; }
-
-        public String getActiveValue() { return activeValue; }
-        public void setActiveValue(String activeValue) { this.activeValue = activeValue; }
-
-        public String getDynamicConfigValue() { return dynamicConfigValue; }
-        public void setDynamicConfigValue(String dynamicConfigValue) { this.dynamicConfigValue = dynamicConfigValue; }
-
-        public String getEffectiveValue() { return effectiveValue; }
-        public void setEffectiveValue(String effectiveValue) { this.effectiveValue = effectiveValue; }
-
-        public String getUpdatedBy() { return updatedBy; }
-        public void setUpdatedBy(String updatedBy) { this.updatedBy = updatedBy; }
-
-        public Date getLastUpdated() { return lastUpdated; }
-        public void setLastUpdated(Date lastUpdated) { this.lastUpdated = lastUpdated; }
     }
 }
