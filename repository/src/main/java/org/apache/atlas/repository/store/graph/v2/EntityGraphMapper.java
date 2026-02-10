@@ -401,7 +401,7 @@ public class EntityGraphMapper {
 
                     setCustomAttributes(vertex, createdEntity);
                     setSystemAttributesToEntity(vertex, createdEntity);
-                    resp.addEntity(CREATE, constructHeader(createdEntity, vertex, entityType));
+                    //resp.addEntity(CREATE, constructHeader(createdEntity, vertex, entityType));
 
                     if (bulkRequestContext.isAppendTags()) {
                         if (CollectionUtils.isNotEmpty(createdEntity.getAddOrUpdateClassifications())) {
@@ -513,7 +513,7 @@ public class EntityGraphMapper {
                     }
 
                     setSystemAttributesToEntity(vertex, updatedEntity);
-                    resp.addEntity(updateType, constructHeader(updatedEntity, vertex, entityType));
+                    //resp.addEntity(updateType, constructHeader(updatedEntity, vertex, entityType));
 
                     // Add hasLineage for newly created edges
                     Set<AtlasEdge> newlyCreatedEdges = getNewCreatedInputOutputEdges(guid);

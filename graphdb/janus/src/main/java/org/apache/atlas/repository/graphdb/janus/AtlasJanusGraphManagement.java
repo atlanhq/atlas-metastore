@@ -75,6 +75,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutionException;
 
+import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.HISTORICAL_GUID_PROPERTY_KEY;
 import static org.janusgraph.core.schema.SchemaAction.ENABLE_INDEX;
 import static org.janusgraph.core.schema.SchemaStatus.ENABLED;
 import static org.janusgraph.core.schema.SchemaStatus.INSTALLED;
@@ -332,7 +334,7 @@ public class AtlasJanusGraphManagement implements AtlasGraphManagement {
 
         JanusGraphIndex index = indexBuilder.buildCompositeIndex();
 
-        if (lockEnabled && isUnique) {
+        if (lockEnabled && isUnique && !shouldSkipLockForIndex(propertyName)) {
             management.setConsistency(index, ConsistencyModifier.LOCK);
         }
     }
@@ -409,6 +411,11 @@ public class AtlasJanusGraphManagement implements AtlasGraphManagement {
                     continue;
                 }
 
+                if (shouldSkipLockForIndex(index.name())) {
+                    LOG.info("Skipping consistency lock for unique GUID index {}", index.name());
+                    continue;
+                }
+
                 for (PropertyKey propertyKey : index.getFieldKeys()) {
                     LOG.info("setConsistency: {}: {}", count, propertyKey.name());
                 }
@@ -420,6 +427,10 @@ public class AtlasJanusGraphManagement implements AtlasGraphManagement {
         finally {
             LOG.info("setConsistency: {}: {}: Done!", elementType.getSimpleName(), count);
         }
+    }
+
+    private static boolean shouldSkipLockForIndex(String indexName) {
+        return GUID_PROPERTY_KEY.equals(indexName) || HISTORICAL_GUID_PROPERTY_KEY.equals(indexName);
     }
 
     @Override
