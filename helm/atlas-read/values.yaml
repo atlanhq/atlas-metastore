@@ -439,6 +439,11 @@ atlas:
     slackWebhook: ''
     tag_notifications_async_enabled: true
 
+  entity:
+    # Skip mapping of optional attributes that are absent from payload, have no default value
+    # Improves write performance by reducing unnecessary attribute processing
+    skip_optional_attributes: true
+
 cassandra:
 
   updateStrategy:
