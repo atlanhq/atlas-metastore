@@ -194,7 +194,6 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
                 }
             }
         }
-
         if (this.storeManager.getFeatures().hasOrderedScan()) {
             final Select getKeysRangedSelect = selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
                 .column(KEY_COLUMN_NAME)
@@ -536,11 +535,19 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         if (!groupedStore) {
             throw new IllegalStateException("Grouped mutation called for non-grouped store: " + tableName);
         }
+        if (isNoOpMutation(keyMutations)) {
+            return;
+        }
         for (int attempt = 0; attempt < MAX_GROUPED_MUTATION_RETRIES; attempt++) {
             final GroupedState state = fetchGroupedState(key, txh);
-//            final List<Entry> baseEntries = state.exists ? state.entries : fetchLegacyAllEntries(key, txh);
-            final List<Entry> baseEntries =  state.entries ;//: fetchLegacyAllEntries(key, txh);
+            final List<Entry> baseEntries = state.exists ? state.entries : fetchLegacyAllEntries(key, txh);
             final List<Entry> mergedEntries = applyMutation(baseEntries, keyMutations);
+            if (state.exists && areEntriesEquivalent(state.entries, mergedEntries)) {
+                return;
+            }
+            if (!state.exists && mergedEntries.isEmpty()) {
+                return;
+            }
             final List<ByteBuffer> encodedEntries = encodeEntries(mergedEntries);
             final long newVersion = state.version + 1L;
 
@@ -701,6 +708,30 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
             merged.put(addition.getColumn(), addition);
         }
         return new ArrayList<>(merged.values());
+    }
+
+    private static boolean isNoOpMutation(KCVMutation mutation) {
+        return mutation == null || (mutation.getAdditions().isEmpty() && mutation.getDeletions().isEmpty());
+    }
+
+    private static boolean areEntriesEquivalent(List<Entry> left, List<Entry> right) {
+        if (left == right) {
+            return true;
+        }
+        if (left.size() != right.size()) {
+            return false;
+        }
+        for (int i = 0; i < left.size(); i++) {
+            Entry leftEntry = left.get(i);
+            Entry rightEntry = right.get(i);
+            if (leftEntry.getColumn().compareTo(rightEntry.getColumn()) != 0) {
+                return false;
+            }
+            if (!leftEntry.getValue().asByteBuffer().equals(rightEntry.getValue().asByteBuffer())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static List<ByteBuffer> encodeEntries(List<Entry> entries) {

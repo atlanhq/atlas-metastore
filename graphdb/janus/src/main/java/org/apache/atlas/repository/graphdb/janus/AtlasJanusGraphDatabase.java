@@ -197,6 +197,7 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
             LOG.debug("Global properties updated!: {}", map);
         } catch (Exception ex) {
             LOG.error("Error updating global configuration: {}", map, ex);
+            throw new RuntimeException(ex);
         } finally {
             if (managementSystem != null) {
                 managementSystem.commit();
