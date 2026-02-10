@@ -87,6 +87,7 @@ public class TaskQueueWatcher implements Runnable {
     @Override
     public void run() {
         if (isMaintenanceModeEnabled()) {
+            setMaintenanceModeActivated();
             LOG.info("TaskQueueWatcher: Maintenance mode is enabled, new tasks will not be loaded into the queue until next restart");
             return;
         }
