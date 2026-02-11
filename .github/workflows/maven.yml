@@ -28,7 +28,6 @@ on:
       - lite_master
       - alcon-v2-418
       - ms-428-delete-optimisation-phase3
-      - infra_97_staging
 
 jobs:
   # Detect what changed to optimize workflow execution
