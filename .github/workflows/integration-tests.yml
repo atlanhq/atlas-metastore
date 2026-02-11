@@ -101,6 +101,7 @@ jobs:
           mvn test -pl webapp \
             -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest" \
             -Drat.skip=true \
+            -DskipEnunciate=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
             2>&1 | tee test-output.log
 
