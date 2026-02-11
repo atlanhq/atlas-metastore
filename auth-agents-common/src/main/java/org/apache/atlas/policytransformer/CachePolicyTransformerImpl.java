@@ -639,12 +639,17 @@ public class CachePolicyTransformerImpl {
             return null;
         }
 
-        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
-        if (!CollectionUtils.isEmpty(conditions)) {
-            LOG.info("Policy conditions found for policy {}, conditions={}", atlasPolicy.getGuid(), conditions.get(0).toString());
+        List<Object> conditionsRaw = (List<Object>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+        if (!CollectionUtils.isEmpty(conditionsRaw)) {
+            LOG.info("Policy conditions found for policy {}, count={}", atlasPolicy.getGuid(), conditionsRaw.size());
         }
 
-        for (AtlasStruct condition : conditions) {
+        for (Object conditionObj : conditionsRaw) {
+            // Convert LinkedHashMap (from JSON deserialization) to AtlasStruct
+            AtlasStruct condition = (conditionObj instanceof AtlasStruct) ?
+                                    (AtlasStruct) conditionObj :
+                                    new AtlasStruct((Map) conditionObj);
+
             RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
 
             rangerCondition.setType((String) condition.getAttribute("policyConditionType"));
