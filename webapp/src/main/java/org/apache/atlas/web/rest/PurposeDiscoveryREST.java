@@ -109,12 +109,12 @@ public class PurposeDiscoveryREST {
 
             // Authorization check: users can only query their own purposes
             // Service accounts with admin privileges can query for any user
-            String authenticatedUser = RequestContext.get().getUser();
+            String authenticatedUser = RequestContext.getCurrentUser();
             if (authenticatedUser != null && !authenticatedUser.equals(request.getUsername())) {
                 LOG.warn("User '{}' attempted to query purposes for different user '{}'",
                         authenticatedUser, request.getUsername());
                 throw new AtlasBaseException(AtlasErrorCode.UNAUTHORIZED_ACCESS,
-                        "User can only query their own purposes");
+                        authenticatedUser, "Purpose discovery for other users");
             }
 
             LOG.info("getUserPurposes: username={}, groupCount={}, limit={}, offset={}",
