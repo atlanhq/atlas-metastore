@@ -100,7 +100,7 @@ public class EmbeddedServer {
             application.addServlet(holder, "/api/atlas/v2/*");
             
             LOG.info("Successfully registered Atlas V2 API Fast-Lane shallow stack Servlet");
-        } catch (Exception e) {\
+        } catch (Exception e) {
             //No action other than error logging needed. Revert back to original flow in web.xml
             LOG.error("Failed to register Fast-Lane shallow stack Servlet, falling back to default web.xml flow", e);
         }
