@@ -80,27 +80,31 @@ public class EmbeddedServer {
         application.setClassLoader(Thread.currentThread().getContextClassLoader());
         
         // --- LOAD CHANGE: API FAST-LANE REGISTRATION ---
-        // We manually register the Jersey Spring Servlet to ensue there is a straight path 
+        // We manually register the Jersey Spring Servlet to ensure there is a straight path 
         // for the V2 API that bypasses the global filter chain in web.xml.
+        // ----- IMP* This change is to reduce Jetty's deep stack all filter call for every
+        // authenticated API call that lands in Atlas ------
         try {
             // Using the SpringServlet which integrates Jersey with  Spring context
             com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
                 new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
             
             org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
-            holder.setName("atlas-v2-fastlane");
+            holder.setName("atlas-v2-fastlane"); // TODO : "Slimstack"( instead of "fastlane") is another potential name 
             
-            // This parameter tells Jersey where your API Resource classes are located
+            // This parameter tells Jersey where Atlas API Resource classes are located
             holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
             
-            // We map this specifically to the V2 API path
+            // We map this specifically to the V2 API path.
+            //  Need to check that all keycloak or other filter calls happen before /v2 mapping
             application.addServlet(holder, "/api/atlas/v2/*");
             
             LOG.info("Successfully registered Atlas V2 API Fast-Lane Servlet");
-        } catch (Exception e) {
+        } catch (Exception e) {\
+            //No action other than error logging needed. Revert back to original flow in web.xml
             LOG.error("Failed to register Fast-Lane Servlet, falling back to default web.xml flow", e);
         }
-        // Disable directory listing (Keep your existing setting)
+        // Disable directory listing 
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
         
         return application;
