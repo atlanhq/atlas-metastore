@@ -431,9 +431,16 @@ public class DynamicConfigStore implements ApplicationContextAware {
         }
     }
 
-    public static String getDummyJanusIndexName() {
+    /**
+     * Get the JanusGraph ES index name.
+     * Falls back to the value from ApplicationProperties (atlas.graph.index.search.index-name)
+     * if DynamicConfigStore is not activated.
+     *
+     * @return the ES index name
+     */
+    public static String getJanusIndexName() {
         if (isActivated()) {
-            String value = getConfig(ConfigKey.DUMMY_JANUS_INDEX_NAME.getKey());
+            String value = getConfig(ConfigKey.JANUS_INDEX_NAME.getKey());
             if (StringUtils.isNotEmpty(value)) {
                 return value;
             }
@@ -446,6 +453,17 @@ public class DynamicConfigStore implements ApplicationContextAware {
             LOG.warn("Failed to read atlas.graph.index.search.index-name from ApplicationProperties", e);
             return ConfigKey.JANUS_INDEX_NAME.getDefaultValue();
         }
+    }
+
+    public static String getDummyJanusIndexName() {
+        if (isActivated()) {
+            String value = getConfig(ConfigKey.DUMMY_JANUS_INDEX_NAME.getKey());
+            if (StringUtils.isNotEmpty(value)) {
+                return value;
+            }
+        }
+        // Fall back to ApplicationProperties
+        return null;
     }
 
     public static Boolean getAllowCustomVertexId() {
