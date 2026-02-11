@@ -276,14 +276,16 @@ public class PurposeDiscoveryIntegrationTest extends AtlasDockerIntegrationTest 
 
     @Test
     @Order(5)
-    @DisplayName("Test Purpose Discovery API - No results for unmatched user/group")
-    void testDiscoverPurposesNoMatch() throws Exception {
-        LOG.info("Testing Purpose Discovery API with unmatched user/group...");
+    @DisplayName("Test Purpose Discovery API - Authorization check rejects queries for other users")
+    void testDiscoverPurposesAuthorizationCheck() throws Exception {
+        LOG.info("Testing Purpose Discovery API authorization check...");
 
+        // Try to query purposes for a different user while logged in as admin
+        // This should be rejected with 403 Unauthorized
         String payload = """
             {
-                "username": "nonexistentuser",
-                "groups": ["nonexistentgroup"],
+                "username": "otheruser",
+                "groups": ["somegroup"],
                 "limit": 100,
                 "offset": 0
             }
@@ -300,25 +302,11 @@ public class PurposeDiscoveryIntegrationTest extends AtlasDockerIntegrationTest 
 
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
-        LOG.info("Purpose Discovery (no match) response: {} - {}", response.statusCode(), response.body());
-        assertEquals(200, response.statusCode(), "Purpose Discovery API should return 200 even with no results");
+        LOG.info("Purpose Discovery (authorization) response: {} - {}", response.statusCode(), response.body());
 
-        ObjectNode result = mapper.readValue(response.body(), ObjectNode.class);
-
-        // Our specific purpose should NOT be in the results for this user/group combo
-        // (unless there's a public policy, which we didn't create)
-        ArrayNode purposes = (ArrayNode) result.get("purposes");
-
-        boolean foundOurPurpose = false;
-        for (JsonNode purpose : purposes) {
-            if (purposeGuid.equals(purpose.get("guid").asText())) {
-                foundOurPurpose = true;
-                break;
-            }
-        }
-
-        assertFalse(foundOurPurpose,
-            "Our Purpose should NOT be discoverable by unmatched user/group");
+        // Should return 403 Forbidden - users can only query their own purposes
+        assertEquals(403, response.statusCode(),
+            "Should return 403 when querying purposes for a different user");
     }
 
     @Test
