@@ -23,6 +23,7 @@ on:
       - master
       - beta
       - staging
+      - leangraph-dynamic
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
