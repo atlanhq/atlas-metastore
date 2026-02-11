@@ -90,7 +90,7 @@ public class EmbeddedServer {
                 new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
             
             org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
-            holder.setName("atlas-v2-fastlane"); // TODO : "Slimstack"( instead of "fastlane") is another potential name 
+            holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
             
             // This parameter tells Jersey where Atlas API Resource classes are located
             holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
@@ -99,10 +99,10 @@ public class EmbeddedServer {
             //  Need to check that all keycloak or other filter calls happen before /v2 mapping
             application.addServlet(holder, "/api/atlas/v2/*");
             
-            LOG.info("Successfully registered Atlas V2 API Fast-Lane Servlet");
+            LOG.info("Successfully registered Atlas V2 API Fast-Lane shallow stack Servlet");
         } catch (Exception e) {\
             //No action other than error logging needed. Revert back to original flow in web.xml
-            LOG.error("Failed to register Fast-Lane Servlet, falling back to default web.xml flow", e);
+            LOG.error("Failed to register Fast-Lane shallow stack Servlet, falling back to default web.xml flow", e);
         }
         // Disable directory listing 
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
