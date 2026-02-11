@@ -484,7 +484,6 @@ public class CachePolicyTransformerImpl {
     }
 
     private RangerPolicy toRangerPolicy(AtlasEntityHeader atlasPolicy, String serviceType) throws AtlasBaseException, IOException {
-        LOG.info("Transforming atlas policy to ranger policy, atlasPolicyGuid={}, atlasPolicyName={}, serviceType={}, attributes={}", atlasPolicy.getGuid(), atlasPolicy.getAttribute(NAME), serviceType, atlasPolicy.getAttributes());
         RangerPolicy rangerPolicy = getRangerPolicy(atlasPolicy, serviceType);
 
         //GET policy Item
@@ -641,6 +640,9 @@ public class CachePolicyTransformerImpl {
         }
 
         List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+        if (!CollectionUtils.isEmpty(conditions)) {
+            LOG.info("Policy conditions found for policy {}, conditions={}", atlasPolicy.getGuid(), conditions.get(0).toString());
+        }
 
         for (AtlasStruct condition : conditions) {
             RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
