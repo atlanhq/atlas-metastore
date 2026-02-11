@@ -79,7 +79,7 @@ public class EmbeddedServer {
         WebAppContext application = new WebAppContext(path, "/");
         application.setClassLoader(Thread.currentThread().getContextClassLoader());
         
-        // --- LOAD CHANGE: API FAST-LANE REGISTRATION ---
+        // --- LOAD CHANGE: API FAST-LANE REGISTRATION --- 
         // We manually register the Jersey Spring Servlet to ensure there is a straight path 
         // for the V2 API that bypasses the global filter chain in web.xml.
         // ----- IMP* This change is to reduce Jetty's deep stack all filter call for every
