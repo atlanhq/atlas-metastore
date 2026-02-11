@@ -346,6 +346,8 @@ data:
     atlas.webserver.keepalivetimesecs=30
     # Queue size for the requests(when max threads are busy) for the atlas web server
     atlas.webserver.queuesize=200
+    # To ensure the webserver buffer is large enough for the larger JIT-inlined frames with updated flags
+    atlas.webserver.request.buffer.size=65536
     #########  CSRF Configs  #########
     atlas.rest-csrf.enabled=false
     #atlas.rest-csrf.browser-useragents-regex=^Mozilla.*,^Opera.*,^Chrome.*

@@ -78,8 +78,31 @@ public class EmbeddedServer {
     protected WebAppContext getWebAppContext(String path) {
         WebAppContext application = new WebAppContext(path, "/");
         application.setClassLoader(Thread.currentThread().getContextClassLoader());
-        // Disable directory listing
+        
+        // --- LOAD CHANGE: API FAST-LANE REGISTRATION ---
+        // We manually register the Jersey Spring Servlet to ensue there is a straight path 
+        // for the V2 API that bypasses the global filter chain in web.xml.
+        try {
+            // Using the SpringServlet which integrates Jersey with  Spring context
+            com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
+                new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
+            
+            org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
+            holder.setName("atlas-v2-fastlane");
+            
+            // This parameter tells Jersey where your API Resource classes are located
+            holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
+            
+            // We map this specifically to the V2 API path
+            application.addServlet(holder, "/api/atlas/v2/*");
+            
+            LOG.info("Successfully registered Atlas V2 API Fast-Lane Servlet");
+        } catch (Exception e) {
+            LOG.error("Failed to register Fast-Lane Servlet, falling back to default web.xml flow", e);
+        }
+        // Disable directory listing (Keep your existing setting)
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
+        
         return application;
     }
 

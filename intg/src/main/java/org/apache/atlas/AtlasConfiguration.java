@@ -31,7 +31,7 @@ public enum AtlasConfiguration {
     WEBSERVER_RESERVED_THREADS("atlas.webserver.reservedthreads", 40),
     WEBSERVER_KEEPALIVE_SECONDS("atlas.webserver.keepalivetimesecs", 60),
     WEBSERVER_QUEUE_SIZE("atlas.webserver.queuesize", 100),
-    WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 16192),
+    WEBSERVER_REQUEST_BUFFER_SIZE("atlas.jetty.request.buffer.size", 65536), //To ensure the webserver buffer is large enough for the larger JIT-inlined frames changed from 16K to 64K
 
     QUERY_PARAM_MAX_LENGTH("atlas.query.param.max.length", 4*1024),
 

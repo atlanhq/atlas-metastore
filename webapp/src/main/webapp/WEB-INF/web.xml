@@ -114,10 +114,10 @@
         <url-pattern>/api/atlas/admin/status</url-pattern>
     </filter-mapping>
 
-    <filter>
+    <!-- <filter>
         <filter-name>brotliFilter</filter-name>
         <filter-class>org.apache.atlas.web.filters.BrotliCompressionFilter</filter-class>
-    </filter>
+    </filter> -->
 
     <filter-mapping>
         <filter-name>brotliFilter</filter-name>
