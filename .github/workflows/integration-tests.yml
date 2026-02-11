@@ -86,7 +86,7 @@ jobs:
 
       - name: Build webapp module
         run: |
-          mvn install -pl webapp -am -DskipTests -Drat.skip=true -q
+          mvn install -pl webapp -am -DskipTests -Drat.skip=true -DskipEnunciate=true -q
         env:
           MAVEN_OPTS: -Xmx2g
 
