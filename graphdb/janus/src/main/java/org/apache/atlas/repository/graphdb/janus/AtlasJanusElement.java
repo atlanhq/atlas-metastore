@@ -224,10 +224,7 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     public void setProperty(String propertyName, Object value) {
         try {
             if (value == null) {
-                Object existingVal = getProperty(propertyName, Object.class);
-                if (existingVal != null) {
-                    removeProperty(propertyName);
-                }
+                removeProperty(propertyName);
             } else {
                 if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
                     AtlasJanusVertex vertex = (AtlasJanusVertex) this;

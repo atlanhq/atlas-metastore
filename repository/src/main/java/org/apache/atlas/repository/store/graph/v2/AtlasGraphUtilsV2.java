@@ -272,27 +272,21 @@ public class AtlasGraphUtilsV2 {
             propertyName = encodePropertyKey(propertyName);
         }
 
-        Object existingValue = element.getProperty(propertyName, Object.class);
-
         if (value == null) {
-            if (existingValue != null) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Removing property {} from {}", propertyName, toString(element));
-                }
-                element.removeProperty(propertyName);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Removing property {} from {}", propertyName, toString(element));
             }
+            element.removeProperty(propertyName);
         } else {
-            if (!value.equals(existingValue)) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Setting property {} in {}", propertyName, toString(element));
-                }
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Setting property {} in {}", propertyName, toString(element));
+            }
 
-                if (value instanceof Date) {
-                    Long encodedValue = ((Date) value).getTime();
-                    element.setProperty(propertyName, encodedValue);
-                } else {
-                    element.setProperty(propertyName, value);
-                }
+            if (value instanceof Date) {
+                Long encodedValue = ((Date) value).getTime();
+                element.setProperty(propertyName, encodedValue);
+            } else {
+                element.setProperty(propertyName, value);
             }
         }
     }
