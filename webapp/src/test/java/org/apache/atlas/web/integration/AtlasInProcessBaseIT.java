@@ -178,7 +178,7 @@ public abstract class AtlasInProcessBaseIT {
 
         // Build the index template body
         String templateBody = String.format(
-                "{\"index_patterns\":[\"janusgraph_vertex_index\"],\"settings\":%s,\"mappings\":%s}",
+                "{\"index_patterns\":[\"janusgraph_vertex_index\",\"leangraph_janusgraph_vertex_index\"],\"settings\":%s,\"mappings\":%s}",
                 settings, mappings);
 
         // PUT the template via ES REST API
@@ -260,7 +260,6 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.storage.backend=cql");
             w.println("atlas.graph.storage.hostname=localhost");
             w.println("atlas.graph.storage.cql.port=" + cassandraPort);
-            w.println("atlas.graph.storage.cql.keyspace=atlas_test");
             w.println("atlas.graph.storage.cql.replication-factor=1");
             w.println("atlas.graph.storage.clustername=atlas-test-cluster");
             w.println("atlas.graph.storage.port=" + cassandraPort);
@@ -354,6 +353,13 @@ public abstract class AtlasInProcessBaseIT {
 
             // Config store
             w.println("atlas.config.store.cassandra.enabled=false");
+
+            w.println("atlas.graph.lean.graph.enabled=true");
+            w.println("atlas.graph.storage.cql.keyspace=leangraph_janusgraph");
+            w.println("atlas.graph.index.search.index-name=leangraph_janusgraph");
+            w.println("atlas.graph.graph.set-vertex-id=true");
+            w.println("atlas.graph.graph.allow-custom-vid-types=true");
+            w.println("atlas.cassandra.vanilla.keyspace=leangraph_janusgraph");
         }
     }
 
