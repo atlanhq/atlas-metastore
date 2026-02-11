@@ -431,16 +431,9 @@ public class DynamicConfigStore implements ApplicationContextAware {
         }
     }
 
-    /**
-     * Get the JanusGraph ES index name.
-     * Falls back to the value from ApplicationProperties (atlas.graph.index.search.index-name)
-     * if DynamicConfigStore is not activated.
-     *
-     * @return the ES index name
-     */
-    public static String getJanusIndexName() {
+    public static String getDummyJanusIndexName() {
         if (isActivated()) {
-            String value = getConfig(ConfigKey.JANUS_INDEX_NAME.getKey());
+            String value = getConfig(ConfigKey.DUMMY_JANUS_INDEX_NAME.getKey());
             if (StringUtils.isNotEmpty(value)) {
                 return value;
             }
@@ -452,6 +445,24 @@ public class DynamicConfigStore implements ApplicationContextAware {
         } catch (AtlasException e) {
             LOG.warn("Failed to read atlas.graph.index.search.index-name from ApplicationProperties", e);
             return ConfigKey.JANUS_INDEX_NAME.getDefaultValue();
+        }
+    }
+
+    public static Boolean getAllowCustomVertexId() {
+        if (isActivated()) {
+            String value = getConfig(ConfigKey.ALLOW_CUSTOM_VERTEX_ID.getKey());
+            if (StringUtils.isNotEmpty(value)) {
+                return "true".equalsIgnoreCase(value);
+            }
+
+        }
+        // Fall back to ApplicationProperties
+        try {
+            return ApplicationProperties.get().getBoolean("atlas.graph.allow-custom-vertex-id",
+                    Boolean.parseBoolean(ConfigKey.ALLOW_CUSTOM_VERTEX_ID.getDefaultValue()));
+        } catch (AtlasException e) {
+            LOG.warn("Failed to read atlas.graph.allow-custom-vertex-id from ApplicationProperties", e);
+            return Boolean.parseBoolean(ConfigKey.ALLOW_CUSTOM_VERTEX_ID.getDefaultValue());
         }
     }
 

@@ -44,7 +44,11 @@ public enum ConfigKey {
     JANUS_CQL_KEYSPACE("janus_cql_keyspace", "atlas"),
 
     // JanusGraph ES index name override
-    JANUS_INDEX_NAME("janus_index_name", "janusgraph");
+    JANUS_INDEX_NAME("janus_index_name", "janusgraph"),
+
+    ALLOW_CUSTOM_VERTEX_ID("allow_custom_vertex_id", "false"),
+
+    DUMMY_JANUS_INDEX_NAME("dummy_janus_index_name", null);
 
     private final String key;
     private final String defaultValue;

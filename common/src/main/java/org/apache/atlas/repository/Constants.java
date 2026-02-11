@@ -562,6 +562,8 @@ public final class Constants {
         Object dynamicIndexName = tryInvokeDynamicConfigStore("getJanusIndexName");
         if (dynamicIndexName instanceof String && StringUtils.isNotBlank((String) dynamicIndexName)) {
             indexName = (String) dynamicIndexName;
+            LOG.info("Using dynamic index name from DynamicConfigStore: {}", indexName);
+            return indexName + "_";
         }
 
         if (StringUtils.isBlank(indexName)) {

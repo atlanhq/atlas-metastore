@@ -125,9 +125,15 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
             janusConfig.setProperty("storage.cql.keyspace", dynamicCqlKeyspace);
         }
 
-        String dynamicIndexName = DynamicConfigStore.getJanusIndexName();
+        String dynamicIndexName = DynamicConfigStore.getDummyJanusIndexName();
         if (dynamicIndexName != null) {
-            janusConfig.setProperty("index.search.index-name", "janusgraph");
+            janusConfig.setProperty("index.search.index-name", dynamicIndexName);
+        }
+
+        Boolean allowCustomVertexId = DynamicConfigStore.getAllowCustomVertexId();
+        if (allowCustomVertexId != null && allowCustomVertexId) {
+            janusConfig.setProperty("graph.allow-custom-vid-types", true);
+            janusConfig.setProperty("graph.allow-custom-vertex-id", true);
         }
 
         LOG.info("JanusGraph config - storage.cql.keyspace={}, index.search.index-name={}",
