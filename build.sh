@@ -23,8 +23,7 @@ unzip -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
 
 echo "Maven Building (parallel mode)"
 
-mvn clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true -DskipCheck=true -T 1C -q install package -Pdist "$@"
-
+mvn -T 1C clean -U -Dmaven.test.skip -DskipTests -Drat.skip=true -DskipOverlay -DskipEnunciate=true install package -Pdist
 echo "[DEBUG listing distro/target"
 ls distro/target
 
