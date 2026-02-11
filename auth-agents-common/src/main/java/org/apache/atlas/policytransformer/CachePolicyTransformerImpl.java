@@ -484,6 +484,7 @@ public class CachePolicyTransformerImpl {
     }
 
     private RangerPolicy toRangerPolicy(AtlasEntityHeader atlasPolicy, String serviceType) throws AtlasBaseException, IOException {
+        LOG.info("Transforming atlas policy to ranger policy, atlasPolicyGuid={}, atlasPolicyName={}, serviceType={}, attributes={}", atlasPolicy.getGuid(), atlasPolicy.getAttribute(NAME), serviceType, atlasPolicy.getAttributes());
         RangerPolicy rangerPolicy = getRangerPolicy(atlasPolicy, serviceType);
 
         //GET policy Item
