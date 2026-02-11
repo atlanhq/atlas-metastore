@@ -359,7 +359,7 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         CreateTableWithOptions createTable = createTable(keyspaceName, tableName)
             .ifNotExists()
             .withPartitionKey(KEY_COLUMN_NAME, DataTypes.BLOB)
-            .withColumn(ENTRIES_COLUMN_NAME, DataTypes.listOf(DataTypes.BLOB))
+            .withColumn(ENTRIES_COLUMN_NAME, DataTypes.listOf(DataTypes.BLOB, true))
             .withColumn(VERSION_COLUMN_NAME, DataTypes.BIGINT);
 
         createTable = compactionOptions(createTable, configuration);
