@@ -23,6 +23,7 @@ on:
       - infra_97_master
       - infra_97_staging
       - infra_97_beta
+      - slimleangraph
     types:
       - completed
 
