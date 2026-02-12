@@ -40,7 +40,7 @@ import org.apache.atlas.ESAliasRequestBuilder;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
-import org.apache.atlas.idgenerator.DistributedIdGenerator;
+import java.util.UUID;
 import org.apache.atlas.model.discovery.SearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.Constants;
@@ -157,32 +157,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     private CqlSession cqlSession;
     private DynamicVertexService dynamicVertexService;
 
-    private static DistributedIdGenerator CUSTOM_ID_GENERATOR;
-
-
-    static {
-        try {
-            String hostName = ApplicationProperties.get().getString("atlas.graph.storage.hostname", "localhost");
-            int port = ApplicationProperties.get().getInt("atlas.graph.storage.port", 9042);
-            String podName = System.getenv("K8S_POD_NAME");
-
-            if (podName == null || podName.isBlank()) {
-                podName = "local-atlas-0";
-                String message = "Pod name not found in env for DistributedIdGenerator for custom vertex ID generation, falling back to " + podName;
-                LOG.warn(message);
-
-                //LOG.error(message);
-                //throw new RuntimeException(message);
-            }
-
-            if (LEAN_GRAPH_ENABLED) {
-                CUSTOM_ID_GENERATOR = new DistributedIdGenerator(hostName, port, podName);
-            }
-        } catch (AtlasException e) {
-            LOG.error("Failed to initialize DistributedIdGenerator for custom vertex ID generation");
-            throw new RuntimeException(e);
-        }
-    }
 
     public DynamicVertexService getDynamicVertexRetrievalService() {
         return dynamicVertexService;
@@ -250,8 +224,14 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     private CqlSessionBuilder getCQLBuilder (String hostname) {
+        int port;
+        try {
+            port = ApplicationProperties.get().getInt("atlas.graph.storage.port", 9042);
+        } catch (AtlasException e) {
+            port = 9042;
+        }
         return CqlSession.builder()
-                .addContactPoint(new InetSocketAddress(hostname, 9042))
+                .addContactPoint(new InetSocketAddress(hostname, port))
                 .withConfigLoader(
                         DriverConfigLoader.programmaticBuilder()
                                 .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, Duration.ofSeconds(10))
@@ -1082,6 +1062,6 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     private String generateCustomId() {
-        return CUSTOM_ID_GENERATOR.nextId();
+        return UUID.randomUUID().toString().replace("-", "");
     }
 }
