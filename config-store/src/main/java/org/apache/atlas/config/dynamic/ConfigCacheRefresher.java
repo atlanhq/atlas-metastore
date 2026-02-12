@@ -1,4 +1,4 @@
-package org.apache.atlas.service.config;
+package org.apache.atlas.config.dynamic;
 
 import io.fabric8.kubernetes.api.model.ContainerStatus;
 import io.fabric8.kubernetes.client.KubernetesClient;

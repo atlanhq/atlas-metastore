@@ -1,4 +1,4 @@
-package org.apache.atlas.service.config;
+package org.apache.atlas.config.dynamic;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.DefaultConsistencyLevel;

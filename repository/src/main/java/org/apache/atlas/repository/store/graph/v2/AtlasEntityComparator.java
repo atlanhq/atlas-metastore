@@ -26,7 +26,7 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.util.AtlasEntityUtils;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.config.dynamic.DynamicConfigStore;
 import org.apache.atlas.type.AtlasBusinessMetadataType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
