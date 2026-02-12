@@ -111,25 +111,25 @@ import static org.apache.atlas.type.Constants.STATE_PROPERTY_KEY;
  */
 public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusEdge> {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasJanusGraph.class);
-    private static final Parameter[] EMPTY_PARAMETER_ARRAY  = new Parameter[0];
+    private static final Parameter[] EMPTY_PARAMETER_ARRAY = new Parameter[0];
 
 
-    private static       Configuration APPLICATION_PROPERTIES = null;
+    private static Configuration APPLICATION_PROPERTIES = null;
 
     private final ConvertGremlinValueFunction GREMLIN_VALUE_CONVERSION_FUNCTION = new ConvertGremlinValueFunction();
-    private final Set<String>                 multiProperties                   = new HashSet<>();
-    private final StandardJanusGraph          janusGraph;
-    private final RestHighLevelClient         elasticsearchClient;
-    private final RestClient                  restClient;
+    private final Set<String> multiProperties = new HashSet<>();
+    private final StandardJanusGraph janusGraph;
+    private final RestHighLevelClient elasticsearchClient;
+    private final RestClient restClient;
 
     private final RestClient esUiClusterClient;
     private final RestClient esNonUiClusterClient;
 
     private final ThreadLocal<GremlinGroovyScriptEngine> scriptEngine = ThreadLocal.withInitial(() -> {
         DefaultImportCustomizer.Builder builder = DefaultImportCustomizer.build()
-                                                                         .addClassImports(java.util.function.Function.class)
-                                                                         .addMethodImports(__.class.getMethods())
-                                                                         .addMethodImports(P.class.getMethods());
+                .addClassImports(java.util.function.Function.class)
+                .addMethodImports(__.class.getMethods())
+                .addMethodImports(P.class.getMethods());
         return new GremlinGroovyScriptEngine(builder.create());
     });
 
@@ -147,8 +147,12 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             Iterable<PropertyKey> keys = mgmt.getRelationTypes(PropertyKey.class);
 
             for (PropertyKey key : keys) {
-                if (key.cardinality() != Cardinality.SINGLE) {
-                    multiProperties.add(key.name());
+                try {
+                    if (key.cardinality() != Cardinality.SINGLE) {
+                        multiProperties.add(key.name());
+                    }
+                } catch (NullPointerException e) {
+                    LOG.warn("Skipping PropertyKey with corrupted schema (missing multiplicity): {}", key.name(), e);
                 }
             }
         } finally {
@@ -169,15 +173,15 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
                                                                AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> inVertex,
                                                                String edgeLabel) throws AtlasBaseException {
         try {
-            Vertex oV   = outVertex.getV().getWrappedElement();
-            Vertex iV   = inVertex.getV().getWrappedElement();
+            Vertex oV = outVertex.getV().getWrappedElement();
+            Vertex iV = inVertex.getV().getWrappedElement();
 
             if (oV.id().equals(iV.id())) {
                 LOG.error("Attempting to create a relationship between same vertex");
                 throw new AtlasBaseException(RELATIONSHIP_CREATE_INVALID_PARAMS);
             }
 
-            Edge   edge = oV.addEdge(edgeLabel, iV);
+            Edge edge = oV.addEdge(edgeLabel, iV);
 
             return GraphDbObjectFactory.createEdge(this, edge);
         } catch (SchemaViolationException e) {
@@ -224,7 +228,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     @Override
     public AtlasEdge<AtlasJanusVertex, AtlasJanusEdge> getEdge(String edgeId) {
         Iterator<Edge> it = getGraph().edges(edgeId);
-        Edge           e  = getSingleElement(it, edgeId);
+        Edge e = getSingleElement(it, edgeId);
 
         return GraphDbObjectFactory.createEdge(this, e);
     }
@@ -312,11 +316,11 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     private AtlasIndexQuery<AtlasJanusVertex, AtlasJanusEdge> indexQuery(String indexName, String graphQuery, int offset, List<AtlasIndexQueryParameter> indexQueryParameterList) {
-        String               prefix = getIndexQueryPrefix();
-        JanusGraphIndexQuery query  = getGraph().indexQuery(indexName, graphQuery).setElementIdentifier(prefix).offset(offset);
+        String prefix = getIndexQueryPrefix();
+        JanusGraphIndexQuery query = getGraph().indexQuery(indexName, graphQuery).setElementIdentifier(prefix).offset(offset);
 
-        if(indexQueryParameterList != null && indexQueryParameterList.size() > 0) {
-            for(AtlasIndexQueryParameter indexQueryParameter: indexQueryParameterList) {
+        if (indexQueryParameterList != null && indexQueryParameterList.size() > 0) {
+            for (AtlasIndexQueryParameter indexQueryParameter : indexQueryParameterList) {
                 query = query.addParameter(new Parameter(indexQueryParameter.getParameterName(), indexQueryParameter.getParameterValue()));
             }
         }
@@ -352,7 +356,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", e.getMessage());
         }
 
-        int statusCode = response.getStatusLine().getStatusCode();;
+        int statusCode = response.getStatusLine().getStatusCode();
+        ;
         if (statusCode != 200) {
             throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", "Status code " + statusCode);
         }
@@ -377,7 +382,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", e.getMessage());
         }
 
-        int statusCode = response.getStatusLine().getStatusCode();;
+        int statusCode = response.getStatusLine().getStatusCode();
+        ;
         if (statusCode != 200) {
             throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", "Status code " + statusCode);
         }
@@ -419,8 +425,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex(String vertexId) {
-        Iterator<Vertex> it     = getGraph().vertices(vertexId);
-        Vertex           vertex = getSingleElement(it, vertexId);
+        Iterator<Vertex> it = getGraph().vertices(vertexId);
+        Vertex vertex = getSingleElement(it, vertexId);
 
         return GraphDbObjectFactory.createVertex(this, vertex);
     }
@@ -428,8 +434,8 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     @Override
     public Set<AtlasVertex> getVertices(String... vertexIds) {
         Set<AtlasVertex> result = new HashSet<>();
-        Iterator<Vertex> it     = getGraph().vertices(vertexIds);
-        while( it.hasNext()) {
+        Iterator<Vertex> it = getGraph().vertices(vertexIds);
+        while (it.hasNext()) {
             Vertex vertex = it.next();
             if (vertex == null) {
                 LOG.warn("Vertex with id {} not found", vertexIds);
@@ -475,7 +481,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
     @Override
     public void exportToGson(OutputStream os) throws IOException {
-        GraphSONMapper         mapper  = getGraph().io(IoCore.graphson()).mapper().create();
+        GraphSONMapper mapper = getGraph().io(IoCore.graphson()).mapper().create();
         GraphSONWriter.Builder builder = GraphSONWriter.build();
 
         builder.mapper(mapper);
@@ -556,7 +562,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
 
         return Iterables.transform(it,
                 (Function<Vertex, AtlasVertex<AtlasJanusVertex, AtlasJanusEdge>>) input ->
-                    GraphDbObjectFactory.createVertex(AtlasJanusGraph.this, input));
+                        GraphDbObjectFactory.createVertex(AtlasJanusGraph.this, input));
 
     }
 
@@ -579,9 +585,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
 
-    String getIndexFieldName(AtlasPropertyKey propertyKey, JanusGraphIndex graphIndex, Parameter ... parameters) {
+    String getIndexFieldName(AtlasPropertyKey propertyKey, JanusGraphIndex graphIndex, Parameter... parameters) {
         PropertyKey janusKey = AtlasJanusObjectFactory.createPropertyKey(propertyKey);
-        if(parameters == null) {
+        if (parameters == null) {
             parameters = EMPTY_PARAMETER_ARRAY;
         }
         return janusGraph.getIndexSerializer().getDefaultFieldName(janusKey, parameters, graphIndex.getBackingIndex());
@@ -645,9 +651,9 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
     }
 
     private Set<String> getIndexKeys(Class<? extends Element> janusGraphElementClass) {
-        JanusGraphManagement      mgmt    = getGraph().openManagement();
+        JanusGraphManagement mgmt = getGraph().openManagement();
         Iterable<JanusGraphIndex> indices = mgmt.getGraphIndexes(janusGraphElementClass);
-        Set<String>               result  = new HashSet<String>();
+        Set<String> result = new HashSet<String>();
 
         for (JanusGraphIndex index : indices) {
             result.add(index.name());
@@ -696,6 +702,7 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             return convertGremlinValue(input);
         }
     }
+
     private Edge getFirstActiveEdge(GraphTraversal gt) {
         if (gt != null) {
             while (gt.hasNext()) {
