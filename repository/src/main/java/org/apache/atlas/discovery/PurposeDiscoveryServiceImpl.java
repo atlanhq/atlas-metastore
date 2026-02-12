@@ -34,7 +34,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
@@ -49,9 +49,13 @@ import java.util.*;
  *    including the accessControl relationship attribute
  * 2. Extract unique Purpose GUIDs and fetch Purpose details
  * </p>
+ * <p>
+ * This service is disabled by default and enabled via the
+ * atlas.purpose.discovery.enabled property (defaults to true in production).
+ * </p>
  */
 @Service
-@Lazy
+@ConditionalOnProperty(name = "atlas.purpose.discovery.enabled", havingValue = "true", matchIfMissing = true)
 public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryServiceImpl.class);
 
