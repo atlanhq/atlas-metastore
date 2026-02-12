@@ -55,9 +55,9 @@ import javax.ws.rs.core.MediaType;
  *
  * @see PurposeDiscoveryService
  */
-@Path("purposes")
-@Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
-@Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
+// @Path("purposes")  // Temporarily disabled to diagnose CI hang
+// @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
+// @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class PurposeDiscoveryREST {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryREST.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.PurposeDiscoveryREST");
