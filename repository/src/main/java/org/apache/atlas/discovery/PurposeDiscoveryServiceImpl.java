@@ -34,8 +34,9 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.stereotype.Service;
+// NOTE: @Service temporarily removed to debug test hang issue
+// import org.springframework.context.annotation.Lazy;
+// import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.util.*;
@@ -49,9 +50,13 @@ import java.util.*;
  *    including the accessControl relationship attribute
  * 2. Extract unique Purpose GUIDs and fetch Purpose details
  * </p>
+ * <p>
+ * NOTE: @Service annotation temporarily removed to debug test hang issue.
+ * This class will not be registered as a Spring bean until re-enabled.
+ * </p>
  */
-@Service
-@Lazy
+// @Service
+// @Lazy
 public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryServiceImpl.class);
 

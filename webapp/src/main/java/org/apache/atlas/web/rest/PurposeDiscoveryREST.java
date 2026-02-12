@@ -29,8 +29,9 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.stereotype.Service;
+// NOTE: @Service temporarily removed to debug test hang issue
+// import org.springframework.context.annotation.Lazy;
+// import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
@@ -46,13 +47,17 @@ import javax.ws.rs.core.MediaType;
  * has access to, based on their username and group memberships. It eliminates
  * the need for frontend aggregation of AuthPolicy entities.
  * </p>
+ * <p>
+ * NOTE: @Service and @Path annotations temporarily removed to debug test hang issue.
+ * This class will not be registered until re-enabled.
+ * </p>
  *
  * @see PurposeDiscoveryService
  */
-@Path("purposes")
-@Singleton
-@Service
-@Lazy
+// @Path("purposes")
+// @Singleton
+// @Service
+// @Lazy
 @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class PurposeDiscoveryREST {
