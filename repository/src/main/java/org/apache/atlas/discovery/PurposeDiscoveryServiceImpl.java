@@ -85,18 +85,23 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private final int maxPolicyFetchSize;
 
     @Inject
-    public PurposeDiscoveryServiceImpl(AtlasDiscoveryService discoveryService) throws AtlasBaseException {
+    public PurposeDiscoveryServiceImpl(AtlasDiscoveryService discoveryService) {
         this.discoveryService = discoveryService;
         this.mapper = new ObjectMapper();
 
+        int aggregationSize = DEFAULT_MAX_AGGREGATION_SIZE;
+        int policyFetchSize = DEFAULT_MAX_POLICY_FETCH_SIZE;
+
         try {
             Configuration config = ApplicationProperties.get();
-            this.maxAggregationSize = config.getInt(CONFIG_MAX_AGGREGATION_SIZE, DEFAULT_MAX_AGGREGATION_SIZE);
-            this.maxPolicyFetchSize = config.getInt(CONFIG_MAX_POLICY_FETCH_SIZE, DEFAULT_MAX_POLICY_FETCH_SIZE);
+            aggregationSize = config.getInt(CONFIG_MAX_AGGREGATION_SIZE, DEFAULT_MAX_AGGREGATION_SIZE);
+            policyFetchSize = config.getInt(CONFIG_MAX_POLICY_FETCH_SIZE, DEFAULT_MAX_POLICY_FETCH_SIZE);
         } catch (Exception e) {
-            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e,
-                    "Failed to load configuration for PurposeDiscoveryService");
+            LOG.warn("Failed to load configuration for PurposeDiscoveryService, using defaults", e);
         }
+
+        this.maxAggregationSize = aggregationSize;
+        this.maxPolicyFetchSize = policyFetchSize;
 
         LOG.info("PurposeDiscoveryServiceImpl initialized with maxAggregationSize={}, maxPolicyFetchSize={}",
                 maxAggregationSize, maxPolicyFetchSize);
