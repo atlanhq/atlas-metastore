@@ -88,13 +88,11 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
     public static final String KEY_END_BINDING = "keyEnd";
     public static final String LIMIT_BINDING = "maxRows";
     public static final String ENTRIES_COLUMN_NAME = "grouped_entries";
-    public static final String VERSION_COLUMN_NAME = "grouped_version";
-    public static final String ENTRIES_BINDING = "groupedEntries";
-    public static final String VERSION_BINDING = "version";
-    public static final String PREVIOUS_VERSION_BINDING = "previousVersion";
+    public static final String TIMESTAMP_COLUMN_NAME = "grouped_timestamp";
     private static final String APPLIED_COLUMN_NAME = "[applied]";
     private static final String GROUPED_TABLE_SUFFIX = "_grouped";
     private static final int MAX_GROUPED_MUTATION_RETRIES = 20;
+    private static final int SUPER_NODE_ATTRIBUTE_THRESHOLD = 1000;
 
     public static final Function<? super Throwable, BackendException> EXCEPTION_MAPPER = cause -> {
         cause = CompletableFutureUtil.unwrapExecutionException(cause);
@@ -142,10 +140,9 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
     private final PreparedStatement deleteColumn;
     private final PreparedStatement insertColumn;
     private final PreparedStatement insertColumnWithTTL;
-    private final PreparedStatement getLegacyAllColumnsByKey;
     private final PreparedStatement getGroupedEntriesByKey;
     private final PreparedStatement insertGroupedEntriesIfNotExists;
-    private final PreparedStatement updateGroupedEntriesIfVersionMatches;
+    private final PreparedStatement updateGroupedEntriesIfTimestampMatches;
 
     private final QueryBackPressure queryBackPressure;
     private final AsyncQueryExecutionService asyncQueryExecutionService;
@@ -242,34 +239,24 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
             this.insertColumnWithTTL = null;
         }
 
-        this.getLegacyAllColumnsByKey = this.session.prepare(selectFrom(this.storeManager.getKeyspaceName(), this.tableName)
-            .column(COLUMN_COLUMN_NAME)
-            .column(VALUE_COLUMN_NAME)
-            .whereColumn(KEY_COLUMN_NAME).isEqualTo(bindMarker(KEY_BINDING))
-            .build());
-
         if (groupedStore) {
             this.getGroupedEntriesByKey = this.session.prepare(selectFrom(this.storeManager.getKeyspaceName(), this.groupedTableName)
                 .column(ENTRIES_COLUMN_NAME)
-                .column(VERSION_COLUMN_NAME)
+                .column(TIMESTAMP_COLUMN_NAME)
                 .whereColumn(KEY_COLUMN_NAME).isEqualTo(bindMarker(KEY_BINDING))
                 .build());
-            this.insertGroupedEntriesIfNotExists = this.session.prepare(insertInto(this.storeManager.getKeyspaceName(), this.groupedTableName)
-                .value(KEY_COLUMN_NAME, bindMarker(KEY_BINDING))
-                .value(ENTRIES_COLUMN_NAME, bindMarker(ENTRIES_BINDING))
-                .value(VERSION_COLUMN_NAME, bindMarker(VERSION_BINDING))
-                .ifNotExists()
-                .build());
-            this.updateGroupedEntriesIfVersionMatches = this.session.prepare(update(this.storeManager.getKeyspaceName(), this.groupedTableName)
-                .setColumn(ENTRIES_COLUMN_NAME, bindMarker(ENTRIES_BINDING))
-                .setColumn(VERSION_COLUMN_NAME, bindMarker(VERSION_BINDING))
-                .whereColumn(KEY_COLUMN_NAME).isEqualTo(bindMarker(KEY_BINDING))
-                .ifColumn(VERSION_COLUMN_NAME).isEqualTo(bindMarker(PREVIOUS_VERSION_BINDING))
-                .build());
+            this.insertGroupedEntriesIfNotExists = this.session.prepare(String.format(
+                "INSERT INTO %s.%s (%s, %s, %s) VALUES (?, ?, now()) IF NOT EXISTS",
+                this.storeManager.getKeyspaceName(), this.groupedTableName, KEY_COLUMN_NAME, ENTRIES_COLUMN_NAME,
+                TIMESTAMP_COLUMN_NAME));
+            this.updateGroupedEntriesIfTimestampMatches = this.session.prepare(String.format(
+                "UPDATE %s.%s SET %s = ?, %s = now() WHERE %s = ? IF %s = ?",
+                this.storeManager.getKeyspaceName(), this.groupedTableName, ENTRIES_COLUMN_NAME,
+                TIMESTAMP_COLUMN_NAME, KEY_COLUMN_NAME, TIMESTAMP_COLUMN_NAME));
         } else {
             this.getGroupedEntriesByKey = null;
             this.insertGroupedEntriesIfNotExists = null;
-            this.updateGroupedEntriesIfVersionMatches = null;
+            this.updateGroupedEntriesIfTimestampMatches = null;
         }
 
         queryBackPressure = storeManager.getQueriesBackPressure();
@@ -360,7 +347,7 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
             .ifNotExists()
             .withPartitionKey(KEY_COLUMN_NAME, DataTypes.BLOB)
             .withColumn(ENTRIES_COLUMN_NAME, DataTypes.listOf(DataTypes.BLOB, true))
-            .withColumn(VERSION_COLUMN_NAME, DataTypes.BIGINT);
+            .withColumn(TIMESTAMP_COLUMN_NAME, DataTypes.TIMEUUID);
 
         createTable = compactionOptions(createTable, configuration);
         createTable = compressionOptions(createTable, configuration);
@@ -540,8 +527,12 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         }
         for (int attempt = 0; attempt < MAX_GROUPED_MUTATION_RETRIES; attempt++) {
             final GroupedState state = fetchGroupedState(key, txh);
-            final List<Entry> baseEntries = state.exists ? state.entries : fetchLegacyAllEntries(key, txh);
+            final List<Entry> baseEntries = state.entries;
             final List<Entry> mergedEntries = applyMutation(baseEntries, keyMutations);
+            if (baseEntries.size() > SUPER_NODE_ATTRIBUTE_THRESHOLD || mergedEntries.size() > SUPER_NODE_ATTRIBUTE_THRESHOLD) {
+                mutateLegacyTable(key, keyMutations, txh);
+                return;
+            }
             if (state.exists && areEntriesEquivalent(state.entries, mergedEntries)) {
                 return;
             }
@@ -549,25 +540,22 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
                 return;
             }
             final List<ByteBuffer> encodedEntries = encodeEntries(mergedEntries);
-            final long newVersion = state.version + 1L;
 
             final boolean applied;
             queryBackPressure.acquireBeforeQuery();
             try {
                 final Row row;
                 if (state.exists) {
-                    row = session.execute(updateGroupedEntriesIfVersionMatches.boundStatementBuilder()
-                        .setByteBuffer(KEY_BINDING, key.asByteBuffer())
-                        .setList(ENTRIES_BINDING, encodedEntries, ByteBuffer.class)
-                        .setLong(VERSION_BINDING, newVersion)
-                        .setLong(PREVIOUS_VERSION_BINDING, state.version)
+                    row = session.execute(updateGroupedEntriesIfTimestampMatches.boundStatementBuilder()
+                        .setList(0, encodedEntries, ByteBuffer.class)
+                        .setByteBuffer(1, key.asByteBuffer())
+                        .setUuid(2, state.timestamp)
                         .setConsistencyLevel(getTransaction(txh).getWriteConsistencyLevel())
                         .build()).one();
                 } else {
                     row = session.execute(insertGroupedEntriesIfNotExists.boundStatementBuilder()
-                        .setByteBuffer(KEY_BINDING, key.asByteBuffer())
-                        .setList(ENTRIES_BINDING, encodedEntries, ByteBuffer.class)
-                        .setLong(VERSION_BINDING, newVersion)
+                        .setByteBuffer(0, key.asByteBuffer())
+                        .setList(1, encodedEntries, ByteBuffer.class)
                         .setConsistencyLevel(getTransaction(txh).getWriteConsistencyLevel())
                         .build()).one();
                 }
@@ -652,48 +640,17 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
                 .setConsistencyLevel(getTransaction(txh).getReadConsistencyLevel())
                 .build()).one();
             if (row == null) {
-                return new GroupedState(false, Collections.emptyList(), 0L);
+                return new GroupedState(false, Collections.emptyList(), null);
             }
             final List<ByteBuffer> rawEntries = row.getList(ENTRIES_COLUMN_NAME, ByteBuffer.class);
             final List<Entry> entries = rawEntries == null ? Collections.emptyList() : decodeEntries(rawEntries);
-            final Long version = row.getLong(VERSION_COLUMN_NAME);
-            return new GroupedState(true, entries, version == null ? 0L : version);
+            final UUID timestamp = row.getUuid(TIMESTAMP_COLUMN_NAME);
+            return new GroupedState(true, entries, timestamp);
         } catch (Throwable t) {
             throw EXCEPTION_MAPPER.apply(t);
         } finally {
             queryBackPressure.releaseAfterQuery();
         }
-    }
-
-    private List<Entry> fetchLegacyAllEntries(final StaticBuffer key, final StoreTransaction txh) throws BackendException {
-        queryBackPressure.acquireBeforeQuery();
-        try {
-            ResultSet resultSet = session.execute(getLegacyAllColumnsByKey.boundStatementBuilder()
-                .setByteBuffer(KEY_BINDING, key.asByteBuffer())
-                .setConsistencyLevel(getTransaction(txh).getReadConsistencyLevel())
-                .build());
-            List<Entry> result = new ArrayList<>();
-            for (Row row : resultSet) {
-                result.add(new StaticArrayEntry(concatColumnValue(row), row.getByteBuffer(COLUMN_COLUMN_NAME).remaining()));
-            }
-            result.sort(Comparator.comparing(Entry::getColumn));
-            return result;
-        } catch (Throwable t) {
-            throw EXCEPTION_MAPPER.apply(t);
-        } finally {
-            queryBackPressure.releaseAfterQuery();
-        }
-    }
-
-    private static byte[] concatColumnValue(Row row) {
-        ByteBuffer column = row.getByteBuffer(COLUMN_COLUMN_NAME);
-        ByteBuffer value = row.getByteBuffer(VALUE_COLUMN_NAME);
-        ByteBuffer colDup = column.duplicate();
-        ByteBuffer valDup = value.duplicate();
-        byte[] data = new byte[colDup.remaining() + valDup.remaining()];
-        colDup.get(data, 0, colDup.remaining());
-        valDup.get(data, colDup.remaining(), valDup.remaining());
-        return data;
     }
 
     private static List<Entry> applyMutation(List<Entry> entries, KCVMutation mutation) {
@@ -782,15 +739,38 @@ public class CQLKeyColumnValueStore implements KeyColumnValueStore {
         return result.isEmpty() ? EntryList.EMPTY_LIST : result;
     }
 
+    private void mutateLegacyTable(final StaticBuffer key, final KCVMutation keyMutations, final StoreTransaction txh) throws BackendException {
+        final Long baseTimestamp = storeManager.isAssignTimestamp() ? (System.currentTimeMillis() * 1000L) : null;
+        final Long deletionTimestamp = baseTimestamp;
+        final Long additionTimestamp = baseTimestamp == null ? null : baseTimestamp + 1L;
+        for (StaticBuffer deletion : keyMutations.getDeletions()) {
+            executeLegacyWrite((BoundStatement) deleteColumn(key, deletion, deletionTimestamp), txh);
+        }
+        for (Entry addition : keyMutations.getAdditions()) {
+            executeLegacyWrite((BoundStatement) insertColumn(key, addition, additionTimestamp), txh);
+        }
+    }
+
+    private void executeLegacyWrite(final BoundStatement statement, final StoreTransaction txh) throws BackendException {
+        queryBackPressure.acquireBeforeQuery();
+        try {
+            session.execute(statement.setConsistencyLevel(getTransaction(txh).getWriteConsistencyLevel()));
+        } catch (Throwable t) {
+            throw EXCEPTION_MAPPER.apply(t);
+        } finally {
+            queryBackPressure.releaseAfterQuery();
+        }
+    }
+
     private static final class GroupedState {
         private final boolean exists;
         private final List<Entry> entries;
-        private final long version;
+        private final UUID timestamp;
 
-        private GroupedState(boolean exists, List<Entry> entries, long version) {
+        private GroupedState(boolean exists, List<Entry> entries, UUID timestamp) {
             this.exists = exists;
             this.entries = entries;
-            this.version = version;
+            this.timestamp = timestamp;
         }
     }
 
