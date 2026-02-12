@@ -34,6 +34,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
@@ -50,6 +51,7 @@ import java.util.*;
  * </p>
  */
 @Service
+@Lazy
 public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryServiceImpl.class);
 
