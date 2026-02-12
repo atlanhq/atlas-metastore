@@ -32,8 +32,6 @@ import org.apache.atlas.model.searchlog.SearchLogSearchResult;
 import org.apache.atlas.model.searchlog.SearchRequestLogData.SearchRequestLogDataBuilder;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.searchlog.SearchLoggingManagement;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -51,13 +49,9 @@ import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
-import java.time.Duration;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
-import java.util.concurrent.TimeoutException;
 
 import static org.apache.atlas.repository.Constants.*;
 import static org.apache.atlas.web.filters.AuditFilter.X_ATLAN_CLIENT_ORIGIN;
@@ -300,63 +294,6 @@ public class DiscoveryREST {
             AtlasPerfTracer.log(perf);
         }
     }
-
-    /**
-     * Execute index search asynchronously with timeout handling.
-     */
-    private AtlasSearchResult executeIndexSearchAsync(IndexSearchParams parameters) throws AtlasBaseException {
-        long timeoutMs = asyncExecutorService.getDefaultTimeoutMs();
-
-        // Capture RequestContext for propagation to async thread
-        RequestContext parentContext = RequestContext.get();
-        RequestContext asyncContext = parentContext.copyForAsync();
-
-        CompletableFuture<AtlasSearchResult> future = asyncExecutorService.supplyAsync(
-            () -> {
-                try {
-                    // Propagate RequestContext to async thread
-                    RequestContext.setCurrentContext(asyncContext);
-                    return discoveryService.directIndexSearch(parameters, true);
-                } catch (AtlasBaseException e) {
-                    throw new CompletionException(e);
-                } finally {
-                    // Clean up RequestContext in async thread
-                    RequestContext.clear();
-                }
-            },
-            "indexSearch"
-        );
-
-        // Apply timeout
-        future = asyncExecutorService.withTimeout(future, Duration.ofMillis(timeoutMs), "indexSearch");
-
-        try {
-            return future.join();
-        } catch (CompletionException ce) {
-            Throwable cause = ce.getCause();
-            if (cause instanceof TimeoutException) {
-                throw new AtlasBaseException(AtlasErrorCode.INDEX_SEARCH_FAILED_DUE_TO_TIMEOUT,
-                    String.valueOf(timeoutMs / 1000) + "s");
-            }
-            if (cause instanceof AtlasBaseException) {
-                throw (AtlasBaseException) cause;
-            }
-            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, cause.getMessage());
-        }
-    }
-
-    /**
-     * Check if async execution is enabled via feature flag.
-     */
-    private boolean isAsyncExecutionEnabled() {
-        try {
-            return FeatureFlagStore.evaluate(FeatureFlag.ENABLE_ASYNC_EXECUTION.getKey(), "true");
-        } catch (Exception e) {
-            LOG.debug("Failed to evaluate async execution feature flag, defaulting to false", e);
-            return false;
-        }
-    }
-
 
     /**
      * Raw ES search: returns direct ES response as-is

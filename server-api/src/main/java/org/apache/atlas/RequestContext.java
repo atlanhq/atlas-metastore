@@ -965,8 +965,13 @@ public class RequestContext {
      * Copy read-only properties from this context to be used for propagation to worker threads.
      * This creates a snapshot of flags and settings that should be consistent across async operations.
      *
-     * NOTE: This does NOT copy mutable state like caches, entity updates, etc.
-     * Each worker thread should have its own mutable state.
+     * <p>NOTE: This does NOT copy mutable state like caches, entity updates, etc.
+     * Each worker thread should have its own mutable state.</p>
+     *
+     * <p>NOTE: {@link AtlasPerfMetrics} is intentionally NOT deep-copied. The same metricsRegistry
+     * reference is shared so that the parent thread can record wall-clock time for the overall
+     * async operation. AtlasPerfMetrics is not thread-safe, so individual worker threads must
+     * NOT write to it concurrently — only the coordinating thread should record metrics.</p>
      *
      * @return A new RequestContext with copied read-only properties
      */
@@ -1010,6 +1015,7 @@ public class RequestContext {
         // Copy trace ID for logging correlation
         copy.traceId = this.traceId;
         copy.requestUri = this.requestUri;
+        // Shared reference — not thread-safe, only parent thread should record metrics (see Javadoc)
         copy.metricsRegistry = this.metricsRegistry;
 
         return copy;
@@ -1031,6 +1037,40 @@ public class RequestContext {
             synchronized (ACTIVE_REQUESTS) {
                 ACTIVE_REQUESTS.add(context);
             }
+        }
+    }
+
+    /**
+     * Execute work in an async thread with proper RequestContext lifecycle management.
+     * Sets the given context before work begins and clears it after completion.
+     *
+     * @param ctx  The RequestContext to propagate (typically from {@link #copyForAsync()})
+     * @param work The work to execute
+     * @param <T>  Return type
+     * @return The result of the work
+     */
+    public static <T> T withAsyncContext(RequestContext ctx, java.util.function.Supplier<T> work) {
+        try {
+            setCurrentContext(ctx);
+            return work.get();
+        } finally {
+            clear();
+        }
+    }
+
+    /**
+     * Execute work in an async thread with proper RequestContext lifecycle management.
+     * Sets the given context before work begins and clears it after completion.
+     *
+     * @param ctx  The RequestContext to propagate (typically from {@link #copyForAsync()})
+     * @param work The work to execute
+     */
+    public static void withAsyncContext(RequestContext ctx, Runnable work) {
+        try {
+            setCurrentContext(ctx);
+            work.run();
+        } finally {
+            clear();
         }
     }
 

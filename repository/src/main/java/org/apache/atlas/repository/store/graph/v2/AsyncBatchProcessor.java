@@ -19,6 +19,7 @@ package org.apache.atlas.repository.store.graph.v2;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
+import org.apache.atlas.async.AsyncExecutorService;
 import org.apache.atlas.service.FeatureFlag;
 import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -30,11 +31,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -49,20 +46,14 @@ public class AsyncBatchProcessor {
     private static final int DEFAULT_MIN_FOR_PARALLEL = 5;
     private static final long DEFAULT_TIMEOUT_MS = 30000;
 
-    private static final ExecutorService EXECUTOR;
+    private static volatile AsyncExecutorService sharedExecutorService;
 
-    static {
-        int poolSize = AtlasConfiguration.ASYNC_EXECUTOR_CORE_POOL_SIZE.getInt();
-        EXECUTOR = Executors.newFixedThreadPool(poolSize, new ThreadFactory() {
-            private final AtomicInteger counter = new AtomicInteger(1);
-
-            @Override
-            public Thread newThread(Runnable r) {
-                Thread t = new Thread(r, "atlas-batch-processor-" + counter.getAndIncrement());
-                t.setDaemon(true);
-                return t;
-            }
-        });
+    /**
+     * Initialize with the Spring-managed AsyncExecutorService.
+     * Should be called once during application startup.
+     */
+    public static void init(AsyncExecutorService executorService) {
+        sharedExecutorService = executorService;
     }
 
     /**
@@ -176,11 +167,18 @@ public class AsyncBatchProcessor {
     /**
      * Process items in parallel using CompletableFuture.
      * Propagates both MDC and RequestContext to worker threads.
+     * Falls back to sequential processing if the shared executor is not initialized.
      */
     private static <T, R> List<R> processParallel(
             List<T> items,
             Function<T, R> processor,
             String metricName) {
+
+        AsyncExecutorService executor = sharedExecutorService;
+        if (executor == null) {
+            LOG.warn("AsyncBatchProcessor: sharedExecutorService not initialized, falling back to sequential processing");
+            return processSequential(items, processor);
+        }
 
         // Capture contexts for propagation
         Map<String, String> mdcContext = MDC.getCopyOfContextMap();
@@ -189,7 +187,7 @@ public class AsyncBatchProcessor {
 
         // Create futures for all items
         List<CompletableFuture<R>> futures = items.stream()
-            .map(item -> CompletableFuture.supplyAsync(() -> {
+            .map(item -> executor.supplyAsync(() -> {
                 // Propagate MDC context
                 Map<String, String> previousMdc = MDC.getCopyOfContextMap();
                 try {
@@ -212,7 +210,7 @@ public class AsyncBatchProcessor {
                         MDC.clear();
                     }
                 }
-            }, EXECUTOR))
+            }, metricName))
             .collect(Collectors.toList());
 
         // Wait for all futures with timeout
