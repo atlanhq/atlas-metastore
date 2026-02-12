@@ -640,9 +640,6 @@ public class CachePolicyTransformerImpl {
         }
 
         List<Object> conditionsRaw = (List<Object>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
-        if (!CollectionUtils.isEmpty(conditionsRaw)) {
-            LOG.info("Policy conditions found for policy {}, count={}", atlasPolicy.getGuid(), conditionsRaw.size());
-        }
 
         for (Object conditionObj : conditionsRaw) {
             // Convert LinkedHashMap (from JSON deserialization) to AtlasStruct
