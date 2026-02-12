@@ -17,12 +17,13 @@
  */
 package org.apache.atlas.web.rest;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.annotation.Timed;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.service.config.ConfigKey;
-import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.config.dynamic.ConfigKey;
+import org.apache.atlas.config.dynamic.DynamicConfigCacheStore.ConfigEntry;
+import org.apache.atlas.config.dynamic.DynamicConfigStore;
 import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.apache.commons.lang3.StringUtils;
@@ -417,5 +418,81 @@ public class ConfigREST {
 
         public Date getTimestamp() { return timestamp; }
         public void setTimestamp(Date timestamp) { this.timestamp = timestamp; }
+    }
+
+    /**
+     * Response containing JanusGraph configuration details.
+     */
+    public static class JanusConfigResponse {
+        private JanusConfigDetail cqlKeyspace;
+        private JanusConfigDetail indexName;
+        private boolean dynamicConfigStoreEnabled;
+        private boolean dynamicConfigStoreActivated;
+        private String restartRequiredNote;
+        private Date timestamp;
+
+        public JanusConfigDetail getCqlKeyspace() { return cqlKeyspace; }
+        public void setCqlKeyspace(JanusConfigDetail cqlKeyspace) { this.cqlKeyspace = cqlKeyspace; }
+
+        public JanusConfigDetail getIndexName() { return indexName; }
+        public void setIndexName(JanusConfigDetail indexName) { this.indexName = indexName; }
+
+        public boolean isDynamicConfigStoreEnabled() { return dynamicConfigStoreEnabled; }
+        public void setDynamicConfigStoreEnabled(boolean dynamicConfigStoreEnabled) { this.dynamicConfigStoreEnabled = dynamicConfigStoreEnabled; }
+
+        public boolean isDynamicConfigStoreActivated() { return dynamicConfigStoreActivated; }
+        public void setDynamicConfigStoreActivated(boolean dynamicConfigStoreActivated) { this.dynamicConfigStoreActivated = dynamicConfigStoreActivated; }
+
+        public String getRestartRequiredNote() { return restartRequiredNote; }
+        public void setRestartRequiredNote(String restartRequiredNote) { this.restartRequiredNote = restartRequiredNote; }
+
+        public Date getTimestamp() { return timestamp; }
+        public void setTimestamp(Date timestamp) { this.timestamp = timestamp; }
+    }
+
+    /**
+     * Detail for a single JanusGraph config property showing values from all layers.
+     */
+    public static class JanusConfigDetail {
+        /** The dynamic config key (e.g. janus_cql_keyspace) */
+        private String configKey;
+        /** The ApplicationProperties key (e.g. atlas.graph.storage.cql.keyspace) */
+        private String applicationPropertiesKey;
+        /** The hardcoded default value */
+        private String defaultValue;
+        /** Value currently in ApplicationProperties (what JanusGraph is actually using) */
+        private String activeValue;
+        /** Value stored in the dynamic config store (Cassandra cache) */
+        private String dynamicConfigValue;
+        /** The effective value returned by the helper method (considering fallback chain) */
+        private String effectiveValue;
+        /** Who last updated the dynamic config value */
+        private String updatedBy;
+        /** When the dynamic config value was last updated */
+        private Date lastUpdated;
+
+        public String getConfigKey() { return configKey; }
+        public void setConfigKey(String configKey) { this.configKey = configKey; }
+
+        public String getApplicationPropertiesKey() { return applicationPropertiesKey; }
+        public void setApplicationPropertiesKey(String applicationPropertiesKey) { this.applicationPropertiesKey = applicationPropertiesKey; }
+
+        public String getDefaultValue() { return defaultValue; }
+        public void setDefaultValue(String defaultValue) { this.defaultValue = defaultValue; }
+
+        public String getActiveValue() { return activeValue; }
+        public void setActiveValue(String activeValue) { this.activeValue = activeValue; }
+
+        public String getDynamicConfigValue() { return dynamicConfigValue; }
+        public void setDynamicConfigValue(String dynamicConfigValue) { this.dynamicConfigValue = dynamicConfigValue; }
+
+        public String getEffectiveValue() { return effectiveValue; }
+        public void setEffectiveValue(String effectiveValue) { this.effectiveValue = effectiveValue; }
+
+        public String getUpdatedBy() { return updatedBy; }
+        public void setUpdatedBy(String updatedBy) { this.updatedBy = updatedBy; }
+
+        public Date getLastUpdated() { return lastUpdated; }
+        public void setLastUpdated(Date lastUpdated) { this.lastUpdated = lastUpdated; }
     }
 }

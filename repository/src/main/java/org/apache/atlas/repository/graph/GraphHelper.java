@@ -39,7 +39,7 @@ import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.config.dynamic.DynamicConfigStore;
 import org.apache.atlas.type.AtlasArrayType;
 import org.apache.atlas.type.AtlasMapType;
 import org.apache.atlas.util.BeanUtil;

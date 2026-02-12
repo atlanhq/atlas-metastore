@@ -1018,7 +1018,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                             clazz = Map.class; // Maps are Map<Object, Object>
                             break;
                         default:
-                            LOG.warn("Unhandled attribute type category {} for attribute {} of type {}. Retrieving as Object.class.",
+                            LOG.debug("Unhandled attribute type category {} for attribute {} of type {}. Retrieving as Object.class.",
                                     attrType.getTypeCategory(), attributeName, entityType.getTypeName());
                             clazz = Object.class; // Fallback for unhandled or complex types
                             break;
