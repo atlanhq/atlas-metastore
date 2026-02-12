@@ -162,7 +162,16 @@ public class AtlasEntityComparator {
             }
         }
 
-        if (context.isReplaceClassifications() || context.isReplaceTags() || context.isAppendTags()) {
+        // Determine if this entity has classification changes to process
+        // Process classifications if:
+        // 1. Query parameters are set (backward compatibility), OR
+        // 2. Entity has classification-related fields populated (new per-entity behavior)
+        boolean hasClassificationChanges = context.isReplaceClassifications() || context.isReplaceTags() || context.isAppendTags() ||
+                CollectionUtils.isNotEmpty(updatedEntity.getClassifications()) ||
+                CollectionUtils.isNotEmpty(updatedEntity.getAddOrUpdateClassifications()) ||
+                CollectionUtils.isNotEmpty(updatedEntity.getRemoveClassifications());
+
+        if (hasClassificationChanges) {
             List<AtlasClassification> newVal  = updatedEntity.getClassifications();
             List<AtlasClassification> currVal;
             if (storedEntity != null) {
@@ -189,15 +198,24 @@ public class AtlasEntityComparator {
 
                 Map<String, List<AtlasClassification>> diff;
 
-                if (context.isReplaceTags()) {
-                    diff = AtlasEntityUtils.getTagsDiffForReplace(updatedEntity.getGuid(),
-                            updatedEntity.getClassifications(),
-                            currVal);
-                } else {
+                // Determine per-entity whether to use replace or append mode
+                // Priority: 
+                // 1. If entity has addOrUpdateClassifications or removeClassifications -> use append mode
+                // 2. Else if global replaceTags flag is set -> use replace mode
+                // 3. Else use append mode (default for backward compatibility when appendTags is set)
+                boolean useAppendMode = CollectionUtils.isNotEmpty(updatedEntity.getAddOrUpdateClassifications()) ||
+                        CollectionUtils.isNotEmpty(updatedEntity.getRemoveClassifications()) ||
+                        (!context.isReplaceTags() && !CollectionUtils.isNotEmpty(newVal));
+
+                if (useAppendMode) {
                     diff = AtlasEntityUtils.getTagsDiffForAppend(updatedEntity.getGuid(),
                             updatedEntity.getAddOrUpdateClassifications(),
                             currVal,
                             updatedEntity.getRemoveClassifications());
+                } else {
+                    diff = AtlasEntityUtils.getTagsDiffForReplace(updatedEntity.getGuid(),
+                            updatedEntity.getClassifications(),
+                            currVal);
                 }
 
                 if (MapUtils.isNotEmpty(diff) && (diff.containsKey(PROCESS_DELETE) || diff.containsKey(PROCESS_UPDATE) || diff.containsKey(PROCESS_ADD))) {
