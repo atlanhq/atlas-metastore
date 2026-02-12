@@ -579,7 +579,22 @@ public class AtlasGraphUtilsV2 {
             List<Integer> indices = groupEntry.getValue();
 
             if (indices.size() == 1) {
-                // Single item, use existing method (no benefit from OR query)
+                // Single item — resolve individually (no benefit from OR query)
+                int idx = indices.get(0);
+                UniqueAttrLookupKey lookupKey = indexToLookupKey.get(idx);
+                AtlasEntityType entityType = typeRegistry.getEntityTypeByName(lookupKey.typeName);
+
+                if (entityType != null) {
+                    AtlasVertex vertex = findByUniqueAttributes(graph, entityType,
+                            objectIds.get(idx).getUniqueAttributes());
+                    if (vertex != null) {
+                        ret.put(idx, vertex);
+                        String guid = vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
+                        if (guid != null) {
+                            GraphTransactionInterceptor.addToVertexCache(guid, vertex);
+                        }
+                    }
+                }
                 continue;
             }
 
@@ -643,7 +658,8 @@ public class AtlasGraphUtilsV2 {
 
                     // Mark successfully processed indices
                     for (int idx : batchIndices) {
-                        if (ret.containsKey(idx) || lookupKeyToVertex.containsKey(indexToLookupKey.get(idx).lookupKeyString)) {
+                        UniqueAttrLookupKey lookupKey = indexToLookupKey.get(idx);
+                        if (lookupKey != null && (ret.containsKey(idx) || lookupKeyToVertex.containsKey(lookupKey.lookupKeyString))) {
                             indexToLookupKey.remove(idx); // Processed
                         }
                     }
@@ -651,7 +667,6 @@ public class AtlasGraphUtilsV2 {
                 } catch (Exception e) {
                     LOG.warn("findByUniqueAttributesBatch: OR query failed for group {} batch [{}-{}], will use fallback",
                             groupEntry.getKey(), batchStart, batchEnd, e);
-                    // Don't remove from indexToLookupKey - will be processed individually
                 }
             }
         }
