@@ -31,6 +31,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
@@ -48,8 +49,8 @@ import javax.ws.rs.core.MediaType;
  * the need for frontend aggregation of AuthPolicy entities.
  * </p>
  * <p>
- * Note: This REST class is Spring-managed via @Component, but it manually
- * instantiates PurposeDiscoveryServiceImpl to avoid initialization order issues.
+ * Note: Uses @Lazy on the AtlasDiscoveryService injection to defer its initialization
+ * until the service is actually used, avoiding Spring context startup issues.
  * </p>
  *
  * @see PurposeDiscoveryService
@@ -63,15 +64,27 @@ public class PurposeDiscoveryREST {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryREST.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.PurposeDiscoveryREST");
 
-    private final PurposeDiscoveryService purposeDiscoveryService;
+    private final AtlasDiscoveryService atlasDiscoveryService;
+    private volatile PurposeDiscoveryService purposeDiscoveryService;
 
     @Context
     private HttpServletRequest httpServletRequest;
 
     @Inject
-    public PurposeDiscoveryREST(AtlasDiscoveryService atlasDiscoveryService) {
-        // Manually instantiate to avoid Spring bean initialization order issues
-        this.purposeDiscoveryService = new PurposeDiscoveryServiceImpl(atlasDiscoveryService);
+    public PurposeDiscoveryREST(@Lazy AtlasDiscoveryService atlasDiscoveryService) {
+        // Store the lazy proxy - actual service will be created on first use
+        this.atlasDiscoveryService = atlasDiscoveryService;
+    }
+
+    private PurposeDiscoveryService getPurposeDiscoveryService() {
+        if (purposeDiscoveryService == null) {
+            synchronized (this) {
+                if (purposeDiscoveryService == null) {
+                    purposeDiscoveryService = new PurposeDiscoveryServiceImpl(atlasDiscoveryService);
+                }
+            }
+        }
+        return purposeDiscoveryService;
     }
 
     /**
@@ -133,7 +146,7 @@ public class PurposeDiscoveryREST {
                     request.getOffset());
 
             // Discover purposes
-            PurposeUserResponse response = purposeDiscoveryService.discoverPurposesForUser(request);
+            PurposeUserResponse response = getPurposeDiscoveryService().discoverPurposesForUser(request);
 
             LOG.info("getUserPurposes: username={}, found {} purposes (total: {})",
                     request.getUsername(),
