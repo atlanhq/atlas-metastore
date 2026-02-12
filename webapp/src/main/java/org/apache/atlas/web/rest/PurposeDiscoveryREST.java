@@ -31,11 +31,10 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.stereotype.Component;
+import org.springframework.context.ApplicationContext;
+import org.springframework.web.context.support.WebApplicationContextUtils;
 
-import javax.inject.Inject;
-import javax.inject.Singleton;
+import javax.servlet.ServletContext;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
 import javax.ws.rs.core.Context;
@@ -49,37 +48,35 @@ import javax.ws.rs.core.MediaType;
  * the need for frontend aggregation of AuthPolicy entities.
  * </p>
  * <p>
- * Note: Uses @Lazy on the AtlasDiscoveryService injection to defer its initialization
- * until the service is actually used, avoiding Spring context startup issues.
+ * Note: This class is NOT Spring-managed to avoid initialization order issues.
+ * It looks up AtlasDiscoveryService from Spring context on first use.
+ * Jersey discovers this class via @Path annotation.
  * </p>
  *
  * @see PurposeDiscoveryService
  */
 @Path("purposes")
-@Singleton
-@Component
 @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class PurposeDiscoveryREST {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryREST.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.PurposeDiscoveryREST");
 
-    private final AtlasDiscoveryService atlasDiscoveryService;
     private volatile PurposeDiscoveryService purposeDiscoveryService;
 
     @Context
     private HttpServletRequest httpServletRequest;
 
-    @Inject
-    public PurposeDiscoveryREST(@Lazy AtlasDiscoveryService atlasDiscoveryService) {
-        // Store the lazy proxy - actual service will be created on first use
-        this.atlasDiscoveryService = atlasDiscoveryService;
-    }
+    @Context
+    private ServletContext servletContext;
 
     private PurposeDiscoveryService getPurposeDiscoveryService() {
         if (purposeDiscoveryService == null) {
             synchronized (this) {
                 if (purposeDiscoveryService == null) {
+                    // Look up AtlasDiscoveryService from Spring context on first use
+                    ApplicationContext ctx = WebApplicationContextUtils.getWebApplicationContext(servletContext);
+                    AtlasDiscoveryService atlasDiscoveryService = ctx.getBean(AtlasDiscoveryService.class);
                     purposeDiscoveryService = new PurposeDiscoveryServiceImpl(atlasDiscoveryService);
                 }
             }
