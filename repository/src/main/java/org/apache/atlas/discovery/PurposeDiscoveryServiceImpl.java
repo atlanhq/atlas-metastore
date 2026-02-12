@@ -34,9 +34,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 
-import javax.inject.Inject;
 import java.util.*;
 
 /**
@@ -49,12 +47,10 @@ import java.util.*;
  * 2. Extract unique Purpose GUIDs and fetch Purpose details
  * </p>
  * <p>
- * Note: Using @Component instead of @Service to avoid early initialization issues
- * during Spring context startup. The bean is still managed by Spring but with
- * lower priority in the initialization order.
+ * Note: This class is NOT a Spring-managed bean to avoid initialization order
+ * issues during context startup. It is instantiated manually by PurposeDiscoveryREST.
  * </p>
  */
-@Component
 public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryServiceImpl.class);
 
@@ -90,7 +86,6 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private volatile Integer maxAggregationSize;
     private volatile Integer maxPolicyFetchSize;
 
-    @Inject
     public PurposeDiscoveryServiceImpl(AtlasDiscoveryService discoveryService) {
         this.discoveryService = discoveryService;
         this.mapper = new ObjectMapper();

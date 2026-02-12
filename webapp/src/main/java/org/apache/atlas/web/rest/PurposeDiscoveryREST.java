@@ -20,7 +20,9 @@ package org.apache.atlas.web.rest;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
+import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.discovery.PurposeDiscoveryService;
+import org.apache.atlas.discovery.PurposeDiscoveryServiceImpl;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.PurposeUserRequest;
 import org.apache.atlas.model.discovery.PurposeUserResponse;
@@ -46,8 +48,8 @@ import javax.ws.rs.core.MediaType;
  * the need for frontend aggregation of AuthPolicy entities.
  * </p>
  * <p>
- * Note: Using @Component instead of @Service to avoid early initialization issues
- * during Spring context startup. Jersey discovers this class via @Path annotation.
+ * Note: This REST class is Spring-managed via @Component, but it manually
+ * instantiates PurposeDiscoveryServiceImpl to avoid initialization order issues.
  * </p>
  *
  * @see PurposeDiscoveryService
@@ -67,8 +69,9 @@ public class PurposeDiscoveryREST {
     private HttpServletRequest httpServletRequest;
 
     @Inject
-    public PurposeDiscoveryREST(PurposeDiscoveryService purposeDiscoveryService) {
-        this.purposeDiscoveryService = purposeDiscoveryService;
+    public PurposeDiscoveryREST(AtlasDiscoveryService atlasDiscoveryService) {
+        // Manually instantiate to avoid Spring bean initialization order issues
+        this.purposeDiscoveryService = new PurposeDiscoveryServiceImpl(atlasDiscoveryService);
     }
 
     /**
