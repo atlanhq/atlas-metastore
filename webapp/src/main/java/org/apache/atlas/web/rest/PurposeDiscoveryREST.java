@@ -29,6 +29,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
@@ -51,6 +52,7 @@ import javax.ws.rs.core.MediaType;
 @Path("purposes")
 @Singleton
 @Service
+@Lazy
 @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class PurposeDiscoveryREST {
