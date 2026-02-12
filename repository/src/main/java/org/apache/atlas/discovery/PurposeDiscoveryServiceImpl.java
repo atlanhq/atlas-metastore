@@ -34,8 +34,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Lazy;
-import org.springframework.stereotype.Service;
+import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 import java.util.*;
@@ -49,9 +48,13 @@ import java.util.*;
  *    including the accessControl relationship attribute
  * 2. Extract unique Purpose GUIDs and fetch Purpose details
  * </p>
+ * <p>
+ * Note: Using @Component instead of @Service to avoid early initialization issues
+ * during Spring context startup. The bean is still managed by Spring but with
+ * lower priority in the initialization order.
+ * </p>
  */
-@Service
-@Lazy
+@Component
 public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryServiceImpl.class);
 
