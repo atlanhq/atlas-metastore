@@ -29,7 +29,6 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
@@ -52,7 +51,6 @@ import javax.ws.rs.core.MediaType;
 @Path("purposes")
 @Singleton
 @Service
-@ConditionalOnProperty(name = "atlas.purpose.discovery.enabled", havingValue = "true", matchIfMissing = true)
 @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class PurposeDiscoveryREST {

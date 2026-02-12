@@ -34,7 +34,6 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
@@ -49,13 +48,8 @@ import java.util.*;
  *    including the accessControl relationship attribute
  * 2. Extract unique Purpose GUIDs and fetch Purpose details
  * </p>
- * <p>
- * This service is disabled by default and enabled via the
- * atlas.purpose.discovery.enabled property (defaults to true in production).
- * </p>
  */
 @Service
-@ConditionalOnProperty(name = "atlas.purpose.discovery.enabled", havingValue = "true", matchIfMissing = true)
 public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(PurposeDiscoveryServiceImpl.class);
 
@@ -86,30 +80,54 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
 
     private final AtlasDiscoveryService discoveryService;
     private final ObjectMapper mapper;
-    private final int maxAggregationSize;
-    private final int maxPolicyFetchSize;
+
+    // Lazy-initialized configuration values
+    private volatile Integer maxAggregationSize;
+    private volatile Integer maxPolicyFetchSize;
 
     @Inject
     public PurposeDiscoveryServiceImpl(AtlasDiscoveryService discoveryService) {
         this.discoveryService = discoveryService;
         this.mapper = new ObjectMapper();
+        // Configuration is loaded lazily on first use to avoid blocking during Spring context init
+    }
 
-        int aggregationSize = DEFAULT_MAX_AGGREGATION_SIZE;
-        int policyFetchSize = DEFAULT_MAX_POLICY_FETCH_SIZE;
+    /**
+     * Lazily loads configuration values on first use.
+     */
+    private void ensureConfigLoaded() {
+        if (maxAggregationSize == null) {
+            synchronized (this) {
+                if (maxAggregationSize == null) {
+                    int aggregationSize = DEFAULT_MAX_AGGREGATION_SIZE;
+                    int policyFetchSize = DEFAULT_MAX_POLICY_FETCH_SIZE;
 
-        try {
-            Configuration config = ApplicationProperties.get();
-            aggregationSize = config.getInt(CONFIG_MAX_AGGREGATION_SIZE, DEFAULT_MAX_AGGREGATION_SIZE);
-            policyFetchSize = config.getInt(CONFIG_MAX_POLICY_FETCH_SIZE, DEFAULT_MAX_POLICY_FETCH_SIZE);
-        } catch (Exception e) {
-            LOG.warn("Failed to load configuration for PurposeDiscoveryService, using defaults", e);
+                    try {
+                        Configuration config = ApplicationProperties.get();
+                        aggregationSize = config.getInt(CONFIG_MAX_AGGREGATION_SIZE, DEFAULT_MAX_AGGREGATION_SIZE);
+                        policyFetchSize = config.getInt(CONFIG_MAX_POLICY_FETCH_SIZE, DEFAULT_MAX_POLICY_FETCH_SIZE);
+                    } catch (Exception e) {
+                        LOG.warn("Failed to load configuration for PurposeDiscoveryService, using defaults", e);
+                    }
+
+                    this.maxPolicyFetchSize = policyFetchSize;
+                    this.maxAggregationSize = aggregationSize;
+
+                    LOG.info("PurposeDiscoveryServiceImpl config loaded: maxAggregationSize={}, maxPolicyFetchSize={}",
+                            maxAggregationSize, maxPolicyFetchSize);
+                }
+            }
         }
+    }
 
-        this.maxAggregationSize = aggregationSize;
-        this.maxPolicyFetchSize = policyFetchSize;
+    private int getMaxAggregationSize() {
+        ensureConfigLoaded();
+        return maxAggregationSize;
+    }
 
-        LOG.info("PurposeDiscoveryServiceImpl initialized with maxAggregationSize={}, maxPolicyFetchSize={}",
-                maxAggregationSize, maxPolicyFetchSize);
+    private int getMaxPolicyFetchSize() {
+        ensureConfigLoaded();
+        return maxPolicyFetchSize;
     }
 
     @Override
@@ -186,10 +204,10 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             LOG.info("Found {} AuthPolicies for user: {}", resultCount, request.getUsername());
 
             // Warn if we hit the fetch limit - results may be incomplete
-            if (resultCount >= maxPolicyFetchSize) {
+            if (resultCount >= getMaxPolicyFetchSize()) {
                 LOG.warn("AuthPolicy fetch hit limit of {} for user: {}. Results may be incomplete. " +
                         "Consider increasing 'atlas.discovery.purpose.max-policy-fetch-size' configuration.",
-                        maxPolicyFetchSize, request.getUsername());
+                        getMaxPolicyFetchSize(), request.getUsername());
             }
 
             // Extract unique Purpose GUIDs from accessControl relationship
@@ -245,7 +263,7 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
                 Collections.singletonMap("must", filterClauses)));
 
         Map<String, Object> dsl = new LinkedHashMap<>();
-        dsl.put("size", maxPolicyFetchSize);
+        dsl.put("size", getMaxPolicyFetchSize());
         dsl.put("query", Collections.singletonMap("bool", boolQuery));
 
         if (LOG.isDebugEnabled()) {
