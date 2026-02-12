@@ -38,7 +38,6 @@ import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Implementation of PurposeDiscoveryService that uses ES queries to efficiently
@@ -151,6 +150,7 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
      */
     private Set<String> getUniquePurposeGuids(PurposeUserRequest request) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getUniquePurposeGuids");
+        boolean wasInvokedByIndexSearch = RequestContext.get().isInvokedByIndexSearch();
 
         try {
             // Build the DSL query for AuthPolicies
@@ -166,45 +166,38 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setSuppressLogs(true);
 
             // Set index search context flag (required for relationship attribute processing)
-            // Save previous state to restore later
-            boolean wasInvokedByIndexSearch = RequestContext.get().isInvokedByIndexSearch();
             RequestContext.get().setIsInvokedByIndexSearch(true);
 
-            try {
-                // Execute the query with bulk fetching enabled to populate relationship attributes
-                AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
+            // Execute the query with bulk fetching enabled to populate relationship attributes
+            AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
-                if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
-                    LOG.info("No AuthPolicies found for user: {}, groups: {}", request.getUsername(), request.getGroups());
-                    return Collections.emptySet();
-                }
-
-                int resultCount = searchResult.getEntities().size();
-                LOG.info("Found {} AuthPolicies for user: {}", resultCount, request.getUsername());
-
-                // Warn if we hit the fetch limit - results may be incomplete
-                if (resultCount >= maxPolicyFetchSize) {
-                    LOG.warn("AuthPolicy fetch hit limit of {} for user: {}. Results may be incomplete. " +
-                            "Consider increasing 'atlas.discovery.purpose.max-policy-fetch-size' configuration.",
-                            maxPolicyFetchSize, request.getUsername());
-                }
-
-                // Extract unique Purpose GUIDs from accessControl relationship
-                Set<String> purposeGuids = new LinkedHashSet<>();
-                for (AtlasEntityHeader policy : searchResult.getEntities()) {
-                    String purposeGuid = extractPurposeGuid(policy);
-                    if (purposeGuid != null) {
-                        purposeGuids.add(purposeGuid);
-                    }
-                }
-
-                return purposeGuids;
-            } finally {
-                // Restore previous RequestContext state
-                RequestContext.get().setIsInvokedByIndexSearch(wasInvokedByIndexSearch);
+            if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
+                LOG.info("No AuthPolicies found for user: {}, groups: {}", request.getUsername(), request.getGroups());
+                return Collections.emptySet();
             }
 
+            int resultCount = searchResult.getEntities().size();
+            LOG.info("Found {} AuthPolicies for user: {}", resultCount, request.getUsername());
+
+            // Warn if we hit the fetch limit - results may be incomplete
+            if (resultCount >= maxPolicyFetchSize) {
+                LOG.warn("AuthPolicy fetch hit limit of {} for user: {}. Results may be incomplete. " +
+                        "Consider increasing 'atlas.discovery.purpose.max-policy-fetch-size' configuration.",
+                        maxPolicyFetchSize, request.getUsername());
+            }
+
+            // Extract unique Purpose GUIDs from accessControl relationship
+            Set<String> purposeGuids = new LinkedHashSet<>();
+            for (AtlasEntityHeader policy : searchResult.getEntities()) {
+                String purposeGuid = extractPurposeGuid(policy);
+                if (purposeGuid != null) {
+                    purposeGuids.add(purposeGuid);
+                }
+            }
+
+            return purposeGuids;
         } finally {
+            RequestContext.get().setIsInvokedByIndexSearch(wasInvokedByIndexSearch);
             RequestContext.get().endMetricRecord(metric);
         }
     }
@@ -310,6 +303,7 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     private List<AtlasEntityHeader> fetchPurposeDetails(List<String> guids, Set<String> attributes)
             throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("fetchPurposeDetails");
+        boolean wasInvokedByIndexSearch = RequestContext.get().isInvokedByIndexSearch();
 
         try {
             // Build the DSL query for Purposes
@@ -327,33 +321,34 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setSuppressLogs(true);
 
             // Set index search context flag (required for proper attribute processing)
-            // Save previous state to restore later
-            boolean wasInvokedByIndexSearch = RequestContext.get().isInvokedByIndexSearch();
             RequestContext.get().setIsInvokedByIndexSearch(true);
 
-            try {
-                // Execute the query with bulk fetching enabled
-                AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
+            // Execute the query with bulk fetching enabled
+            AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
-                if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
-                    LOG.warn("No Purpose entities found for GUIDs: {}", guids);
-                    return Collections.emptyList();
-                }
-
-                // Maintain the order of GUIDs
-                Map<String, AtlasEntityHeader> purposeMap = searchResult.getEntities().stream()
-                        .collect(Collectors.toMap(AtlasEntityHeader::getGuid, p -> p, (a, b) -> a));
-
-                return guids.stream()
-                        .map(purposeMap::get)
-                        .filter(Objects::nonNull)
-                        .collect(Collectors.toList());
-            } finally {
-                // Restore previous RequestContext state
-                RequestContext.get().setIsInvokedByIndexSearch(wasInvokedByIndexSearch);
+            if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
+                LOG.warn("No Purpose entities found for GUIDs: {}", guids);
+                return Collections.emptyList();
             }
 
+            // Build map for ordered lookup
+            Map<String, AtlasEntityHeader> purposeMap = new HashMap<>();
+            for (AtlasEntityHeader entity : searchResult.getEntities()) {
+                purposeMap.put(entity.getGuid(), entity);
+            }
+
+            // Maintain the order of input GUIDs
+            List<AtlasEntityHeader> purposes = new ArrayList<>(guids.size());
+            for (String guid : guids) {
+                AtlasEntityHeader purpose = purposeMap.get(guid);
+                if (purpose != null) {
+                    purposes.add(purpose);
+                }
+            }
+
+            return purposes;
         } finally {
+            RequestContext.get().setIsInvokedByIndexSearch(wasInvokedByIndexSearch);
             RequestContext.get().endMetricRecord(metric);
         }
     }
