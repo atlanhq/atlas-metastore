@@ -99,6 +99,7 @@ atlas:
     enable_request_isolation: false
     enable_janus_optimization_for_relationship: true
     enable_janus_optimization_extended: true
+    enable_janus_optimization_for_classifications: true
   jg:
     super:
       vertex:
