@@ -22,7 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.SortOrder;
 import org.apache.atlas.annotation.Timed;
-import org.apache.atlas.async.AsyncExecutorService;
+
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -76,22 +76,19 @@ public class DiscoveryREST {
     private final AtlasTypeRegistry     typeRegistry;
     private final AtlasDiscoveryService discoveryService;
     private final SearchLoggingManagement loggerManagement;
-    private final AsyncExecutorService asyncExecutorService;
 
     private static final String INDEXSEARCH_TAG_NAME = "indexsearch";
     private static final Set<String> TRACKING_UTM_TAGS = new HashSet<>(Arrays.asList("ui_main_list", "ui_popup_searchbar"));
     private static final String UTM_TAG_FROM_PRODUCT = "project_webapp";
     @Inject
     public DiscoveryREST(AtlasTypeRegistry typeRegistry, AtlasDiscoveryService discoveryService,
-                         SearchLoggingManagement loggerManagement, Configuration configuration,
-                         AsyncExecutorService asyncExecutorService) {
+                         SearchLoggingManagement loggerManagement, Configuration configuration) {
         this.typeRegistry           = typeRegistry;
         this.discoveryService       = discoveryService;
         this.loggerManagement       = loggerManagement;
         this.maxFullTextQueryLength = configuration.getInt(Constants.MAX_FULLTEXT_QUERY_STR_LENGTH, 4096);
         this.maxDslQueryLength      = configuration.getInt(Constants.MAX_DSL_QUERY_STR_LENGTH, 4096);
         this.enableSearchLogging    = AtlasConfiguration.ENABLE_SEARCH_LOGGER.getBoolean();
-        this.asyncExecutorService   = asyncExecutorService;
     }
 
     /**

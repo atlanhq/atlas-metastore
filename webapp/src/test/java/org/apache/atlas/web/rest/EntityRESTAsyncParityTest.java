@@ -29,8 +29,7 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.graph.v2.repair.AtlasRepairAttributeService;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.RepairIndex;
 import org.apache.commons.configuration.Configuration;
@@ -53,7 +52,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Parity tests verifying that sync and async execution paths in EntityREST.getByGuids()
- * produce identical results. The async path is gated by the ENABLE_ASYNC_EXECUTION feature flag.
+ * produce identical results. The async path is gated by DynamicConfigStore.isAsyncExecutionEnabled().
  */
 class EntityRESTAsyncParityTest {
 
@@ -61,7 +60,7 @@ class EntityRESTAsyncParityTest {
     private AsyncExecutorService asyncExecutorService;
 
     private EntityREST entityREST;
-    private MockedStatic<FeatureFlagStore> featureFlagMock;
+    private MockedStatic<DynamicConfigStore> configStoreMock;
     private MockedStatic<ApplicationProperties> appPropsMock;
 
     @BeforeEach
@@ -99,13 +98,13 @@ class EntityRESTAsyncParityTest {
         when(asyncExecutorService.withTimeout(any(CompletableFuture.class), any(Duration.class), anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        featureFlagMock = mockStatic(FeatureFlagStore.class);
+        configStoreMock = mockStatic(DynamicConfigStore.class);
     }
 
     @AfterEach
     void tearDown() {
-        if (featureFlagMock != null) {
-            featureFlagMock.close();
+        if (configStoreMock != null) {
+            configStoreMock.close();
         }
         if (appPropsMock != null) {
             appPropsMock.close();
@@ -248,8 +247,7 @@ class EntityRESTAsyncParityTest {
     // --- Helpers ---
 
     private void setAsyncFlag(boolean enabled) {
-        featureFlagMock.when(() -> FeatureFlagStore.evaluate(
-                eq(FeatureFlag.ENABLE_ASYNC_EXECUTION.getKey()), eq("true")))
+        configStoreMock.when(DynamicConfigStore::isAsyncExecutionEnabled)
                 .thenReturn(enabled);
     }
 

@@ -451,6 +451,21 @@ public class DynamicConfigStore implements ApplicationContextAware {
         return false;
     }
 
+    /**
+     * Check if async execution is enabled for parallel API operations
+     * (e.g., getByGuids fan-out, lineage BOTH direction split).
+     * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
+     *
+     * @return true if async execution is enabled, false otherwise
+     */
+    public static boolean isAsyncExecutionEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.ENABLE_ASYNC_EXECUTION.getKey());
+        }
+        // Fall back to FeatureFlagStore (Redis)
+        return FeatureFlagStore.evaluate(ConfigKey.ENABLE_ASYNC_EXECUTION.getKey(), "true");
+    }
+
     // ================== Internal Methods ==================
 
     String getConfigInternal(String key) {

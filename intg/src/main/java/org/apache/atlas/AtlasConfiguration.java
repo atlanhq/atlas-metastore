@@ -200,9 +200,6 @@ public enum AtlasConfiguration {
     ASYNC_EXECUTOR_KEEP_ALIVE_SECONDS("atlas.async.executor.keep.alive.seconds", 60),
     ASYNC_EXECUTOR_DEFAULT_TIMEOUT_MS("atlas.async.executor.default.timeout.ms", 30000),
 
-    // Async batching configuration for entity retrieval
-    ASYNC_ENTITY_BATCH_SIZE("atlas.async.entity.batch.size", 50),
-    ASYNC_HEADER_BATCH_SIZE("atlas.async.header.batch.size", 100),
     ASYNC_MIN_ENTITIES_FOR_PARALLEL("atlas.async.min.entities.for.parallel", 5);
 
     private static final Configuration APPLICATION_PROPERTIES;

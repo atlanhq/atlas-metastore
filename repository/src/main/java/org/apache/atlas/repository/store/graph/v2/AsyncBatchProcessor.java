@@ -20,8 +20,7 @@ package org.apache.atlas.repository.store.graph.v2;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.async.AsyncExecutorService;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,10 +41,6 @@ import java.util.stream.Collectors;
 public class AsyncBatchProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(AsyncBatchProcessor.class);
 
-    private static final int DEFAULT_BATCH_SIZE = 50;
-    private static final int DEFAULT_MIN_FOR_PARALLEL = 5;
-    private static final long DEFAULT_TIMEOUT_MS = 30000;
-
     private static volatile AsyncExecutorService sharedExecutorService;
 
     /**
@@ -57,13 +52,13 @@ public class AsyncBatchProcessor {
     }
 
     /**
-     * Check if async execution is enabled.
+     * Check if async execution is enabled via dynamic config store.
      */
     public static boolean isAsyncEnabled() {
         try {
-            return FeatureFlagStore.evaluate(FeatureFlag.ENABLE_ASYNC_EXECUTION.getKey(), "true");
+            return DynamicConfigStore.isAsyncExecutionEnabled();
         } catch (Exception e) {
-            LOG.debug("Failed to evaluate async feature flag, defaulting to false", e);
+            LOG.debug("Failed to evaluate async execution flag, defaulting to false", e);
             return false;
         }
     }
@@ -97,51 +92,6 @@ public class AsyncBatchProcessor {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord(metricName + ".parallel");
         try {
             return processParallel(items, processor, metricName);
-        } finally {
-            RequestContext.get().endMetricRecord(metric);
-        }
-    }
-
-    /**
-     * Process items in batches with parallel execution within each batch.
-     *
-     * @param items       List of items to process
-     * @param processor   Function to process each item
-     * @param batchSize   Size of each batch
-     * @param metricName  Name for performance metrics
-     * @param <T>         Input type
-     * @param <R>         Result type
-     * @return List of results in the same order as input
-     */
-    public static <T, R> List<R> processBatchesParallel(
-            List<T> items,
-            Function<T, R> processor,
-            int batchSize,
-            String metricName) {
-
-        if (items == null || items.isEmpty()) {
-            return new ArrayList<>();
-        }
-
-        if (!isAsyncEnabled()) {
-            return processSequential(items, processor);
-        }
-
-        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord(metricName + ".batched");
-        try {
-            List<R> results = new ArrayList<>(items.size());
-
-            // Process in batches
-            for (int i = 0; i < items.size(); i += batchSize) {
-                int end = Math.min(i + batchSize, items.size());
-                List<T> batch = items.subList(i, end);
-
-                // Process batch in parallel
-                List<R> batchResults = processParallel(batch, processor, metricName + ".batch");
-                results.addAll(batchResults);
-            }
-
-            return results;
         } finally {
             RequestContext.get().endMetricRecord(metric);
         }
@@ -237,41 +187,5 @@ public class AsyncBatchProcessor {
         }
 
         return results;
-    }
-
-    /**
-     * Partition a list into batches of specified size.
-     *
-     * @param list      List to partition
-     * @param batchSize Size of each batch
-     * @param <T>       Element type
-     * @return List of batches
-     */
-    public static <T> List<List<T>> partition(List<T> list, int batchSize) {
-        List<List<T>> batches = new ArrayList<>();
-        if (list == null || list.isEmpty()) {
-            return batches;
-        }
-
-        for (int i = 0; i < list.size(); i += batchSize) {
-            int end = Math.min(i + batchSize, list.size());
-            batches.add(new ArrayList<>(list.subList(i, end)));
-        }
-
-        return batches;
-    }
-
-    /**
-     * Get the configured batch size for entity processing.
-     */
-    public static int getEntityBatchSize() {
-        return AtlasConfiguration.ASYNC_ENTITY_BATCH_SIZE.getInt();
-    }
-
-    /**
-     * Get the configured batch size for header processing.
-     */
-    public static int getHeaderBatchSize() {
-        return AtlasConfiguration.ASYNC_HEADER_BATCH_SIZE.getInt();
     }
 }

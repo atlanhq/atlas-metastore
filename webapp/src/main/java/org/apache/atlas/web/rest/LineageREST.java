@@ -31,8 +31,7 @@ import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.lineage.*;
 import org.apache.atlas.model.lineage.AtlasLineageInfo.LineageDirection;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfTracer;
@@ -361,13 +360,13 @@ public class LineageREST {
     }
 
     /**
-     * Check if async execution is enabled via feature flag.
+     * Check if async execution is enabled via dynamic config store.
      */
     private boolean isAsyncExecutionEnabled() {
         try {
-            return FeatureFlagStore.evaluate(FeatureFlag.ENABLE_ASYNC_EXECUTION.getKey(), "true");
+            return DynamicConfigStore.isAsyncExecutionEnabled();
         } catch (Exception e) {
-            LOG.debug("Failed to evaluate async execution feature flag, defaulting to false", e);
+            LOG.debug("Failed to evaluate async execution flag, defaulting to false", e);
             return false;
         }
     }

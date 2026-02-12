@@ -1040,38 +1040,4 @@ public class RequestContext {
         }
     }
 
-    /**
-     * Execute work in an async thread with proper RequestContext lifecycle management.
-     * Sets the given context before work begins and clears it after completion.
-     *
-     * @param ctx  The RequestContext to propagate (typically from {@link #copyForAsync()})
-     * @param work The work to execute
-     * @param <T>  Return type
-     * @return The result of the work
-     */
-    public static <T> T withAsyncContext(RequestContext ctx, java.util.function.Supplier<T> work) {
-        try {
-            setCurrentContext(ctx);
-            return work.get();
-        } finally {
-            clear();
-        }
-    }
-
-    /**
-     * Execute work in an async thread with proper RequestContext lifecycle management.
-     * Sets the given context before work begins and clears it after completion.
-     *
-     * @param ctx  The RequestContext to propagate (typically from {@link #copyForAsync()})
-     * @param work The work to execute
-     */
-    public static void withAsyncContext(RequestContext ctx, Runnable work) {
-        try {
-            setCurrentContext(ctx);
-            work.run();
-        } finally {
-            clear();
-        }
-    }
-
 }

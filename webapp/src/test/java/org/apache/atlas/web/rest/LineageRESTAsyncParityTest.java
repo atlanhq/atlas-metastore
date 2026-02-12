@@ -25,8 +25,7 @@ import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.lineage.AtlasLineageInfo;
 import org.apache.atlas.model.lineage.AtlasLineageInfo.LineageDirection;
 import org.apache.atlas.model.lineage.AtlasLineageInfo.LineageRelation;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.web.rest.validator.LineageListRequestValidator;
 import org.apache.commons.configuration.Configuration;
@@ -47,7 +46,7 @@ import static org.mockito.Mockito.*;
 
 /**
  * Parity tests verifying that sync and async execution paths in LineageREST.getLineageGraph()
- * produce identical results when direction is BOTH. The async path is gated by ENABLE_ASYNC_EXECUTION.
+ * produce identical results when direction is BOTH. The async path is gated by DynamicConfigStore.isAsyncExecutionEnabled().
  */
 class LineageRESTAsyncParityTest {
 
@@ -55,7 +54,7 @@ class LineageRESTAsyncParityTest {
     private AsyncExecutorService asyncExecutorService;
 
     private LineageREST lineageREST;
-    private MockedStatic<FeatureFlagStore> featureFlagMock;
+    private MockedStatic<DynamicConfigStore> configStoreMock;
     private MockedStatic<ApplicationProperties> appPropsMock;
 
     private static final String BASE_GUID = "base-entity-guid";
@@ -89,13 +88,13 @@ class LineageRESTAsyncParityTest {
         when(asyncExecutorService.withTimeout(any(CompletableFuture.class), any(Duration.class), anyString()))
                 .thenAnswer(invocation -> invocation.getArgument(0));
 
-        featureFlagMock = mockStatic(FeatureFlagStore.class);
+        configStoreMock = mockStatic(DynamicConfigStore.class);
     }
 
     @AfterEach
     void tearDown() {
-        if (featureFlagMock != null) {
-            featureFlagMock.close();
+        if (configStoreMock != null) {
+            configStoreMock.close();
         }
         if (appPropsMock != null) {
             appPropsMock.close();
@@ -249,8 +248,7 @@ class LineageRESTAsyncParityTest {
     // --- Helpers ---
 
     private void setAsyncFlag(boolean enabled) {
-        featureFlagMock.when(() -> FeatureFlagStore.evaluate(
-                eq(FeatureFlag.ENABLE_ASYNC_EXECUTION.getKey()), eq("true")))
+        configStoreMock.when(DynamicConfigStore::isAsyncExecutionEnabled)
                 .thenReturn(enabled);
     }
 
