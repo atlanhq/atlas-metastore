@@ -2,6 +2,7 @@ package org.apache.atlas.repository.graphdb.janus.cassandra;
 
 import com.datastax.driver.core.exceptions.QueryValidationException;
 import com.datastax.oss.driver.api.core.ConsistencyLevel;
+import com.datastax.oss.driver.api.core.CqlIdentifier;
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.cql.BatchStatement;
 import com.datastax.oss.driver.api.core.cql.BatchStatementBuilder;
@@ -33,6 +34,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static org.apache.atlas.utils.AtlasEntityUtil.calculateBucket; // LEGACY: remove when all tenants migrated off bucket schema
+
 /**
  * Enhanced Cassandra implementation for vertex data repository with advanced
  * features like connection pooling, retry mechanisms, and better error handling.
@@ -51,6 +54,9 @@ class CassandraVertexDataRepository implements VertexDataRepository {
     private final PreparedStatement deleteVertexStatement;
     private final ObjectMapper objectMapper;
 
+    // LEGACY: remove when all tenants migrated off bucket schema
+    private final boolean hasBucketColumn;
+
     /**
      * Creates a new enhanced Cassandra repository.
      *
@@ -61,19 +67,51 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         this.session = session;
         this.keyspace = AtlasConfiguration.ATLAS_CASSANDRA_VANILLA_KEYSPACE.getString();
         this.tableName = AtlasConfiguration.ATLAS_CASSANDRA_VERTEX_TABLE.getString();
-        this.insertVertexStatement = session.prepare(String.format(
-                "INSERT INTO %s.%s (id, json_data, updated_at) VALUES (?, ?, ?)",
-                keyspace,
-                tableName));
-        this.deleteVertexStatement = session.prepare(String.format(
-                "DELETE FROM %s.%s WHERE id = ?",
-                keyspace,
-                tableName));
+        this.hasBucketColumn = detectBucketColumn(session, keyspace, tableName);
+
+        if (hasBucketColumn) {
+            LOG.info("Detected LEGACY bucket-based schema for table {}.{} - using bucket-aware queries", keyspace, tableName);
+            this.insertVertexStatement = session.prepare(String.format(
+                    "INSERT INTO %s.%s (bucket, id, json_data, updated_at) VALUES (?, ?, ?, ?)",
+                    keyspace, tableName));
+            this.deleteVertexStatement = session.prepare(String.format(
+                    "DELETE FROM %s.%s WHERE bucket = ? AND id = ?",
+                    keyspace, tableName));
+        } else {
+            LOG.info("Detected new schema (no bucket column) for table {}.{} - using direct id queries", keyspace, tableName);
+            this.insertVertexStatement = session.prepare(String.format(
+                    "INSERT INTO %s.%s (id, json_data, updated_at) VALUES (?, ?, ?)",
+                    keyspace, tableName));
+            this.deleteVertexStatement = session.prepare(String.format(
+                    "DELETE FROM %s.%s WHERE id = ?",
+                    keyspace, tableName));
+        }
 
         this.objectMapper = new ObjectMapper();
         SimpleModule module = new SimpleModule("NumbersAsStringModule");
         module.addDeserializer(Object.class, new NumbersAsStringObjectDeserializer());
         objectMapper.registerModule(module);
+    }
+
+    /**
+     * Detects whether the assets table has a 'bucket' column in its schema.
+     * Uses CqlSession cached metadata (no network call).
+     * Returns false (new schema) if detection fails, as a safe default for new tenants.
+     *
+     * LEGACY: Remove this method when all tenants are migrated off the bucket schema.
+     */
+    private static boolean detectBucketColumn(CqlSession session, String keyspace, String tableName) {
+        try {
+            return session.getMetadata()
+                    .getKeyspace(CqlIdentifier.fromCql(keyspace))
+                    .flatMap(ks -> ks.getTable(CqlIdentifier.fromCql(tableName)))
+                    .flatMap(table -> table.getColumn(CqlIdentifier.fromCql("bucket")))
+                    .isPresent();
+        } catch (Exception e) {
+            LOG.warn("Failed to detect schema for table {}.{}, defaulting to no-bucket schema: {}",
+                    keyspace, tableName, e.getMessage());
+            return false;
+        }
     }
 
     @Override
@@ -85,18 +123,39 @@ class CassandraVertexDataRepository implements VertexDataRepository {
                 return;
             }
 
-            BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.UNLOGGED);
-            Instant updatedAt = Instant.ofEpochMilli(RequestContext.get().getRequestTime());
-            for (Map.Entry<String, String> entry : serialisedVertices.entrySet()) {
-                BoundStatement boundStatement = insertVertexStatement.bind(entry.getKey(), entry.getValue(), updatedAt);
-                batchBuilder.addStatement(boundStatement);
+            if (hasBucketColumn) {
+                insertVerticesWithBucket(serialisedVertices);
+            } else {
+                insertVerticesNoBucket(serialisedVertices);
             }
-
-            BatchStatement batchStatement = batchBuilder.build();
-            session.execute(batchStatement);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+
+    private void insertVerticesNoBucket(Map<String, String> serialisedVertices) {
+        BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.UNLOGGED);
+        Instant updatedAt = Instant.ofEpochMilli(RequestContext.get().getRequestTime());
+        for (Map.Entry<String, String> entry : serialisedVertices.entrySet()) {
+            BoundStatement boundStatement = insertVertexStatement.bind(entry.getKey(), entry.getValue(), updatedAt);
+            batchBuilder.addStatement(boundStatement);
+        }
+        session.execute(batchBuilder.build());
+    }
+
+    /**
+     * LEGACY: Insert vertices using bucket-partitioned schema.
+     * Remove when all tenants are migrated off the bucket schema.
+     */
+    private void insertVerticesWithBucket(Map<String, String> serialisedVertices) {
+        BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.UNLOGGED);
+        Instant updatedAt = Instant.ofEpochMilli(RequestContext.get().getRequestTime());
+        for (Map.Entry<String, String> entry : serialisedVertices.entrySet()) {
+            int bucket = calculateBucket(entry.getKey());
+            BoundStatement boundStatement = insertVertexStatement.bind(bucket, entry.getKey(), entry.getValue(), updatedAt);
+            batchBuilder.addStatement(boundStatement);
+        }
+        session.execute(batchBuilder.build());
     }
 
     @Override
@@ -107,16 +166,35 @@ class CassandraVertexDataRepository implements VertexDataRepository {
                 return;
             }
 
-            BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.UNLOGGED);
-            for (String vertexId : vertexIds) {
-                batchBuilder.addStatement(deleteVertexStatement.bind(vertexId));
+            if (hasBucketColumn) {
+                dropVerticesWithBucket(vertexIds);
+            } else {
+                dropVerticesNoBucket(vertexIds);
             }
-
-            BatchStatement batchStatement = batchBuilder.build();
-            session.execute(batchStatement);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
+    }
+
+    private void dropVerticesNoBucket(List<String> vertexIds) {
+        BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.UNLOGGED);
+        for (String vertexId : vertexIds) {
+            batchBuilder.addStatement(deleteVertexStatement.bind(vertexId));
+        }
+        session.execute(batchBuilder.build());
+    }
+
+    /**
+     * LEGACY: Drop vertices using bucket-partitioned schema.
+     * Remove when all tenants are migrated off the bucket schema.
+     */
+    private void dropVerticesWithBucket(List<String> vertexIds) {
+        BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.UNLOGGED);
+        for (String vertexId : vertexIds) {
+            int bucket = calculateBucket(vertexId);
+            batchBuilder.addStatement(deleteVertexStatement.bind(bucket, vertexId));
+        }
+        session.execute(batchBuilder.build());
     }
 
     /**
@@ -232,38 +310,11 @@ class CassandraVertexDataRepository implements VertexDataRepository {
         }
 
         try {
-            PreparedStatement preparedStatement = getPreparedStatementForBatchSize(uniqueSanitizedVertexIdsInBatch.size());
-            BoundStatement boundStatement = preparedStatement.bind();
-
-            int bindIndex = 0;
-            for (String vertexId : uniqueSanitizedVertexIdsInBatch) {
-                boundStatement = boundStatement.setString(bindIndex++, vertexId);
+            if (hasBucketColumn) {
+                return fetchSingleBatchWithBucket(uniqueSanitizedVertexIdsInBatch);
+            } else {
+                return fetchSingleBatchNoBucket(uniqueSanitizedVertexIdsInBatch);
             }
-
-            boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
-            ResultSet resultSet = session.execute(boundStatement);
-
-            for (Row row : resultSet) {
-                String id = row.getString("id");
-                String jsonData = row.getString("json_data");
-                try {
-                    AtlasPerfMetrics.MetricRecorder deserializeRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly_DeserializeJson");
-                    Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
-                    RequestContext.get().endMetricRecord(deserializeRecorder);
-
-                    DynamicVertex vertex = new DynamicVertex(props);
-                    if (!vertex.hasProperty("id")) {
-                        vertex.setProperty("id", id);
-                    }
-                    results.put(id, vertex);
-                } catch (JsonProcessingException e) {
-                    LOG.warn("Failed to parse JSON for DynamicVertex ID {}: {}", id, e.getMessage());
-                } catch (Exception e) {
-                    LOG.warn("Failed to convert or process data for DynamicVertex ID {}: {}", id, e.getMessage());
-                }
-            }
-            return results;
-
         } catch (QueryValidationException e) {
             LOG.error("Invalid query error during single call batch fetch strategy:  Error=\'{}\'.", e.getMessage(), e);
             throw new AtlasBaseException("Invalid query for single call batch fetch: " + e.getMessage(), e);
@@ -272,6 +323,92 @@ class CassandraVertexDataRepository implements VertexDataRepository {
             throw new AtlasBaseException("Failed to fetch vertex data in single call strategy: " + e.getMessage(), e);
         } finally {
             RequestContext.get().endMetricRecord(mainRecorder);
+        }
+    }
+
+    private Map<String, DynamicVertex> fetchSingleBatchNoBucket(List<String> vertexIds) {
+        Map<String, DynamicVertex> results = new HashMap<>();
+
+        PreparedStatement preparedStatement = getPreparedStatementForBatchSize(vertexIds.size());
+        BoundStatement boundStatement = preparedStatement.bind();
+
+        int bindIndex = 0;
+        for (String vertexId : vertexIds) {
+            boundStatement = boundStatement.setString(bindIndex++, vertexId);
+        }
+
+        boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
+        ResultSet resultSet = session.execute(boundStatement);
+
+        processResultRows(resultSet, results);
+        return results;
+    }
+
+    /**
+     * LEGACY: Fetch vertices using bucket-partitioned schema.
+     * Builds a dynamic query: SELECT id, json_data FROM table WHERE bucket IN (?,?,...) AND id IN (?,?,...)
+     * Remove when all tenants are migrated off the bucket schema.
+     */
+    private Map<String, DynamicVertex> fetchSingleBatchWithBucket(List<String> vertexIds) {
+        Map<String, DynamicVertex> results = new HashMap<>();
+
+        Set<Integer> uniqueBucketIds = new HashSet<>();
+        for (String vertexId : vertexIds) {
+            uniqueBucketIds.add(calculateBucket(vertexId));
+        }
+
+        StringBuilder queryBuilder = new StringBuilder("SELECT id, json_data FROM ")
+                .append(keyspace).append(".").append(tableName)
+                .append(" WHERE bucket IN (");
+        for (int i = 0; i < uniqueBucketIds.size(); i++) {
+            queryBuilder.append(i == 0 ? "?" : ", ?");
+        }
+        queryBuilder.append(") AND id IN (");
+        for (int i = 0; i < vertexIds.size(); i++) {
+            queryBuilder.append(i == 0 ? "?" : ", ?");
+        }
+        queryBuilder.append(")");
+
+        PreparedStatement preparedStatement = session.prepare(queryBuilder.toString());
+        BoundStatement boundStatement = preparedStatement.bind();
+
+        int bindIndex = 0;
+        for (Integer bucketId : uniqueBucketIds) {
+            boundStatement = boundStatement.setInt(bindIndex++, bucketId);
+        }
+        for (String vertexId : vertexIds) {
+            boundStatement = boundStatement.setString(bindIndex++, vertexId);
+        }
+
+        boundStatement = boundStatement.setConsistencyLevel(ConsistencyLevel.LOCAL_QUORUM);
+        ResultSet resultSet = session.execute(boundStatement);
+
+        processResultRows(resultSet, results);
+        return results;
+    }
+
+    /**
+     * Processes result rows from Cassandra into DynamicVertex objects.
+     */
+    private void processResultRows(ResultSet resultSet, Map<String, DynamicVertex> results) {
+        for (Row row : resultSet) {
+            String id = row.getString("id");
+            String jsonData = row.getString("json_data");
+            try {
+                AtlasPerfMetrics.MetricRecorder deserializeRecorder = RequestContext.get().startMetricRecord("fetchSingleBatchDirectly_DeserializeJson");
+                Map<String, Object> props = objectMapper.readValue(jsonData, Map.class);
+                RequestContext.get().endMetricRecord(deserializeRecorder);
+
+                DynamicVertex vertex = new DynamicVertex(props);
+                if (!vertex.hasProperty("id")) {
+                    vertex.setProperty("id", id);
+                }
+                results.put(id, vertex);
+            } catch (JsonProcessingException e) {
+                LOG.warn("Failed to parse JSON for DynamicVertex ID {}: {}", id, e.getMessage());
+            } catch (Exception e) {
+                LOG.warn("Failed to convert or process data for DynamicVertex ID {}: {}", id, e.getMessage());
+            }
         }
     }
 }
