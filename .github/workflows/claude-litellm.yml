@@ -1,0 +1,252 @@
+name: Claude PR Review (LiteLLM)
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review]
+  # Trigger after integration tests complete
+  workflow_run:
+    workflows: ["Integration Tests"]
+    types: [completed]
+
+env:
+  LITELLM_MODEL: claude-haiku-4.5
+
+jobs:
+  # Job 1: Auto-review PRs on open/sync
+  claude-review:
+    if: |
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Connect to VPN
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openconnect
+
+          MAX_RETRIES=3
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "VPN connection attempt $attempt/$MAX_RETRIES..."
+            sudo pkill -x openconnect 2>/dev/null || true
+            sleep 2
+
+            echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+              --protocol=gp \
+              --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+              --passwd-on-stdin \
+              --non-inter \
+              --background \
+              "vpnsec.atlan.app" && sleep 10
+
+            if pgrep -x openconnect > /dev/null; then
+              echo "VPN connected (PID: $(pgrep -x openconnect))"
+              break
+            fi
+
+            echo "Attempt $attempt failed."
+            if [ "$attempt" -eq "$MAX_RETRIES" ]; then
+              echo "ERROR: VPN connection failed after $MAX_RETRIES attempts"
+              exit 1
+            fi
+            echo "Retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r .github/scripts/requirements.txt
+
+      - name: Run Claude PR Review
+        env:
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          python3 .github/scripts/claude_review.py \
+            --pr-number ${{ github.event.pull_request.number }} \
+            --pr-title "$PR_TITLE" \
+            --pr-author "$PR_AUTHOR" \
+            --repo "${{ github.repository }}" \
+            --litellm-url "https://llmproxy.atlan.dev/v1" \
+            --model "${{ env.LITELLM_MODEL }}"
+
+  # Job 2: Analyze test results after integration tests complete
+  claude-test-analysis:
+    if: |
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion != 'skipped' &&
+      github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Connect to VPN
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openconnect
+
+          MAX_RETRIES=3
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "VPN connection attempt $attempt/$MAX_RETRIES..."
+            sudo pkill -x openconnect 2>/dev/null || true
+            sleep 2
+
+            echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+              --protocol=gp \
+              --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+              --passwd-on-stdin \
+              --non-inter \
+              --background \
+              "vpnsec.atlan.app" && sleep 10
+
+            if pgrep -x openconnect > /dev/null; then
+              echo "VPN connected (PID: $(pgrep -x openconnect))"
+              break
+            fi
+
+            echo "Attempt $attempt failed."
+            if [ "$attempt" -eq "$MAX_RETRIES" ]; then
+              echo "ERROR: VPN connection failed after $MAX_RETRIES attempts"
+              exit 1
+            fi
+            echo "Retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
+
+      - name: Get PR number from workflow run
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id
+            });
+
+            const headBranch = run.data.head_branch;
+
+            const prs = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              head: `${context.repo.owner}:${headBranch}`
+            });
+
+            if (prs.data.length > 0) {
+              const pr = prs.data[0];
+              const baseBranch = pr.base.ref;
+
+              // Only run for master/staging
+              const allowedBranches = ['master', 'staging'];
+              if (!allowedBranches.includes(baseBranch)) {
+                console.log(`Skipping: PR targets '${baseBranch}'`);
+                core.setOutput('found', 'false');
+                return;
+              }
+
+              core.setOutput('number', pr.number);
+              core.setOutput('title', pr.title);
+              core.setOutput('found', 'true');
+            } else {
+              core.setOutput('found', 'false');
+            }
+
+      - name: Download test artifacts
+        if: steps.pr.outputs.found == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: integration-test-reports-${{ github.event.workflow_run.id }}
+          path: test-results
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ github.event.workflow_run.id }}
+        continue-on-error: true
+
+      - name: Check for test results
+        if: steps.pr.outputs.found == 'true'
+        id: test-results
+        run: |
+          if ls test-results/TEST-*.xml 1>/dev/null 2>&1; then
+            echo "has_results=true" >> $GITHUB_OUTPUT
+
+            # Quick status check from first XML
+            JUNIT_XML=$(ls test-results/TEST-*.xml | head -1)
+            FAILURES=$(grep -oP 'failures="\K[0-9]+' "$JUNIT_XML" | head -1 || echo "0")
+            ERRORS=$(grep -oP 'errors="\K[0-9]+' "$JUNIT_XML" | head -1 || echo "0")
+
+            if [ $((FAILURES + ERRORS)) -gt 0 ]; then
+              echo "status=failed" >> $GITHUB_OUTPUT
+            else
+              echo "status=passed" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "has_results=false" >> $GITHUB_OUTPUT
+            echo "status=unknown" >> $GITHUB_OUTPUT
+          fi
+
+          echo "workflow_conclusion=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
+
+      - name: Get PR diff
+        if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
+        run: |
+          gh pr diff ${{ steps.pr.outputs.number }} > pr-diff.txt
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
+        run: |
+          pip install -r .github/scripts/requirements.txt
+
+      - name: Run Test Analysis
+        if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
+        env:
+          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
+        run: |
+          python3 .github/scripts/test_analysis.py \
+            --pr-number ${{ steps.pr.outputs.number }} \
+            --pr-title "$PR_TITLE" \
+            --test-status "${{ steps.test-results.outputs.status }}" \
+            --junit-dir test-results \
+            --pr-diff-file pr-diff.txt \
+            --litellm-url "https://llmproxy.atlan.dev/v1" \
+            --model "${{ env.LITELLM_MODEL }}" \
+            --output test-analysis.md
+
+      - name: Post Test Analysis Comment
+        if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
+        run: |
+          gh pr comment ${{ steps.pr.outputs.number }} --body-file test-analysis.md
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
