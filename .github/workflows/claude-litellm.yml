@@ -8,6 +8,9 @@ on:
     workflows: ["Integration Tests"]
     types: [completed]
 
+env:
+  LITELLM_MODEL: claude-haiku-4.5
+
 jobs:
   # Job 1: Auto-review PRs on open/sync
   claude-review:
@@ -63,7 +66,7 @@ jobs:
             --pr-author "$PR_AUTHOR" \
             --repo "${{ github.repository }}" \
             --litellm-url "https://llmproxy.atlan.dev/v1" \
-            --model "claude"
+            --model "${{ env.LITELLM_MODEL }}"
 
   # Job 2: Analyze test results after integration tests complete
   claude-test-analysis:
@@ -202,7 +205,7 @@ jobs:
             --junit-dir test-results \
             --pr-diff-file pr-diff.txt \
             --litellm-url "https://llmproxy.atlan.dev/v1" \
-            --model "claude" \
+            --model "${{ env.LITELLM_MODEL }}" \
             --output test-analysis.md
 
       - name: Post Test Analysis Comment
