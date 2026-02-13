@@ -2,11 +2,13 @@
 """
 Claude PR Review Script using LiteLLM Proxy
 Posts inline review comments on PR code + a structured summary comment.
+Shows live progress on the PR by editing a single comment as tasks complete.
 """
 
 import os
 import sys
 import json
+import time
 import argparse
 import subprocess
 import requests
@@ -61,8 +63,8 @@ class GitHubAPI:
         response.raise_for_status()
         return response.json()["head"]["sha"]
 
-    def post_pr_comment(self, pr_number: int, body: str):
-        """Post an issue-level comment on the PR"""
+    def post_pr_comment(self, pr_number: int, body: str) -> Dict[str, Any]:
+        """Post an issue-level comment on the PR. Returns the comment object."""
         url = f"{self.base_url}/repos/{self.repo}/issues/{pr_number}/comments"
         response = requests.post(
             url, headers=self.headers, json={"body": body}, timeout=30
@@ -70,23 +72,18 @@ class GitHubAPI:
         response.raise_for_status()
         return response.json()
 
+    def update_pr_comment(self, comment_id: int, body: str) -> Dict[str, Any]:
+        """Edit an existing issue comment by its ID."""
+        url = f"{self.base_url}/repos/{self.repo}/issues/comments/{comment_id}"
+        response = requests.patch(
+            url, headers=self.headers, json={"body": body}, timeout=30
+        )
+        response.raise_for_status()
+        return response.json()
+
     def submit_review(self, pr_number: int, commit_id: str, body: str,
                       comments: List[Dict[str, Any]], event: str = "COMMENT"):
-        """Submit a pull request review with inline comments.
-
-        Uses the GitHub Pull Request Review API to post inline comments
-        atomically alongside a summary body.
-
-        Args:
-            pr_number: PR number
-            commit_id: HEAD commit SHA of the PR
-            body: Summary comment body (markdown)
-            comments: List of inline comments, each with keys:
-                - path (str): file path relative to repo root
-                - line (int): line number in the diff (new-file side)
-                - body (str): comment markdown
-            event: Review event — COMMENT, APPROVE, or REQUEST_CHANGES
-        """
+        """Submit a pull request review with inline comments."""
         url = f"{self.base_url}/repos/{self.repo}/pulls/{pr_number}/reviews"
         payload = {
             "commit_id": commit_id,
@@ -102,6 +99,134 @@ class GitHubAPI:
 
 
 # ---------------------------------------------------------------------------
+# Live progress tracker — edits a single PR comment as tasks complete
+# ---------------------------------------------------------------------------
+
+class ProgressTracker:
+    """Posts and updates a single PR comment to show review progress.
+
+    Creates an initial comment with a task checklist, then edits it
+    as each step completes. When the review is finished the comment
+    is replaced with the full review results.
+    """
+
+    TASKS = [
+        "Fetch PR diff and changed files",
+        "Analyze code with Claude AI",
+        "Post inline review comments",
+        "Compile review summary",
+    ]
+
+    def __init__(self, github_api: GitHubAPI, pr_number: int, pr_title: str):
+        self.github_api = github_api
+        self.pr_number = pr_number
+        self.pr_title = pr_title
+        self.comment_id: Optional[int] = None
+        self.completed: List[int] = []
+        self.start_time = time.time()
+
+    def _build_progress_body(self, active_task: Optional[int] = None) -> str:
+        """Build the markdown body showing task progress."""
+        lines = [
+            f"## 🤖 Claude AI Review — PR #{self.pr_number}",
+            "",
+            f"⏳ **Reviewing:** {self.pr_title}",
+            "",
+            "### Tasks",
+        ]
+        for i, task in enumerate(self.TASKS):
+            if i in self.completed:
+                lines.append(f"- [x] {task}")
+            elif i == active_task:
+                lines.append(f"- [ ] ⏳ {task}...")
+            else:
+                lines.append(f"- [ ] {task}")
+
+        elapsed = int(time.time() - self.start_time)
+        lines.append("")
+        lines.append(f"*Running for {elapsed}s...*")
+        lines.append("")
+        lines.append("---")
+        lines.append("*Powered by Claude via LiteLLM Proxy*")
+        return "\n".join(lines)
+
+    def start(self):
+        """Post the initial progress comment on the PR."""
+        body = self._build_progress_body(active_task=0)
+        try:
+            result = self.github_api.post_pr_comment(self.pr_number, body)
+            self.comment_id = result["id"]
+            print(f"Progress comment posted (id={self.comment_id})")
+        except Exception as e:
+            print(f"Warning: could not post progress comment: {e}")
+
+    def complete_task(self, task_index: int, next_task: Optional[int] = None):
+        """Mark a task as done and optionally start the next one."""
+        self.completed.append(task_index)
+        if self.comment_id is None:
+            return
+        body = self._build_progress_body(active_task=next_task)
+        try:
+            self.github_api.update_pr_comment(self.comment_id, body)
+        except Exception as e:
+            print(f"Warning: could not update progress comment: {e}")
+
+    def finish(self, final_body: str):
+        """Replace the progress comment with the final review body."""
+        elapsed = int(time.time() - self.start_time)
+        header = (
+            f"**Claude AI finished reviewing in {elapsed}s**\n\n---\n\n"
+        )
+        full_body = header + final_body
+        if self.comment_id is None:
+            # Progress comment was never created — post fresh
+            try:
+                self.github_api.post_pr_comment(self.pr_number, full_body)
+            except Exception as e:
+                print(f"Failed to post final comment: {e}")
+                sys.exit(1)
+        else:
+            try:
+                self.github_api.update_pr_comment(self.comment_id, full_body)
+                print("Progress comment updated with final review.")
+            except Exception as e:
+                print(f"Warning: could not update progress comment, posting new: {e}")
+                try:
+                    self.github_api.post_pr_comment(self.pr_number, full_body)
+                except Exception as e2:
+                    print(f"Failed to post final comment: {e2}")
+                    sys.exit(1)
+
+    def fail(self, error_message: str):
+        """Update the progress comment to show failure."""
+        elapsed = int(time.time() - self.start_time)
+        lines = [
+            f"## 🤖 Claude AI Review — PR #{self.pr_number}",
+            "",
+            f"❌ **Review failed after {elapsed}s**",
+            "",
+            "### Tasks",
+        ]
+        for i, task in enumerate(self.TASKS):
+            if i in self.completed:
+                lines.append(f"- [x] {task}")
+            else:
+                lines.append(f"- [ ] {task}")
+        lines.append("")
+        lines.append(f"**Error:** {error_message}")
+        lines.append("")
+        lines.append("---")
+        lines.append("*Powered by Claude via LiteLLM Proxy*")
+        body = "\n".join(lines)
+
+        if self.comment_id:
+            try:
+                self.github_api.update_pr_comment(self.comment_id, body)
+            except Exception:
+                pass
+
+
+# ---------------------------------------------------------------------------
 # Diff-line mapping: translate file + new-file line → diff position
 # ---------------------------------------------------------------------------
 
@@ -111,9 +236,6 @@ def build_diff_line_map(files: List[Dict[str, Any]]) -> Dict[str, Dict[int, int]
     GitHub inline review comments require a *position* within the diff,
     not the absolute line number.  This function parses every file's
     ``patch`` text and builds the mapping.
-
-    Returns:
-        dict mapping ``file_path -> {new_line_number: diff_position}``
     """
     mapping: Dict[str, Dict[int, int]] = {}
     for f in files:
@@ -126,7 +248,6 @@ def build_diff_line_map(files: List[Dict[str, Any]]) -> Dict[str, Dict[int, int]
         new_line = 0
         for raw_line in patch.split("\n"):
             if raw_line.startswith("@@"):
-                # Parse hunk header: @@ -old,count +new,count @@
                 try:
                     plus_part = raw_line.split("+")[1].split("@@")[0]
                     new_line = int(plus_part.split(",")[0]) - 1
@@ -136,7 +257,6 @@ def build_diff_line_map(files: List[Dict[str, Any]]) -> Dict[str, Dict[int, int]
                 continue
             position += 1
             if raw_line.startswith("-"):
-                # Deleted line — no new-file line number
                 continue
             new_line += 1
             if raw_line.startswith("+") or not raw_line.startswith("-"):
@@ -232,17 +352,25 @@ def build_summary_markdown(summary: str, verdict: str, verdict_reason: str,
     }.get(verdict, "ℹ️")
     verdict_display = verdict.replace("_", " ")
 
-    # Group findings by category
+    # Group findings by severity
     critical = [f for f in findings if f.get("severity") == "critical"]
     warnings = [f for f in findings if f.get("severity") == "warning"]
     suggestions = [f for f in findings if f.get("severity") == "suggestion"]
 
+    # Group findings by category
     security = [f for f in findings if f.get("category") == "security"]
-    bugs = [f for f in findings if f.get("category") == "bug"]
     perf = [f for f in findings if f.get("category") == "performance"]
 
     lines = []
     lines.append(f"## 🤖 Claude AI Review — PR #{pr_number}\n")
+
+    # --- Tasks completed ---
+    lines.append("### Tasks")
+    lines.append("- [x] Fetch PR diff and changed files")
+    lines.append("- [x] Analyze code with Claude AI")
+    lines.append("- [x] Post inline review comments")
+    lines.append("- [x] Compile review summary")
+    lines.append("")
 
     # --- Summary ---
     lines.append("### 📋 Summary\n")
@@ -257,7 +385,7 @@ def build_summary_markdown(summary: str, verdict: str, verdict_reason: str,
     if inline_posted > 0:
         lines.append(f"> 💬 {inline_posted} inline comment(s) posted on code")
     if inline_failed > 0:
-        lines.append(f"> ⚠️ {inline_failed} comment(s) could not be posted inline (see below)")
+        lines.append(f"> ⚠️ {inline_failed} comment(s) could not be posted inline (shown below)")
     lines.append("")
 
     # --- Critical Findings ---
@@ -336,19 +464,22 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
     print(f"Reviewing PR #{pr_number}: {pr_title}")
     print(f"Author: {pr_author}")
 
-    # 1. Fetch PR diff
+    # --- Post initial progress comment ---
+    progress = ProgressTracker(github_api, pr_number, pr_title)
+    progress.start()
+
+    # Task 0: Fetch PR diff and changed files
     print("Fetching PR diff...")
     try:
         diff = github_api.get_pr_diff(pr_number)
     except Exception as e:
-        print(f"Failed to get PR diff: {e}")
+        progress.fail(f"Failed to get PR diff: {e}")
         sys.exit(1)
 
     if len(diff) > 50000:
         diff = diff[:50000] + "\n\n[... diff truncated due to size ...]"
         print("Diff truncated (>50 KB)")
 
-    # 2. Fetch changed files (with patch info for diff-position mapping)
     print("Fetching changed files...")
     try:
         files = github_api.get_pr_files(pr_number)
@@ -359,7 +490,6 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
         files = []
         file_list = []
 
-    # 3. Get HEAD SHA (needed for inline comments)
     print("Fetching PR head SHA...")
     try:
         head_sha = github_api.get_pr_head_sha(pr_number)
@@ -367,10 +497,10 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
         print(f"Could not fetch head SHA: {e}")
         head_sha = None
 
-    # 4. Build diff-line mapping
     diff_line_map = build_diff_line_map(files)
+    progress.complete_task(0, next_task=1)
 
-    # 5. Ask LLM for structured JSON findings
+    # Task 1: Analyze code with Claude AI
     print("Analyzing PR with Claude via LiteLLM...")
     findings_prompt = build_findings_prompt(
         pr_number, pr_title, pr_author, file_list, diff
@@ -383,26 +513,25 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
     try:
         raw_response = llm_client.chat(messages, max_tokens=4000, temperature=0.1)
     except Exception as e:
-        print(f"Failed to get review from LLM: {e}")
+        progress.fail(f"LLM analysis failed: {e}")
         sys.exit(1)
 
-    # 6. Parse JSON response
+    # Parse JSON response
     try:
-        # Strip markdown fences if the model wraps the JSON
         cleaned = raw_response.strip()
         if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1]  # drop first ```json line
-            cleaned = cleaned.rsplit("```", 1)[0]  # drop trailing ```
+            cleaned = cleaned.split("\n", 1)[1]
+            cleaned = cleaned.rsplit("```", 1)[0]
         review_data = json.loads(cleaned)
     except (json.JSONDecodeError, Exception) as e:
         print(f"Failed to parse LLM JSON response: {e}")
         print(f"Raw response (first 500 chars): {raw_response[:500]}")
-        # Fallback: post raw response as a comment
-        github_api.post_pr_comment(pr_number,
+        # Fallback: post raw response
+        fallback = (
             f"## 🤖 Claude AI Review\n\n{raw_response}\n\n---\n"
             f"*Powered by Claude via LiteLLM Proxy*"
         )
-        print("Posted raw review as fallback comment.")
+        progress.finish(fallback)
         return
 
     summary = review_data.get("summary", "No summary provided.")
@@ -411,8 +540,9 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
     findings = review_data.get("findings", [])
 
     print(f"LLM returned {len(findings)} finding(s), verdict: {verdict}")
+    progress.complete_task(1, next_task=2)
 
-    # 7. Post inline comments via GitHub Review API
+    # Task 2: Post inline review comments
     inline_posted = 0
     inline_failed = 0
     review_comments = []
@@ -422,12 +552,10 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
             file_path = f.get("file", "")
             line = f.get("line", 0)
 
-            # Look up diff position
             file_map = diff_line_map.get(file_path, {})
             position = file_map.get(line)
 
             if not position:
-                # Cannot map to diff position — will show in summary only
                 inline_failed += 1
                 continue
 
@@ -448,10 +576,8 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
                 "body": comment_body
             })
 
-        # Submit review with all inline comments at once
         if review_comments:
             try:
-                # Map verdict to GitHub review event
                 event = {
                     "APPROVE": "APPROVE",
                     "REQUEST_CHANGES": "REQUEST_CHANGES"
@@ -459,7 +585,7 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
 
                 github_api.submit_review(
                     pr_number, head_sha,
-                    body="",  # summary will go in a separate comment for richer formatting
+                    body="",
                     comments=review_comments,
                     event=event
                 )
@@ -467,24 +593,21 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
                 print(f"Posted {inline_posted} inline comment(s) via review API.")
             except Exception as e:
                 print(f"Failed to submit review with inline comments: {e}")
-                # Mark all as failed — they'll appear in summary instead
                 inline_failed += len(review_comments)
                 inline_posted = 0
 
-    # 8. Post structured summary comment
-    print("Posting summary comment...")
+    progress.complete_task(2, next_task=3)
+
+    # Task 3: Compile and post review summary
+    print("Compiling review summary...")
     summary_md = build_summary_markdown(
         summary, verdict, verdict_reason, findings,
         pr_number, pr_title, pr_author,
         inline_posted, inline_failed
     )
 
-    try:
-        github_api.post_pr_comment(pr_number, summary_md)
-        print("Review posted successfully!")
-    except Exception as e:
-        print(f"Failed to post summary comment: {e}")
-        sys.exit(1)
+    progress.finish(summary_md)
+    print("Review posted successfully!")
 
 
 def main():

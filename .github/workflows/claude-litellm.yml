@@ -9,7 +9,7 @@ on:
     types: [completed]
 
 env:
-  LITELLM_MODEL: claude-opus-4.6
+  LITELLM_MODEL: claude-haiku-4.5
 
 jobs:
   # Job 1: Auto-review PRs on open/sync
