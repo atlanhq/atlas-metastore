@@ -24,6 +24,7 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.annotation.Timed;
+import org.apache.atlas.async.AsyncExecutorService;
 import org.apache.atlas.authorize.*;
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.bulkimport.BulkImportResponse;
@@ -43,6 +44,7 @@ import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.*;
 import org.apache.atlas.repository.store.graph.v2.repair.AtlasRepairAttributeService;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedVertexIdResult;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
@@ -70,7 +72,11 @@ import javax.ws.rs.core.StreamingOutput;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -109,9 +115,10 @@ public class EntityREST {
     private final EntityMutationService entityMutationService;
     private final AtlasRepairAttributeService repairAttributeService;
     private final RepairIndex repairIndex;
+    private final AsyncExecutorService asyncExecutorService;
 
     @Inject
-    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, AtlasRepairAttributeService repairAttributeService, RepairIndex repairIndex) {
+    public EntityREST(AtlasTypeRegistry typeRegistry, AtlasEntityStore entitiesStore, ESBasedAuditRepository  esBasedAuditRepository, EntityGraphRetriever retriever, EntityMutationService entityMutationService, AtlasRepairAttributeService repairAttributeService, RepairIndex repairIndex, AsyncExecutorService asyncExecutorService) {
         this.typeRegistry      = typeRegistry;
         this.entitiesStore     = entitiesStore;
         this.esBasedAuditRepository = esBasedAuditRepository;
@@ -119,6 +126,7 @@ public class EntityREST {
         this.entityMutationService = entityMutationService;
         this.repairAttributeService = repairAttributeService;
         this.repairIndex = repairIndex;
+        this.asyncExecutorService = asyncExecutorService;
     }
 
     /**
@@ -794,9 +802,99 @@ public class EntityREST {
                 throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guids);
             }
 
+            // Only use async for multiple GUIDs where parallel fetch provides real benefit
+            // Single GUID async adds thread overhead without performance improvement
+            if (isAsyncExecutionEnabled() && guids.size() > 1) {
+                return executeGetByGuidsAsync(guids, minExtInfo, ignoreRelationships);
+            }
             return entitiesStore.getByIds(guids, minExtInfo, ignoreRelationships);
         } finally {
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Execute bulk entity fetch asynchronously with fan-out parallelization.
+     * Each entity is fetched in parallel, preserving the input GUID order.
+     */
+    private AtlasEntitiesWithExtInfo executeGetByGuidsAsync(List<String> guids, boolean minExtInfo, boolean ignoreRelationships) throws AtlasBaseException {
+        long timeoutMs = asyncExecutorService.getDefaultTimeoutMs();
+
+        // Capture RequestContext for propagation to async threads
+        RequestContext parentContext = RequestContext.get();
+        RequestContext asyncContext = parentContext.copyForAsync();
+
+        // Fan-out: Create a future for each GUID
+        List<CompletableFuture<AtlasEntityWithExtInfo>> futures = guids.stream()
+            .map(guid -> asyncExecutorService.supplyAsync(() -> {
+                try {
+                    // Propagate RequestContext to async thread
+                    RequestContext.setCurrentContext(asyncContext.copyForAsync());
+                    return entitiesStore.getById(guid, minExtInfo, ignoreRelationships);
+                } catch (AtlasBaseException e) {
+                    throw new CompletionException(e);
+                } finally {
+                    // Clean up RequestContext in async thread
+                    RequestContext.clear();
+                }
+            }, "getById:" + guid))
+            .collect(Collectors.toList());
+
+        // Wait for all futures with overall timeout
+        CompletableFuture<Void> allFutures = CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        allFutures = asyncExecutorService.withTimeout(allFutures, Duration.ofMillis(timeoutMs), "getByGuids");
+
+        try {
+            allFutures.join();
+
+            // Merge results in original GUID order
+            AtlasEntitiesWithExtInfo result = new AtlasEntitiesWithExtInfo();
+            for (int i = 0; i < futures.size(); i++) {
+                try {
+                    AtlasEntityWithExtInfo entityWithExtInfo = futures.get(i).join();
+                    if (entityWithExtInfo != null && entityWithExtInfo.getEntity() != null) {
+                        result.addEntity(entityWithExtInfo.getEntity());
+
+                        // Merge referred entities
+                        if (MapUtils.isNotEmpty(entityWithExtInfo.getReferredEntities())) {
+                            for (AtlasEntity referredEntity : entityWithExtInfo.getReferredEntities().values()) {
+                                result.addReferredEntity(referredEntity);
+                            }
+                        }
+                    }
+                } catch (CompletionException ce) {
+                    // Log but continue - partial results on failure unless skipFailedEntities is false
+                    LOG.warn("Failed to fetch entity at index {}: {}", i, ce.getMessage());
+                    if (!RequestContext.get().isSkipFailedEntities()) {
+                        throw ce;
+                    }
+                }
+            }
+
+            result.compact();
+            return result;
+        } catch (CompletionException ce) {
+            Throwable cause = ce.getCause();
+            if (cause instanceof TimeoutException) {
+                throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR,
+                    "Bulk entity fetch timed out after " + (timeoutMs / 1000) + "s");
+            }
+            if (cause instanceof AtlasBaseException) {
+                throw (AtlasBaseException) cause;
+            }
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, cause.getMessage());
+        }
+    }
+
+    /**
+     * Check if async execution is enabled via dynamic config store.
+     */
+    private boolean isAsyncExecutionEnabled() {
+        try {
+            return DynamicConfigStore.isAsyncExecutionEnabled();
+        } catch (Exception e) {
+            LOG.debug("Failed to evaluate async execution flag, defaulting to false", e);
+            return false;
         }
     }
 

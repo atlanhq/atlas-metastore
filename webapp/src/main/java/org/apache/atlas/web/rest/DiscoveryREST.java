@@ -22,6 +22,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.SortOrder;
 import org.apache.atlas.annotation.Timed;
+
 import org.apache.atlas.authorizer.AtlasAuthorizationUtils;
 import org.apache.atlas.discovery.AtlasDiscoveryService;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -240,7 +241,13 @@ public class DiscoveryREST {
             if(LOG.isDebugEnabled()){
                 LOG.debug("Performing indexsearch for the params ({})", parameters);
             }
-            AtlasSearchResult result = discoveryService.directIndexSearch(parameters, true);
+
+            AtlasSearchResult result;
+            // Note: Async wrapper for single operations adds thread overhead without performance benefit.
+            // The sync path is used directly. Timeout handling can be added at service layer if needed.
+            // Async is only beneficial for parallel operations (bulk entity fetch, lineage BOTH direction).
+            result = discoveryService.directIndexSearch(parameters, true);
+
             if (result == null) {
                 return null;
             }
@@ -284,7 +291,6 @@ public class DiscoveryREST {
             AtlasPerfTracer.log(perf);
         }
     }
-
 
     /**
      * Raw ES search: returns direct ES response as-is

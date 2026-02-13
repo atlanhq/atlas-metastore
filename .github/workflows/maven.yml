@@ -26,8 +26,8 @@ on:
       - staging
       - lite_master
       - alcon-v2-418
-      - ms-428-delete-optimisation-phase3
       - ring-*
+      - ms-574-make-apis-async
 
     paths-ignore:
       - '.claude/**'
