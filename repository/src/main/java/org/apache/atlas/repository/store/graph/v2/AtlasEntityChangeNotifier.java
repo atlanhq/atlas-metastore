@@ -103,6 +103,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onEntitiesMutated(EntityMutationResponse entityMutationResponse, boolean isImport) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         if (CollectionUtils.isEmpty(entityChangeListeners)) {
             return;
         }
@@ -132,6 +136,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void notifyRelationshipMutation(List<AtlasRelationship> relationships, EntityNotification.EntityNotificationV2.OperationType operationType) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         if (CollectionUtils.isEmpty(entityChangeListeners)) {
             return;
         }
@@ -154,6 +162,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onClassificationAddedToEntity(AtlasEntity entity, List<AtlasClassification> addedClassifications) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         if (isV2EntityNotificationEnabled) {
             doFullTextMapping(entity.getGuid());
 
@@ -184,6 +196,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onClassificationsAddedToEntities(List<AtlasEntity> entities, List<AtlasClassification> addedClassifications, boolean forceInline) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         if (isV2EntityNotificationEnabled) {
             doFullTextMappingHelper(entities);
 
@@ -261,6 +277,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onClassificationUpdatedToEntity(AtlasEntity entity, List<AtlasClassification> updatedClassifications) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         doFullTextMapping(entity.getGuid());
 
         if (isV2EntityNotificationEnabled) {
@@ -352,6 +372,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onClassificationDeletedFromEntity(AtlasEntity entity, List<AtlasClassification> deletedClassifications) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         doFullTextMapping(entity.getGuid());
 
         if (isV2EntityNotificationEnabled) {
@@ -380,6 +404,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onClassificationsDeletedFromEntities(List<AtlasEntity> entities, List<AtlasClassification> deletedClassifications) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         doFullTextMappingHelper(entities);
 
         if (isV2EntityNotificationEnabled) {
@@ -483,6 +511,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onTermAddedToEntities(AtlasGlossaryTerm term, List<AtlasRelatedObjectId> entityIds) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         // listeners notified on term-entity association only if v2 notifications are enabled
         if (isV2EntityNotificationEnabled) {
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
@@ -503,6 +535,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onTermDeletedFromEntities(AtlasGlossaryTerm term, List<AtlasRelatedObjectId> entityIds) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         // listeners notified on term-entity disassociation only if v2 notifications are enabled
         if (isV2EntityNotificationEnabled) {
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
@@ -523,6 +559,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onLabelsUpdatedFromEntity(String entityGuid, Set<String> addedLabels, Set<String> deletedLabels) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         doFullTextMapping(entityGuid);
 
         if (isV2EntityNotificationEnabled) {
@@ -549,6 +589,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void onBusinessAttributesUpdated(String entityGuid, Map<String, Map<String, Object>> updatedBusinessAttributes) throws AtlasBaseException{
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         if (isV2EntityNotificationEnabled) {
             AtlasEntity entity = instanceConverter.getEntityWithMandatoryRelations(entityGuid);
 
@@ -1013,6 +1057,10 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
     @Override
     public void notifyDifferentialEntityChanges(EntityMutationResponse entityMutationResponse, boolean isImport) throws AtlasBaseException {
+        if (RequestContext.get().isSkipEntityChangeNotification()) {
+            return;
+        }
+
         if (!notifyDifferentialEntityChangesEnabled) {
             return; // Early exit if disabled
         }

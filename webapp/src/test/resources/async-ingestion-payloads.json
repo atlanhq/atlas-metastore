@@ -323,26 +323,6 @@
     }
   }
 }, {
-  "eventId" : "c3d4e5f6-a7b8-9012-cdef-123456789012",
-  "eventType" : "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES",
-  "eventTime" : 1770888880972,
-  "requestMetadata" : {
-    "traceId" : "trace-bm-update",
-    "user" : "admin"
-  },
-  "operationMetadata" : {
-    "isOverwrite" : false
-  },
-  "payload" : {
-    "guid" : "guid-table-001",
-    "businessAttributes" : {
-      "bmName" : {
-        "attr1" : "val1",
-        "attr2" : "val2"
-      }
-    }
-  }
-}, {
   "eventId" : "d4e5f6a7-b8c9-0123-defa-234567890123",
   "eventType" : "ADD_LABELS",
   "eventTime" : 1770888880973,

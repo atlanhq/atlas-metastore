@@ -66,6 +66,7 @@ class AsyncIngestionConsumerServiceTest {
         ReflectionTestUtils.setField(consumerService, "baseDelayMs", 100L);
         ReflectionTestUtils.setField(consumerService, "maxDelayMs", 1000L);
         ReflectionTestUtils.setField(consumerService, "backoffMultiplier", 2.0);
+        ReflectionTestUtils.setField(consumerService, "entityNotificationsEnabled", false);
     }
 
     @AfterEach
@@ -284,19 +285,7 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
-    // Sample #14: ADD_OR_UPDATE_BUSINESS_ATTRIBUTES
-    private static final String ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT = """
-            {
-              "eventId": "c3d4e5f6-a7b8-9012-cdef-123456789012",
-              "eventType": "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES",
-              "eventTime": 1770888880972,
-              "requestMetadata": { "traceId": "trace-bm-update", "user": "admin" },
-              "operationMetadata": { "isOverwrite": false },
-              "payload": { "guid": "guid-table-001", "businessAttributes": { "bmName": { "attr1": "val1", "attr2": "val2" } } }
-            }
-            """;
-
-    // Sample #15: ADD_LABELS
+    // Sample #14: ADD_LABELS
     private static final String ADD_LABELS_EVENT = """
             {
               "eventId": "d4e5f6a7-b8c9-0123-defa-234567890123",
@@ -461,22 +450,6 @@ class AsyncIngestionConsumerServiceTest {
     }
 
     @Test
-    void testReplayAddOrUpdateBusinessAttributes() throws Exception {
-        doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
-
-        processEvent(ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT);
-
-        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
-        ArgumentCaptor<Map> bmCaptor = ArgumentCaptor.forClass(Map.class);
-        ArgumentCaptor<Boolean> overwriteCaptor = ArgumentCaptor.forClass(Boolean.class);
-        verify(entitiesStore).addOrUpdateBusinessAttributes(
-                guidCaptor.capture(), bmCaptor.capture(), overwriteCaptor.capture());
-        assertEquals("guid-table-001", guidCaptor.getValue());
-        assertTrue(bmCaptor.getValue().containsKey("bmName"));
-        assertFalse(overwriteCaptor.getValue());
-    }
-
-    @Test
     void testReplayAddLabels() throws Exception {
         doNothing().when(entitiesStore).addLabels(anyString(), anySet());
 
@@ -579,6 +552,38 @@ class AsyncIngestionConsumerServiceTest {
     }
 
     @Test
+    void testEntityChangeNotificationSuppressed_WhenDisabled() throws Exception {
+        // Default: entityNotificationsEnabled=false → skipEntityChangeNotification=true
+        ReflectionTestUtils.setField(consumerService, "entityNotificationsEnabled", false);
+
+        when(entityMutationService.deleteById(anyString())).thenAnswer(invocation -> {
+            // During processing, RequestContext should have skipEntityChangeNotification=true
+            assertTrue(RequestContext.get().isSkipEntityChangeNotification(),
+                    "skipEntityChangeNotification should be true when entityNotificationsEnabled=false");
+            return null;
+        });
+
+        processEvent(DELETE_BY_GUID_EVENT);
+        verify(entityMutationService).deleteById("guid-table-001");
+    }
+
+    @Test
+    void testEntityChangeNotificationEnabled_WhenConfigured() throws Exception {
+        // Override: entityNotificationsEnabled=true → skipEntityChangeNotification=false
+        ReflectionTestUtils.setField(consumerService, "entityNotificationsEnabled", true);
+
+        when(entityMutationService.deleteById(anyString())).thenAnswer(invocation -> {
+            // During processing, RequestContext should have skipEntityChangeNotification=false
+            assertFalse(RequestContext.get().isSkipEntityChangeNotification(),
+                    "skipEntityChangeNotification should be false when entityNotificationsEnabled=true");
+            return null;
+        });
+
+        processEvent(DELETE_BY_GUID_EVENT);
+        verify(entityMutationService).deleteById("guid-table-001");
+    }
+
+    @Test
     void testGetStatus_AllFields() {
         ReflectionTestUtils.setField(consumerService, "processedCount",
                 new java.util.concurrent.atomic.AtomicLong(100));
@@ -658,13 +663,13 @@ class AsyncIngestionConsumerServiceTest {
 
     @Test
     void testProcessAllEventTypes_EndToEnd() throws Exception {
-        // Read all 15 events from the payloads JSON fixture
+        // Read all 14 events from the payloads JSON fixture
         JsonNode events;
         try (java.io.InputStream is = getClass().getResourceAsStream("/async-ingestion-payloads.json")) {
             assertNotNull(is, "async-ingestion-payloads.json not found on classpath");
             events = MAPPER.readTree(is);
         }
-        assertEquals(15, events.size(), "Expected 15 events in payloads file");
+        assertEquals(14, events.size(), "Expected 14 events in payloads file");
 
         // Set up mocks for all event types
         when(entityMutationService.createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class)))
@@ -685,10 +690,9 @@ class AsyncIngestionConsumerServiceTest {
         when(entitiesStore.updateEntityAttributeByGuid(anyString(), anyString(), any())).thenReturn(null);
         when(entityMutationService.updateByUniqueAttributes(
                 any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class))).thenReturn(null);
-        doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
         doNothing().when(entitiesStore).addLabels(anyString(), anySet());
 
-        // Process all 15 events sequentially (same order as published by fatgraph)
+        // Process all 14 events sequentially (same order as published by fatgraph)
         for (JsonNode event : events) {
             processEvent(MAPPER.writeValueAsString(event));
         }
@@ -758,10 +762,7 @@ class AsyncIngestionConsumerServiceTest {
         inOrder.verify(entityMutationService).updateByUniqueAttributes(
                 eq(mockTableType), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class));
 
-        // 14. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES → addOrUpdateBusinessAttributes
-        inOrder.verify(entitiesStore).addOrUpdateBusinessAttributes(eq("guid-table-001"), anyMap(), eq(false));
-
-        // 15. ADD_LABELS → addLabels
+        // 14. ADD_LABELS → addLabels
         inOrder.verify(entitiesStore).addLabels(eq("guid-table-001"), anySet());
 
         inOrder.verifyNoMoreInteractions();

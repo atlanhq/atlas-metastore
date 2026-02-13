@@ -123,6 +123,9 @@ public class AsyncIngestionConsumerService {
     @Value("${atlas.async.ingestion.consumer.dlq.topic:ATLAS_ASYNC_INGESTION_DLQ}")
     private String dlqTopic;
 
+    @Value("${atlas.async.ingestion.consumer.entityNotificationsEnabled:false}")
+    private boolean entityNotificationsEnabled;
+
     // ── Dependencies ─────────────────────────────────────────────────────
     private final EntityMutationService entityMutationService;
     private final AtlasEntityStore entitiesStore;
@@ -445,6 +448,7 @@ public class AsyncIngestionConsumerService {
         if (requestMetadata.has("traceId")) {
             ctx.setTraceId(requestMetadata.get("traceId").asText());
         }
+        ctx.setSkipEntityChangeNotification(!entityNotificationsEnabled);
     }
 
     private void routeAndProcess(String eventType, JsonNode payload, JsonNode operationMetadata) throws Exception {
@@ -502,10 +506,7 @@ public class AsyncIngestionConsumerService {
                 replayUpdateByUniqueAttributes(payload, operationMetadata);
                 break;
 
-            // ── Business metadata & labels ────────────────────────────
-            case "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES":
-                replayAddOrUpdateBusinessAttributes(payload, operationMetadata);
-                break;
+            // ── Labels ─────────────────────────────────────────────────
             case "ADD_LABELS":
                 replayAddLabels(payload);
                 break;
@@ -706,18 +707,6 @@ public class AsyncIngestionConsumerService {
         AtlasEntity.AtlasEntityWithExtInfo entityInfo = AtlasType.fromJson(
                 payload.toString(), AtlasEntity.AtlasEntityWithExtInfo.class);
         entityMutationService.updateByUniqueAttributes(entityType, uniqAttrs, entityInfo);
-    }
-
-    /**
-     * ADD_OR_UPDATE_BUSINESS_ATTRIBUTES: payload = {"guid": "...", "businessAttributes": {...}}
-     * operationMetadata = {"isOverwrite": false}
-     */
-    private void replayAddOrUpdateBusinessAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
-        String guid = payload.get("guid").asText();
-        Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(
-                payload.get("businessAttributes"), new TypeReference<Map<String, Map<String, Object>>>() {});
-        boolean isOverwrite = operationMetadata.path("isOverwrite").asBoolean(false);
-        entitiesStore.addOrUpdateBusinessAttributes(guid, bmAttrs, isOverwrite);
     }
 
     /**
