@@ -29,19 +29,24 @@ jobs:
           fetch-depth: 0
 
       - name: Connect to VPN
-        env:
-          GP_PASSWORD: ${{ secrets.GLOBALPROTECT_PASSWORD }}
-          GP_USERNAME: ${{ secrets.GLOBALPROTECT_USERNAME }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
-          printf '%s\n' "$GP_PASSWORD" | sudo openconnect \
+          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
             --protocol=gp \
-            --user="$GP_USERNAME" \
+            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
             --passwd-on-stdin \
+            --non-inter \
             --background \
             "vpnsec.atlan.app"
-          sleep 5
+          sleep 10
+
+          # Verify VPN is running
+          if ! pgrep -x openconnect > /dev/null; then
+            echo "ERROR: OpenConnect exited unexpectedly"
+            exit 1
+          fi
+          echo "VPN connected (PID: $(pgrep -x openconnect))"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -86,19 +91,24 @@ jobs:
           fetch-depth: 0
 
       - name: Connect to VPN
-        env:
-          GP_PASSWORD: ${{ secrets.GLOBALPROTECT_PASSWORD }}
-          GP_USERNAME: ${{ secrets.GLOBALPROTECT_USERNAME }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
-          printf '%s\n' "$GP_PASSWORD" | sudo openconnect \
+          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
             --protocol=gp \
-            --user="$GP_USERNAME" \
+            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
             --passwd-on-stdin \
+            --non-inter \
             --background \
             "vpnsec.atlan.app"
-          sleep 5
+          sleep 10
+
+          # Verify VPN is running
+          if ! pgrep -x openconnect > /dev/null; then
+            echo "ERROR: OpenConnect exited unexpectedly"
+            exit 1
+          fi
+          echo "VPN connected (PID: $(pgrep -x openconnect))"
 
       - name: Get PR number from workflow run
         id: pr
