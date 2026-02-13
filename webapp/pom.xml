@@ -1023,6 +1023,13 @@
                 </includes>
                 <filtering>true</filtering>
             </testResource>
+            <testResource>
+                <directory>src/test/resources</directory>
+                <includes>
+                    <include>**/*.json</include>
+                </includes>
+                <filtering>false</filtering>
+            </testResource>
         </testResources>
     </build>
 
