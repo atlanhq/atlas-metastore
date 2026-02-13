@@ -15,7 +15,6 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
 name: Java CI with Maven
 
@@ -28,6 +27,18 @@ on:
       - lite_master
       - alcon-v2-418
       - ms-428-delete-optimisation-phase3
+<<<<<<< HEAD
+=======
+      - ring-*
+
+    paths-ignore:
+      - '.claude/**'
+      - '.cursor/**'
+      - 'docs/**'
+      - 'local-dev/**'
+      - 'README.txt'
+      - 'README.md'
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -668,8 +679,10 @@ jobs:
     # 1. Helm-lint passed (quality gate)
     # 2. Build succeeded AND smoke-test passed/skipped: publish (code/workflow changes)
     # 3. Build skipped AND helm changed: publish (helm-only changes)
+    # 4. NOT a ring-* branch (cohort releases patch ArgoCD directly, no chart publish needed)
     if: |
-      always() && 
+      always() &&
+      !startsWith(github.ref_name, 'ring-') &&
       needs.helm-lint.result == 'success' && (
         (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
         (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')

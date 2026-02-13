@@ -524,6 +524,7 @@ data:
     atlas.config.store.cassandra.consistency.level={{ .Values.atlas.configStore.cassandra.consistencyLevel }}
 
     ######### Delete Optimization Configs #########
+<<<<<<< HEAD
     # Batch GUID lookup for deleteByIds
     atlas.delete.batch.lookup.enabled={{ .Values.atlas.delete.batch_lookup_enabled }}
     atlas.delete.batch.lookup.size={{ .Values.atlas.delete.batch_lookup_size }}
@@ -538,4 +539,10 @@ data:
     # Slow query and large batch thresholds
     atlas.delete.slow.query.threshold.ms={{ .Values.atlas.delete.slow_query_threshold_ms }}
     atlas.delete.large.batch.threshold={{ .Values.atlas.delete.large_batch_threshold }}
+=======
+    # Batch sizes for various delete operations
+    atlas.delete.batch.lookup.size={{ .Values.atlas.delete.batch_lookup_size }}
+    atlas.delete.uniqueattr.batch.size={{ .Values.atlas.delete.uniqueattr_batch_size }}
+    atlas.delete.owned.batch.size={{ .Values.atlas.delete.owned_batch_size }}
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
 {{- end }}

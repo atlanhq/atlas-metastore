@@ -188,6 +188,7 @@ public enum AtlasConfiguration {
     TASK_HIGH_MEMORY_PAUSE_MS("atlas.tasks.high.memory.pause.ms", 2000),
     TASK_MAX_RETRY_ATTEMPTS("atlas.tasks.max.retry.attempts", 3),
 
+<<<<<<< HEAD
     // Batch Vertex Lookups (by GUID)
     DELETE_BATCH_LOOKUP_ENABLED("atlas.delete.batch.lookup.enabled", false),
     DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
@@ -207,6 +208,12 @@ public enum AtlasConfiguration {
     // Logging thresholds for delete operations
     DELETE_SLOW_QUERY_THRESHOLD_MS("atlas.delete.slow.query.threshold.ms", 1000),
     DELETE_LARGE_BATCH_THRESHOLD("atlas.delete.large.batch.threshold", 500);
+=======
+    // Batch sizes for various delete operations
+    DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
+    DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100);
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
 
     private static final Configuration APPLICATION_PROPERTIES;
 

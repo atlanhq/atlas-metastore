@@ -25,12 +25,21 @@ import org.junit.jupiter.api.Test;
 import static org.junit.jupiter.api.Assertions.*;
 
 /**
+<<<<<<< HEAD
  * Tests for deleteByIds batch lookup behavior.
  *
  * <h2>Behavior</h2>
  * <ul>
  * <li>When DELETE_BATCH_LOOKUP_ENABLED is OFF, single lookups are used</li>
  * <li>When DELETE_BATCH_LOOKUP_ENABLED is ON, batch lookups are used</li>
+=======
+ * Tests for delete batch operations configuration.
+ *
+ * <h2>Behavior</h2>
+ * <ul>
+ * <li>When DELETE_BATCH_OPERATIONS_ENABLED is OFF, single lookups are used</li>
+ * <li>When DELETE_BATCH_OPERATIONS_ENABLED is ON, batch lookups are used for all delete operations</li>
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
  * <li>When batch lookup fails, fallback to single lookups occurs</li>
  * </ul>
  */
@@ -48,10 +57,15 @@ class DeleteByIdsBatchLookupTest {
     }
 
     @Test
+<<<<<<< HEAD
     void testBatchLookupFlagDefaults() {
         // Verify default flag values
         assertFalse(AtlasConfiguration.DELETE_BATCH_LOOKUP_ENABLED.getBoolean(),
                 "DELETE_BATCH_LOOKUP_ENABLED should default to false");
+=======
+    void testBatchOperationsFlagDefaults() {
+        // Verify default flag values
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
         assertEquals(500, AtlasConfiguration.DELETE_BATCH_LOOKUP_SIZE.getInt(),
                 "DELETE_BATCH_LOOKUP_SIZE should default to 500");
     }

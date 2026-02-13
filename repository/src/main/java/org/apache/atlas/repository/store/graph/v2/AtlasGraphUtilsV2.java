@@ -573,7 +573,26 @@ public class AtlasGraphUtilsV2 {
             List<Integer> indices = groupEntry.getValue();
 
             if (indices.size() == 1) {
+<<<<<<< HEAD
                 // Single item, use existing method (no benefit from OR query)
+=======
+                // Single item — resolve individually (no benefit from OR query)
+                int idx = indices.get(0);
+                UniqueAttrLookupKey lookupKey = indexToLookupKey.get(idx);
+                AtlasEntityType entityType = typeRegistry.getEntityTypeByName(lookupKey.typeName);
+
+                if (entityType != null) {
+                    AtlasVertex vertex = findByUniqueAttributes(graph, entityType,
+                            objectIds.get(idx).getUniqueAttributes());
+                    if (vertex != null) {
+                        ret.put(idx, vertex);
+                        String guid = vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
+                        if (guid != null) {
+                            GraphTransactionInterceptor.addToVertexCache(guid, vertex);
+                        }
+                    }
+                }
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
                 continue;
             }
 
@@ -637,7 +656,12 @@ public class AtlasGraphUtilsV2 {
 
                     // Mark successfully processed indices
                     for (int idx : batchIndices) {
+<<<<<<< HEAD
                         if (ret.containsKey(idx) || lookupKeyToVertex.containsKey(indexToLookupKey.get(idx).lookupKeyString)) {
+=======
+                        UniqueAttrLookupKey lookupKey = indexToLookupKey.get(idx);
+                        if (lookupKey != null && (ret.containsKey(idx) || lookupKeyToVertex.containsKey(lookupKey.lookupKeyString))) {
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
                             indexToLookupKey.remove(idx); // Processed
                         }
                     }
@@ -645,7 +669,10 @@ public class AtlasGraphUtilsV2 {
                 } catch (Exception e) {
                     LOG.warn("findByUniqueAttributesBatch: OR query failed for group {} batch [{}-{}], will use fallback",
                             groupEntry.getKey(), batchStart, batchEnd, e);
+<<<<<<< HEAD
                     // Don't remove from indexToLookupKey - will be processed individually
+=======
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
                 }
             }
         }

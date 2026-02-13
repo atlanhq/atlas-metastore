@@ -186,6 +186,8 @@ public class EntityGraphMapper {
     private static final boolean RESTRICT_PROPAGATION_THROUGH_LINEAGE_DEFAULT        = false;
 
     private static final boolean RESTRICT_PROPAGATION_THROUGH_HIERARCHY_DEFAULT        = false;
+    private static final boolean REMOVE_PROPAGATIONS_ON_ENTITY_DELETE_DEFAULT         = true;
+
     public static final int CLEANUP_BATCH_SIZE = 200000;
     public static final String GUID = "__guid";
     private              boolean DEFERRED_ACTION_ENABLED                             = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
@@ -4775,13 +4777,9 @@ public class EntityGraphMapper {
         Tag currentTag = tagDAO.findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(entityVertex.getIdForDisplay(), classificationName, false);
         if (Objects.isNull(currentTag)) {
             LOG.error(AtlasErrorCode.CLASSIFICATION_NOT_FOUND.getFormattedErrorMessage(classificationName));
-                // Temporary fix for clearing dangling tag references are found. [Ticket: MS-402]
-            String playbookName = RequestContext.get().getPlaybookName();
-            if(StringUtils.isNotEmpty(playbookName)) {
-                addEsDeferredOperation(entityVertex, classificationName);
-                return;
-            }
-            throw new AtlasBaseException(AtlasErrorCode.CLASSIFICATION_NOT_FOUND, classificationName);// Returning from here  instead of throwing error to delete ES for dangling tag references are found.
+            // If a client is trying to delete this tag, it might be existing in ES but not in C*. Allow it to be cleaned in ES.
+            addEsDeferredOperation(entityVertex, classificationName);
+            return;
         }
 
         // Get in progress task to see if there already is a propagation for this particular vertex
@@ -5275,6 +5273,11 @@ public class EntityGraphMapper {
                     .filter(tag -> !(tag.getEntityGuid().equals(classification.getEntityGuid()) && tag.getTypeName().equals(classification.getTypeName())))
                     .collect(Collectors.toList());
             currentTags.add(classification);
+            // MS-594: normalize null propagation flags before storing to Cassandra.
+            // Without this, null flags are omitted from JSON (NON_NULL serialization)
+            // causing data inconsistency in the tag_meta_json column.
+            normalizeClassificationFlagsForUpdate(classification, currentClassification);
+
             // Update tag
             Map<String, Object> minAssetMap = getMinimalAssetMap(entityVertex);
             tagDAO.putDirectTag(entityVertex.getIdForDisplay(), classificationName, classification, minAssetMap);
@@ -5397,6 +5400,15 @@ public class EntityGraphMapper {
 
                 taskManagement.createTaskV2(propagationType, currentUser, taskParams, classification.getTypeName(), entityGuid);
             }
+
+            // MS-595: copy propagation flags from the request classification onto currentClassification
+            // so that the audit/notification receives the NEW values instead of stale ones.
+            // Cassandra is already updated via putDirectTag() above, but currentClassification
+            // was read before the update and still has the OLD flag values.
+            currentClassification.setPropagate(classification.isPropagate());
+            currentClassification.setRemovePropagationsOnEntityDelete(classification.getRemovePropagationsOnEntityDelete());
+            currentClassification.setRestrictPropagationThroughLineage(classification.getRestrictPropagationThroughLineage());
+            currentClassification.setRestrictPropagationThroughHierarchy(classification.getRestrictPropagationThroughHierarchy());
 
             updatedClassifications.add(currentClassification);
         }
@@ -7091,6 +7103,47 @@ public class EntityGraphMapper {
             LOG.debug("Error checking DynamicConfigStore for maintenance mode, falling back to static config", e);
         }
         return AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean();
+    }
+
+    /**
+     * MS-594: Normalize propagation flags on a classification before storing to Cassandra.
+     *
+     * <p>AtlasClassification uses {@code @JsonSerialize(include=NON_NULL)}, so any null
+     * Boolean field is omitted from the serialized JSON. When {@code putDirectTag} stores
+     * a classification with null propagation flags, the Cassandra {@code tag_meta_json}
+     * column will be missing those fields entirely — causing data inconsistency.</p>
+     *
+     * <p>For each null flag on {@code update}, this method copies the value from
+     * {@code current} (the existing tag in Cassandra). If {@code current} also has null
+     * (from tags stored before this fix), the system default is used.</p>
+     *
+     * @param update  the classification from the update request (may have null flags)
+     * @param current the current classification read from Cassandra (may also have null flags)
+     */
+    static void normalizeClassificationFlagsForUpdate(AtlasClassification update, AtlasClassification current) {
+        if (update.isPropagate() == null) {
+            update.setPropagate(current.isPropagate() != null
+                    ? current.isPropagate()
+                    : CLASSIFICATION_PROPAGATION_DEFAULT);
+        }
+
+        if (update.getRemovePropagationsOnEntityDelete() == null) {
+            update.setRemovePropagationsOnEntityDelete(current.getRemovePropagationsOnEntityDelete() != null
+                    ? current.getRemovePropagationsOnEntityDelete()
+                    : REMOVE_PROPAGATIONS_ON_ENTITY_DELETE_DEFAULT);
+        }
+
+        if (update.getRestrictPropagationThroughLineage() == null) {
+            update.setRestrictPropagationThroughLineage(current.getRestrictPropagationThroughLineage() != null
+                    ? current.getRestrictPropagationThroughLineage()
+                    : RESTRICT_PROPAGATION_THROUGH_LINEAGE_DEFAULT);
+        }
+
+        if (update.getRestrictPropagationThroughHierarchy() == null) {
+            update.setRestrictPropagationThroughHierarchy(current.getRestrictPropagationThroughHierarchy() != null
+                    ? current.getRestrictPropagationThroughHierarchy()
+                    : RESTRICT_PROPAGATION_THROUGH_HIERARCHY_DEFAULT);
+        }
     }
 
 }

@@ -29,10 +29,15 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <h2>Flag Behavior</h2>
  * <ul>
+<<<<<<< HEAD
  * <li>shadow=false, optimized=false: Original path (single findByGuid calls)</li>
  * <li>shadow=true, optimized=false: Shadow mode: run both, compare, log mismatches</li>
  * <li>shadow=false, optimized=true: Optimized path (batched findByGuids calls)</li>
  * <li>shadow=true, optimized=true: Optimized path (shadow ignored)</li>
+=======
+ * <li>DELETE_BATCH_OPERATIONS_ENABLED=false: Original path (single findByGuid calls)</li>
+ * <li>DELETE_BATCH_OPERATIONS_ENABLED=true: Optimized path (batched findByGuids calls)</li>
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
  * </ul>
  */
 class OwnedVerticesBatchLookupTest {
@@ -50,11 +55,15 @@ class OwnedVerticesBatchLookupTest {
 
     @Test
     void testFlagDefaults() {
+<<<<<<< HEAD
         // Verify default flag values are OFF (safe default)
         assertFalse(AtlasConfiguration.DELETE_OWNED_SHADOW_ENABLED.getBoolean(),
                 "DELETE_OWNED_SHADOW_ENABLED should default to false");
         assertFalse(AtlasConfiguration.DELETE_OWNED_OPTIMIZED_ENABLED.getBoolean(),
                 "DELETE_OWNED_OPTIMIZED_ENABLED should default to false");
+=======
+        // Verify default flag values
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
         assertEquals(100, AtlasConfiguration.DELETE_OWNED_BATCH_SIZE.getInt(),
                 "DELETE_OWNED_BATCH_SIZE should default to 100");
     }

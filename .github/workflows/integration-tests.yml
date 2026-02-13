@@ -26,6 +26,10 @@ on:
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
+<<<<<<< HEAD
+=======
+      - '.github/**'
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
       - 'docs/**'
       - 'helm/**'
       - 'local-dev/**'
@@ -40,7 +44,11 @@ permissions:
 jobs:
   integration-tests:
     runs-on: ubuntu-latest
+<<<<<<< HEAD
     timeout-minutes: 45
+=======
+    timeout-minutes: 30
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
 
     steps:
       # ============================================
@@ -98,7 +106,11 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           mvn test -pl webapp \
+<<<<<<< HEAD
             -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest" \
+=======
+            -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest" \
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
             -Drat.skip=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
             2>&1 | tee test-output.log

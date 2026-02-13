@@ -112,6 +112,7 @@ atlas:
     optimised_calculation: false
   # Delete Optimization Settings
   delete:
+<<<<<<< HEAD
     # Enable batch GUID lookups for deleteByIds (reduces N+1 queries)
     batch_lookup_enabled: false
     batch_lookup_size: 500
@@ -127,6 +128,12 @@ atlas:
     slow_query_threshold_ms: 1000
     # Large batch detection threshold
     large_batch_threshold: 500
+=======
+    # Batch sizes for various delete operations
+    batch_lookup_size: 500
+    uniqueattr_batch_size: 200
+    owned_batch_size: 100
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
   authorizer:
     enable_delta_based_refresh: true
     enable_abac: true
@@ -667,3 +674,4 @@ nginx:
 # client_body_timeout: - Time taken by the client to send the request body.
 # client_header_timeout: - Time taken by the client to send the request header.
 # keepalive_timeout: - This timeout applies to an idle client connection after Nginx has finished sending a response and is waiting for the next request on the same TCP connection.
+

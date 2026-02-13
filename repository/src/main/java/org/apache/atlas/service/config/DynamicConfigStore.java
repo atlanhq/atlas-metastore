@@ -438,6 +438,19 @@ public class DynamicConfigStore implements ApplicationContextAware {
         return FeatureFlagStore.evaluate(ConfigKey.USE_TEMP_ES_INDEX.getKey(), "true");
     }
 
+    /**
+     * Check if delete batch operations are enabled.
+     * Only enabled when DynamicConfigStore is activated and the flag is set to true.
+     *
+     * @return true if batch delete operations are enabled, false otherwise
+     */
+    public static boolean isDeleteBatchEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.DELETE_BATCH_ENABLED.getKey());
+        }
+        return false;
+    }
+
     // ================== Internal Methods ==================
 
     String getConfigInternal(String key) {
@@ -623,6 +636,16 @@ public class DynamicConfigStore implements ApplicationContextAware {
                 .description("Number of expected config keys defined in ConfigKey enum")
                 .register(meterRegistry);
 
+<<<<<<< HEAD
+=======
+        Gauge.builder("atlas_delete_batch_enabled",
+                        this,
+                        ref -> isDeleteBatchEnabled() ? 1.0 : 0.0)
+                .description("Whether delete batch optimization is enabled (1=enabled, 0=disabled)")
+                .tag("component", "delete")
+                .register(meterRegistry);
+
+>>>>>>> fdaa30df7d618be39a4c60b07f6b1272db0032e7
         // Per-flag gauges — allows Grafana dashboards per tenant per flag
         for (ConfigKey configKey : ConfigKey.values()) {
             final String flagKey = configKey.getKey();
