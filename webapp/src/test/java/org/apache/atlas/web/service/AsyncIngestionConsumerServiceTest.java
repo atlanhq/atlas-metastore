@@ -5,10 +5,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasClassification;
+import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
+import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
@@ -28,6 +30,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -46,6 +49,8 @@ class AsyncIngestionConsumerServiceTest {
     @Mock
     private EntityMutationService entityMutationService;
     @Mock
+    private AtlasEntityStore entitiesStore;
+    @Mock
     private AtlasTypeDefStore typeDefStore;
     @Mock
     private AtlasTypeRegistry typeRegistry;
@@ -54,7 +59,7 @@ class AsyncIngestionConsumerServiceTest {
 
     @BeforeEach
     void setUp() {
-        consumerService = new AsyncIngestionConsumerService(entityMutationService, typeDefStore, typeRegistry);
+        consumerService = new AsyncIngestionConsumerService(entityMutationService, entitiesStore, typeDefStore, typeRegistry);
         ReflectionTestUtils.setField(consumerService, "topic", "ATLAS_ASYNC_ENTITIES");
         ReflectionTestUtils.setField(consumerService, "consumerGroupId", "test_group");
         ReflectionTestUtils.setField(consumerService, "maxRetries", 3);
@@ -249,6 +254,60 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
+    // Sample #12: PARTIAL_UPDATE_BY_GUID
+    private static final String PARTIAL_UPDATE_BY_GUID_EVENT = """
+            {
+              "eventId": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+              "eventType": "PARTIAL_UPDATE_BY_GUID",
+              "eventTime": 1770888880970,
+              "requestMetadata": { "traceId": "trace-partial-update", "user": "admin" },
+              "operationMetadata": {},
+              "payload": { "guid": "guid-table-001", "attrName": "description", "attrValue": "updated description" }
+            }
+            """;
+
+    // Sample #13: UPDATE_BY_UNIQUE_ATTRIBUTES
+    private static final String UPDATE_BY_UNIQUE_ATTRIBUTES_EVENT = """
+            {
+              "eventId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
+              "eventType": "UPDATE_BY_UNIQUE_ATTRIBUTES",
+              "eventTime": 1770888880971,
+              "requestMetadata": { "traceId": "trace-update-uniq", "user": "admin" },
+              "operationMetadata": { "typeName": "Table", "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table1" } },
+              "payload": {
+                "entity": {
+                  "typeName": "Table",
+                  "attributes": { "qualifiedName": "default/snowflake/db1/schema1/table1", "name": "table1", "description": "updated via unique attrs" },
+                  "guid": "guid-table-001"
+                }
+              }
+            }
+            """;
+
+    // Sample #14: ADD_OR_UPDATE_BUSINESS_ATTRIBUTES
+    private static final String ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT = """
+            {
+              "eventId": "c3d4e5f6-a7b8-9012-cdef-123456789012",
+              "eventType": "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES",
+              "eventTime": 1770888880972,
+              "requestMetadata": { "traceId": "trace-bm-update", "user": "admin" },
+              "operationMetadata": { "isOverwrite": false },
+              "payload": { "guid": "guid-table-001", "businessAttributes": { "bmName": { "attr1": "val1", "attr2": "val2" } } }
+            }
+            """;
+
+    // Sample #15: ADD_LABELS
+    private static final String ADD_LABELS_EVENT = """
+            {
+              "eventId": "d4e5f6a7-b8c9-0123-defa-234567890123",
+              "eventType": "ADD_LABELS",
+              "eventTime": 1770888880973,
+              "requestMetadata": { "traceId": "trace-add-labels", "user": "admin" },
+              "operationMetadata": {},
+              "payload": { "guid": "guid-table-001", "labels": ["label1", "label2", "label3"] }
+            }
+            """;
+
     // ── Tests ────────────────────────────────────────────────────────────
 
     @Test
@@ -360,6 +419,77 @@ class AsyncIngestionConsumerServiceTest {
         assertEquals(2, guidsCaptor.getValue().size());
         assertTrue(guidsCaptor.getValue().contains("guid-table-001"));
         assertTrue(guidsCaptor.getValue().contains("guid-col-001"));
+    }
+
+    @Test
+    void testReplayPartialUpdateByGuid() throws Exception {
+        when(entitiesStore.updateEntityAttributeByGuid(anyString(), anyString(), any())).thenReturn(null);
+
+        processEvent(PARTIAL_UPDATE_BY_GUID_EVENT);
+
+        verify(entitiesStore).updateEntityAttributeByGuid("guid-table-001", "description", "updated description");
+    }
+
+    @Test
+    void testReplayUpdateByUniqueAttributes() throws Exception {
+        AtlasEntityType mockEntityType = mock(AtlasEntityType.class);
+        when(typeRegistry.getEntityTypeByName("Table")).thenReturn(mockEntityType);
+        when(entityMutationService.updateByUniqueAttributes(
+                any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class))).thenReturn(null);
+
+        processEvent(UPDATE_BY_UNIQUE_ATTRIBUTES_EVENT);
+
+        ArgumentCaptor<AtlasEntityType> typeCaptor = ArgumentCaptor.forClass(AtlasEntityType.class);
+        ArgumentCaptor<Map> attrsCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<AtlasEntity.AtlasEntityWithExtInfo> entityCaptor =
+                ArgumentCaptor.forClass(AtlasEntity.AtlasEntityWithExtInfo.class);
+        verify(entityMutationService).updateByUniqueAttributes(
+                typeCaptor.capture(), attrsCaptor.capture(), entityCaptor.capture());
+        assertSame(mockEntityType, typeCaptor.getValue());
+        assertEquals("default/snowflake/db1/schema1/table1", attrsCaptor.getValue().get("qualifiedName"));
+        assertNotNull(entityCaptor.getValue().getEntity());
+        assertEquals("Table", entityCaptor.getValue().getEntity().getTypeName());
+    }
+
+    @Test
+    void testReplayUpdateByUniqueAttributes_UnknownType() throws Exception {
+        when(typeRegistry.getEntityTypeByName("Table")).thenReturn(null);
+
+        assertThrows(Exception.class, () -> processEvent(UPDATE_BY_UNIQUE_ATTRIBUTES_EVENT));
+        verify(entityMutationService, never()).updateByUniqueAttributes(
+                any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class));
+    }
+
+    @Test
+    void testReplayAddOrUpdateBusinessAttributes() throws Exception {
+        doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
+
+        processEvent(ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map> bmCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Boolean> overwriteCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(entitiesStore).addOrUpdateBusinessAttributes(
+                guidCaptor.capture(), bmCaptor.capture(), overwriteCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertTrue(bmCaptor.getValue().containsKey("bmName"));
+        assertFalse(overwriteCaptor.getValue());
+    }
+
+    @Test
+    void testReplayAddLabels() throws Exception {
+        doNothing().when(entitiesStore).addLabels(anyString(), anySet());
+
+        processEvent(ADD_LABELS_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Set> labelsCaptor = ArgumentCaptor.forClass(Set.class);
+        verify(entitiesStore).addLabels(guidCaptor.capture(), labelsCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertEquals(3, labelsCaptor.getValue().size());
+        assertTrue(labelsCaptor.getValue().contains("label1"));
+        assertTrue(labelsCaptor.getValue().contains("label2"));
+        assertTrue(labelsCaptor.getValue().contains("label3"));
     }
 
     @Test
@@ -528,13 +658,13 @@ class AsyncIngestionConsumerServiceTest {
 
     @Test
     void testProcessAllEventTypes_EndToEnd() throws Exception {
-        // Read all 11 events from the payloads JSON fixture
+        // Read all 15 events from the payloads JSON fixture
         JsonNode events;
         try (java.io.InputStream is = getClass().getResourceAsStream("/async-ingestion-payloads.json")) {
             assertNotNull(is, "async-ingestion-payloads.json not found on classpath");
             events = MAPPER.readTree(is);
         }
-        assertEquals(11, events.size(), "Expected 11 events in payloads file");
+        assertEquals(15, events.size(), "Expected 15 events in payloads file");
 
         // Set up mocks for all event types
         when(entityMutationService.createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class)))
@@ -551,14 +681,20 @@ class AsyncIngestionConsumerServiceTest {
         when(typeDefStore.updateTypesDef(any(AtlasTypesDef.class))).thenReturn(null);
         doNothing().when(typeDefStore).deleteTypesDef(any(AtlasTypesDef.class));
         when(typeDefStore.deleteTypeByName(anyString())).thenReturn(null);
+        // New event type mocks
+        when(entitiesStore.updateEntityAttributeByGuid(anyString(), anyString(), any())).thenReturn(null);
+        when(entityMutationService.updateByUniqueAttributes(
+                any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class))).thenReturn(null);
+        doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
+        doNothing().when(entitiesStore).addLabels(anyString(), anySet());
 
-        // Process all 11 events sequentially (same order as published by fatgraph)
+        // Process all 15 events sequentially (same order as published by fatgraph)
         for (JsonNode event : events) {
             processEvent(MAPPER.writeValueAsString(event));
         }
 
         // Verify all downstream calls in order
-        InOrder inOrder = inOrder(entityMutationService, typeDefStore, typeRegistry);
+        InOrder inOrder = inOrder(entityMutationService, entitiesStore, typeDefStore, typeRegistry);
 
         // 1. BULK_CREATE_OR_UPDATE → createOrUpdate
         inOrder.verify(entityMutationService).createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class));
@@ -613,6 +749,20 @@ class AsyncIngestionConsumerServiceTest {
 
         // 11. TYPEDEF_DELETE_BY_NAME → deleteTypeByName("CustomTable")
         inOrder.verify(typeDefStore).deleteTypeByName("CustomTable");
+
+        // 12. PARTIAL_UPDATE_BY_GUID → updateEntityAttributeByGuid
+        inOrder.verify(entitiesStore).updateEntityAttributeByGuid("guid-table-001", "description", "updated description");
+
+        // 13. UPDATE_BY_UNIQUE_ATTRIBUTES → typeRegistry lookup + updateByUniqueAttributes
+        inOrder.verify(typeRegistry).getEntityTypeByName("Table");
+        inOrder.verify(entityMutationService).updateByUniqueAttributes(
+                eq(mockTableType), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class));
+
+        // 14. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES → addOrUpdateBusinessAttributes
+        inOrder.verify(entitiesStore).addOrUpdateBusinessAttributes(eq("guid-table-001"), anyMap(), eq(false));
+
+        // 15. ADD_LABELS → addLabels
+        inOrder.verify(entitiesStore).addLabels(eq("guid-table-001"), anySet());
 
         inOrder.verifyNoMoreInteractions();
     }

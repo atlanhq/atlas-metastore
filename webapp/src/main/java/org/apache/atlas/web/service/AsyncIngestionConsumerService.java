@@ -7,11 +7,13 @@ import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasClassification;
+import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
+import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
@@ -123,6 +125,7 @@ public class AsyncIngestionConsumerService {
 
     // ── Dependencies ─────────────────────────────────────────────────────
     private final EntityMutationService entityMutationService;
+    private final AtlasEntityStore entitiesStore;
     private final AtlasTypeDefStore typeDefStore;
     private final AtlasTypeRegistry typeRegistry;
 
@@ -157,9 +160,11 @@ public class AsyncIngestionConsumerService {
 
     @Inject
     public AsyncIngestionConsumerService(EntityMutationService entityMutationService,
+                                         AtlasEntityStore entitiesStore,
                                          AtlasTypeDefStore typeDefStore,
                                          AtlasTypeRegistry typeRegistry) {
         this.entityMutationService = entityMutationService;
+        this.entitiesStore = entitiesStore;
         this.typeDefStore = typeDefStore;
         this.typeRegistry = typeRegistry;
     }
@@ -489,6 +494,22 @@ public class AsyncIngestionConsumerService {
                 replayDeleteRelationships(payload);
                 break;
 
+            // ── Partial update mutations ─────────────────────────────
+            case "PARTIAL_UPDATE_BY_GUID":
+                replayPartialUpdateByGuid(payload, operationMetadata);
+                break;
+            case "UPDATE_BY_UNIQUE_ATTRIBUTES":
+                replayUpdateByUniqueAttributes(payload, operationMetadata);
+                break;
+
+            // ── Business metadata & labels ────────────────────────────
+            case "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES":
+                replayAddOrUpdateBusinessAttributes(payload, operationMetadata);
+                break;
+            case "ADD_LABELS":
+                replayAddLabels(payload);
+                break;
+
             // ── TypeDef mutations ────────────────────────────────────
             case "TYPEDEF_CREATE":
                 replayTypeDefCreate(payload);
@@ -656,6 +677,57 @@ public class AsyncIngestionConsumerService {
     private void replayDeleteRelationships(JsonNode payload) throws AtlasBaseException {
         List<String> guids = MAPPER.convertValue(payload.get("guids"), new TypeReference<List<String>>() {});
         entityMutationService.deleteRelationshipsByIds(guids);
+    }
+
+    // ── Partial Update & Attribute Replay Methods ─────────────────────────
+
+    /**
+     * PARTIAL_UPDATE_BY_GUID: payload = {"guid": "...", "attrName": "...", "attrValue": ...}
+     */
+    private void replayPartialUpdateByGuid(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        String guid = payload.get("guid").asText();
+        String attrName = payload.get("attrName").asText();
+        Object attrValue = MAPPER.convertValue(payload.get("attrValue"), Object.class);
+        entitiesStore.updateEntityAttributeByGuid(guid, attrName, attrValue);
+    }
+
+    /**
+     * UPDATE_BY_UNIQUE_ATTRIBUTES: payload = AtlasEntityWithExtInfo JSON
+     * operationMetadata = {"typeName": "Table", "uniqueAttributes": {"qualifiedName": "..."}}
+     */
+    private void replayUpdateByUniqueAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        String typeName = operationMetadata.get("typeName").asText();
+        Map<String, Object> uniqAttrs = MAPPER.convertValue(
+                operationMetadata.get("uniqueAttributes"), new TypeReference<Map<String, Object>>() {});
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        if (entityType == null) {
+            throw new AtlasBaseException("Unknown entity type: " + typeName);
+        }
+        AtlasEntity.AtlasEntityWithExtInfo entityInfo = AtlasType.fromJson(
+                payload.toString(), AtlasEntity.AtlasEntityWithExtInfo.class);
+        entityMutationService.updateByUniqueAttributes(entityType, uniqAttrs, entityInfo);
+    }
+
+    /**
+     * ADD_OR_UPDATE_BUSINESS_ATTRIBUTES: payload = {"guid": "...", "businessAttributes": {...}}
+     * operationMetadata = {"isOverwrite": false}
+     */
+    private void replayAddOrUpdateBusinessAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        String guid = payload.get("guid").asText();
+        Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(
+                payload.get("businessAttributes"), new TypeReference<Map<String, Map<String, Object>>>() {});
+        boolean isOverwrite = operationMetadata.path("isOverwrite").asBoolean(false);
+        entitiesStore.addOrUpdateBusinessAttributes(guid, bmAttrs, isOverwrite);
+    }
+
+    /**
+     * ADD_LABELS: payload = {"guid": "...", "labels": ["label1", "label2"]}
+     */
+    private void replayAddLabels(JsonNode payload) throws AtlasBaseException {
+        String guid = payload.get("guid").asText();
+        Set<String> labels = MAPPER.convertValue(
+                payload.get("labels"), new TypeReference<Set<String>>() {});
+        entitiesStore.addLabels(guid, labels);
     }
 
     // ── TypeDef Replay Methods ───────────────────────────────────────────
