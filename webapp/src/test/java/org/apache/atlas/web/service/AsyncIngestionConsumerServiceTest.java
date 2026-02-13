@@ -21,6 +21,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -521,6 +522,99 @@ class AsyncIngestionConsumerServiceTest {
         assertTrue(ctx.isReplaceBusinessAttributes());
         assertFalse(ctx.isOverwriteBusinessAttributes());
         // skipProcessEdgeRestoration is not a field on leangraph's BulkRequestContext — silently ignored
+    }
+
+    // ── End-to-End: Process All Event Types from JSON ──────────────────
+
+    @Test
+    void testProcessAllEventTypes_EndToEnd() throws Exception {
+        // Read all 11 events from the payloads JSON fixture
+        JsonNode events;
+        try (java.io.InputStream is = getClass().getResourceAsStream("/async-ingestion-payloads.json")) {
+            assertNotNull(is, "async-ingestion-payloads.json not found on classpath");
+            events = MAPPER.readTree(is);
+        }
+        assertEquals(11, events.size(), "Expected 11 events in payloads file");
+
+        // Set up mocks for all event types
+        when(entityMutationService.createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class)))
+                .thenReturn(null);
+        doNothing().when(entityMutationService).setClassifications(any(AtlasEntityHeaders.class), anyBoolean());
+        when(entityMutationService.deleteById(anyString())).thenReturn(null);
+        when(entityMutationService.deleteByIds(anyList())).thenReturn(null);
+        AtlasEntityType mockTableType = mock(AtlasEntityType.class);
+        when(typeRegistry.getEntityTypeByName("Table")).thenReturn(mockTableType);
+        when(entityMutationService.deleteByUniqueAttributes(any(AtlasEntityType.class), anyMap())).thenReturn(null);
+        when(entityMutationService.deleteByUniqueAttributes(anyList())).thenReturn(null);
+        when(entityMutationService.restoreByIds(anyList())).thenReturn(null);
+        when(typeDefStore.createTypesDef(any(AtlasTypesDef.class))).thenReturn(null);
+        when(typeDefStore.updateTypesDef(any(AtlasTypesDef.class))).thenReturn(null);
+        doNothing().when(typeDefStore).deleteTypesDef(any(AtlasTypesDef.class));
+        when(typeDefStore.deleteTypeByName(anyString())).thenReturn(null);
+
+        // Process all 11 events sequentially (same order as published by fatgraph)
+        for (JsonNode event : events) {
+            processEvent(MAPPER.writeValueAsString(event));
+        }
+
+        // Verify all downstream calls in order
+        InOrder inOrder = inOrder(entityMutationService, typeDefStore, typeRegistry);
+
+        // 1. BULK_CREATE_OR_UPDATE → createOrUpdate
+        inOrder.verify(entityMutationService).createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class));
+
+        // 2. SET_CLASSIFICATIONS → setClassifications (2 classifications across 2 entities, override=false)
+        ArgumentCaptor<AtlasEntityHeaders> headersCaptor = ArgumentCaptor.forClass(AtlasEntityHeaders.class);
+        inOrder.verify(entityMutationService).setClassifications(headersCaptor.capture(), eq(false));
+        assertEquals(2, headersCaptor.getValue().getGuidHeaderMap().size());
+
+        // 3. DELETE_BY_GUID → deleteById("guid-table-001")
+        inOrder.verify(entityMutationService).deleteById("guid-table-001");
+
+        // 4. DELETE_BY_GUIDS → deleteByIds (3 guids)
+        ArgumentCaptor<List<String>> deleteGuidsCaptor = ArgumentCaptor.forClass(List.class);
+        inOrder.verify(entityMutationService).deleteByIds(deleteGuidsCaptor.capture());
+        assertEquals(3, deleteGuidsCaptor.getValue().size());
+        assertTrue(deleteGuidsCaptor.getValue().containsAll(List.of("guid-table-001", "guid-col-001", "guid-col-002")));
+
+        // 5. DELETE_BY_UNIQUE_ATTRIBUTE → typeRegistry lookup + deleteByUniqueAttributes
+        inOrder.verify(typeRegistry).getEntityTypeByName("Table");
+        ArgumentCaptor<Map> uniqAttrsCaptor = ArgumentCaptor.forClass(Map.class);
+        inOrder.verify(entityMutationService).deleteByUniqueAttributes(eq(mockTableType), uniqAttrsCaptor.capture());
+        assertEquals("default/snowflake/db1/schema1/table1", uniqAttrsCaptor.getValue().get("qualifiedName"));
+
+        // 6. BULK_DELETE_BY_UNIQUE_ATTRIBUTES → deleteByUniqueAttributes(list of 2 objectIds)
+        ArgumentCaptor<List<AtlasObjectId>> objIdsCaptor = ArgumentCaptor.forClass(List.class);
+        inOrder.verify(entityMutationService).deleteByUniqueAttributes(objIdsCaptor.capture());
+        assertEquals(2, objIdsCaptor.getValue().size());
+
+        // 7. RESTORE_BY_GUIDS → restoreByIds (2 guids)
+        ArgumentCaptor<List<String>> restoreGuidsCaptor = ArgumentCaptor.forClass(List.class);
+        inOrder.verify(entityMutationService).restoreByIds(restoreGuidsCaptor.capture());
+        assertEquals(2, restoreGuidsCaptor.getValue().size());
+        assertTrue(restoreGuidsCaptor.getValue().containsAll(List.of("guid-table-001", "guid-col-001")));
+
+        // 8. TYPEDEF_CREATE → createTypesDef (1 classificationDef + 1 entityDef)
+        ArgumentCaptor<AtlasTypesDef> createTdCaptor = ArgumentCaptor.forClass(AtlasTypesDef.class);
+        inOrder.verify(typeDefStore).createTypesDef(createTdCaptor.capture());
+        assertEquals("CustomTable", createTdCaptor.getValue().getEntityDefs().get(0).getName());
+        assertEquals("SensitiveData", createTdCaptor.getValue().getClassificationDefs().get(0).getDisplayName());
+
+        // 9. TYPEDEF_UPDATE → updateTypesDef (CustomTable with 2 attributes)
+        ArgumentCaptor<AtlasTypesDef> updateTdCaptor = ArgumentCaptor.forClass(AtlasTypesDef.class);
+        inOrder.verify(typeDefStore).updateTypesDef(updateTdCaptor.capture());
+        assertEquals(2, updateTdCaptor.getValue().getEntityDefs().get(0).getAttributeDefs().size());
+
+        // 10. TYPEDEF_DELETE → deleteTypesDef
+        ArgumentCaptor<AtlasTypesDef> deleteTdCaptor = ArgumentCaptor.forClass(AtlasTypesDef.class);
+        inOrder.verify(typeDefStore).deleteTypesDef(deleteTdCaptor.capture());
+        assertFalse(deleteTdCaptor.getValue().getClassificationDefs().isEmpty());
+        assertFalse(deleteTdCaptor.getValue().getEntityDefs().isEmpty());
+
+        // 11. TYPEDEF_DELETE_BY_NAME → deleteTypeByName("CustomTable")
+        inOrder.verify(typeDefStore).deleteTypeByName("CustomTable");
+
+        inOrder.verifyNoMoreInteractions();
     }
 
     // ── DLQ Publishing Tests ─────────────────────────────────────────────
