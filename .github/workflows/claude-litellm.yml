@@ -26,12 +26,15 @@ jobs:
           fetch-depth: 0
 
       - name: Connect to VPN
+        env:
+          GP_PASSWORD: ${{ secrets.GLOBALPROTECT_PASSWORD }}
+          GP_USERNAME: ${{ secrets.GLOBALPROTECT_USERNAME }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
-          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+          printf '%s\n' "$GP_PASSWORD" | sudo openconnect \
             --protocol=gp \
-            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+            --user="$GP_USERNAME" \
             --passwd-on-stdin \
             --background \
             "vpnsec.atlan.app"
@@ -80,12 +83,15 @@ jobs:
           fetch-depth: 0
 
       - name: Connect to VPN
+        env:
+          GP_PASSWORD: ${{ secrets.GLOBALPROTECT_PASSWORD }}
+          GP_USERNAME: ${{ secrets.GLOBALPROTECT_USERNAME }}
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
-          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+          printf '%s\n' "$GP_PASSWORD" | sudo openconnect \
             --protocol=gp \
-            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+            --user="$GP_USERNAME" \
             --passwd-on-stdin \
             --background \
             "vpnsec.atlan.app"

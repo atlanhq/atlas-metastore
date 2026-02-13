@@ -202,5 +202,5 @@ Possible additions:
 - [ ] Full QA pipeline (`/claude-qa-pipeline` command)
 - [ ] Inline review comments (currently all in one comment)
 - [ ] Streaming responses for faster feedback
-- [ ] Retry logic for proxy failures
+- [x] Retry logic for proxy failures (implemented in `litellm_client.py`)
 - [ ] Cost/usage tracking metrics
