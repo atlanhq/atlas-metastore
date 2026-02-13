@@ -39,15 +39,15 @@ jobs:
         env:
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
         run: |
           python3 .github/scripts/claude_review.py \
             --pr-number ${{ github.event.pull_request.number }} \
-            --pr-title "${{ github.event.pull_request.title }}" \
-            --pr-author "${{ github.event.pull_request.user.login }}" \
+            --pr-title "$PR_TITLE" \
+            --pr-author "$PR_AUTHOR" \
             --repo "${{ github.repository }}" \
             --litellm-url "https://llmproxy.atlan.dev/v1" \
-            --litellm-key "$LITELLM_API_KEY" \
-            --github-token "$GITHUB_TOKEN" \
             --model "claude"
 
   # Job 2: Analyze test results after integration tests complete
@@ -116,20 +116,18 @@ jobs:
           run-id: ${{ github.event.workflow_run.id }}
         continue-on-error: true
 
-      - name: Parse test results
+      - name: Check for test results
         if: steps.pr.outputs.found == 'true'
         id: test-results
         run: |
-          if [ -f "test-results/TEST-"*.xml ] 2>/dev/null; then
-            # Find first JUnit XML file
-            JUNIT_XML=$(ls test-results/TEST-*.xml | head -1)
-            echo "junit_xml=$JUNIT_XML" >> $GITHUB_OUTPUT
+          if ls test-results/TEST-*.xml 1>/dev/null 2>&1; then
             echo "has_results=true" >> $GITHUB_OUTPUT
-            
-            # Extract test status
+
+            # Quick status check from first XML
+            JUNIT_XML=$(ls test-results/TEST-*.xml | head -1)
             FAILURES=$(grep -oP 'failures="\K[0-9]+' "$JUNIT_XML" | head -1 || echo "0")
             ERRORS=$(grep -oP 'errors="\K[0-9]+' "$JUNIT_XML" | head -1 || echo "0")
-            
+
             if [ $((FAILURES + ERRORS)) -gt 0 ]; then
               echo "status=failed" >> $GITHUB_OUTPUT
             else
@@ -139,15 +137,13 @@ jobs:
             echo "has_results=false" >> $GITHUB_OUTPUT
             echo "status=unknown" >> $GITHUB_OUTPUT
           fi
-          
+
           echo "workflow_conclusion=${{ github.event.workflow_run.conclusion }}" >> $GITHUB_OUTPUT
 
       - name: Get PR diff
         if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
-        id: diff
         run: |
           gh pr diff ${{ steps.pr.outputs.number }} > pr-diff.txt
-          echo "✅ PR diff saved"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -167,15 +163,15 @@ jobs:
         if: steps.pr.outputs.found == 'true' && steps.test-results.outputs.has_results == 'true'
         env:
           LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
+          PR_TITLE: ${{ steps.pr.outputs.title }}
         run: |
           python3 .github/scripts/test_analysis.py \
             --pr-number ${{ steps.pr.outputs.number }} \
-            --pr-title "${{ steps.pr.outputs.title }}" \
+            --pr-title "$PR_TITLE" \
             --test-status "${{ steps.test-results.outputs.status }}" \
-            --junit-xml "${{ steps.test-results.outputs.junit_xml }}" \
-            --pr-diff "$(cat pr-diff.txt)" \
+            --junit-dir test-results \
+            --pr-diff-file pr-diff.txt \
             --litellm-url "https://llmproxy.atlan.dev/v1" \
-            --litellm-key "$LITELLM_API_KEY" \
             --model "claude" \
             --output test-analysis.md
 

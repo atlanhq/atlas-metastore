@@ -44,7 +44,7 @@ gh secret set LITELLM_API_KEY --repo atlanhq/atlas-metastore
 # https://github.com/atlanhq/atlas-metastore/settings/secrets/actions
 ```
 
-**Value:** Your LiteLLM API key (e.g., `sk-W6qr_YpPtzp7Cv510IPCDQ`)
+**Value:** Your LiteLLM API key (e.g., `sk-...`)
 
 ### 2. Configure Model Name
 
@@ -105,7 +105,7 @@ python3 claude_review.py \
   --pr-author "hitk6" \
   --repo "atlanhq/atlas-metastore" \
   --litellm-url "https://llmproxy.atlan.dev/v1" \
-  --litellm-key "sk-W6qr_YpPtzp7Cv510IPCDQ" \
+  --litellm-key "sk-..." \
   --github-token "$GITHUB_TOKEN" \
   --model "claude"
 ```
@@ -120,7 +120,7 @@ python3 test_analysis.py \
   --junit-xml "path/to/TEST-results.xml" \
   --pr-diff "$(gh pr diff 6083)" \
   --litellm-url "https://llmproxy.atlan.dev/v1" \
-  --litellm-key "sk-W6qr_YpPtzp7Cv510IPCDQ" \
+  --litellm-key "sk-..." \
   --model "claude" \
   --output "-"  # stdout
 ```

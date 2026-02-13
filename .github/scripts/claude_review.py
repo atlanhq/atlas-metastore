@@ -11,42 +11,7 @@ import argparse
 import requests
 from typing import Optional, Dict, Any, List
 
-
-class LiteLLMClient:
-    """Client for LiteLLM proxy API"""
-    
-    def __init__(self, base_url: str, api_key: str, model: str = "claude"):
-        self.base_url = base_url.rstrip('/')
-        self.api_key = api_key
-        self.model = model
-        self.headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json"
-        }
-    
-    def chat(self, messages: List[Dict[str, str]], max_tokens: int = 4000, temperature: float = 0.1) -> str:
-        """Send chat completion request to LiteLLM proxy"""
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "max_tokens": max_tokens,
-            "temperature": temperature
-        }
-        
-        response = requests.post(
-            f"{self.base_url}/chat/completions",
-            headers=self.headers,
-            json=payload,
-            timeout=120
-        )
-        
-        if response.status_code != 200:
-            print(f"❌ Error: {response.status_code}")
-            print(f"Response: {response.text}")
-            raise Exception(f"LiteLLM API error: {response.status_code} - {response.text}")
-        
-        result = response.json()
-        return result["choices"][0]["message"]["content"]
+from litellm_client import LiteLLMClient
 
 
 class GitHubAPI:
@@ -64,11 +29,13 @@ class GitHubAPI:
     def get_pr_diff(self, pr_number: int) -> str:
         """Get PR diff"""
         import subprocess
+        env = {**os.environ, "GH_TOKEN": self.token}
         result = subprocess.run(
             ["gh", "pr", "diff", str(pr_number)],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
+            env=env
         )
         return result.stdout
     
@@ -261,15 +228,26 @@ def main():
     parser.add_argument("--pr-author", required=True, help="PR author")
     parser.add_argument("--repo", required=True, help="GitHub repository (owner/repo)")
     parser.add_argument("--litellm-url", default="https://llmproxy.atlan.dev/v1", help="LiteLLM base URL")
-    parser.add_argument("--litellm-key", required=True, help="LiteLLM API key")
-    parser.add_argument("--github-token", required=True, help="GitHub token")
+    parser.add_argument("--litellm-key", default=None, help="LiteLLM API key (or set LITELLM_API_KEY env var)")
+    parser.add_argument("--github-token", default=None, help="GitHub token (or set GITHUB_TOKEN env var)")
     parser.add_argument("--model", default="claude", help="Model name in LiteLLM")
-    
+
     args = parser.parse_args()
-    
+
+    # Resolve secrets from args or environment variables
+    litellm_key = args.litellm_key or os.environ.get("LITELLM_API_KEY")
+    github_token = args.github_token or os.environ.get("GITHUB_TOKEN")
+
+    if not litellm_key:
+        print("Error: LiteLLM API key required. Use --litellm-key or set LITELLM_API_KEY env var.")
+        sys.exit(1)
+    if not github_token:
+        print("Error: GitHub token required. Use --github-token or set GITHUB_TOKEN env var.")
+        sys.exit(1)
+
     # Initialize clients
-    llm_client = LiteLLMClient(args.litellm_url, args.litellm_key, args.model)
-    github_api = GitHubAPI(args.github_token, args.repo)
+    llm_client = LiteLLMClient(args.litellm_url, litellm_key, args.model)
+    github_api = GitHubAPI(github_token, args.repo)
     
     # Run review
     review_pr(
