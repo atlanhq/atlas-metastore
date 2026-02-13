@@ -32,21 +32,34 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
-          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
-            --protocol=gp \
-            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
-            --passwd-on-stdin \
-            --non-inter \
-            --background \
-            "vpnsec.atlan.app"
-          sleep 10
 
-          # Verify VPN is running
-          if ! pgrep -x openconnect > /dev/null; then
-            echo "ERROR: OpenConnect exited unexpectedly"
-            exit 1
-          fi
-          echo "VPN connected (PID: $(pgrep -x openconnect))"
+          MAX_RETRIES=3
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "VPN connection attempt $attempt/$MAX_RETRIES..."
+            sudo pkill -x openconnect 2>/dev/null || true
+            sleep 2
+
+            echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+              --protocol=gp \
+              --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+              --passwd-on-stdin \
+              --non-inter \
+              --background \
+              "vpnsec.atlan.app" && sleep 10
+
+            if pgrep -x openconnect > /dev/null; then
+              echo "VPN connected (PID: $(pgrep -x openconnect))"
+              break
+            fi
+
+            echo "Attempt $attempt failed."
+            if [ "$attempt" -eq "$MAX_RETRIES" ]; then
+              echo "ERROR: VPN connection failed after $MAX_RETRIES attempts"
+              exit 1
+            fi
+            echo "Retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -94,21 +107,34 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y openconnect
-          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
-            --protocol=gp \
-            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
-            --passwd-on-stdin \
-            --non-inter \
-            --background \
-            "vpnsec.atlan.app"
-          sleep 10
 
-          # Verify VPN is running
-          if ! pgrep -x openconnect > /dev/null; then
-            echo "ERROR: OpenConnect exited unexpectedly"
-            exit 1
-          fi
-          echo "VPN connected (PID: $(pgrep -x openconnect))"
+          MAX_RETRIES=3
+          for attempt in $(seq 1 $MAX_RETRIES); do
+            echo "VPN connection attempt $attempt/$MAX_RETRIES..."
+            sudo pkill -x openconnect 2>/dev/null || true
+            sleep 2
+
+            echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+              --protocol=gp \
+              --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+              --passwd-on-stdin \
+              --non-inter \
+              --background \
+              "vpnsec.atlan.app" && sleep 10
+
+            if pgrep -x openconnect > /dev/null; then
+              echo "VPN connected (PID: $(pgrep -x openconnect))"
+              break
+            fi
+
+            echo "Attempt $attempt failed."
+            if [ "$attempt" -eq "$MAX_RETRIES" ]; then
+              echo "ERROR: VPN connection failed after $MAX_RETRIES attempts"
+              exit 1
+            fi
+            echo "Retrying in $((attempt * 15))s..."
+            sleep $((attempt * 15))
+          done
 
       - name: Get PR number from workflow run
         id: pr
