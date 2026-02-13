@@ -17,7 +17,23 @@
  */
 package org.apache.atlas.repository.store.graph.v2;
 
+import com.fasterxml.jackson.databind.JsonNode;
+
 public class BulkRequestContext {
+
+    /**
+     * Reconstruct a BulkRequestContext from the operationMetadata JSON
+     * published by the fatgraph AsyncIngestionProducer.
+     */
+    public static BulkRequestContext fromOperationMetadata(JsonNode opMeta) {
+        return new Builder()
+                .setReplaceClassifications(opMeta.path("replaceClassifications").asBoolean(false))
+                .setReplaceTags(opMeta.path("replaceTags").asBoolean(false))
+                .setAppendTags(opMeta.path("appendTags").asBoolean(false))
+                .setReplaceBusinessAttributes(opMeta.path("replaceBusinessAttributes").asBoolean(false))
+                .setOverwriteBusinessAttributes(opMeta.path("overwriteBusinessAttributes").asBoolean(false))
+                .build();
+    }
     private boolean replaceClassifications;
     private boolean replaceTags;
     private boolean appendTags;
