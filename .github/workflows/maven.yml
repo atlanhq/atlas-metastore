@@ -27,6 +27,7 @@ on:
       - lite_master
       - alcon-v2-418
       - ring-*
+      - ms-574-make-apis-async
 
     paths-ignore:
       - '.claude/**'
