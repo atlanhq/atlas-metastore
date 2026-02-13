@@ -89,42 +89,44 @@ def analyze_tests(
         focus = "Analyze why tests failed and provide concrete fix suggestions."
 
     prompt = f"""You are analyzing integration test results for a PR in Apache Atlas Metastore.
+Keep your entire response under 60 lines. Be concise and scannable.
 
-## PR Information
-- **PR Number:** #{pr_number}
-- **Title:** {pr_title}
+## Context
+- **PR:** #{pr_number} — {pr_title}
 - **Test Status:** {test_status}
-
-## Test Results
-- **Total Tests:** {total}
-- **Passed:** {passed}
-- **Failed:** {failed}
-- **Skipped:** {skipped}
+- **Results:** {passed} passed, {failed} failed, {skipped} skipped (total: {total})
 
 ## Failed Tests
-{chr(10).join(failed_tests) if failed_tests else "None"}
+{chr(10).join(failed_tests[:20]) if failed_tests else "None"}
 
 ## PR Changes (Diff)
 ```diff
 {pr_diff[:10000]}
 ```
 
-## Your Task
+## Task
 {focus}
 
-Provide analysis in this format:
+## Output Format — STRICT
 
-### Test Results Summary
-[Brief overview of test status]
+### Results
+| Status | Count |
+|--------|-------|
+| ✅ Passed | {passed} |
+| ❌ Failed | {failed} |
+| ⏭️ Skipped | {skipped} |
 
 ### {'Root Cause Analysis' if failed > 0 else 'Coverage Assessment'}
-[Detailed analysis relating test results to PR changes]
+[Numbered list — each item: one failed test → probable cause → affected file:line from the diff]
+[If no failures: brief coverage assessment in 3-5 bullet points]
 
-### {'Recommended Fixes' if failed > 0 else 'Coverage Recommendations'}
-[Concrete suggestions with code examples if applicable]
+### {'Recommended Fixes' if failed > 0 else 'Recommendations'}
+[Numbered list — each item: one-line fix description with short code snippet (max 3 lines) if applicable]
+[If no failures: coverage gap recommendations in 2-3 bullet points]
 
-### Conclusion
-[Final assessment and next steps]
+### Verdict
+[One of: ✅ Tests look good | ⚠️ Minor gaps | ❌ Failures need attention]
+[One sentence summary of next steps]
 """
 
     messages = [{"role": "user", "content": prompt}]

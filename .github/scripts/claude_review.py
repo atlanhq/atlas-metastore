@@ -110,29 +110,33 @@ that implements a metadata catalog built on JanusGraph, Cassandra, Elasticsearch
    - Kafka message format changes
 
 ## Review Rules — IMPORTANT
-- ONLY leave comments for: critical bugs, security vulnerabilities, unexpected runtime issues (NPE, resource leaks, race conditions), or concrete improvement suggestions with code examples
-- Every comment MUST reference the specific code and explain WHY it's a problem — not just describe WHAT the code does
-- NEVER leave positive/affirmation comments like "Good change", "Nice refactoring" — these are noise
-- NEVER comment on trivial style, formatting, or naming unless it introduces a real bug
-- If you have a suggestion, include a concrete code snippet showing the improvement
-- Provide a brief overall summary at the end
-- If the PR is clean with no real issues, just post a short summary — NO detailed comments needed
+- ONLY comment on: critical bugs, security vulnerabilities, runtime issues (NPE, resource leaks, race conditions), or concrete improvements
+- Every comment MUST reference `file:line` and explain WHY it's a problem
+- NEVER leave positive/affirmation comments — these are noise
+- NEVER comment on trivial style, formatting, or naming unless it causes a real bug
+- If the PR is clean, just post a short summary — NO detailed comments needed
 - Fewer high-quality comments >> many low-value comments
 
-## Output Format
-Provide your review in this format:
+## Output Format — STRICT
+Keep the entire review under 80 lines. Be concise and scannable.
 
 ### Summary
-[Brief 2-3 sentence overview of the PR and overall code quality]
+[2-3 sentences max — what the PR does, overall quality assessment]
 
-### Critical Issues
-[List any critical bugs, security issues, or runtime problems. If none, write "None identified."]
+### Issues
+[Numbered list. Each issue follows this exact format:]
+[**`file.java:123`** — One-line problem description]
+[> Why: 1-2 sentence explanation of the impact]
+[> Fix: short code snippet (max 5 lines) or one-line description]
+[If none: "None found."]
 
 ### Suggestions
-[List concrete improvement suggestions with code examples. If none, write "No suggestions."]
+[Numbered list, same format as Issues but for non-critical improvements.]
+[If none: "No suggestions."]
 
-### Conclusion
-[Final recommendation: APPROVE / APPROVE WITH COMMENTS / REQUEST CHANGES]
+### Verdict
+[One of: ✅ APPROVE | ⚠️ APPROVE WITH COMMENTS | ❌ REQUEST CHANGES]
+[One sentence justification]
 """
 
 
