@@ -147,8 +147,12 @@ public class AtlasJanusGraph implements AtlasGraph<AtlasJanusVertex, AtlasJanusE
             Iterable<PropertyKey> keys = mgmt.getRelationTypes(PropertyKey.class);
 
             for (PropertyKey key : keys) {
-                if (key.cardinality() != Cardinality.SINGLE) {
-                    multiProperties.add(key.name());
+                try {
+                    if (key.cardinality() != Cardinality.SINGLE) {
+                        multiProperties.add(key.name());
+                    }
+                } catch (NullPointerException e) {
+                    LOG.warn("Skipping PropertyKey with corrupted schema (missing multiplicity): {}", key.name(), e);
                 }
             }
         } finally {
