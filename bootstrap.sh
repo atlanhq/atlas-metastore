@@ -31,9 +31,19 @@ if ! command -v gitleaks &> /dev/null; then
 
     if command -v brew &> /dev/null; then
         brew install gitleaks
+    elif [ "$(uname -s)" = "Linux" ]; then
+        GITLEAKS_VERSION=$(curl -s https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep '"tag_name"' | sed 's/.*"v\(.*\)".*/\1/')
+        ARCH=$(uname -m)
+        case "$ARCH" in
+            x86_64) ARCH="x64" ;;
+            aarch64|arm64) ARCH="arm64" ;;
+        esac
+        curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${ARCH}.tar.gz" | tar -xz -C /tmp
+        sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
+        echo "gitleaks ${GITLEAKS_VERSION} installed to /usr/local/bin/"
     else
-        echo "Error: brew not found."
-        echo "Please install gitleaks manually: https://github.com/gitleaks/gitleaks#installing"
+        echo "Error: Could not auto-install gitleaks."
+        echo "Please install manually: https://github.com/gitleaks/gitleaks#installing"
         exit 1
     fi
 fi

@@ -5,20 +5,11 @@ title = "Gitleaks config for Atlas Metastore"
 [extend]
 useDefault = true
 
+# Path-level ignores are managed in .gitleaksignore (fingerprint-based).
+# Only keep regex allowlists here for patterns that are safe across all files.
+
 [allowlist]
 description = "Allowlist for known safe patterns"
-paths = [
-    '''\.cursorrules$''',
-    '''README\.md$''',
-    '''CLAUDE\.md$''',
-    '''\.gitignore$''',
-    '''\.claude/config\.json$''',
-    '''addons/.*\.json$''',
-    '''\.pre-commit-config\.yaml$''',
-    '''bootstrap\.sh$''',
-]
-
-# Allow example/dummy values in documentation, configs, and test fixtures
 regexes = [
     '''example\.com''',
     '''your-key-here''',
