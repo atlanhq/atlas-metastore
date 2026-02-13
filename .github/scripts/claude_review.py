@@ -2,10 +2,13 @@
 """
 Claude PR Review Script using LiteLLM Proxy
 Posts inline review comments on PR code + a structured summary comment.
+The LLM outputs the review directly as human-readable markdown (not JSON).
+Inline comment data is embedded as a hidden HTML block at the end of the response.
 Shows live progress on the PR by editing a single comment as tasks complete.
 """
 
 import os
+import re
 import sys
 import json
 import time
@@ -15,6 +18,9 @@ import requests
 from typing import Optional, Dict, Any, List
 
 from litellm_client import LiteLLMClient
+
+# Delimiter used by the LLM to separate the visible markdown from inline comment data
+INLINE_COMMENTS_DELIMITER = "<!-- INLINE_COMMENTS_JSON"
 
 
 class GitHubAPI:
@@ -226,7 +232,7 @@ def build_diff_line_map(files: List[Dict[str, Any]]) -> Dict[str, Dict[int, int]
 
 
 # ---------------------------------------------------------------------------
-# Prompts
+# Prompt — LLM outputs markdown directly
 # ---------------------------------------------------------------------------
 
 SYSTEM_PROMPT = """You are a senior staff engineer doing a thorough code review for Apache Atlas
@@ -250,14 +256,15 @@ Categories to check:
 
 Rules:
 - ONLY flag real problems — never comment on style or formatting.
-- If the PR is clean, return empty arrays.
+- If the PR is clean, say so clearly — do not invent issues.
 - Quality over quantity."""
 
 
-def build_findings_prompt(pr_number: int, pr_title: str, pr_author: str,
-                          pr_description: str, file_list: List[str],
-                          diff: str) -> str:
-    return f"""Review this PR and return your findings as **pure JSON** (no markdown fences).
+def build_review_prompt(pr_number: int, pr_title: str, pr_author: str,
+                        pr_description: str, file_list: List[str],
+                        diff: str) -> str:
+    return f"""Review this PR and write your review directly as a **well-formatted GitHub markdown document**.
+Do NOT return JSON. Write the review as you would post it on GitHub — human-readable, with rich formatting.
 
 ## PR
 - **#{pr_number}** — {pr_title}
@@ -274,218 +281,204 @@ def build_findings_prompt(pr_number: int, pr_title: str, pr_author: str,
 {diff}
 ```
 
-## Response Schema — follow EXACTLY
+---
 
-{{
-  "summary": "<2-3 sentence overview of what the PR does and overall quality>",
-  "description_vs_code": "<1-2 sentences: does the PR description accurately reflect the actual code changes? Flag any mismatches, missing context, or misleading claims.>",
-  "verdict": "APPROVE | APPROVE_WITH_COMMENTS | REQUEST_CHANGES",
-  "verdict_reason": "<one sentence justification>",
-  "critical_findings": [
-    {{
-      "title": "<short descriptive title for this vulnerability/bug>",
-      "file": "<exact file path from changed files list>",
-      "line": <line number in the NEW file>,
-      "code_snippet": "<the exact vulnerable/buggy code — copy from the diff, 1-5 lines>",
-      "why_critical": "<2-3 sentences: what is wrong, what is the real-world impact>",
-      "exploit_example": "<1-2 sentences: how could this be misused or how does it fail>",
-      "duplicates": ["<file2:line>", "<file3:line>"],
-      "fixes": [
-        {{
-          "option": "<Option A / Option B / etc>",
-          "code": "<fixed code snippet>",
-          "explanation": "<1 sentence why this works>"
-        }}
-      ]
-    }}
-  ],
-  "security_findings": [
-    {{
-      "title": "<title>",
-      "file": "<file path>",
-      "line": <line>,
-      "code_snippet": "<vulnerable code>",
-      "description": "<what the security issue is and its impact>",
-      "duplicates": ["<file2:line>"],
-      "fix_code": "<fixed code>",
-      "fix_explanation": "<why this fixes it>"
-    }}
-  ],
-  "recommendations": [
-    {{
-      "title": "<title>",
-      "file": "<file path>",
-      "line": <line>,
-      "code_snippet": "<current code>",
-      "description": "<what could be improved and why>",
-      "suggested_code": "<improved code>",
-      "duplicates": ["<file2:line>"]
-    }}
-  ],
-  "optimisations": [
-    "<one-liner performance/quality improvement suggestion>"
-  ],
-  "next_steps": [
-    "<actionable next step for the PR author>"
-  ]
-}}
+## Output — write the ENTIRE review as markdown, following this EXACT structure:
 
-### Rules:
+# 🤖 Claude AI Code Review
+**PR #{pr_number}** — {pr_title}
+**Author:** @{pr_author}
+
+### ✅ Tasks Completed
+- [x] Fetch PR diff, description, and changed files
+- [x] Analyze code with Claude AI
+- [x] Post inline review comments
+- [x] Compile review summary
+
+---
+### 📋 Summary
+[2-3 sentence overview of what the PR does and overall quality]
+
+> **📝 PR Description Check:** [1-2 sentences: does the PR description accurately reflect the actual code changes? Flag mismatches, missing context, or misleading claims.]
+
+| Category | Count |
+|----------|-------|
+| 🔴 Critical | [N] |
+| 🔒 Security | [N] |
+| 💡 Recommendations | [N] |
+| **Total** | **[N]** |
+
+---
+### 🔴 Critical Findings
+
+[If none: "No critical issues found. ✅"]
+
+[For each finding, use this format:]
+
+#### [N]. [Short descriptive title]
+📍 **`file/path.java:line`**
+[If duplicated: ↳ Also present in: `file2:line`, `file3:line`]
+
+**Vulnerable code:**
+```java
+[exact code copied from the diff, 1-5 lines]
+```
+**Why this is critical:** [2-3 sentences: what is wrong, real-world impact]
+
+**Example of misuse:** [1-2 sentences: how this can be exploited or how it fails]
+
+**Required Fix:**
+
+<details><summary><b>Option A: [name]</b></summary>
+
+```java
+[fixed code]
+```
+[1 sentence why this works]
+
+</details>
+
+<details><summary><b>Option B: [name]</b></summary>
+
+```java
+[fixed code]
+```
+[1 sentence why this works]
+
+</details>
+
+---
+### 🔒 Security Issues & Fixes
+
+[If none: "No security issues found. ✅"]
+
+[For each finding:]
+
+#### [N]. [Title]
+📍 **`file/path.java:line`**
+[If duplicated: ↳ Also present in: `file2:line`]
+
+**Vulnerable code:**
+```java
+[exact code from diff]
+```
+**Issue:** [what the security issue is and its impact]
+
+**Fix:**
+```java
+[fixed code]
+```
+_[Why this fixes it]_
+
+---
+### 💡 Recommendations
+
+[If none: omit this entire section]
+
+[For each:]
+
+#### [N]. [Title]
+📍 **`file/path.java:line`**
+[If duplicated: ↳ Also in: `file2:line`]
+
+**Current code:**
+```java
+[current code from diff]
+```
+[What could be improved and why]
+
+**Suggested improvement:**
+```java
+[improved code]
+```
+
+---
+### ⚡ Optimisations
+
+[If none: omit this entire section]
+
+- [one-liner performance/quality improvement suggestion]
+- [...]
+
+---
+### [emoji] Verdict: **[APPROVE / APPROVE WITH COMMENTS / REQUEST CHANGES]**
+
+[One sentence justification]
+
+### 📌 Next Steps
+
+1. [actionable next step]
+2. [...]
+
+---
+*Powered by Claude via LiteLLM Proxy*
+
+---
+
+## CRITICAL — Inline Comments Block
+
+After the `*Powered by Claude via LiteLLM Proxy*` line, you MUST append a hidden HTML comment block
+containing JSON data for inline PR comments. This block is NOT displayed on GitHub but is parsed
+by the script to post inline comments on the actual code lines.
+
+Format — EXACTLY:
+```
+<!-- INLINE_COMMENTS_JSON
+[
+  {{
+    "file": "exact/file/path.java",
+    "line": 42,
+    "severity": "critical|security|recommendation",
+    "title": "Short title",
+    "comment": "Markdown body for the inline comment. Include the issue description and a suggested fix code block."
+  }}
+]
+-->
+```
+
+Rules for the inline comments block:
 - `file` must be an EXACT path from the changed files list.
 - `line` must exist in the NEW file (right side of diff, `+` or context lines).
-- `code_snippet` must be copied verbatim from the diff — do NOT paraphrase.
-- `duplicates` lists OTHER locations with the same issue (format: `file:line`). Empty array if unique.
-- For critical_findings, provide at least one fix option with working code.
-- Read the PR description carefully and validate it against the actual code changes.
+- `severity` must be one of: `critical`, `security`, `recommendation`.
+- `comment` is posted directly as an inline comment on the PR code — make it self-contained.
+  Include the issue + fix code block so the developer sees the full context on that line.
+- Every finding from Critical Findings, Security Issues, and Recommendations MUST have
+  a matching entry in this block.
 - Maximum: 5 critical, 5 security, 10 recommendations.
+- If the PR is clean with zero findings, output an empty array: `[]`
 """
 
 
 # ---------------------------------------------------------------------------
-# Markdown builder
+# Response parser — split markdown from inline comments
 # ---------------------------------------------------------------------------
 
-def build_summary_markdown(review_data: Dict, pr_number: int, pr_title: str,
-                           pr_author: str, inline_posted: int,
-                           inline_failed: int) -> str:
-    """Build the full review comment from structured JSON."""
+def parse_llm_response(raw_response: str):
+    """Split LLM response into visible markdown and inline comment data.
 
-    summary = review_data.get("summary", "No summary provided.")
-    desc_check = review_data.get("description_vs_code", "")
-    verdict = review_data.get("verdict", "APPROVE_WITH_COMMENTS")
-    verdict_reason = review_data.get("verdict_reason", "")
-    critical = review_data.get("critical_findings", [])
-    security = review_data.get("security_findings", [])
-    recs = review_data.get("recommendations", [])
-    optimisations = review_data.get("optimisations", [])
-    next_steps = review_data.get("next_steps", [])
+    Returns:
+        (markdown_body, inline_comments_list)
+    """
+    # Split at the hidden HTML comment delimiter
+    if INLINE_COMMENTS_DELIMITER in raw_response:
+        parts = raw_response.split(INLINE_COMMENTS_DELIMITER, 1)
+        markdown_body = parts[0].rstrip()
+        # Extract JSON from the HTML comment block: <!-- INLINE_COMMENTS_JSON [...] -->
+        json_block = parts[1]
+        # Remove closing -->
+        json_block = re.sub(r'-->\s*$', '', json_block).strip()
+        try:
+            inline_comments = json.loads(json_block)
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Warning: could not parse inline comments JSON: {e}")
+            print(f"Block (first 300): {json_block[:300]}")
+            inline_comments = []
+    else:
+        print("Warning: no INLINE_COMMENTS_JSON block found in LLM response.")
+        markdown_body = raw_response.strip()
+        inline_comments = []
 
-    verdict_emoji = {"APPROVE": "✅", "APPROVE_WITH_COMMENTS": "⚠️",
-                     "REQUEST_CHANGES": "❌"}.get(verdict, "ℹ️")
-
-    total = len(critical) + len(security) + len(recs)
-    L = []  # output lines
-
-    # ── Title ──
-    L.append(f"# 🤖 Claude AI Code Review")
-    L.append(f"**PR #{pr_number}** — {pr_title}  ")
-    L.append(f"**Author:** @{pr_author}\n")
-
-    # ── Tasks ──
-    L.append("### ✅ Tasks Completed")
-    L.append("- [x] Fetch PR diff, description, and changed files")
-    L.append("- [x] Analyze code with Claude AI")
-    L.append("- [x] Post inline review comments")
-    L.append("- [x] Compile review summary\n")
-
-    # ── Summary ──
-    L.append("---")
-    L.append("### 📋 Summary\n")
-    L.append(f"{summary}\n")
-
-    if desc_check:
-        L.append(f"> **📝 PR Description Check:** {desc_check}\n")
-
-    # ── Stats ──
-    L.append(f"| Category | Count |")
-    L.append(f"|----------|-------|")
-    L.append(f"| 🔴 Critical | {len(critical)} |")
-    L.append(f"| 🔒 Security | {len(security)} |")
-    L.append(f"| 💡 Recommendations | {len(recs)} |")
-    L.append(f"| **Total** | **{total}** |")
-    L.append("")
-    if inline_posted > 0:
-        L.append(f"> 💬 **{inline_posted}** inline comment(s) posted directly on code")
-    if inline_failed > 0:
-        L.append(f"> ⚠️ **{inline_failed}** comment(s) could not be posted inline — shown below")
-    L.append("")
-
-    # ── Critical Findings ──
-    L.append("---")
-    L.append("### 🔴 Critical Findings\n")
-    if not critical:
-        L.append("No critical issues found. ✅\n")
-    for i, f in enumerate(critical, 1):
-        L.append(f"#### {i}. {f.get('title', 'Issue')}")
-        L.append(f"📍 **`{f.get('file', '?')}:{f.get('line', '?')}`**")
-        dupes = f.get("duplicates", [])
-        if dupes:
-            L.append(f"↳ Also present in: {', '.join(f'`{d}`' for d in dupes)}")
-        L.append("")
-        L.append("**Vulnerable code:**")
-        L.append(f"```java\n{f.get('code_snippet', '')}\n```")
-        L.append(f"**Why this is critical:** {f.get('why_critical', '')}\n")
-        L.append(f"**Example of misuse:** {f.get('exploit_example', '')}\n")
-        fixes = f.get("fixes", [])
-        if fixes:
-            L.append("**Required Fix:**\n")
-            for fix in fixes:
-                L.append(f"<details><summary><b>{fix.get('option', 'Fix')}</b></summary>\n")
-                L.append(f"```java\n{fix.get('code', '')}\n```")
-                L.append(f"{fix.get('explanation', '')}\n")
-                L.append("</details>\n")
-        L.append("")
-
-    # ── Security Findings ──
-    L.append("---")
-    L.append("### 🔒 Security Issues & Fixes\n")
-    if not security:
-        L.append("No security issues found. ✅\n")
-    for i, f in enumerate(security, 1):
-        L.append(f"#### {i}. {f.get('title', 'Issue')}")
-        L.append(f"📍 **`{f.get('file', '?')}:{f.get('line', '?')}`**")
-        dupes = f.get("duplicates", [])
-        if dupes:
-            L.append(f"↳ Also present in: {', '.join(f'`{d}`' for d in dupes)}")
-        L.append("")
-        L.append("**Vulnerable code:**")
-        L.append(f"```java\n{f.get('code_snippet', '')}\n```")
-        L.append(f"**Issue:** {f.get('description', '')}\n")
-        L.append("**Fix:**")
-        L.append(f"```java\n{f.get('fix_code', '')}\n```")
-        L.append(f"_{f.get('fix_explanation', '')}_\n")
-
-    # ── Recommendations ──
-    if recs:
-        L.append("---")
-        L.append("### 💡 Recommendations\n")
-        for i, r in enumerate(recs, 1):
-            L.append(f"#### {i}. {r.get('title', 'Suggestion')}")
-            L.append(f"📍 **`{r.get('file', '?')}:{r.get('line', '?')}`**")
-            dupes = r.get("duplicates", [])
-            if dupes:
-                L.append(f"↳ Also in: {', '.join(f'`{d}`' for d in dupes)}")
-            L.append("")
-            L.append("**Current code:**")
-            L.append(f"```java\n{r.get('code_snippet', '')}\n```")
-            L.append(f"{r.get('description', '')}\n")
-            L.append("**Suggested improvement:**")
-            L.append(f"```java\n{r.get('suggested_code', '')}\n```\n")
-
-    # ── Optimisations ──
-    if optimisations:
-        L.append("---")
-        L.append("### ⚡ Optimisations\n")
-        for opt in optimisations:
-            L.append(f"- {opt}")
-        L.append("")
-
-    # ── Verdict ──
-    L.append("---")
-    L.append(f"### {verdict_emoji} Verdict: **{verdict.replace('_', ' ')}**\n")
-    L.append(f"{verdict_reason}\n")
-
-    # ── Next Steps ──
-    if next_steps:
-        L.append("### 📌 Next Steps\n")
-        for j, step in enumerate(next_steps, 1):
-            L.append(f"{j}. {step}")
-        L.append("")
-
-    L.append("---")
-    L.append("*Powered by Claude via LiteLLM Proxy*")
-
-    return "\n".join(L)
+    return markdown_body, inline_comments
 
 
 # ---------------------------------------------------------------------------
@@ -536,14 +529,14 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
     diff_line_map = build_diff_line_map(files)
     progress.complete_task(0, next_task=1)
 
-    # Task 1: Analyze with LLM
+    # Task 1: Analyze with LLM — returns markdown directly
     print("Analyzing PR with Claude via LiteLLM...")
-    findings_prompt = build_findings_prompt(
+    review_prompt = build_review_prompt(
         pr_number, pr_title, pr_author, pr_description, file_list, diff
     )
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": findings_prompt}
+        {"role": "user", "content": review_prompt}
     ]
 
     try:
@@ -552,26 +545,9 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
         progress.fail(f"LLM analysis failed: {e}")
         sys.exit(1)
 
-    # Parse JSON
-    try:
-        cleaned = raw_response.strip()
-        if cleaned.startswith("```"):
-            cleaned = cleaned.split("\n", 1)[1]
-            cleaned = cleaned.rsplit("```", 1)[0]
-        review_data = json.loads(cleaned)
-    except (json.JSONDecodeError, Exception) as e:
-        print(f"Failed to parse LLM JSON: {e}")
-        print(f"Raw (first 500): {raw_response[:500]}")
-        fallback = f"## 🤖 Claude AI Review\n\n{raw_response}\n\n---\n*Powered by Claude via LiteLLM Proxy*"
-        progress.finish(fallback)
-        return
-
-    all_findings = (
-        review_data.get("critical_findings", []) +
-        review_data.get("security_findings", []) +
-        review_data.get("recommendations", [])
-    )
-    print(f"LLM returned {len(all_findings)} finding(s), verdict: {review_data.get('verdict')}")
+    # Parse: split markdown body from hidden inline comments JSON
+    markdown_body, inline_comments = parse_llm_response(raw_response)
+    print(f"LLM returned {len(inline_comments)} inline comment(s)")
     progress.complete_task(1, next_task=2)
 
     # Task 2: Post inline comments
@@ -579,57 +555,39 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
     inline_failed = 0
     review_comments = []
 
-    if head_sha and all_findings:
-        for f in all_findings:
-            file_path = f.get("file", "")
-            line = f.get("line", 0)
+    if head_sha and inline_comments:
+        for ic in inline_comments:
+            file_path = ic.get("file", "")
+            line = ic.get("line", 0)
             position = diff_line_map.get(file_path, {}).get(line)
             if not position:
                 inline_failed += 1
                 continue
 
-            # Determine severity icon
-            if f in review_data.get("critical_findings", []):
-                sev_icon, sev_label = "🔴", "Critical"
-            elif f in review_data.get("security_findings", []):
-                sev_icon, sev_label = "🔒", "Security"
-            else:
-                sev_icon, sev_label = "💡", "Recommendation"
+            severity = ic.get("severity", "recommendation")
+            sev_icon = {"critical": "🔴", "security": "🔒"}.get(severity, "💡")
+            sev_label = {"critical": "Critical", "security": "Security"}.get(severity, "Recommendation")
 
-            body_parts = [f"{sev_icon} **{sev_label}: {f.get('title', 'Issue')}**\n"]
+            title = ic.get("title", "Issue")
+            comment_body = ic.get("comment", "")
 
-            desc = f.get("why_critical") or f.get("description") or ""
-            if desc:
-                body_parts.append(f"{desc}\n")
-
-            # Add fix code if available
-            fix_code = None
-            if "fixes" in f and f["fixes"]:
-                fix_code = f["fixes"][0].get("code", "")
-                fix_expl = f["fixes"][0].get("explanation", "")
-            elif "fix_code" in f:
-                fix_code = f.get("fix_code", "")
-                fix_expl = f.get("fix_explanation", "")
-            elif "suggested_code" in f:
-                fix_code = f.get("suggested_code", "")
-                fix_expl = ""
-
-            if fix_code:
-                body_parts.append(f"💡 **Suggested fix:**\n```java\n{fix_code}\n```")
-                if fix_expl:
-                    body_parts.append(f"_{fix_expl}_")
+            body = f"{sev_icon} **{sev_label}: {title}**\n\n{comment_body}"
 
             review_comments.append({
                 "path": file_path,
                 "position": position,
-                "body": "\n".join(body_parts)
+                "body": body
             })
 
         if review_comments:
             try:
-                verdict = review_data.get("verdict", "COMMENT")
-                event = {"APPROVE": "APPROVE",
-                         "REQUEST_CHANGES": "REQUEST_CHANGES"}.get(verdict, "COMMENT")
+                # Determine review event from the markdown verdict line
+                event = "COMMENT"
+                if "REQUEST CHANGES" in markdown_body.upper():
+                    event = "REQUEST_CHANGES"
+                elif "### ✅ Verdict" in markdown_body or "Verdict: **APPROVE**" in markdown_body:
+                    event = "APPROVE"
+
                 github_api.submit_review(
                     pr_number, head_sha, body="",
                     comments=review_comments, event=event
@@ -643,13 +601,27 @@ def review_pr(llm_client: LiteLLMClient, github_api: GitHubAPI,
 
     progress.complete_task(2, next_task=3)
 
-    # Task 3: Compile and post summary
-    print("Compiling review summary...")
-    summary_md = build_summary_markdown(
-        review_data, pr_number, pr_title, pr_author,
-        inline_posted, inline_failed
-    )
-    progress.finish(summary_md)
+    # Task 3: Post the review summary (the markdown body from the LLM)
+    print("Posting review summary...")
+
+    # Append inline comment stats if any were posted/failed
+    if inline_posted > 0 or inline_failed > 0:
+        stats_lines = []
+        if inline_posted > 0:
+            stats_lines.append(f"> 💬 **{inline_posted}** inline comment(s) posted directly on code")
+        if inline_failed > 0:
+            stats_lines.append(f"> ⚠️ **{inline_failed}** comment(s) could not be mapped to diff lines")
+        # Insert after the stats table (before the first ---)
+        insert_marker = "---\n### 🔴 Critical Findings"
+        if insert_marker in markdown_body:
+            markdown_body = markdown_body.replace(
+                insert_marker,
+                "\n".join(stats_lines) + "\n\n" + insert_marker
+            )
+        else:
+            markdown_body += "\n\n" + "\n".join(stats_lines)
+
+    progress.finish(markdown_body)
     print("Review posted successfully!")
 
 
