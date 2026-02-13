@@ -1,4 +1,3 @@
-#
 # Licensed to the Apache Software Foundation (ASF) under one
 # or more contributor license agreements.  See the NOTICE file
 # distributed with this work for additional information
@@ -14,11 +13,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-#
 
 mkdir -p ~/.m2/repository/org/keycloak
 
 wget  https://atlan-public.s3.eu-west-1.amazonaws.com/artifact/keycloak-15.0.2.1.zip
+
 unzip -o keycloak-15.0.2.1.zip -d ~/.m2/repository/org
 
 echo "Maven Building"
@@ -30,4 +29,3 @@ ls distro/target
 
 echo "[DEBUG] listing local directory"
 ls target
-
