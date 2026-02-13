@@ -30,4 +30,3 @@ ls distro/target
 
 echo "[DEBUG] listing local directory"
 ls target
-
