@@ -38,5 +38,6 @@
             <artifactId>atlas-client-common</artifactId>
             <version>${project.version}</version>
         </dependency>
+
     </dependencies>
 </project>

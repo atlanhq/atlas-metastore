@@ -19,7 +19,6 @@ package org.apache.atlas.plugin.util;
 import com.google.common.base.Splitter;
 import com.google.common.base.Strings;
 import com.google.common.collect.Lists;
-import com.sun.jersey.core.util.Base64;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -32,6 +31,7 @@ import javax.crypto.spec.PBEParameterSpec;
 import java.io.IOException;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.Map;
 
 public class PasswordUtils {
@@ -77,7 +77,7 @@ public class PasswordUtils {
             SecretKey key = skf.generateSecret(keySpec);
             engine.init(Cipher.ENCRYPT_MODE, key, new PBEParameterSpec(salt, iterationCount, new IvParameterSpec(iv)));
             byte[] encryptedStr = engine.doFinal(strToEncrypt.getBytes());
-            ret = new String(Base64.encode(encryptedStr));
+            ret = Base64.getEncoder().encodeToString(encryptedStr);
         }
         catch(Throwable t) {
             LOG.error("Unable to encrypt password due to error", t);
@@ -100,7 +100,7 @@ public class PasswordUtils {
 			SALT = crypt_algo_array[index++].getBytes(); // 2
 			iterationCount = Integer.parseInt(crypt_algo_array[index++]);// 3
 			if (needsIv(cryptAlgo)) {
-				iv = Base64.decode(crypt_algo_array[index++]);
+                    iv = Base64.getDecoder().decode(crypt_algo_array[index++]);
 			} else {
 				iv = DEFAULT_INITIAL_VECTOR;
 			}
@@ -140,7 +140,7 @@ public class PasswordUtils {
     private String decrypt() throws IOException {
         String ret = null;
         try {
-            byte[] decodedPassword = Base64.decode(password);
+            byte[] decodedPassword = Base64.getDecoder().decode(password);
             Cipher engine = Cipher.getInstance(cryptAlgo);
             PBEKeySpec keySpec = new PBEKeySpec(encryptKey);
             SecretKeyFactory skf = SecretKeyFactory.getInstance(cryptAlgo);
@@ -184,7 +184,7 @@ public class PasswordUtils {
 	private static String generateBase64EncodedIV() throws NoSuchAlgorithmException {
 		byte[] iv = new byte[16];
 		SecureRandom.getInstance("NativePRNGNonBlocking").nextBytes(iv);
-		return new String(Base64.encode(iv));
+		return Base64.getEncoder().encodeToString(iv);
 	}
 
 	public String getCryptAlgo() {
@@ -212,7 +212,7 @@ public class PasswordUtils {
 	}
 
 	public String getIvAsString() {
-		return new String(Base64.encode(getIv()));
+		return Base64.getEncoder().encodeToString(getIv());
 	}
 	public static String getDecryptPassword(String password) {
 		String decryptedPwd = null;

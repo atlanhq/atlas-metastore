@@ -3,15 +3,16 @@ package org.apache.atlas.web.filters;
 import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.springframework.stereotype.Component;
-import org.springframework.web.context.support.SpringBeanAutowiringSupport;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.context.WebApplicationContext;
+import org.springframework.web.context.support.WebApplicationContextUtils;
 
 import javax.inject.Inject;
-import javax.servlet.FilterChain;
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import javax.validation.constraints.NotNull;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 
 /**
@@ -23,8 +24,12 @@ public class MetricsFilter extends OncePerRequestFilter {
     @Inject
     private MetricUtils metricUtils;
 
-    public MetricsFilter() {
-        SpringBeanAutowiringSupport.processInjectionBasedOnCurrentContext(this);
+    @Override
+    protected void initFilterBean() throws ServletException {
+        WebApplicationContext ctx = WebApplicationContextUtils.findWebApplicationContext(getServletContext());
+        if (ctx != null) {
+            ctx.getAutowireCapableBeanFactory().autowireBean(this);
+        }
     }
 
     @Override

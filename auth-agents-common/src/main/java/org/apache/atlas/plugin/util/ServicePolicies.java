@@ -30,9 +30,9 @@ import org.apache.atlas.plugin.model.RangerServiceDef;
 import org.apache.atlas.plugin.policyengine.RangerPolicyEngine;
 import org.apache.atlas.plugin.policyengine.RangerPolicyEngineImpl;
 
-import javax.xml.bind.annotation.XmlAccessType;
-import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.bind.annotation.XmlRootElement;
+import jakarta.xml.bind.annotation.XmlAccessType;
+import jakarta.xml.bind.annotation.XmlAccessorType;
+import jakarta.xml.bind.annotation.XmlRootElement;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Date;

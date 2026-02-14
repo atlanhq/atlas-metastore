@@ -20,8 +20,8 @@ package org.apache.atlas.web.servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 public class AtlasErrorServlet  extends AtlasHttpServlet {
     public static final Logger LOG = LoggerFactory.getLogger(AtlasErrorServlet.class);

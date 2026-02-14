@@ -27,7 +27,7 @@ import org.apache.atlas.plugin.model.RangerValidityRecurrence;
 import org.apache.atlas.plugin.model.RangerValidityRecurrence.RecurrenceSchedule;
 import org.apache.atlas.plugin.model.RangerValiditySchedule;
 
-import javax.annotation.Nonnull;
+import jakarta.annotation.Nonnull;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;

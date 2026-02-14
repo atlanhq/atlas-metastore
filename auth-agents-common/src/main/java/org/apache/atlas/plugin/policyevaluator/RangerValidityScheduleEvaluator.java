@@ -31,7 +31,7 @@ import org.apache.atlas.plugin.resourcematcher.ScheduledTimeMatcher;
 import org.apache.atlas.plugin.resourcematcher.ScheduledTimeRangeMatcher;
 import org.apache.atlas.plugin.util.RangerPerfTracer;
 
-import javax.annotation.Nonnull;
+import jakarta.annotation.Nonnull;
 import java.text.DateFormat;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;

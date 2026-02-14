@@ -722,14 +722,12 @@
         <jackson.version>2.12.4</jackson.version>
         <janusgraph.version>1.0.4-atlan</janusgraph.version>
         <janusgraph.cassandra.version>0.5.3</janusgraph.cassandra.version>
-        <jaxb.api.version>2.3.1</jaxb.api.version>
+        <jaxb.api.version>4.0.2</jaxb.api.version>
         <javax-inject.version>1</javax-inject.version>
-        <javax.servlet.version>3.1.0</javax.servlet.version>
-        <jersey-spring.version>1.19.4</jersey-spring.version>
-        <jersey.version>1.19</jersey.version>
+        <jakarta.servlet.version>6.0.0</jakarta.servlet.version>
         <jettison.version>1.3.7</jettison.version>
         <jetty-maven-plugin.stopWait>10</jetty-maven-plugin.stopWait>
-        <jetty.version>9.4.33.v20201020</jetty.version>
+        <jetty.version>11.0.21</jetty.version>
         <joda-time.version>2.10.6</joda-time.version>
         <json.version>3.2.11</json.version>
         <jsr.version>1.1</jsr.version>
@@ -738,12 +736,12 @@
         <retrofit.version>2.9.0</retrofit.version>
         <kafka.scala.binary.version>2.12</kafka.scala.binary.version>
         <kafka.version>2.8.1</kafka.version>
-        <keycloak.version>15.0.2.1</keycloak.version>
+        <keycloak.version>22.0.5</keycloak.version>
         <owasp-html-sanitizer.version>20220608.1</owasp-html-sanitizer.version>
         <launch-darkly.version>6.0.5</launch-darkly.version>
         <logback.version>1.3.14</logback.version>
         <lombok.version>1.18.42</lombok.version>
-        <lucene-solr.version>8.8.2</lucene-solr.version>
+        <lucene-solr.version>8.11.3</lucene-solr.version>
         <maven-site-plugin.version>3.7</maven-site-plugin.version>
         <MaxPermGen>512m</MaxPermGen>
         <node-for-v2.version>v9.11.1</node-for-v2.version>
@@ -759,7 +757,7 @@
         <projectBaseDir>${project.basedir}</projectBaseDir>
         <skipCheck>false</skipCheck>
         <skipDocs>true</skipDocs>
-        <skipEnunciate>false</skipEnunciate>
+        <skipEnunciate>true</skipEnunciate>
         <skipITs>false</skipITs>
         <skipSite>true</skipSite>
         <skipTests>false</skipTests>
@@ -769,8 +767,8 @@
         <solr-test-framework.version>8.6.3</solr-test-framework.version>
         <solr.version>8.6.3</solr.version>
         <spray.version>1.3.1</spray.version>
-        <spring.security.version>5.5.1</spring.security.version>
-        <spring.version>5.3.18</spring.version>
+        <spring.security.version>6.3.4</spring.security.version>
+        <spring.version>6.1.14</spring.version>
         <sqoop.version>1.4.6.2.3.99.0-195</sqoop.version>
         <storm.version>2.3.0</storm.version>
         <surefire.forkCount>2C</surefire.forkCount>
@@ -912,8 +910,8 @@
 
             <dependency>
                 <groupId>org.glassfish</groupId>
-                <artifactId>javax.el</artifactId>
-                <version>3.0.0</version>
+                <artifactId>jakarta.el</artifactId>
+                <version>4.0.2</version>
             </dependency>
 
             <!-- Logging -->
@@ -932,8 +930,8 @@
             </dependency>
 
             <dependency>
-                <groupId>javax.xml.bind</groupId>
-                <artifactId>jaxb-api</artifactId>
+                <groupId>jakarta.xml.bind</groupId>
+                <artifactId>jakarta.xml.bind-api</artifactId>
                 <version>${jaxb.api.version}</version>
             </dependency>
 
@@ -1003,6 +1001,14 @@
                         <groupId>org.slf4j</groupId>
                         <artifactId>slf4j-reload4j</artifactId>
                     </exclusion>
+                    <exclusion>
+                        <groupId>com.sun.jersey</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>javax.ws.rs</groupId>
+                        <artifactId>jsr311-api</artifactId>
+                    </exclusion>
                 </exclusions>
             </dependency>
 
@@ -1030,6 +1036,14 @@
                     <exclusion>
                         <groupId>org.codehaus.jackson</groupId>
                         <artifactId>*</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>com.sun.jersey</groupId>
+                        <artifactId>*</artifactId>
+                    </exclusion>
+                    <exclusion>
+                        <groupId>javax.ws.rs</groupId>
+                        <artifactId>jsr311-api</artifactId>
                     </exclusion>
                 </exclusions>
             </dependency>
@@ -1178,70 +1192,10 @@
                 <version>${joda-time.version}</version>
             </dependency>
 
-            <!-- Jersey -->
             <dependency>
-                <groupId>com.sun.jersey</groupId>
-                <artifactId>jersey-client</artifactId>
-                <version>${jersey.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>com.sun.jersey</groupId>
-                <artifactId>jersey-server</artifactId>
-                <version>${jersey.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>com.sun.jersey</groupId>
-                <artifactId>jersey-core</artifactId>
-                <version>${jersey.version}</version>
-            </dependency>
-
-            <!-- Jersey + Spring -->
-            <dependency>
-                <groupId>com.sun.jersey.contribs</groupId>
-                <artifactId>jersey-spring</artifactId>
-                <version>${jersey-spring.version}</version>
-                <exclusions>
-                    <exclusion>
-                        <groupId>org.springframework</groupId>
-                        <artifactId>spring</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.springframework</groupId>
-                        <artifactId>spring-core</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.springframework</groupId>
-                        <artifactId>spring-web</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.springframework</groupId>
-                        <artifactId>spring-beans</artifactId>
-                    </exclusion>
-                    <exclusion>
-                        <groupId>org.springframework</groupId>
-                        <artifactId>spring-context</artifactId>
-                    </exclusion>
-                </exclusions>
-            </dependency>
-
-            <dependency>
-                <groupId>com.sun.jersey</groupId>
-                <artifactId>jersey-servlet</artifactId>
-                <version>${jersey.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>com.sun.jersey.contribs</groupId>
-                <artifactId>jersey-multipart</artifactId>
-                <version>${jersey.version}</version>
-            </dependency>
-
-            <dependency>
-                <groupId>javax.servlet.jsp</groupId>
-                <artifactId>jsp-api</artifactId>
-                <version>2.1</version>
+                <groupId>jakarta.servlet.jsp</groupId>
+                <artifactId>jakarta.servlet.jsp-api</artifactId>
+                <version>3.1.1</version>
             </dependency>
 
             <!-- JSON -->
@@ -1319,9 +1273,9 @@
             </dependency>
 
             <dependency>
-                <groupId>javax.servlet</groupId>
-                <artifactId>javax.servlet-api</artifactId>
-                <version>${javax.servlet.version}</version>
+                <groupId>jakarta.servlet</groupId>
+                <artifactId>jakarta.servlet-api</artifactId>
+                <version>${jakarta.servlet.version}</version>
             </dependency>
 
             <!--  atlas modules -->

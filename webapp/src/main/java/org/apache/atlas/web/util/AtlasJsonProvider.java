@@ -18,61 +18,33 @@
 
 package org.apache.atlas.web.util;
 
-import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
-import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider;
-import org.apache.atlas.web.errors.ExceptionMapperUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.ws.rs.Produces;
-import javax.ws.rs.WebApplicationException;
-import javax.ws.rs.core.Context;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.ext.Provider;
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.annotation.Annotation;
-import java.lang.reflect.Type;
+import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.ext.ContextResolver;
+import jakarta.ws.rs.ext.Provider;
 
 
 @Provider
 @Produces(MediaType.APPLICATION_JSON)
 @Component
-public class AtlasJsonProvider extends JacksonJaxbJsonProvider {
+public class AtlasJsonProvider implements ContextResolver<ObjectMapper> {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasJsonProvider.class);
 
-    private static final ObjectMapper mapper = new ObjectMapper()
-                                                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
-
-    @Context
-    private HttpServletRequest httpServletRequest;
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true);
 
     public AtlasJsonProvider() {
-        super(mapper, JacksonJaxbJsonProvider.DEFAULT_ANNOTATIONS);
-
         LOG.info("AtlasJsonProvider() instantiated");
     }
 
     @Override
-    public Object readFrom(Class<Object> type, Type genericType, Annotation[] annotations, MediaType mediaType,
-                           MultivaluedMap<String, String> httpHeaders, InputStream entityStream) throws IOException {
-        try {
-            return super.readFrom(type, genericType, annotations, mediaType, httpHeaders, entityStream);
-        } catch (JsonParseException jpe) {
-            LOG.error("Malformed json passed to server", jpe);
-            ExceptionMapperUtil.logRequestBodyOnError(httpServletRequest);
-            throw new WebApplicationException(Servlets.getErrorResponse(jpe.getMessage(), Response.Status.BAD_REQUEST));
-        } catch (JsonMappingException jme) {
-            LOG.error("Malformed json passed to server, incorrect data type used", jme);
-            ExceptionMapperUtil.logRequestBodyOnError(httpServletRequest);
-            throw new WebApplicationException(Servlets.getErrorResponse(jme.getMessage(), Response.Status.BAD_REQUEST));
-        }
+    public ObjectMapper getContext(Class<?> type) {
+        return MAPPER;
     }
 }

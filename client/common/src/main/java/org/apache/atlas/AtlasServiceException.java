@@ -18,23 +18,23 @@
 
 package org.apache.atlas;
 
-import com.sun.jersey.api.client.ClientResponse;
+import jakarta.ws.rs.core.Response;
 
 public class AtlasServiceException extends Exception {
-    private ClientResponse.Status status;
+    private Response.Status status;
 
     public AtlasServiceException(AtlasBaseClient.API api, Exception e) {
         super("Metadata service API " + api.getMethod() + " : " + api.getNormalizedPath() + " failed", e);
     }
 
-    private AtlasServiceException(AtlasBaseClient.API api, ClientResponse.Status status, String response) {
+    private AtlasServiceException(AtlasBaseClient.API api, Response.Status status, String response) {
         super("Metadata service API " + api + " failed with status " + (status != null ? status.getStatusCode() : -1)
                 + " (" + status + ") Response Body (" + response + ")");
         this.status = status;
     }
 
-    public AtlasServiceException(AtlasBaseClient.API api, ClientResponse response) {
-        this(api, ClientResponse.Status.fromStatusCode(response.getStatus()), response.getEntity(String.class));
+    public AtlasServiceException(AtlasBaseClient.API api, int statusCode, String response) {
+        this(api, Response.Status.fromStatusCode(statusCode), response);
     }
 
     public AtlasServiceException(Exception e) {
@@ -46,7 +46,7 @@ public class AtlasServiceException extends Exception {
         this.status = e.status;
     }
 
-    public ClientResponse.Status getStatus() {
+    public Response.Status getStatus() {
         return status;
     }
 }

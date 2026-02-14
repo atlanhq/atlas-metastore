@@ -43,15 +43,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.builders.WebSecurity;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.config.Customizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.authentication.session.RegisterSessionAuthenticationStrategy;
@@ -77,9 +79,9 @@ import static org.apache.atlas.AtlasConstants.ATLAS_MIGRATION_MODE_FILENAME;
 import static org.apache.atlas.web.filters.HeadersUtil.SERVER_KEY;
 
 @EnableWebSecurity
-@EnableGlobalMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity(prePostEnabled = true)
 @KeycloakConfiguration
-public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
+public class AtlasSecurityConfig {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasSecurityConfig.class);
 
     private final AtlasAuthenticationProvider authenticationProvider;
@@ -159,13 +161,8 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         return entryPoint;
     }
 
-    @Inject
-    protected void configure(AuthenticationManagerBuilder authenticationManagerBuilder) {
-        authenticationManagerBuilder.authenticationProvider(authenticationProvider);
-    }
-
-    @Override
-    public void configure(WebSecurity web) throws Exception {
+    @Bean
+    public WebSecurityCustomizer webSecurityCustomizer() {
         List<String> matchers = new ArrayList<>(
           Arrays.asList("/css/**","/n/css/**",
             "/img/**",
@@ -194,45 +191,46 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
             matchers.add("/login.jsp");
         }
 
-        web.ignoring()
-                .antMatchers(matchers.toArray(new String[matchers.size()]));
+        RequestMatcher[] antMatchers = matchers.stream()
+                .map(AntPathRequestMatcher::new)
+                .toArray(RequestMatcher[]::new);
+
+        return web -> web.ignoring().requestMatchers(antMatchers);
     }
 
-    protected void configure(HttpSecurity httpSecurity) throws Exception {
-        //@formatter:off
+    @Bean
+    protected SecurityFilterChain securityFilterChain(HttpSecurity httpSecurity, AuthenticationManager authenticationManager) throws Exception {
+        httpSecurity.authenticationProvider(authenticationProvider);
+
         httpSecurity
-                .authorizeRequests().anyRequest().authenticated()
-                .and()
-                    .headers()
-                .addHeaderWriter(new StaticHeadersWriter(HeadersUtil.CONTENT_SEC_POLICY_KEY, HeadersUtil.headerMap.get(HeadersUtil.CONTENT_SEC_POLICY_KEY)))
-                .addHeaderWriter(new StaticHeadersWriter(SERVER_KEY, HeadersUtil.headerMap.get(SERVER_KEY)))
-                        .and()
-                    .servletApi()
-                .and()
-                    .csrf().disable()
-                    .sessionManagement()
-                    .enableSessionUrlRewriting(false)
-                    .sessionCreationPolicy(SessionCreationPolicy.ALWAYS)
-                    .sessionFixation()
-                    .newSession()
-                .and()
-                .httpBasic()
-                .authenticationEntryPoint(getDelegatingAuthenticationEntryPoint())
-                .and()
-                    .formLogin()
+                .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
+                .headers(headers -> headers
+                        .addHeaderWriter(new StaticHeadersWriter(HeadersUtil.CONTENT_SEC_POLICY_KEY, HeadersUtil.headerMap.get(HeadersUtil.CONTENT_SEC_POLICY_KEY)))
+                        .addHeaderWriter(new StaticHeadersWriter(SERVER_KEY, HeadersUtil.headerMap.get(SERVER_KEY))))
+                .servletApi(Customizer.withDefaults())
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(session -> session
+                        .enableSessionUrlRewriting(false)
+                        .sessionCreationPolicy(SessionCreationPolicy.ALWAYS)
+                        .sessionFixation(sessionFixation -> sessionFixation.newSession()))
+                .httpBasic(httpBasic -> {
+                    try {
+                        httpBasic.authenticationEntryPoint(getDelegatingAuthenticationEntryPoint());
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                })
+                .formLogin(form -> form
                         .loginPage("/login.jsp")
                         .loginProcessingUrl("/j_spring_security_check")
                         .successHandler(successHandler)
                         .failureHandler(failureHandler)
                         .usernameParameter("j_username")
-                        .passwordParameter("j_password")
-                .and()
-                    .logout()
+                        .passwordParameter("j_password"))
+                .logout(logout -> logout
                         .logoutSuccessUrl("/login.jsp")
                         .deleteCookies("ATLASSESSIONID")
-                        .logoutUrl("/logout.html");
-
-        //@formatter:on
+                        .logoutUrl("/logout.html"));
 
         boolean configMigrationEnabled = !StringUtils.isEmpty(configuration.getString(ATLAS_MIGRATION_MODE_FILENAME));
         if (configMigrationEnabled) {
@@ -249,17 +247,24 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         httpSecurity
                 .addFilterAfter(staleTransactionCleanupFilter, BasicAuthenticationFilter.class)
                 .addFilterBefore(ssoAuthenticationFilter, BasicAuthenticationFilter.class)
-                .addFilterAfter(atlasAuthenticationFilter, SecurityContextHolderAwareRequestFilter.class)
-                .addFilterAfter(csrfPreventionFilter, AtlasAuthenticationFilter.class);
+                .addFilterAfter(csrfPreventionFilter, SecurityContextHolderAwareRequestFilter.class);
 
         if (keycloakEnabled) {
+            httpSecurity.logout(logout -> {
+                try {
+                    logout.addLogoutHandler(keycloakLogoutHandler());
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            });
             httpSecurity
-              .logout().addLogoutHandler(keycloakLogoutHandler()).and()
-              .addFilterBefore(keycloakAuthenticationProcessingFilter(), BasicAuthenticationFilter.class)
-              .addFilterBefore(keycloakPreAuthActionsFilter(), LogoutFilter.class)
-              .addFilterAfter(keycloakSecurityContextRequestFilter(), SecurityContextHolderAwareRequestFilter.class)
-              .addFilterAfter(keycloakAuthenticatedActionsRequestFilter(), KeycloakSecurityContextRequestFilter.class);
+                    .addFilterBefore(keycloakAuthenticationProcessingFilter(authenticationManager), BasicAuthenticationFilter.class)
+                    .addFilterBefore(keycloakPreAuthActionsFilter(), LogoutFilter.class)
+                    .addFilterAfter(keycloakSecurityContextRequestFilter(), SecurityContextHolderAwareRequestFilter.class)
+                    .addFilterAfter(keycloakAuthenticatedActionsRequestFilter(), KeycloakSecurityContextRequestFilter.class);
         }
+
+        return httpSecurity.build();
     }
 
 
@@ -323,9 +328,14 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
     }
 
     @Bean
-    protected KeycloakAuthenticationProcessingFilter keycloakAuthenticationProcessingFilter() throws Exception {
-        KeycloakAuthenticationProcessingFilter filter = new KeycloakAuthenticationProcessingFilter(authenticationManagerBean(), KEYCLOAK_REQUEST_MATCHER);
+    protected KeycloakAuthenticationProcessingFilter keycloakAuthenticationProcessingFilter(AuthenticationManager authenticationManager) throws Exception {
+        KeycloakAuthenticationProcessingFilter filter = new KeycloakAuthenticationProcessingFilter(authenticationManager, KEYCLOAK_REQUEST_MATCHER);
         filter.setSessionAuthenticationStrategy(sessionAuthenticationStrategy());
         return filter;
+    }
+
+    @Bean
+    protected AuthenticationManager authenticationManager(AuthenticationConfiguration authenticationConfiguration) throws Exception {
+        return authenticationConfiguration.getAuthenticationManager();
     }
 }

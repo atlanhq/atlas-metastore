@@ -20,13 +20,11 @@ package org.apache.atlas;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.google.common.annotations.VisibleForTesting;
-import com.sun.jersey.api.client.WebResource;
-import com.sun.jersey.core.header.FormDataContentDisposition;
-import com.sun.jersey.core.util.MultivaluedMapImpl;
-import com.sun.jersey.multipart.FormDataBodyPart;
-import com.sun.jersey.multipart.FormDataMultiPart;
-import com.sun.jersey.multipart.MultiPart;
-import com.sun.jersey.multipart.file.StreamDataBodyPart;
+import jakarta.ws.rs.client.WebTarget;
+import jakarta.ws.rs.core.MultivaluedHashMap;
+import org.glassfish.jersey.media.multipart.FormDataMultiPart;
+import org.glassfish.jersey.media.multipart.MultiPart;
+import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
 
 import org.apache.atlas.bulkimport.BulkImportResponse;
 import org.apache.atlas.model.SearchFilter;
@@ -71,11 +69,11 @@ import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.apache.hadoop.security.UserGroupInformation;
 
-import javax.ws.rs.HttpMethod;
-import javax.ws.rs.core.Cookie;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
+import jakarta.ws.rs.HttpMethod;
+import jakarta.ws.rs.core.Cookie;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -145,36 +143,36 @@ public class AtlasClientV2 extends AtlasBaseClient {
     public AtlasClientV2(UserGroupInformation ugi, String doAsUser, String... baseUrls) {
         super(ugi, doAsUser, baseUrls);
     }
-
-    /**
-     * Constructor for AtlasClient with cookie params as header
-     * @param baseUrl
-     * @param cookieName
-     * @param value
-     * @param path
-     * @param domain
-     */
-    public AtlasClientV2(String[] baseUrl, String cookieName, String value, String path, String domain) {
-        super(baseUrl, new Cookie(cookieName, value, path, domain));
-    }
-
-    /**
-     * Constructor for AtlasClient with cookie as header
-     * @param baseUrl
-     * @param cookie
-     */
-    public AtlasClientV2(String[] baseUrl, Cookie cookie) {
-        super(baseUrl, cookie);
-    }
+//
+//    /**
+//     * Constructor for AtlasClient with cookie params as header
+//     * @param baseUrl
+//     * @param cookieName
+//     * @param value
+//     * @param path
+//     * @param domain
+//     */
+//    public AtlasClientV2(String[] baseUrl, String cookieName, String value, String path, String domain) {
+//        super(baseUrl, new Cookie(cookieName, value, path, domain));
+//    }
+//
+//    /**
+//     * Constructor for AtlasClient with cookie as header
+//     * @param baseUrl
+//     * @param cookie
+//     */
+//    public AtlasClientV2(String[] baseUrl, Cookie cookie) {
+//        super(baseUrl, cookie);
+//    }
 
     public AtlasClientV2(Configuration configuration, String[] baseUrl, String[] basicAuthUserNamePassword) {
         super(configuration, baseUrl, basicAuthUserNamePassword);
     }
-
-    @VisibleForTesting
-    AtlasClientV2(WebResource service, Configuration configuration) {
-        super(service, configuration);
-    }
+//
+//    @VisibleForTesting
+//    AtlasClientV2(WebTarget service, Configuration configuration) {
+//        super(service, configuration);
+//    }
 
     /**
      * Bulk retrieval API for retrieving all type definitions in Atlas
@@ -355,7 +353,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasEntityWithExtInfo getEntityByGuid(String guid, boolean minExtInfo, boolean ignoreRelationships) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("minExtInfo", String.valueOf(minExtInfo));
         queryParams.add("ignoreRelationships", String.valueOf(ignoreRelationships));
@@ -381,7 +379,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasEntitiesWithExtInfo getEntitiesByGuids(List<String> guids, boolean minExtInfo, boolean ignoreRelationships) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.put("guid", guids);
         queryParams.add("minExtInfo", String.valueOf(minExtInfo));
@@ -414,7 +412,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<EntityAuditEventV2> getAuditEvents(String guid, String startKey, EntityAuditEventV2.EntityAuditActionV2 auditAction, short count) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("startKey", startKey);
 
@@ -450,7 +448,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public EntityMutationResponse partialUpdateEntityByGuid(String entityGuid, Object attrValue, String attrName) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("name", attrName);
 
@@ -534,7 +532,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasEntityHeaders getEntityHeaders(long tagUpdateStartTime) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("tagUpdateStartTime", Long.toString(tagUpdateStartTime));
 
@@ -544,7 +542,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
 
     // Business attributes APIs
     public void addOrUpdateBusinessAttributes(String entityGuid, boolean isOverwrite, Map<String, Map<String, Object>> businessAttributes) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("isOverwrite", String.valueOf(isOverwrite));
 
@@ -610,7 +608,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
 
     /* Lineage APIs  */
     public AtlasLineageInfo getLineageInfo(String guid, LineageDirection direction, int depth) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("direction", direction.toString());
         queryParams.add("depth", String.valueOf(depth));
@@ -630,7 +628,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
 
     /* Discovery APIs */
     public AtlasSearchResult dslSearch(String query) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add(QUERY, query);
 
@@ -638,7 +636,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasSearchResult dslSearchWithParams(String query, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add(QUERY, query);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -648,7 +646,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasSearchResult fullTextSearch(String query) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add(QUERY, query);
 
@@ -656,7 +654,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasSearchResult fullTextSearchWithParams(String query, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add(QUERY, query);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -689,7 +687,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasSearchResult attributeSearch(String typeName, String attrName, String attrValuePrefix, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("attrName", attrName);
         queryParams.add("attrValuePrefix", attrValuePrefix);
@@ -701,7 +699,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasSearchResult relationshipSearch(String guid, String relation, String sortByAttribute, SortOrder sortOrder, boolean excludeDeletedEntities, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("guid", guid);
         queryParams.add("relation", relation);
@@ -719,7 +717,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasQuickSearchResult quickSearch(String query, String typeName, boolean excludeDeletedEntities, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("query", query);
         queryParams.add("typeName", typeName);
@@ -736,7 +734,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
 
     // fieldName should be the parameter on which indexing is enabled such as "qualifiedName"
     public AtlasSuggestionsResult getSuggestions(String prefixString, String fieldName) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         if (StringUtils.isNotEmpty(prefixString)) {
             queryParams.add("prefixString", prefixString);
@@ -750,7 +748,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasUserSavedSearch> getSavedSearches(String userName) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("user", userName);
 
@@ -758,7 +756,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasUserSavedSearch getSavedSearch(String userName, String searchName) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("user", userName);
 
@@ -778,7 +776,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasSearchResult executeSavedSearch(String userName, String searchName) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("user", userName);
 
@@ -796,7 +794,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public AtlasRelationshipWithExtInfo getRelationshipByGuid(String guid, boolean extendedInfo) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("extendedInfo", String.valueOf(extendedInfo));
 
@@ -831,7 +829,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
 
     // Glossary APIs
     public List<AtlasGlossary> getAllGlossaries(String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("sort", sortByAttribute);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -853,7 +851,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasGlossaryTerm> getGlossaryTerms(String glossaryGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("glossaryGuid", glossaryGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -864,7 +862,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasRelatedTermHeader> getGlossaryTermHeaders(String glossaryGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("glossaryGuid", glossaryGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -879,7 +877,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasGlossaryCategory> getGlossaryCategories(String glossaryGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("glossaryGuid", glossaryGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -890,7 +888,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasRelatedCategoryHeader> getGlossaryCategoryHeaders(String glossaryGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("glossaryGuid", glossaryGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -901,7 +899,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasRelatedTermHeader> getCategoryTerms(String categoryGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("categoryGuid", categoryGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -912,7 +910,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public Map<AtlasGlossaryTerm.Relation, Set<AtlasRelatedTermHeader>> getRelatedTerms(String termGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("termGuid", termGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -923,7 +921,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public Map<String, List<AtlasRelatedCategoryHeader>> getRelatedCategories(String categoryGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add(LIMIT, String.valueOf(limit));
         queryParams.add(OFFSET, String.valueOf(offset));
@@ -989,7 +987,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     }
 
     public List<AtlasRelatedObjectId> getEntitiesAssignedWithTerm(String termGuid, String sortByAttribute, int limit, int offset) throws AtlasServiceException {
-        MultivaluedMap<String, String> queryParams = new MultivaluedMapImpl();
+        MultivaluedMap<String, String> queryParams = new MultivaluedHashMap<>();
 
         queryParams.add("termGuid", termGuid);
         queryParams.add(LIMIT, String.valueOf(limit));
@@ -1029,12 +1027,10 @@ public class AtlasClientV2 extends AtlasBaseClient {
 
     private MultiPart getMultiPartData(String fileName) throws AtlasServiceException {
         try {
-            File                             file        = new File(fileName);
-            InputStream                      inputStream = new FileInputStream(file);
-            final FormDataContentDisposition fd          = FormDataContentDisposition.name("file").fileName(file.getName()).build();
+            File        file        = new File(fileName);
+            InputStream inputStream = new FileInputStream(file);
 
-            return new FormDataMultiPart().bodyPart(new StreamDataBodyPart("file", inputStream))
-                                          .bodyPart(new FormDataBodyPart(fd, "file"));
+            return new FormDataMultiPart().bodyPart(new StreamDataBodyPart("file", inputStream, file.getName()));
         } catch (FileNotFoundException e) {
             throw new AtlasServiceException(e);
         }
@@ -1082,7 +1078,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     private MultivaluedMap<String, String> attributesToQueryParams(Map<String, String>            attributes,
                                                                    MultivaluedMap<String, String> queryParams) {
         if (queryParams == null) {
-            queryParams = new MultivaluedMapImpl();
+            queryParams = new MultivaluedHashMap<>();
         }
 
         if (MapUtils.isNotEmpty(attributes)) {
@@ -1097,7 +1093,7 @@ public class AtlasClientV2 extends AtlasBaseClient {
     private MultivaluedMap<String, String> attributesToQueryParams(List<Map<String, String>>      attributesList,
                                                                    MultivaluedMap<String, String> queryParams) {
         if (queryParams == null) {
-            queryParams = new MultivaluedMapImpl();
+            queryParams = new MultivaluedHashMap<>();
         }
 
         for (int i = 0; i < attributesList.size(); i++) {

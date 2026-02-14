@@ -2,7 +2,7 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import org.janusgraph.util.encoding.LongEncoding;
 
-import javax.annotation.Nonnull;
+import jakarta.annotation.Nonnull;
 import java.util.Objects;
 
 public final class JanusUtils {

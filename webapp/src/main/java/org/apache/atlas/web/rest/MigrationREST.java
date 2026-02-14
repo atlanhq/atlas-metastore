@@ -34,8 +34,8 @@ import org.apache.atlas.repository.migration.SoftDeletionProductMigrationService
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
-import javax.ws.rs.*;
-import javax.ws.rs.core.MediaType;
+import jakarta.ws.rs.*;
+import jakarta.ws.rs.core.MediaType;
 import java.util.*;
 import java.util.stream.Collectors;
 

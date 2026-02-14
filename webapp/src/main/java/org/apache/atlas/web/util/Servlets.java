@@ -21,7 +21,6 @@ package org.apache.atlas.web.util;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
-import org.apache.atlas.LocalServletRequest;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.ParamChecker;
@@ -34,9 +33,9 @@ import org.apache.http.client.utils.URLEncodedUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.servlet.http.HttpServletRequest;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.Response;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.io.StringWriter;
 import java.io.UnsupportedEncodingException;
@@ -161,17 +160,17 @@ public final class Servlets {
 
         return Response.status(status).entity(errorJson).type(JSON_MEDIA_TYPE).build();
     }
-
-    public static String getRequestPayload(HttpServletRequest request) throws IOException {
-        //request is an instance of LocalServletRequest for calls from LocalAtlasClient
-        if (request instanceof LocalServletRequest) {
-            return ((LocalServletRequest) request).getPayload();
-        }
-
-        StringWriter writer = new StringWriter();
-        IOUtils.copy(request.getInputStream(), writer);
-        return writer.toString();
-    }
+//
+//    public static String getRequestPayload(HttpServletRequest request) throws IOException {
+//        //request is an instance of LocalServletRequest for calls from LocalAtlasClient
+//        if (request instanceof LocalServletRequest) {
+//            return ((LocalServletRequest) request).getPayload();
+//        }
+//
+//        StringWriter writer = new StringWriter();
+//        IOUtils.copy(request.getInputStream(), writer);
+//        return writer.toString();
+//    }
 
     public static String getRequestId() {
         return Thread.currentThread().getName();

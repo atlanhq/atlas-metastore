@@ -26,9 +26,9 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.atlas.plugin.model.GroupInfo;
 import org.apache.atlas.plugin.model.UserInfo;
 
-import javax.xml.bind.annotation.XmlAccessType;
-import javax.xml.bind.annotation.XmlAccessorType;
-import javax.xml.bind.annotation.XmlRootElement;
+import jakarta.xml.bind.annotation.XmlAccessType;
+import jakarta.xml.bind.annotation.XmlAccessorType;
+import jakarta.xml.bind.annotation.XmlRootElement;
 import java.io.Serializable;
 import java.util.Date;
 import java.util.HashMap;

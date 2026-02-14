@@ -18,6 +18,10 @@
 
 package org.apache.atlas.web.errors;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.atlas.web.util.Servlets;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import jakarta.servlet.http.HttpServletRequest;
@@ -25,31 +29,25 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.ExceptionMapper;
 import jakarta.ws.rs.ext.Provider;
-import java.util.concurrent.ThreadLocalRandom;
 
-/**
- * Exception mapper for Jersey.
- * @param <E>
- */
 @Provider
 @Component
-public class AllExceptionMapper implements ExceptionMapper<Exception> {
+public class JacksonExceptionMapper implements ExceptionMapper<JsonProcessingException> {
+    private static final Logger LOG = LoggerFactory.getLogger(JacksonExceptionMapper.class);
 
     @Context
     private HttpServletRequest httpServletRequest;
 
     @Override
-    public Response toResponse(Exception exception) {
-        final long id = ThreadLocalRandom.current().nextLong();
-
-        // Log request body for bulk endpoints on error (reads from cached request)
+    public Response toResponse(JsonProcessingException exception) {
+        LOG.error("Malformed json passed to server", exception);
         ExceptionMapperUtil.logRequestBodyOnError(httpServletRequest);
 
-        // Log the exception
-        ExceptionMapperUtil.logException(exception);
-        return Response
-                .serverError()
-                .entity(ExceptionMapperUtil.formatErrorMessage(id, exception))
-                .build();
+        String message = exception.getOriginalMessage();
+        if (message == null || message.isEmpty()) {
+            message = exception.getMessage();
+        }
+
+        return Servlets.getErrorResponse(message, Response.Status.BAD_REQUEST);
     }
 }

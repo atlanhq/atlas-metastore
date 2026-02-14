@@ -21,22 +21,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.jaxrs.json.JacksonJaxbJsonProvider;
 import com.google.common.annotations.VisibleForTesting;
-import com.sun.jersey.api.client.Client;
-import com.sun.jersey.api.client.ClientHandlerException;
-import com.sun.jersey.api.client.ClientResponse;
-import com.sun.jersey.api.client.GenericType;
-import com.sun.jersey.api.client.WebResource;
-import com.sun.jersey.api.client.config.DefaultClientConfig;
-import com.sun.jersey.api.client.filter.HTTPBasicAuthFilter;
-import com.sun.jersey.api.json.JSONConfiguration;
-import com.sun.jersey.client.urlconnection.URLConnectionClientHandler;
-import com.sun.jersey.multipart.BodyPart;
-import com.sun.jersey.multipart.FormDataBodyPart;
-import com.sun.jersey.multipart.FormDataMultiPart;
-import com.sun.jersey.multipart.MultiPart;
-import com.sun.jersey.multipart.file.FileDataBodyPart;
-import com.sun.jersey.multipart.file.StreamDataBodyPart;
-import com.sun.jersey.multipart.impl.MultiPartWriter;
 import org.apache.atlas.model.impexp.AtlasExportRequest;
 import org.apache.atlas.model.impexp.AtlasImportRequest;
 import org.apache.atlas.model.impexp.AtlasImportResult;
@@ -49,16 +33,32 @@ import org.apache.atlas.utils.AuthenticationUtil;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
+import org.glassfish.jersey.client.ClientConfig;
+import org.glassfish.jersey.client.ClientProperties;
+import org.glassfish.jersey.client.authentication.HttpAuthenticationFeature;
+import org.glassfish.jersey.media.multipart.BodyPart;
+import org.glassfish.jersey.media.multipart.FormDataMultiPart;
+import org.glassfish.jersey.media.multipart.MultiPart;
+import org.glassfish.jersey.media.multipart.MultiPartFeature;
+import org.glassfish.jersey.media.multipart.file.FileDataBodyPart;
+import org.glassfish.jersey.media.multipart.file.StreamDataBodyPart;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.ws.rs.HttpMethod;
-import javax.ws.rs.core.Cookie;
-import javax.ws.rs.core.MediaType;
-import javax.ws.rs.core.MultivaluedMap;
-import javax.ws.rs.core.Response;
-import javax.ws.rs.core.UriBuilder;
+import jakarta.ws.rs.HttpMethod;
+import jakarta.ws.rs.ProcessingException;
+import jakarta.ws.rs.client.Client;
+import jakarta.ws.rs.client.ClientBuilder;
+import jakarta.ws.rs.client.Entity;
+import jakarta.ws.rs.client.Invocation;
+import jakarta.ws.rs.client.WebTarget;
+import jakarta.ws.rs.core.Cookie;
+import jakarta.ws.rs.core.GenericType;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
+import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriBuilder;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -105,14 +105,13 @@ public abstract class AtlasBaseClient {
     private static final String IMPORT_REQUEST_PARAMTER = "request";
     private static final String IMPORT_DATA_PARAMETER = "data";
 
-    protected WebResource service;
+    protected WebTarget service;
     protected Configuration configuration;
     private String basicAuthUser;
     private String basicAuthPassword;
     private AtlasClientContext atlasClientContext;
     private boolean retryEnabled = false;
     private Cookie cookie = null;
-
     private SecureClientUtils clientUtils;
 
     protected AtlasBaseClient() {
@@ -149,7 +148,7 @@ public abstract class AtlasBaseClient {
     }
 
     @VisibleForTesting
-    protected AtlasBaseClient(WebResource service, Configuration configuration) {
+    protected AtlasBaseClient(WebTarget service, Configuration configuration) {
         this.service = service;
         this.configuration = configuration;
     }
@@ -181,14 +180,14 @@ public abstract class AtlasBaseClient {
     }
 
     public boolean isServerReady() throws AtlasServiceException {
-        WebResource resource   = getResource(API_VERSION.getNormalizedPath());
+        WebTarget resource   = getResource(API_VERSION.getNormalizedPath());
         try {
             callAPIWithResource(API_VERSION, resource, null, ObjectNode.class);
             return true;
-        } catch (ClientHandlerException che) {
+        } catch (ProcessingException che) {
             return false;
         } catch (AtlasServiceException ase) {
-            if (ase.getStatus() != null && ase.getStatus().equals(ClientResponse.Status.SERVICE_UNAVAILABLE)) {
+            if (ase.getStatus() != null && ase.getStatus().equals(Response.Status.SERVICE_UNAVAILABLE)) {
                 LOG.warn("Received SERVICE_UNAVAILABLE, server is not yet ready");
                 return false;
             }
@@ -205,7 +204,7 @@ public abstract class AtlasBaseClient {
      */
     public String getAdminStatus() throws AtlasServiceException {
         String      result    = AtlasBaseClient.UNKNOWN_STATUS;
-        WebResource resource  = getResource(service, API_STATUS.getNormalizedPath());
+        WebTarget   resource  = getResource(service, API_STATUS.getNormalizedPath());
         ObjectNode  response  = callAPIWithResource(API_STATUS, resource, null, ObjectNode.class);
 
         if (response.has(STATUS)) {
@@ -235,19 +234,35 @@ public abstract class AtlasBaseClient {
 
     public <T> T callAPI(API api, Class<T> responseType, Object requestBody,
                          MultivaluedMap<String, String> queryParams, String... params) throws AtlasServiceException {
-        WebResource resource = getResource(api, queryParams, params);
+        WebTarget resource = getResource(api, queryParams, params);
         return callAPIWithResource(api, resource, requestBody, responseType);
+    }
+
+    public <T> T callAPI(API api, Class<T> responseType, Object requestBody,
+                         MultivaluedMap<String, String> queryParams) throws AtlasServiceException {
+        return callAPI(api, responseType, requestBody, queryParams, new String[0]);
+    }
+
+    public <T> T callAPI(API api, GenericType<T> responseType, Object requestBody,
+                         MultivaluedMap<String, String> queryParams, String... params) throws AtlasServiceException {
+        WebTarget resource = getResource(api, queryParams, params);
+        return callAPIWithResource(api, resource, requestBody, responseType);
+    }
+
+    public <T> T callAPI(API api, GenericType<T> responseType, Object requestBody,
+                         MultivaluedMap<String, String> queryParams) throws AtlasServiceException {
+        return callAPI(api, responseType, requestBody, queryParams, new String[0]);
     }
 
     public <T> T callAPI(API api, Class<T> responseType, MultivaluedMap<String, String> queryParams, String... params)
             throws AtlasServiceException {
-        WebResource resource = getResource(api, queryParams, params);
+        WebTarget resource = getResource(api, queryParams, params);
         return callAPIWithResource(api, resource, null, responseType);
     }
 
     public <T> T callAPI(API api, GenericType<T> responseType, MultivaluedMap<String, String> queryParams, String... params)
             throws AtlasServiceException {
-        WebResource resource = getResource(api, queryParams, params);
+        WebTarget resource = getResource(api, queryParams, params);
         return callAPIWithResource(api, resource, null, responseType);
     }
 
@@ -263,46 +278,40 @@ public abstract class AtlasBaseClient {
 
     @VisibleForTesting
     protected Client getClient(Configuration configuration, UserGroupInformation ugi, String doAsUser) {
-        DefaultClientConfig config = new DefaultClientConfig();
-        // Enable POJO mapping feature
-        config.getFeatures().put(JSONConfiguration.FEATURE_POJO_MAPPING, Boolean.TRUE);
-        config.getClasses().add(JacksonJaxbJsonProvider.class);
-        config.getClasses().add(MultiPartWriter.class);
-
         int readTimeout = configuration.getInt("atlas.client.readTimeoutMSecs", 60000);
         int connectTimeout = configuration.getInt("atlas.client.connectTimeoutMSecs", 60000);
         if (configuration.getBoolean(TLS_ENABLED, false)) {
-            // create an SSL properties configuration if one doesn't exist.  SSLFactory expects a file, so forced
-            // to create a
-            // configuration object, persist it, then subsequently pass in an empty configuration to SSLFactory
             try {
-                SecureClientUtils.persistSSLClientConfiguration(configuration, System.getProperty("atlas.conf") );
+                SecureClientUtils.persistSSLClientConfiguration(configuration, System.getProperty("atlas.conf"));
             } catch (Exception e) {
                 LOG.info("Error processing client configuration.", e);
             }
         }
 
-        final URLConnectionClientHandler handler;
         clientUtils = new SecureClientUtils();
 
-        boolean isKerberosEnabled = AuthenticationUtil.isKerberosAuthenticationEnabled(ugi);
-
-        if (isKerberosEnabled) {
-            handler = clientUtils.getClientConnectionHandler(config, configuration, doAsUser, ugi);
+        final ClientConfig config;
+        if (AuthenticationUtil.isKerberosAuthenticationEnabled(ugi)) {
+            config = clientUtils.getClientConfig(configuration, doAsUser, ugi);
+        } else if (configuration.getBoolean(TLS_ENABLED, false)) {
+            config = clientUtils.getUrlConnectionClientConfig();
         } else {
-            if (configuration.getBoolean(TLS_ENABLED, false)) {
-                handler = clientUtils.getUrlConnectionClientHandler();
-            } else {
-                handler = new URLConnectionClientHandler();
-            }
+            config = new ClientConfig();
         }
-        Client client = new Client(handler, config);
-        client.setReadTimeout(readTimeout);
-        client.setConnectTimeout(connectTimeout);
-        return client;
+
+        config.property(ClientProperties.READ_TIMEOUT, readTimeout)
+                .property(ClientProperties.CONNECT_TIMEOUT, connectTimeout);
+
+        config.register(JacksonJaxbJsonProvider.class);
+        config.register(MultiPartFeature.class);
+
+        return ClientBuilder.newClient(config);
     }
 
     public void close() {
+        if (atlasClientContext != null && atlasClientContext.getClient() != null) {
+            atlasClientContext.getClient().close();
+        }
         if (clientUtils != null) {
             clientUtils.destroyFactory();
         }
@@ -340,20 +349,20 @@ public abstract class AtlasBaseClient {
         return configuration;
     }
 
-    protected WebResource getResource(String path, String... pathParams) {
+    protected WebTarget getResource(String path, String... pathParams) {
         return getResource(service, path, pathParams);
     }
 
-    protected <T> T callAPIWithResource(API api, WebResource resource, Object requestObject, Class<T> responseType) throws AtlasServiceException {
-        GenericType<T> genericType = null;
-        if (responseType != null) {
-            genericType = new GenericType<>(responseType);
-        }
-        return callAPIWithResource(api, resource, requestObject, genericType);
+    protected <T> T callAPIWithResource(API api, WebTarget resource, Object requestObject, Class<T> responseType) throws AtlasServiceException {
+        return callAPIWithResourceInternal(api, resource, requestObject, responseType, null);
     }
 
-    protected <T> T callAPIWithResource(API api, WebResource resource, Object requestObject, GenericType<T> responseType) throws AtlasServiceException {
-        ClientResponse clientResponse = null;
+    protected <T> T callAPIWithResource(API api, WebTarget resource, Object requestObject, GenericType<T> responseType) throws AtlasServiceException {
+        return callAPIWithResourceInternal(api, resource, requestObject, null, responseType);
+    }
+
+    private <T> T callAPIWithResourceInternal(API api, WebTarget resource, Object requestObject, Class<T> classResponseType, GenericType<T> genericResponseType) throws AtlasServiceException {
+        Response clientResponse = null;
         int i = 0;
         do {
             if (LOG.isDebugEnabled()) {
@@ -366,12 +375,11 @@ public abstract class AtlasBaseClient {
                 }
             }
 
-            WebResource.Builder requestBuilder = resource.getRequestBuilder();
+            Invocation.Builder requestBuilder = resource.request();
 
             // Set content headers
             requestBuilder
                     .accept(api.getProduces())
-                    .type(api.getConsumes())
                     .header("Expect", "100-continue");
 
             // Set cookie if present
@@ -379,7 +387,11 @@ public abstract class AtlasBaseClient {
                 requestBuilder.cookie(cookie);
             }
 
-            clientResponse = requestBuilder.method(api.getMethod(), ClientResponse.class, requestObject);
+            if (requestObject != null) {
+                clientResponse = requestBuilder.method(api.getMethod(), Entity.entity(requestObject, api.getConsumes()));
+            } else {
+                clientResponse = requestBuilder.method(api.getMethod());
+            }
 
             LOG.debug("HTTP Status  : {}", clientResponse.getStatus());
 
@@ -389,56 +401,66 @@ public abstract class AtlasBaseClient {
             }
 
             if (clientResponse.getStatus() == api.getExpectedStatus().getStatusCode()) {
-                if (responseType == null) {
+                if (classResponseType == null && genericResponseType == null) {
+                    clientResponse.close();
                     return null;
                 }
                 try {
-                    if(api.getProduces().equals(MediaType.APPLICATION_OCTET_STREAM)) {
-                        return (T) clientResponse.getEntityInputStream();
-                    } else if (responseType.getRawClass().equals(ObjectNode.class)) {
-                        String stringEntity = clientResponse.getEntity(String.class);
+                    if (api.getProduces().equals(MediaType.APPLICATION_OCTET_STREAM)) {
+                        return (T) clientResponse.readEntity(InputStream.class);
+                    } else if (ObjectNode.class.equals(classResponseType)) {
+                        String stringEntity = clientResponse.readEntity(String.class);
                         try {
                             JsonNode jsonObject = AtlasJson.parseToV1JsonNode(stringEntity);
                             LOG.debug("Response     : {}", jsonObject);
                             LOG.debug("------------------------------------------------------");
+                            clientResponse.close();
                             return (T) jsonObject;
                         } catch (IOException e) {
                             throw new AtlasServiceException(api, e);
                         }
                     } else {
-                        T entity = clientResponse.getEntity(responseType);
+                        T entity = classResponseType != null ? clientResponse.readEntity(classResponseType)
+                                : clientResponse.readEntity(genericResponseType);
                         LOG.debug("Response     : {}", entity);
                         LOG.debug("------------------------------------------------------");
+                        clientResponse.close();
                         return entity;
                     }
-                } catch (ClientHandlerException e) {
+                } catch (ProcessingException e) {
                     throw new AtlasServiceException(api, e);
                 }
-            } else if (clientResponse.getStatus() != ClientResponse.Status.SERVICE_UNAVAILABLE.getStatusCode()) {
+            } else if (clientResponse.getStatus() != Response.Status.SERVICE_UNAVAILABLE.getStatusCode()) {
                 break;
             } else {
                 LOG.error("Got a service unavailable when calling: {}, will retry..", resource);
+                clientResponse.close();
                 sleepBetweenRetries();
             }
 
             i++;
         } while (i < getNumberOfRetries());
 
-        throw new AtlasServiceException(api, clientResponse);
+        String responseBody = clientResponse != null && clientResponse.hasEntity() ? clientResponse.readEntity(String.class) : null;
+        int status = clientResponse != null ? clientResponse.getStatus() : Response.Status.INTERNAL_SERVER_ERROR.getStatusCode();
+        if (clientResponse != null) {
+            clientResponse.close();
+        }
+        throw new AtlasServiceException(api, status, responseBody);
     }
 
-    protected WebResource getResource(API api, String... pathParams) {
+    protected WebTarget getResource(API api, String... pathParams) {
         return getResource(service, api, pathParams);
     }
 
-    protected WebResource getResource(API api, MultivaluedMap<String, String> queryParams, String... pathParams) {
-        WebResource resource = service.path(api.getNormalizedPath());
+    protected WebTarget getResource(API api, MultivaluedMap<String, String> queryParams, String... pathParams) {
+        WebTarget resource = service.path(api.getNormalizedPath());
         resource = appendPathParams(resource, pathParams);
         resource = appendQueryParams(queryParams, resource);
         return resource;
     }
 
-    protected WebResource getResource(API api, MultivaluedMap<String, String> queryParams) {
+    protected WebTarget getResource(API api, MultivaluedMap<String, String> queryParams) {
         return getResource(service, api, queryParams);
     }
 
@@ -453,13 +475,15 @@ public abstract class AtlasBaseClient {
         Client client = getClient(configuration, ugi, doAsUser);
 
         if ((!AuthenticationUtil.isKerberosAuthenticationEnabled()) && basicAuthUser != null && basicAuthPassword != null) {
-            final HTTPBasicAuthFilter authFilter = new HTTPBasicAuthFilter(basicAuthUser, basicAuthPassword);
-            client.addFilter(authFilter);
+            HttpAuthenticationFeature feature = HttpAuthenticationFeature.basicBuilder()
+                    .credentials(basicAuthUser, basicAuthPassword)
+                    .build();
+            client.register(feature);
         }
 
         String activeServiceUrl = determineActiveServiceURL(baseUrls, client);
         atlasClientContext = new AtlasClientContext(baseUrls, client, ugi, doAsUser);
-        service = client.resource(UriBuilder.fromUri(activeServiceUrl).build());
+        service = client.target(UriBuilder.fromUri(activeServiceUrl).build());
     }
 
     void sleepBetweenRetries() {
@@ -513,26 +537,19 @@ public abstract class AtlasBaseClient {
     }
 
     public AtlasImportResult importData(AtlasImportRequest request, String absoluteFilePath) throws AtlasServiceException {
-        return performImportData(getImportRequestBodyPart(request),
-                            new FileDataBodyPart(IMPORT_DATA_PARAMETER, new File(absoluteFilePath)));
+        return performImportData(request, new FileDataBodyPart(IMPORT_DATA_PARAMETER, new File(absoluteFilePath)));
     }
 
     public AtlasImportResult importData(AtlasImportRequest request, InputStream stream) throws AtlasServiceException {
-        return performImportData(getImportRequestBodyPart(request),
-                                new StreamDataBodyPart(IMPORT_DATA_PARAMETER, stream));
+        return performImportData(request, new StreamDataBodyPart(IMPORT_DATA_PARAMETER, stream));
     }
 
-    private AtlasImportResult performImportData(BodyPart requestPart, BodyPart filePart) throws AtlasServiceException {
+    private AtlasImportResult performImportData(AtlasImportRequest request, BodyPart filePart) throws AtlasServiceException {
         MultiPart multipartEntity = new FormDataMultiPart()
-                .bodyPart(requestPart)
+                .field(IMPORT_REQUEST_PARAMTER, AtlasType.toJson(request), MediaType.APPLICATION_JSON_TYPE)
                 .bodyPart(filePart);
 
         return callAPI(IMPORT, AtlasImportResult.class, multipartEntity);
-    }
-
-
-    private FormDataBodyPart getImportRequestBodyPart(AtlasImportRequest request) {
-        return new FormDataBodyPart(IMPORT_REQUEST_PARAMTER, AtlasType.toJson(request), MediaType.APPLICATION_JSON_TYPE);
     }
 
     public AtlasServer getServer(String serverName) throws AtlasServiceException {
@@ -540,14 +557,15 @@ public abstract class AtlasBaseClient {
         return callAPI(api, AtlasServer.class, null);
     }
 
-    boolean isRetryableException(ClientHandlerException che) {
-        return che.getCause().getClass().equals(IOException.class)
-                || che.getCause().getClass().equals(ConnectException.class);
+    boolean isRetryableException(ProcessingException che) {
+        return che.getCause() != null
+                && (che.getCause().getClass().equals(IOException.class)
+                || che.getCause().getClass().equals(ConnectException.class));
     }
 
-    void handleClientHandlerException(ClientHandlerException che) {
+    void handleClientHandlerException(ProcessingException che) {
         if (isRetryableException(che)) {
-            atlasClientContext.getClient().destroy();
+            atlasClientContext.getClient().close();
             LOG.warn("Destroyed current context while handling ClientHandlerEception.");
             LOG.warn("Will retry and create new context.");
             sleepBetweenRetries();
@@ -564,7 +582,7 @@ public abstract class AtlasBaseClient {
     }
 
     @VisibleForTesting
-    void setService(WebResource resource) {
+    void setService(WebTarget resource) {
         this.service = resource;
     }
 
@@ -590,7 +608,7 @@ public abstract class AtlasBaseClient {
         String activeServerAddress = null;
         for (int i = 0; i < getNumberOfRetries(); i++) {
             try {
-                service = client.resource(UriBuilder.fromUri(serverInstance).build());
+                service = client.target(UriBuilder.fromUri(serverInstance).build());
                 String adminStatus = getAdminStatus();
                 if (StringUtils.equals(adminStatus, "ACTIVE")) {
                     activeServerAddress = serverInstance;
@@ -606,8 +624,8 @@ public abstract class AtlasBaseClient {
         return activeServerAddress;
     }
 
-    private WebResource getResource(WebResource service, String path, String... pathParams) {
-        WebResource resource = service.path(path);
+    private WebTarget getResource(WebTarget service, String path, String... pathParams) {
+        WebTarget resource = service.path(path);
         resource = appendPathParams(resource, pathParams);
         return resource;
     }
@@ -617,14 +635,14 @@ public abstract class AtlasBaseClient {
     }
 
     // Modify URL to include the path params
-    private WebResource getResource(WebResource service, API api, String... pathParams) {
-        WebResource resource = service.path(api.getNormalizedPath());
+    private WebTarget getResource(WebTarget service, API api, String... pathParams) {
+        WebTarget resource = service.path(api.getNormalizedPath());
         resource = appendPathParams(resource, pathParams);
         return resource;
     }
 
-    private WebResource getResource(API api, String queryParamKey, List<String> queryParamValues) {
-        WebResource resource = service.path(api.getNormalizedPath());
+    private WebTarget getResource(API api, String queryParamKey, List<String> queryParamValues) {
+        WebTarget resource = service.path(api.getNormalizedPath());
         for (String queryParamValue : queryParamValues) {
             if (StringUtils.isNotBlank(queryParamKey) && StringUtils.isNotBlank(queryParamValue)) {
                 resource = resource.queryParam(queryParamKey, queryParamValue);
@@ -633,7 +651,7 @@ public abstract class AtlasBaseClient {
         return resource;
     }
 
-    private WebResource appendPathParams(WebResource resource, String[] pathParams) {
+    private WebTarget appendPathParams(WebTarget resource, String[] pathParams) {
         if (pathParams != null) {
             for (String pathParam : pathParams) {
                 resource = resource.path(pathParam);
@@ -643,13 +661,13 @@ public abstract class AtlasBaseClient {
     }
 
     // Modify URL to include the query params
-    private WebResource getResource(WebResource service, API api, MultivaluedMap<String, String> queryParams) {
-        WebResource resource = service.path(api.getNormalizedPath());
+    private WebTarget getResource(WebTarget service, API api, MultivaluedMap<String, String> queryParams) {
+        WebTarget resource = service.path(api.getNormalizedPath());
         resource = appendQueryParams(queryParams, resource);
         return resource;
     }
 
-    private WebResource appendQueryParams(MultivaluedMap<String, String> queryParams, WebResource resource) {
+    private WebTarget appendQueryParams(MultivaluedMap<String, String> queryParams, WebTarget resource) {
         if (null != queryParams && !queryParams.isEmpty()) {
             for (Map.Entry<String, List<String>> entry : queryParams.entrySet()) {
                 for (String value : entry.getValue()) {

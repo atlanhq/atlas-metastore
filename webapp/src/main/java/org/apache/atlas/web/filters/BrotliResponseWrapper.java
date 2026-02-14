@@ -1,8 +1,8 @@
 package org.apache.atlas.web.filters;
 
-import javax.servlet.ServletOutputStream;
-import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpServletResponseWrapper;
+import jakarta.servlet.ServletOutputStream;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -32,7 +32,7 @@ public class BrotliResponseWrapper extends HttpServletResponseWrapper {
                 }
 
                 @Override
-                public void setWriteListener(javax.servlet.WriteListener listener) {
+                public void setWriteListener(jakarta.servlet.WriteListener listener) {
                     // No-op for this example
                 }
             };

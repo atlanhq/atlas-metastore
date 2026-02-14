@@ -22,6 +22,13 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.webapp.WebAppContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
+import org.springframework.core.type.filter.AnnotationTypeFilter;
+
+import jakarta.ws.rs.Path;
+import jakarta.ws.rs.ext.Provider;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * A lightweight Jetty server for in-process integration testing.
@@ -39,6 +46,12 @@ public class InProcessAtlasServer {
 
     private final Server server;
     private final int port;
+    private static final String[] JERSEY_SCAN_PACKAGES = {
+            "org.apache.atlas.web.resources",
+            "org.apache.atlas.web.rest",
+            "org.apache.atlas.web.errors",
+            "org.apache.atlas.web.util"
+    };
 
     public InProcessAtlasServer(int port, String webappPath) {
         this.port = port;
@@ -53,6 +66,9 @@ public class InProcessAtlasServer {
         context.setParentLoaderPriority(true);
         context.setClassLoader(Thread.currentThread().getContextClassLoader());
         context.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
+        // Avoid Jersey's ASM package scanner path in tests; register explicit classes instead.
+        context.setInitParameter("jersey.config.server.provider.packages", "");
+        context.setInitParameter("jersey.config.server.provider.classnames", buildJerseyClassnames());
 
         server.setHandler(context);
         server.setStopTimeout(10_000); // 10 second graceful shutdown limit
@@ -93,5 +109,20 @@ public class InProcessAtlasServer {
 
     public boolean isRunning() {
         return server.isRunning();
+    }
+
+    private static String buildJerseyClassnames() {
+        ClassPathScanningCandidateComponentProvider scanner =
+                new ClassPathScanningCandidateComponentProvider(false);
+        scanner.addIncludeFilter(new AnnotationTypeFilter(Path.class));
+        scanner.addIncludeFilter(new AnnotationTypeFilter(Provider.class));
+
+        Set<String> classNames = new TreeSet<>();
+        for (String basePackage : JERSEY_SCAN_PACKAGES) {
+            scanner.findCandidateComponents(basePackage).forEach(beanDef -> classNames.add(beanDef.getBeanClassName()));
+        }
+
+        classNames.add("org.glassfish.jersey.media.multipart.MultiPartFeature");
+        return String.join(",", classNames);
     }
 }

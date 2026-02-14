@@ -25,7 +25,7 @@ import org.aspectj.lang.Signature;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import javax.inject.Inject;
 
 import static org.apache.atlas.web.service.DebugMetricsWrapper.Constants.*;

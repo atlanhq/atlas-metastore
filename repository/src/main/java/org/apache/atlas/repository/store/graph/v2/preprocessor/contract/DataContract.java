@@ -14,8 +14,8 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.commons.lang.StringUtils;
 
-import javax.validation.*;
-import javax.validation.constraints.NotNull;
+import jakarta.validation.*;
+import jakarta.validation.constraints.NotNull;
 import java.util.Set;
 
 import static org.apache.atlas.AtlasErrorCode.*;
