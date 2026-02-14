@@ -54,7 +54,7 @@ public class AtlasServerIdSelectorTest {
     public void testShouldFailIfNoIDsConfiguration() throws AtlasException {
         when(configuration.getStringArray(HAConfiguration.ATLAS_SERVER_IDS)).thenReturn(new String[] {});
         AtlasServerIdSelector.selectServerId(configuration);
-        fail("Should not return any server id if IDs not found in configuration");
+        fail("Should not return any server id if IDs not found in configurations");
     }
 
     @Test(expectedExceptions = AtlasException.class)
