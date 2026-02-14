@@ -226,7 +226,7 @@ public class EntityREST {
      *
      * attr:<attrName>=<attrValue>
      *
-     * NOTE: The attrName and attrValue should be unique across entities, eg. qualifiedName
+     * NOTE: The attrName and attrValue should be unique across entities, eg. qualifiedNames
      *
      * The REST request would look something like this
      *
