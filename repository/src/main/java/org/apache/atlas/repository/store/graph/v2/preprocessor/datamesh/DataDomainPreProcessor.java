@@ -391,10 +391,17 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     }
 
     private static String createQualifiedName(AtlasEntity entity, String parentDomainQualifiedName) {
+        //short cicruit
+        if (RequestContext.get().isAllowCustomQualifiedName() &&
+                entity != null &&
+                StringUtils.isNotEmpty(entity.getQualifiedNameUUID())) {
+            return entity.getQualifiedNameUUID();
+        }
+        //existing logic
         if (StringUtils.isNotEmpty(parentDomainQualifiedName)) {
-            return parentDomainQualifiedName + "/domain/" + getUUID(entity);
+            return parentDomainQualifiedName + "/domain/" + getUUID();
         } else{
-            return "default/domain/" + getUUID(entity) + "/super";
+            return "default/domain/" + getUUID() + "/super";
         }
     }
 

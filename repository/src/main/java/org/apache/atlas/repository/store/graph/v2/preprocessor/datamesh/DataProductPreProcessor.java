@@ -304,11 +304,17 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     }
 
     private static String createQualifiedName(AtlasEntity entity, String parentDomainQualifiedName) throws AtlasBaseException {
+        //short cicruit
+        if (RequestContext.get().isAllowCustomQualifiedName() &&
+                entity != null &&
+                StringUtils.isNotEmpty(entity.getQualifiedNameUUID())) {
+            return entity.getQualifiedNameUUID();
+        }
+        //existing logic
         if (StringUtils.isEmpty(parentDomainQualifiedName)) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Parent Domain Qualified Name cannot be empty or null");
         }
-        return parentDomainQualifiedName + "/product/" + PreProcessorUtils.getUUID(entity);
-
+        return parentDomainQualifiedName + "/product/" + PreProcessorUtils.getUUID();
     }
 
     private AtlasEntity getPolicyEntity(AtlasEntity entity, String productGuid ) {
