@@ -28,7 +28,7 @@ import org.apache.atlas.repository.ogm.DataAccess;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.AtlasTypeRegistry;
-import org.apache.atlas.util.NanoIdUtils;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.commons.lang.StringUtils;
 
 import java.util.ArrayList;
@@ -184,10 +184,7 @@ public abstract class GlossaryUtils {
         return AtlasGraphUtilsV2.findByGuid(guid);
     }
 
-    protected static String createQualifiedName() {
-        return getUUID();
-    }
-    protected static String getUUID(){
-        return NanoIdUtils.randomNanoId();
+    protected static String createQualifiedName(String glossaryName) {
+        return DeterministicIdUtils.getGlossaryQN(glossaryName);
     }
 }

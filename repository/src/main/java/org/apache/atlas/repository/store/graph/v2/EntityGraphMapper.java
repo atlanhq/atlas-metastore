@@ -78,6 +78,7 @@ import org.apache.atlas.utils.AtlasJson;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.apache.atlas.utils.AtlasPerfTracer;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -244,7 +245,8 @@ public class EntityGraphMapper {
     }
 
     public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
-        final String guid = UUID.randomUUID().toString();
+        final String qualifiedName = (String) entity.getAttribute(Constants.QUALIFIED_NAME);
+        final String guid = DeterministicIdUtils.getGuid(entity.getTypeName(), qualifiedName);
         return createVertexWithGuid(entity, guid);
     }
 
@@ -253,7 +255,7 @@ public class EntityGraphMapper {
             LOG.debug("==> createShellEntityVertex({})", objectId.getTypeName());
         }
 
-        final String    guid       = UUID.randomUUID().toString();
+        final String    guid       = DeterministicIdUtils.getEntityGuid(objectId.getTypeName(), objectId.getUniqueAttributes());
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(objectId.getTypeName());
         AtlasVertex     ret        = createStructVertex(objectId);
 

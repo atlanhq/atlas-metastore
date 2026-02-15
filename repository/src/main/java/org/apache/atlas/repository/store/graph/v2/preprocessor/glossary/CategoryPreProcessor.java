@@ -40,6 +40,7 @@ import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -137,7 +138,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             isValidLexoRank(lexicographicalSortOrder, glossaryQualifiedName, parentQname, this.discovery);
         }
 
-        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(vertex));
+        entity.setAttribute(QUALIFIED_NAME, createQualifiedName(vertex, catName, parentQname));
         AtlasAuthorizationUtils.verifyAccess(new AtlasEntityAccessRequest(typeRegistry, AtlasPrivilege.ENTITY_CREATE, new AtlasEntityHeader(entity)),
                 "create entity: type=", entity.getTypeName());
 
@@ -506,7 +507,7 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
         entityGraphMapper.mapGlossaryRelationshipAttribute(attribute, glossaryObjectId, entityVertex, context);
     }
 
-    private String createQualifiedName(AtlasVertex vertex) {
+    private String createQualifiedName(AtlasVertex vertex, String categoryName, String parentCategoryQN) {
 
         if (vertex != null) {
             String catQName = vertex.getProperty(QUALIFIED_NAME, String.class);
@@ -515,7 +516,8 @@ public class CategoryPreProcessor extends AbstractGlossaryPreProcessor {
             }
         }
 
-        return getUUID() + "@" + anchor.getAttribute(QUALIFIED_NAME);
+        String anchorQN = (String) anchor.getAttribute(QUALIFIED_NAME);
+        return DeterministicIdUtils.getCategoryQN(categoryName, parentCategoryQN, anchorQN) + "@" + anchorQN;
     }
 
 }

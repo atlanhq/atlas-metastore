@@ -37,6 +37,7 @@ import org.apache.atlas.repository.store.aliasstore.IndexAliasStore;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -57,6 +58,7 @@ import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.CR
 import static org.apache.atlas.model.instance.EntityMutations.EntityOperation.UPDATE;
 import static org.apache.atlas.repository.Constants.ATTR_ADMIN_ROLES;
 import static org.apache.atlas.repository.Constants.KEYCLOAK_ROLE_ADMIN;
+import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.Constants.STAKEHOLDER_ENTITY_TYPE;
 import static org.apache.atlas.repository.util.AccessControlUtils.*;
@@ -129,7 +131,9 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                 validateAndReduce(policy);
             }
 
-            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            String parentEntityQN = getEntityQualifiedName(parentEntity);
+            String policyName = (String) policy.getAttribute(NAME);
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.getPolicyQN(policyName, parentEntityQN)));
 
             //extract role
             String roleName = getPersonaRoleName(parentEntity);
@@ -147,7 +151,9 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             aliasStore.updateAlias(parent, policy);
 
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
-            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            String parentEntityQN = getEntityQualifiedName(parentEntity);
+            String policyName = (String) policy.getAttribute(NAME);
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", parentEntityQN, DeterministicIdUtils.getPolicyQN(policyName, parentEntityQN)));
 
             validator.validate(policy, null, parentEntity, CREATE);
 
