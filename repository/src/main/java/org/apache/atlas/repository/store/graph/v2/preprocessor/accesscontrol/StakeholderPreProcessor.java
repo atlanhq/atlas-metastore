@@ -162,7 +162,7 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
         entity.setAttribute(ATTR_STAKEHOLDER_TITLE_GUID, stakeholderTitleGuid);
 
         String stakeholderQualifiedName = format("default/%s/%s",
-                getUUID(),
+                getUUID(entity),
                 domainQualifiedName);
 
         entity.setAttribute(QUALIFIED_NAME, stakeholderQualifiedName);

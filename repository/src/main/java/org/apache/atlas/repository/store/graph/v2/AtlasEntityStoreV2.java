@@ -2156,7 +2156,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         graphDiscoverer.validateAndNormalize(entity);
 
                         //Create vertices which do not exist in the repository
-                        if (RequestContext.get().isImportInProgress() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
+                        if (RequestContext.get().isAllowCustomGuid() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
+                            AtlasVertex existingVertex = AtlasGraphUtilsV2.findByGuid(graph, entity.getGuid());
+                            if (existingVertex != null) {
+                                throw new AtlasBaseException(AtlasErrorCode.INSTANCE_ALREADY_EXISTS, entity.getGuid());
+                            }
                             vertex = entityGraphMapper.createVertexWithGuid(entity, entity.getGuid());
                         } else {
                             vertex = entityGraphMapper.createVertex(entity);

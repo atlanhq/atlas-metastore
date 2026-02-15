@@ -129,7 +129,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
                 validateAndReduce(policy);
             }
 
-            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID(policy)));
 
             //extract role
             String roleName = getPersonaRoleName(parentEntity);
@@ -147,7 +147,7 @@ public class AuthPolicyPreProcessor implements PreProcessor {
             aliasStore.updateAlias(parent, policy);
 
         } else if (POLICY_CATEGORY_PURPOSE.equals(policyCategory)) {
-            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID()));
+            policy.setAttribute(QUALIFIED_NAME, String.format("%s/%s", getEntityQualifiedName(parentEntity), getUUID(policy)));
 
             validator.validate(policy, null, parentEntity, CREATE);
 
