@@ -76,8 +76,10 @@ public class EmbeddedServer {
     }
 
     protected WebAppContext getWebAppContext(String path) {
+        LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet");
         WebAppContext application = new WebAppContext(path, "/");
-        application.setClassLoader(Thread.currentThread().getContextClassLoader());
+        ClassLoader atlasClassLoader = Thread.currentThread().getContextClassLoader();
+        application.setClassLoader(atlasClassLoader);
         
         // --- LOAD CHANGE: API FAST-LANE REGISTRATION --- 
         // We manually register the Jersey Spring Servlet to ensure there is a straight path 
@@ -100,6 +102,8 @@ public class EmbeddedServer {
             holder.setInitParameter("com.sun.jersey.config.property.classnames", 
                                     "org.apache.atlas.web.resources.EntityResourceV2,org.apache.atlas.web.resources.TypesResourceV2, org.apache.atlas.web.resources.DiscoveryResourceV2");
        
+            holder.setInitOrder(1);
+
             // We map this specifically to the V2 API path.
             //  Need to check that all keycloak or other filter calls happen before /v2 mapping
             application.addServlet(holder, "/api/atlas/v2/*");
