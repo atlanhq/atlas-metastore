@@ -3431,6 +3431,7 @@
                 "policyResourceCategory": "ENTITY",
                 "policyResources":
                 [
+                    "entity-type:AIModelVersion",
                     "entity-classification:*",
                     "entity:*"
                 ],
