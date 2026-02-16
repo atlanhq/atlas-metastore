@@ -16,8 +16,7 @@ import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
-import org.janusgraph.util.StringUtils;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -107,8 +106,7 @@ public class ESConnector implements Closeable {
 
                 DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
 
-                long vertexId = Long.parseLong(assetVertexId);
-                String docId = LongEncoding.encode(vertexId);
+                String docId = LongEncodingUtil.vertexIdToDocId(assetVertexId);
                 bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"").append(docId).append("\" }}\n");
 
                 bulkRequestBody.append("{");

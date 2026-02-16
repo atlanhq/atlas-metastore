@@ -38,7 +38,7 @@ import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.metrics.AtlasMetrics;
 import org.apache.atlas.model.patches.AtlasPatch.AtlasPatches;
 import org.apache.atlas.model.tasks.AtlasTask;
-import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.atlas.repository.patches.AtlasPatchManager;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
 import org.apache.atlas.service.FeatureFlagStore;

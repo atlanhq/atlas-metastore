@@ -34,7 +34,6 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.repository.VertexEdgePropertiesCache;
 import org.apache.atlas.model.instance.AtlasStruct;
-import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
@@ -65,7 +64,6 @@ import org.apache.atlas.util.IndexedInstance;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.IteratorUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.tinkerpop.gremlin.structure.*;
 import org.javatuples.Pair;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -2262,38 +2260,26 @@ public final class GraphHelper {
     }
     public Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeName(AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeName");
-        long timeoutSeconds = org.apache.atlas.AtlasConfiguration.TIMEOUT_SUPER_VERTEX_FETCH.getLong();
         try {
-            // Use try-with-resources to ensure stream is properly closed
-            try (Stream<Map<String, Object>> stream = ((AtlasJanusGraph) graph).getGraph().traversal()
-                    .V(vertex.getId())
-                    .bothE()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .project(LABEL_PROPERTY_KEY, TYPE_NAME_PROPERTY_KEY)
-                    .by(T.label)
-                    .by(TYPE_NAME_PROPERTY_KEY)
-                    .dedup()
-                    .toStream()) {
+            Set<AbstractMap.SimpleEntry<String, String>> ret = new HashSet<>();
+            Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
 
-                return stream
-                        .map(m -> {
-                            Object label = m.get(LABEL_PROPERTY_KEY);
-                            Object typeName = m.get(TYPE_NAME_PROPERTY_KEY);
-                            String labelStr = (label != null) ? label.toString() : "";
-                            String typeNameStr = (typeName != null) ? typeName.toString() : "";
+            for (AtlasEdge edge : edges) {
+                String state = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+                if (!ACTIVE_STATE_VALUE.equals(state)) continue;
 
-                            return new AbstractMap.SimpleEntry<>(labelStr, typeNameStr);
-                        })
-                        .filter(entry -> !entry.getKey().isEmpty())
-                        .distinct()
-                        .collect(Collectors.toSet());
+                String label = edge.getLabel();
+                String typeName = edge.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+
+                if (label != null && !label.isEmpty()) {
+                    ret.add(new AbstractMap.SimpleEntry<>(label, typeName != null ? typeName : ""));
+                }
             }
-
+            return ret;
         } catch (Exception e) {
             LOG.error("Error while getting labels of active edges", e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
-        }
-        finally {
+        } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
     }
@@ -2322,7 +2308,7 @@ public final class GraphHelper {
             .subscribeOn(Schedulers.io())
             .onErrorReturn(throwable -> {
                 String reason;
-                if (throwable instanceof org.janusgraph.core.JanusGraphException) {
+                if (throwable.getClass().getName().contains("JanusGraphException")) {
                     reason = "JanusGraphException";
                 } else if (throwable instanceof java.util.concurrent.TimeoutException) {
                     reason = "Timeout";

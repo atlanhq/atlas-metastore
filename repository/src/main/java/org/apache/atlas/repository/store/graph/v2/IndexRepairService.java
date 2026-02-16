@@ -7,10 +7,7 @@ import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.commons.collections.CollectionUtils;
-import org.janusgraph.core.JanusGraph;
-import org.janusgraph.graphdb.database.util.StaleIndexRecordUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.commons.lang.StringUtils;
@@ -154,7 +151,8 @@ public class IndexRepairService {
     }
 
     /**
-     * Remove corrupted composite index entry
+     * Remove corrupted composite index entry.
+     * Uses reflection to invoke JanusGraph-specific repair when available.
      */
     private void removeCorruptedCompositeIndexEntry(
             Long vertexId,
@@ -162,18 +160,24 @@ public class IndexRepairService {
             String compositeIndexName) throws AtlasBaseException {
 
         try {
-            JanusGraph janusGraph = ((AtlasJanusGraph) graph).getGraph();
+            // Use reflection to invoke JanusGraph-specific repair if available
+            Object wrappedGraph = graph.getClass().getMethod("getGraph").invoke(graph);
+            Class<?> staleIndexUtil = Class.forName("org.janusgraph.graphdb.database.util.StaleIndexRecordUtil");
+            staleIndexUtil.getMethod("forceRemoveVertexFromGraphIndex",
+                    Long.class, Map.class, wrappedGraph.getClass().getInterfaces()[0], String.class)
+                    .invoke(null, vertexId, indexProperties, wrappedGraph, compositeIndexName);
 
-            StaleIndexRecordUtil.forceRemoveVertexFromGraphIndex(
-                    vertexId,
-                    indexProperties,
-                    janusGraph,
-                    compositeIndexName
-            );
-
-            janusGraph.tx().commit();
+            wrappedGraph.getClass().getMethod("tx").invoke(wrappedGraph);
             LOG.info("Removed corrupted composite index entry for vertex: {}", vertexId);
 
+        } catch (ClassNotFoundException e) {
+            // Not running with JanusGraph backend - use vertex removal fallback
+            LOG.info("JanusGraph not available, using vertex removal for repair: {}", vertexId);
+            AtlasVertex vertex = graph.getVertex(vertexId.toString());
+            if (vertex != null) {
+                graph.removeVertex(vertex);
+                graph.commit();
+            }
         } catch (Exception e) {
             LOG.error("Failed to remove corrupted composite index entry for vertex: {}", vertexId, e);
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR,

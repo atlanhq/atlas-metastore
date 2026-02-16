@@ -35,7 +35,7 @@ import org.apache.http.HttpEntity;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.apache.http.util.EntityUtils;
-import org.apache.tinkerpop.gremlin.process.traversal.Order;
+import org.apache.atlas.repository.graphdb.AtlasIndexQuery.SortOrder;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.HttpAsyncResponseConsumerFactory;
@@ -699,7 +699,7 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
     }
 
     @Override
-    public Iterator<Result<AtlasJanusVertex, AtlasJanusEdge>> vertices(int offset, int limit, String sortBy, Order sortOrder) {
+    public Iterator<Result<AtlasJanusVertex, AtlasJanusEdge>> vertices(int offset, int limit, String sortBy, SortOrder sortOrder) {
         throw new NotImplementedException();
     }
 

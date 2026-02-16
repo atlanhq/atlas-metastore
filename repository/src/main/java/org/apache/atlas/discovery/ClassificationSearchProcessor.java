@@ -31,7 +31,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections.PredicateUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.tinkerpop.gremlin.process.traversal.Order;
+import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -252,7 +252,7 @@ public class ClassificationSearchProcessor extends SearchProcessor {
                 if (indexQuery != null) {
                     Iterator<AtlasIndexQuery.Result> queryResult;
                     if (StringUtils.isNotEmpty(sortBy)) {
-                        Order qrySortOrder = sortOrder == SortOrder.ASCENDING ? Order.asc : Order.desc;
+                        AtlasIndexQuery.SortOrder qrySortOrder = sortOrder == SortOrder.ASCENDING ? AtlasIndexQuery.SortOrder.ASC : AtlasIndexQuery.SortOrder.DESC;
                         queryResult = indexQuery.vertices(qryOffset, limit, sortBy, qrySortOrder);
                     } else {
                         queryResult = indexQuery.vertices(qryOffset, limit);

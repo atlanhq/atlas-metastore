@@ -44,7 +44,6 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.AtlasRelationshipStoreV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
@@ -62,12 +61,7 @@ import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
-import org.apache.tinkerpop.gremlin.structure.Direction;
-import org.apache.tinkerpop.gremlin.structure.Edge;
-import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -94,8 +88,6 @@ import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 import static org.apache.atlas.type.Constants.PENDING_TASKS_PROPERTY_KEY;
 import static org.apache.atlas.repository.graph.GraphHelper.getTypeName;
 import static org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2.getState;
-import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.__.id;
-import static org.apache.tinkerpop.gremlin.groovy.jsr223.dsl.credential.__.outV;
 
 public abstract class DeleteHandlerV1 {
     public static final Logger  LOG = LoggerFactory.getLogger(DeleteHandlerV1.class);
@@ -309,7 +301,7 @@ public abstract class DeleteHandlerV1 {
 
             AtlasEntityHeader entity = entityRetriever.toAtlasEntityHeader(vertex, attributes);
             entity.setVertexId(vertex.getIdForDisplay());
-            entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            entity.setDocId(LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay()));
             entity.setSuperTypeNames(entityType.getAllSuperTypes());
             vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
 
@@ -2176,11 +2168,11 @@ public abstract class DeleteHandlerV1 {
         removedEdges.forEach(edge -> RequestContext.get().addToDeletedEdgesIdsForResetHasLineage(edge.getIdForDisplay()));
 
         // Check for active lineage in outgoing edges first
-        boolean hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, Direction.OUT);
+        boolean hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, AtlasEdgeDirection.OUT);
 
         // If no active lineage in outgoing edges, check incoming edges
         if (!hasActiveLineage) {
-            hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, Direction.IN);
+            hasActiveLineage = hasActiveLineageDirection(assetVertex, currentEdge, AtlasEdgeDirection.IN);
         }
 
         // Only update if no active lineage found
@@ -2202,39 +2194,30 @@ public abstract class DeleteHandlerV1 {
      * @param direction The edge direction to explore
      * @return True if active lineage exists in the specified direction
      */
-    private boolean hasActiveLineageDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, Direction direction) {
-        GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
-        GraphTraversal<Vertex, Edge> traversal;
+    private boolean hasActiveLineageDirection(AtlasVertex assetVertex, AtlasEdge currentEdge, AtlasEdgeDirection direction) {
+        Iterable<AtlasEdge> edges = assetVertex.getEdges(direction);
 
-        // Create the appropriate directional traversal
-        if (direction.equals(Direction.OUT)) {
-            traversal = g.V(assetVertex.getId())
-                    .outE()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE);
-        } else {
-            traversal = g.V(assetVertex.getId())
-                    .inE()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE);
+        for (AtlasEdge edge : edges) {
+            String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(edgeState)) {
+                continue;
+            }
+
+            String edgeIdStr = edge.getIdForDisplay();
+
+            // Skip if in deleted list or matches current edge
+            if (RequestContext.get().getDeletedEdgesIdsForResetHasLineage().contains(edgeIdStr) ||
+                    currentEdge.getIdForDisplay().equals(edgeIdStr)) {
+                continue;
+            }
+
+            // Check if the outgoing vertex has lineage
+            AtlasVertex outVertex = edge.getOutVertex();
+            Boolean hasLineage = outVertex.getProperty(HAS_LINEAGE, Boolean.class);
+            if (Boolean.TRUE.equals(hasLineage)) {
+                return true;
+            }
         }
-
-        // Complete the traversal with common operations
-        return traversal
-                .project("id", HAS_LINEAGE)
-                .by(id())
-                .by(outV().values(HAS_LINEAGE))
-                .toStream()
-                .anyMatch(edge -> {
-                    Object edgeId = edge.get("id");
-                    String edgeIdStr = (edgeId != null) ? edgeId.toString() : "";
-
-                    // Skip if in deleted list or matches current edge
-                    if (RequestContext.get().getDeletedEdgesIdsForResetHasLineage().contains(edgeIdStr) ||
-                            currentEdge.getIdForDisplay().equals(edgeIdStr)) {
-                        return false;
-                    }
-
-                    // Check if this edge has lineage
-                    return Boolean.TRUE.equals(edge.get(HAS_LINEAGE));
-                });
+        return false;
     }
 }

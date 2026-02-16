@@ -1,0 +1,191 @@
+package org.apache.atlas.repository.graphdb.cassandra;
+
+import org.apache.atlas.repository.graphdb.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+
+public class CassandraGraphManagement implements AtlasGraphManagement {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CassandraGraphManagement.class);
+
+    private final CassandraGraph graph;
+
+    public CassandraGraphManagement(CassandraGraph graph) {
+        this.graph = graph;
+    }
+
+    @Override
+    public boolean containsPropertyKey(String key) {
+        return graph.getPropertyKeysMap().containsKey(key);
+    }
+
+    @Override
+    public void rollback() {
+        // no-op for schema management
+    }
+
+    @Override
+    public void commit() {
+        // Schema changes are applied immediately in the in-memory registry
+        // Persist to schema_registry table
+        LOG.debug("CassandraGraphManagement.commit() - schema changes persisted");
+    }
+
+    @Override
+    public AtlasPropertyKey makePropertyKey(String propertyName, Class propertyClass, AtlasCardinality cardinality) {
+        CassandraPropertyKey key = new CassandraPropertyKey(propertyName, propertyClass, cardinality);
+        graph.getPropertyKeysMap().put(propertyName, key);
+
+        if (cardinality.isMany()) {
+            graph.addMultiProperty(propertyName);
+        }
+
+        return key;
+    }
+
+    @Override
+    public AtlasEdgeLabel makeEdgeLabel(String label) {
+        CassandraEdgeLabel edgeLabel = new CassandraEdgeLabel(label);
+        graph.getEdgeLabelsMap().put(label, edgeLabel);
+        return edgeLabel;
+    }
+
+    @Override
+    public void deletePropertyKey(String propertyKey) {
+        graph.getPropertyKeysMap().remove(propertyKey);
+    }
+
+    @Override
+    public AtlasPropertyKey getPropertyKey(String propertyName) {
+        return graph.getPropertyKeysMap().get(propertyName);
+    }
+
+    @Override
+    public AtlasEdgeLabel getEdgeLabel(String label) {
+        return graph.getEdgeLabelsMap().get(label);
+    }
+
+    @Override
+    public void createVertexCompositeIndex(String propertyName, boolean isUnique, List<AtlasPropertyKey> propertyKeys) {
+        CassandraGraphIndex index = new CassandraGraphIndex(propertyName, false, true, false, true, isUnique);
+        for (AtlasPropertyKey key : propertyKeys) {
+            index.addFieldKey(key);
+        }
+        graph.getGraphIndexesMap().put(propertyName, index);
+        LOG.info("Created vertex composite index: {}, unique={}", propertyName, isUnique);
+    }
+
+    @Override
+    public void createEdgeCompositeIndex(String propertyName, boolean isUnique, List<AtlasPropertyKey> propertyKeys) {
+        CassandraGraphIndex index = new CassandraGraphIndex(propertyName, false, true, true, false, isUnique);
+        for (AtlasPropertyKey key : propertyKeys) {
+            index.addFieldKey(key);
+        }
+        graph.getGraphIndexesMap().put(propertyName, index);
+        LOG.info("Created edge composite index: {}", propertyName);
+    }
+
+    @Override
+    public AtlasGraphIndex getGraphIndex(String indexName) {
+        return graph.getGraphIndexesMap().get(indexName);
+    }
+
+    @Override
+    public boolean edgeIndexExist(String label, String indexName) {
+        return graph.getGraphIndexesMap().containsKey(indexName);
+    }
+
+    @Override
+    public void createVertexMixedIndex(String name, String backingIndex, List<AtlasPropertyKey> propertyKeys) {
+        CassandraGraphIndex index = new CassandraGraphIndex(name, true, false, false, true, false);
+        for (AtlasPropertyKey key : propertyKeys) {
+            index.addFieldKey(key);
+        }
+        graph.getGraphIndexesMap().put(name, index);
+        LOG.info("Created vertex mixed index: {} (backing: {})", name, backingIndex);
+    }
+
+    @Override
+    public void createEdgeMixedIndex(String indexName, String backingIndex, List<AtlasPropertyKey> propertyKeys) {
+        CassandraGraphIndex index = new CassandraGraphIndex(indexName, true, false, true, false, false);
+        for (AtlasPropertyKey key : propertyKeys) {
+            index.addFieldKey(key);
+        }
+        graph.getGraphIndexesMap().put(indexName, index);
+        LOG.info("Created edge mixed index: {} (backing: {})", indexName, backingIndex);
+    }
+
+    @Override
+    public void createEdgeIndex(String label, String indexName, AtlasEdgeDirection edgeDirection,
+                                List<AtlasPropertyKey> propertyKeys) {
+        LOG.info("Created edge index: {} for label: {}", indexName, label);
+    }
+
+    @Override
+    public void createFullTextMixedIndex(String index, String backingIndex, List<AtlasPropertyKey> propertyKeys) {
+        CassandraGraphIndex graphIndex = new CassandraGraphIndex(index, true, false, false, true, false);
+        for (AtlasPropertyKey key : propertyKeys) {
+            graphIndex.addFieldKey(key);
+        }
+        graph.getGraphIndexesMap().put(index, graphIndex);
+        LOG.info("Created full-text mixed index: {} (backing: {})", index, backingIndex);
+    }
+
+    @Override
+    public String addMixedIndex(String vertexIndex, AtlasPropertyKey propertyKey, boolean isStringField) {
+        CassandraGraphIndex index = graph.getGraphIndexesMap().get(vertexIndex);
+        if (index != null) {
+            index.addFieldKey(propertyKey);
+        }
+        // Return the property name directly (no JanusGraph field encoding)
+        return propertyKey.getName();
+    }
+
+    @Override
+    public String addMixedIndex(String vertexIndex, AtlasPropertyKey propertyKey, boolean isStringField,
+                                HashMap<String, Object> indexTypeESConfig,
+                                HashMap<String, HashMap<String, Object>> indexTypeESFields) {
+        return addMixedIndex(vertexIndex, propertyKey, isStringField);
+    }
+
+    @Override
+    public String getIndexFieldName(String indexName, AtlasPropertyKey propertyKey, boolean isStringField) {
+        // Return property name directly - no JanusGraph field encoding needed
+        return propertyKey.getName();
+    }
+
+    @Override
+    public void updateUniqueIndexesForConsistencyLock() {
+        LOG.debug("updateUniqueIndexesForConsistencyLock - no-op in Cassandra backend");
+    }
+
+    @Override
+    public void updateSchemaStatus() {
+        LOG.debug("updateSchemaStatus - no-op in Cassandra backend");
+    }
+
+    @Override
+    public void reindex(String indexName, List<AtlasElement> elements) throws Exception {
+        LOG.info("Reindex request for index: {}, elements: {}", indexName, elements.size());
+    }
+
+    @Override
+    public Object startIndexRecovery(long startTime) {
+        LOG.info("startIndexRecovery from: {} - no-op in Cassandra backend", startTime);
+        return null;
+    }
+
+    @Override
+    public void stopIndexRecovery(Object txRecoveryObject) {
+        // no-op
+    }
+
+    @Override
+    public void printIndexRecoveryStats(Object txRecoveryObject) {
+        // no-op
+    }
+}

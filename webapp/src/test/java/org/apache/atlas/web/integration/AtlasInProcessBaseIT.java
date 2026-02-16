@@ -259,7 +259,16 @@ public abstract class AtlasInProcessBaseIT {
         String esAddress = elasticsearch.getHttpHostAddress(); // host:port
 
         try (PrintWriter w = new PrintWriter(new FileWriter(propsFile))) {
-            // Graph storage - Cassandra
+            // Graph database backend - Cassandra (without JanusGraph)
+            w.println("atlas.graphdb.backend=org.apache.atlas.repository.graphdb.cassandra.CassandraGraphDatabase");
+
+            // Cassandra graph storage settings (for CassandraSessionProvider)
+            w.println("atlas.cassandra.graph.hostname=localhost");
+            w.println("atlas.cassandra.graph.port=" + cassandraPort);
+            w.println("atlas.cassandra.graph.keyspace=atlas_graph_test");
+            w.println("atlas.cassandra.graph.datacenter=datacenter1");
+
+            // Keep JanusGraph Cassandra settings (for DynamicConfigStore and other subsystems)
             w.println("atlas.graph.storage.backend=cql");
             w.println("atlas.graph.storage.hostname=localhost");
             w.println("atlas.graph.storage.cql.port=" + cassandraPort);
@@ -270,7 +279,7 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.query.fast-property=true");
             w.println("atlas.graph.query.batch=true");
             w.println("query.batch.properties-mode=all-properties");
-            w.println("atlas.use.index.query.to.find.entity.by.unique.attributes=true");
+            w.println("atlas.use.index.query.to.find.entity.by.unique.attributes=false");
             w.println("atlas.graph.storage.lock.retries=5");
             w.println("atlas.graph.cache.db-cache=false");
             w.println("atlas.graph.storage.write-time=10000");
@@ -280,7 +289,7 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.index.search.hostname=" + esAddress);
             w.println("atlas.graph.index.search.elasticsearch.client-only=true");
             w.println("atlas.graph.index.search.elasticsearch.retry_on_conflict=5");
-            w.println("atlas.rebuild.index=true");
+            w.println("atlas.rebuild.index=false");
 
             // Notification - External Kafka container
             String kafkaBootstrap = kafka.getBootstrapServers();

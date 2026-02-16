@@ -43,7 +43,7 @@ import org.apache.commons.collections.MapUtils;
 import org.apache.commons.collections.Predicate;
 import org.apache.commons.collections.PredicateUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.tinkerpop.gremlin.process.traversal.Order;
+import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -1300,17 +1300,17 @@ public abstract class SearchProcessor {
         return null;
     }
 
-    private static Order getSortOrderAttribute(SearchContext context) {
+    private static AtlasIndexQuery.SortOrder getSortOrderAttribute(SearchContext context) {
         SortOrder sortOrder = context.getSearchParameters().getSortOrder();
         if (sortOrder == null) sortOrder = ASCENDING;
 
-        return sortOrder == SortOrder.ASCENDING ? Order.asc : Order.desc;
+        return sortOrder == SortOrder.ASCENDING ? AtlasIndexQuery.SortOrder.ASC : AtlasIndexQuery.SortOrder.DESC;
     }
 
     protected static Iterator<AtlasIndexQuery.Result> executeIndexQuery(SearchContext context, AtlasIndexQuery indexQuery, int qryOffset, int limit) {
         String sortBy = getSortByAttribute(context);
         if (sortBy != null && !sortBy.isEmpty()) {
-            Order sortOrder = getSortOrderAttribute(context);
+            AtlasIndexQuery.SortOrder sortOrder = getSortOrderAttribute(context);
             return indexQuery.vertices(qryOffset, limit, sortBy, sortOrder);
         }
         return indexQuery.vertices(qryOffset, limit);

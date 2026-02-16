@@ -23,10 +23,10 @@ import org.apache.atlas.AtlanElasticSearchIndex;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
+import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.service.metrics.MetricUtils;
@@ -77,7 +77,17 @@ public class RepairIndex {
         LOG.info("Initializing graph: ");
         Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
         try {
-            graph = AtlasJanusGraphDatabase.getGraphInstance();
+            // Use AtlasGraphProvider to get graph instance - works with any backend
+            AtlasGraph atlasGraph = AtlasGraphProvider.getGraphInstance();
+            // For JanusGraph-specific reindexing, unwrap the underlying JanusGraph
+            try {
+                Object wrappedGraph = atlasGraph.getClass().getMethod("getGraph").invoke(atlasGraph);
+                if (wrappedGraph instanceof JanusGraph) {
+                    graph = (JanusGraph) wrappedGraph;
+                }
+            } catch (Exception e) {
+                LOG.warn("Could not obtain JanusGraph instance for RepairIndex. Reindexing may be limited.", e);
+            }
             try {
                 searchIndex = new AtlanElasticSearchIndex();
             } catch (AtlasException e) {
@@ -98,6 +108,10 @@ public class RepairIndex {
      * @throws Exception
      */
     public void reindexVerticesByIds(String indexName, Set<Long> vertexIds) throws Exception {
+        if (graph == null) {
+            LOG.warn("JanusGraph not available. reindexVerticesByIds is not supported without JanusGraph backend.");
+            return;
+        }
         Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
         StandardJanusGraphTx tx = null;
         try {
@@ -124,6 +138,10 @@ public class RepairIndex {
     }
 
     public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
+        if (graph == null) {
+            LOG.warn("JanusGraph not available. restoreSelective is not supported without JanusGraph backend.");
+            return;
+        }
         Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
         LOG.info("processing referencedGuids => " + referencedGUIDs);
 
@@ -143,6 +161,10 @@ public class RepairIndex {
     }
 
     public void restoreByIds(Set<String> guids) throws Exception {
+        if (graph == null) {
+            LOG.warn("JanusGraph not available. restoreByIds is not supported without JanusGraph backend.");
+            return;
+        }
 
         StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
         IndexSerializer indexSerializer = janusGraph.getIndexSerializer();

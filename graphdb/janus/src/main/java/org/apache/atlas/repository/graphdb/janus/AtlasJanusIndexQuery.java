@@ -28,6 +28,7 @@ import org.apache.commons.lang.NotImplementedException;
 
 import com.google.common.base.Function;
 import com.google.common.collect.Iterators;
+import org.apache.atlas.repository.graphdb.AtlasIndexQuery.SortOrder;
 import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
 import org.apache.tinkerpop.gremlin.process.traversal.Order;
 import org.janusgraph.core.JanusGraphIndexQuery;
@@ -103,12 +104,13 @@ public class AtlasJanusIndexQuery implements AtlasIndexQuery<AtlasJanusVertex, A
     }
 
     @Override
-    public Iterator<Result<AtlasJanusVertex, AtlasJanusEdge>> vertices(int offset, int limit, String sortBy, Order sortOrder) {
+    public Iterator<Result<AtlasJanusVertex, AtlasJanusEdge>> vertices(int offset, int limit, String sortBy, SortOrder sortOrder) {
         Preconditions.checkArgument(offset >=0, "Index offset should be greater than or equals to 0");
         Preconditions.checkArgument(limit >=0, "Index limit should be greater than or equals to 0");
 
+        Order order = sortOrder == SortOrder.ASC ? Order.asc : Order.desc;
         Iterator<JanusGraphIndexQuery.Result<JanusGraphVertex>> results = query
-                .orderBy(sortBy, sortOrder)
+                .orderBy(sortBy, order)
                 .offset(offset)
                 .limit(limit)
                 .vertexStream().iterator();

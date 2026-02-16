@@ -28,7 +28,7 @@ import io.opentelemetry.sdk.resources.ResourceBuilder;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.samplers.Sampler;
 import io.opentelemetry.semconv.ResourceAttributes;
-import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.atlas.security.SecurityProperties;
 import org.apache.atlas.util.AccessAuditLogsIndexCreator;
 import org.apache.atlas.web.service.EmbeddedServer;

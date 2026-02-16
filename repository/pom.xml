@@ -319,6 +319,13 @@
 
         <dependency>
             <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-graphdb-cassandra</artifactId>
+            <version>${project.version}</version>
+            <scope>compile</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
             <artifactId>client-auth</artifactId>
             <version>3.0.0-SNAPSHOT</version>
         </dependency>

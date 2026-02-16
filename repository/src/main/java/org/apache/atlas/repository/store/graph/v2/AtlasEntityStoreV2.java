@@ -46,7 +46,6 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.observability.AtlasObservabilityData;
@@ -95,8 +94,6 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
-import org.janusgraph.core.JanusGraphException;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -107,7 +104,6 @@ import java.io.InputStream;
 import java.util.*;
 import java.util.stream.Collectors;
 
-import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
 
 import static java.lang.Boolean.FALSE;
 import static org.apache.atlas.AtlasConfiguration.ATLAS_DISTRIBUTED_TASK_ENABLED;
@@ -1112,13 +1108,13 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         usedBatchResolution);
             }
 
-        } catch (JanusGraphException jge) {
-            if (isPermanentBackendException(jge)) {
-                LOG.error("Failed to delete objects:{}", objectIds.stream().map(AtlasObjectId::getUniqueAttributes).collect(Collectors.toList()), jge);
-                throw new AtlasBaseException(AtlasErrorCode.PERMANENT_BACKEND_EXCEPTION_NO_RETRY, jge,
-                        "deleteByUniqueAttributes", "AtlasEntityStoreV2", jge.getMessage());
+        } catch (RuntimeException rte) {
+            if (isPermanentBackendException(rte)) {
+                LOG.error("Failed to delete objects:{}", objectIds.stream().map(AtlasObjectId::getUniqueAttributes).collect(Collectors.toList()), rte);
+                throw new AtlasBaseException(AtlasErrorCode.PERMANENT_BACKEND_EXCEPTION_NO_RETRY, rte,
+                        "deleteByUniqueAttributes", "AtlasEntityStoreV2", rte.getMessage());
             }
-            throw new AtlasBaseException(jge);
+            throw new AtlasBaseException(rte);
         } catch (AtlasBaseException e) {
             throw e;
         } catch (Exception e) {
@@ -1133,11 +1129,8 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private boolean isPermanentBackendException(Throwable throwable) {
         Throwable current = throwable;
         while (current != null) {
-            if (current instanceof org.janusgraph.diskstorage.PermanentBackendException) {
-                return true;
-            }
-            // Also check by class name in case of classloader issues
-            if ("org.janusgraph.diskstorage.PermanentBackendException".equalsIgnoreCase(current.getClass().getName())) {
+            String className = current.getClass().getName();
+            if (className.contains("PermanentBackendException") || className.contains("PermanentStorageException")) {
                 return true;
             }
             current = current.getCause();
@@ -3218,24 +3211,11 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("repairHasLineageForProcess");
 
         try {
-            // Get Gremlin traversal source for native graph operations
-            GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
+            // Check for active input edges with active vertices using edge-based traversal
+            boolean hasActiveInput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_INPUTS);
 
-            // Check for active input edges with active vertices using graph traversal
-            boolean hasActiveInput = g.V(processVertex.getId())
-                    .outE(PROCESS_INPUTS)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .inV()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .hasNext();
-
-            // Check for active output edges with active vertices using graph traversal
-            boolean hasActiveOutput = g.V(processVertex.getId())
-                    .outE(PROCESS_OUTPUTS)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .inV()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .hasNext();
+            // Check for active output edges with active vertices using edge-based traversal
+            boolean hasActiveOutput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_OUTPUTS);
 
             boolean shouldHaveLineage = hasActiveInput && hasActiveOutput;
             boolean currentHasLineage = getEntityHasLineage(processVertex);
@@ -3261,6 +3241,22 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private boolean hasActiveEdgeWithActiveVertex(AtlasVertex vertex, String edgeLabel) {
+        Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.OUT, edgeLabel);
+        for (AtlasEdge edge : edges) {
+            String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(edgeState)) {
+                continue;
+            }
+            AtlasVertex inVertex = edge.getInVertex();
+            String vertexState = inVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (ACTIVE_STATE_VALUE.equals(vertexState)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void repairHasLineageForAssetByVertex(String vertexId, AtlasVertex assetVertex) {
@@ -3342,41 +3338,44 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
      */
     private Boolean checkIfAssetShouldHaveLineage(AtlasVertex assetVertex) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("checkIfAssetShouldHaveLineage");
-        
+
         try {
-            // Get Gremlin traversal source for native graph operations
-            GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
-            
-            // Single unified query: Get all active edges connected to this asset that could indicate lineage
-            // This replaces multiple separate queries with one comprehensive traversal
-            return g.V(assetVertex.getId())
-                    .bothE(PROCESS_EDGE_LABELS) // Get edges in both directions for all process edge types
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE) // Filter for active edges only
-                    .otherV() // Get the connected vertices (process vertices)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE) // Filter for active process vertices only
-                    .or(
-                        // Short-circuit condition 1: Process already has lineage flag set
-                        __.has(HAS_LINEAGE, true),
-                        // Short-circuit condition 2: Process has valid input/output structure
-                        __.where(
-                            __.and(
-                                // Check if process has active inputs
-                                __.outE(PROCESS_INPUTS)
-                                  .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                                  .inV()
-                                  .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE),
-                                // Check if process has active outputs
-                                __.outE(PROCESS_OUTPUTS)
-                                  .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                                  .inV()
-                                  .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                            )
-                        )
-                    )
-                    .hasNext(); // Early termination - returns true as soon as first valid lineage is found
-                    
+            // Check all process edge types in both directions for connected active process vertices
+            for (String edgeLabel : PROCESS_EDGE_LABELS) {
+                Iterable<AtlasEdge> edges = assetVertex.getEdges(AtlasEdgeDirection.BOTH, edgeLabel);
+                for (AtlasEdge edge : edges) {
+                    // Check edge is active
+                    String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE_STATE_VALUE.equals(edgeState)) {
+                        continue;
+                    }
+
+                    // Get the connected process vertex
+                    AtlasVertex processVertex = edge.getInVertex().getId().equals(assetVertex.getId())
+                            ? edge.getOutVertex() : edge.getInVertex();
+                    String processState = processVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE_STATE_VALUE.equals(processState)) {
+                        continue;
+                    }
+
+                    // Short-circuit 1: Process already has lineage flag set
+                    Boolean processHasLineage = processVertex.getProperty(HAS_LINEAGE, Boolean.class);
+                    if (Boolean.TRUE.equals(processHasLineage)) {
+                        return true;
+                    }
+
+                    // Short-circuit 2: Process has valid input/output structure
+                    boolean hasActiveInput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_INPUTS);
+                    boolean hasActiveOutput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_OUTPUTS);
+                    if (hasActiveInput && hasActiveOutput) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+
         } catch (Exception e) {
-            LOG.error("Failed to use optimized Gremlin traversal for lineage check, falling back to Atlas queries", e);
+            LOG.error("Failed to check lineage for asset, falling back", e);
             return null;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);

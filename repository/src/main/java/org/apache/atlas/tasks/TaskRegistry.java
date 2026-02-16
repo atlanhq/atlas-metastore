@@ -34,7 +34,6 @@ import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
-import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasMetricType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -54,7 +53,7 @@ import org.elasticsearch.core.TimeValue;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptType;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -469,7 +468,7 @@ public class TaskRegistry {
                                         atlasTask.getGuid(), atlasTask.getStatus());
                                 mismatches++;
                                 try {
-                                    String docId = LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay()));
+                                    String docId = LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay());
                                     repairMismatchedTask(atlasTask, docId);
                                 }
                                 catch (Exception e){

@@ -20,7 +20,6 @@ package org.apache.atlas.repository.graphdb;
 
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.SearchParams;
-import org.apache.tinkerpop.gremlin.process.traversal.Order;
 
 import java.util.Iterator;
 import java.util.List;
@@ -74,7 +73,7 @@ public interface AtlasIndexQuery<V, E> {
      * @param limit max number of results
      * @return
      */
-    Iterator<Result<V, E>> vertices(int offset, int limit, String sortBy, Order sortOrder);
+    Iterator<Result<V, E>> vertices(int offset, int limit, String sortBy, SortOrder sortOrder);
 
     /**
      * Gets the query results
@@ -115,6 +114,15 @@ public interface AtlasIndexQuery<V, E> {
 
         Map<String, List<String>> getHighLights();
         ArrayList<Object> getSort();
+    }
+
+    /**
+     * Sort order for index query results.
+     * Replaces TinkerPop's Order enum to remove the dependency.
+     */
+    enum SortOrder {
+        ASC,
+        DESC
     }
 
 }

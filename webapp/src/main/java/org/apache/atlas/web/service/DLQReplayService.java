@@ -18,7 +18,7 @@ import org.apache.kafka.common.serialization.StringDeserializer;
 import org.janusgraph.diskstorage.TemporaryBackendException;
 import org.janusgraph.diskstorage.dlq.DLQEntry;
 import org.janusgraph.diskstorage.dlq.SerializableIndexMutation;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -528,7 +528,7 @@ public class DLQReplayService {
                     if (hasInvalidRankFeatureValue(ve.getValue())) {
                         log.warn("Skipping vertex ID {} due to invalid rank_feature value", ve.getKey());
                     } else {
-                        vertexIds.add(LongEncoding.decode(ve.getKey()));
+                        vertexIds.add(LongEncodingUtil.decode(ve.getKey()));
                     }
                 }
                 repairIndex.reindexVerticesByIds(INDEX_NAME_VERTEX_INDEX, vertexIds);
