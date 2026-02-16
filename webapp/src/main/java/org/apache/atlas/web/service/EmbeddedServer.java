@@ -80,44 +80,81 @@ public class EmbeddedServer {
     protected WebAppContext getWebAppContext(String path) {
         LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
         WebAppContext application = new WebAppContext(path, "/");
-        final ClassLoader atlasLoader = Thread.currentThread().getContextClassLoader();
-        application.setClassLoader(atlasLoader);
+        // final ClassLoader atlasLoader = Thread.currentThread().getContextClassLoader();
+        // application.setClassLoader(atlasLoader);
         
         // --- LOAD CHANGE: API FAST-LANE REGISTRATION --- 
         // We manually register the Jersey Spring Servlet to ensure there is a straight path 
         // for the V2 API that bypasses the global filter chain in web.xml.
         // ----- IMP* This change is to reduce Jetty's deep stack all filter call for every
         // authenticated API call that lands in Atlas ------
-        try {
+        // try {
             // Using the SpringServlet which integrates Jersey with  Spring context
-            com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
-                new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
+        //     com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
+        //         new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
             
-            org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
-            holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
+        //     org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
+        //     holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
             
-            //SET THE CLASSLOADER EXPLICITLY for servlet
-           // holder.setClassLoader(atlasClassLoader);
+        //     //SET THE CLASSLOADER EXPLICITLY for servlet
+        //    // holder.setClassLoader(atlasClassLoader);
 
-            // This parameter tells Jersey where Atlas API Resource classes are located
-            holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
+        //     // This parameter tells Jersey where Atlas API Resource classes are located
+        //     holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+        //                             "com.sun.jersey.api.core.ClassNamesResourceConfig");
          
-            //explicit comma-separated list of main V2 classes to avoid resource scanning
-            holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                    "org.apache.atlas.web.resources.EntityResourceV2,org.apache.atlas.web.resources.TypesResourceV2, org.apache.atlas.web.resources.DiscoveryResourceV2");
+        //     //explicit comma-separated list of main V2 classes to avoid resource scanning
+        //     holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+        //                             "org.apache.atlas.web.resources.EntityResourceV2,org.apache.atlas.web.resources.TypesResourceV2, org.apache.atlas.web.resources.DiscoveryResourceV2");
        
-            holder.setInitOrder(1);
+        //     holder.setInitOrder(1);
 
-            // We map this specifically to the V2 API path.
-            //  Need to check that all keycloak or other filter calls happen before /v2 mapping
-            application.addServlet(holder, "/api/atlas/v2/*");
+        //     // We map this specifically to the V2 API path.
+        //     //  Need to check that all keycloak or other filter calls happen before /v2 mapping
+        //     application.addServlet(holder, "/api/atlas/v2/*");
+
             
-            LOG.info("Successfully registered Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
-        } catch (Exception e) {
-            //No action other than error logging needed. Revert back to original flow in web.xml
-            LOG.error("Failed to register Fast-Lane shallow stack Servlet, falling back to default web.xml flow", e);
-        }
+        //     LOG.info("Successfully registered Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
+        // } catch (Exception e) {
+        //     //No action other than error logging needed. Revert back to original flow in web.xml
+        //     LOG.error("Failed to register Fast-Lane shallow stack Servlet, falling back to default web.xml flow", e);
+        // }
+      
+        //LifeCycle Listener for Late Binding of resource files after all the JARs are loaded
+        //and Atlas finds resource classes
+        application.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
+            @Override
+            public void lifeCycleStarting(org.eclipse.jetty.util.component.LifeCycle event) {
+                try {
+                    // At this point, Jetty has set up the WebAppClassLoader
+                    ClassLoader webAppLoader = application.getClassLoader();
+                    
+                    com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
+                        new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
+                    
+                    org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
+                    holder.setName("atlas-v2-shallowstack");
+
+                    // Use the late-bound loader
+                    holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                                            "com.sun.jersey.api.core.ClassNamesResourceConfig");
+                    
+                    holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+                                            "org.apache.atlas.web.resources.EntityResourceV2," +
+                                            "org.apache.atlas.web.resources.TypesResourceV2," +
+                                            "org.apache.atlas.web.resources.DiscoveryResourceV2");
+
+                    holder.setInitOrder(1);
+
+                    application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
+                    
+                    LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully via LifeCycle Listener.");
+                } catch (Exception e) {
+                    LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
+                }
+            }
+        });
+
         // Disable directory listing 
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
         
