@@ -80,8 +80,8 @@ public class EmbeddedServer {
     protected WebAppContext getWebAppContext(String path) {
         LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
         WebAppContext application = new WebAppContext(path, "/");
-        ClassLoader atlasLoader = Thread.currentThread().getContextClassLoader();
-        application.setClassLoader(atlasLoader);
+        // ClassLoader atlasLoader = Thread.currentThread().getContextClassLoader();
+        // application.setClassLoader(atlasLoader);
         
         // --- LOAD CHANGE: API FAST-LANE REGISTRATION --- 
         // We manually register the Jersey Spring Servlet to ensure there is a straight path 
@@ -89,36 +89,22 @@ public class EmbeddedServer {
         // ----- IMP* This change is to reduce Jetty's deep stack all filter call for every
         // authenticated API call that lands in Atlas ------
         try {
-            // Using the SpringServlet which integrates Jersey with  Spring context
+            com.sun.jersey.api.core.DefaultResourceConfig resourceConfig = new com.sun.jersey.api.core.DefaultResourceConfig();
+            
+            // Add the resource classes directly as Class objects
+            // This avoids String-based lookups that are failing
+            resourceConfig.getClasses().add(org.apache.atlas.web.resources.EntityResourceV2.class);
+            resourceConfig.getClasses().add(org.apache.atlas.web.resources.TypesResourceV2.class);
+            resourceConfig.getClasses().add(org.apache.atlas.web.resources.DiscoveryResourceV2.class);
+
             com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
-                new com.sun.jersey.spi.spring.container.servlet.SpringServlet() {
-                    @Override
-                    public void init(javax.servlet.ServletConfig config) throws javax.servlet.ServletException {
-                        ClassLoader webAppLoader = config.getServletContext().getClassLoader();
-                        ClassLoader oldLoader = Thread.currentThread().getContextClassLoader();
-                        try {
-                            // Force the thread to use the Atlas WebApp loader during Jersey startup
-                            Thread.currentThread().setContextClassLoader(webAppLoader);
-                            super.init(config);
-                        } finally {
-                            Thread.currentThread().setContextClassLoader(oldLoader);
-                        }
-                    }
-                };
+                new com.sun.jersey.spi.spring.container.servlet.SpringServlet(resourceConfig);
             
             org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
             holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
             
             //SET THE CLASSLOADER EXPLICITLY for servlet
            // holder.setClassLoader(atlasClassLoader);
-
-            // This parameter tells Jersey where Atlas API Resource classes are located
-            holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
-         
-            //explicit comma-separated list of main V2 classes to avoid resource scanning
-            holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                    "org.apache.atlas.web.resources.EntityResourceV2,org.apache.atlas.web.resources.TypesResourceV2, org.apache.atlas.web.resources.DiscoveryResourceV2");
        
             holder.setInitOrder(1);
 
