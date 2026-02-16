@@ -94,10 +94,11 @@ public class EmbeddedServer {
                 new com.sun.jersey.spi.spring.container.servlet.SpringServlet() {
                     @Override
                     public void init(javax.servlet.ServletConfig config) throws javax.servlet.ServletException {
+                        ClassLoader webAppLoader = config.getServletContext().getClassLoader();
                         ClassLoader oldLoader = Thread.currentThread().getContextClassLoader();
                         try {
                             // Force the thread to use the Atlas WebApp loader during Jersey startup
-                            Thread.currentThread().setContextClassLoader(atlasLoader);
+                            Thread.currentThread().setContextClassLoader(webAppLoader);
                             super.init(config);
                         } finally {
                             Thread.currentThread().setContextClassLoader(oldLoader);
