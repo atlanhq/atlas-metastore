@@ -76,7 +76,7 @@ public class EmbeddedServer {
     }
 
     protected WebAppContext getWebAppContext(String path) {
-        LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet");
+        LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet w/ ClassLoader Alignment");
         WebAppContext application = new WebAppContext(path, "/");
         ClassLoader atlasClassLoader = Thread.currentThread().getContextClassLoader();
         application.setClassLoader(atlasClassLoader);
@@ -94,6 +94,9 @@ public class EmbeddedServer {
             org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
             holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
             
+            //SET THE CLASSLOADER EXPLICITLY for servlet
+            holder.setClassLoader(atlasLoader);
+
             // This parameter tells Jersey where Atlas API Resource classes are located
             holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                                     "com.sun.jersey.api.core.ClassNamesResourceConfig");
@@ -108,7 +111,7 @@ public class EmbeddedServer {
             //  Need to check that all keycloak or other filter calls happen before /v2 mapping
             application.addServlet(holder, "/api/atlas/v2/*");
             
-            LOG.info("Successfully registered Atlas V2 API Fast-Lane shallow stack Servlet");
+            LOG.info("Successfully registered Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
         } catch (Exception e) {
             //No action other than error logging needed. Revert back to original flow in web.xml
             LOG.error("Failed to register Fast-Lane shallow stack Servlet, falling back to default web.xml flow", e);
