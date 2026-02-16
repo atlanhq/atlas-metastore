@@ -76,7 +76,7 @@ public class EmbeddedServer {
     }
 
     protected WebAppContext getWebAppContext(String path) {
-        LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet w/ ClassLoader Alignment");
+        LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
         WebAppContext application = new WebAppContext(path, "/");
         ClassLoader atlasClassLoader = Thread.currentThread().getContextClassLoader();
         application.setClassLoader(atlasClassLoader);
@@ -95,7 +95,7 @@ public class EmbeddedServer {
             holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
             
             //SET THE CLASSLOADER EXPLICITLY for servlet
-            holder.setClassLoader(atlasLoader);
+            holder.setClassLoader(atlasClassLoader);
 
             // This parameter tells Jersey where Atlas API Resource classes are located
             holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
