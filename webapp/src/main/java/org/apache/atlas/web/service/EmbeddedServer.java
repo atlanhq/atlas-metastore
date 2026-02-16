@@ -93,8 +93,13 @@ public class EmbeddedServer {
             holder.setName("atlas-v2-shallowstack"); // TODO : "Shallowstack"( instead of "fastlane") is another potential name 
             
             // This parameter tells Jersey where Atlas API Resource classes are located
-            holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
-            
+            holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
+         
+            //explicit comma-separated list of main V2 classes to avoid resource scanning
+            holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+                                    "org.apache.atlas.web.resources.EntityResourceV2,org.apache.atlas.web.resources.TypesResourceV2, org.apache.atlas.web.resources.DiscoveryResourceV2");
+       
             // We map this specifically to the V2 API path.
             //  Need to check that all keycloak or other filter calls happen before /v2 mapping
             application.addServlet(holder, "/api/atlas/v2/*");
