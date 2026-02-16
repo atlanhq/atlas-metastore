@@ -3582,6 +3582,7 @@
                 [
                     "entity-type:AIApplication",
                     "entity-type:AIModel",
+                    "entity-type:AIModelVersion",
                     "entity-classification:*",
                     "entity:*",
                     "entity-business-metadata:*"
