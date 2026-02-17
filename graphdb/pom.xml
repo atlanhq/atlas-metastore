@@ -38,6 +38,7 @@
         <module>graphdb-impls</module>
         <module>janus</module>
         <module>cassandra</module>
+        <module>migrator</module>
     </modules>
 
     <!-- Note: gremlin-server dependency moved to graphdb/janus and graphdb/common modules only -->
