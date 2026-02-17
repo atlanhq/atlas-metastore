@@ -3,6 +3,7 @@ package org.apache.atlas.repository.graphdb.cassandra;
 import com.datastax.oss.driver.api.core.CqlSession;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.GraphDatabase;
 import org.apache.commons.configuration.Configuration;
@@ -26,6 +27,7 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
     private static final Logger LOG = LoggerFactory.getLogger(CassandraGraphDatabase.class);
 
     private static volatile CassandraGraph graphInstance;
+    private static volatile boolean esIndexesVerified = false;
 
     @Override
     public boolean isGraphLoaded() {
@@ -41,7 +43,28 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
                 }
             }
         }
+        ensureRequiredESIndexes();
         return graphInstance;
+    }
+
+    /**
+     * Ensures the required ES indexes exist. Called lazily because during initial
+     * graph creation the ES client may not yet be available (AtlasElasticsearchDatabase
+     * static initializer hasn't run). On subsequent calls (e.g., when handling requests),
+     * the ES client is ready and indexes will be created if missing.
+     */
+    private static void ensureRequiredESIndexes() {
+        if (esIndexesVerified) {
+            return;
+        }
+        try {
+            CassandraGraph.ensureESIndexExists(Constants.VERTEX_INDEX_NAME);
+            CassandraGraph.ensureESIndexExists(Constants.EDGE_INDEX_NAME);
+            esIndexesVerified = true;
+        } catch (Throwable t) {
+            // ES client may not be ready yet; will retry on next call
+            LOG.debug("ES indexes not yet verified (will retry): {}", t.getMessage());
+        }
     }
 
     @Override

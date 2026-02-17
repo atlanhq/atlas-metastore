@@ -1,6 +1,13 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.*;
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.RestClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -106,7 +113,10 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             index.addFieldKey(key);
         }
         graph.getGraphIndexesMap().put(name, index);
-        LOG.info("Created vertex mixed index: {} (backing: {})", name, backingIndex);
+        // Use prefixed name (e.g., "janusgraph_vertex_index") matching what query callers expect
+        String esIndexName = Constants.INDEX_PREFIX + name;
+        ensureESIndexExists(esIndexName);
+        LOG.info("Created vertex mixed index: {} (ES index: {}, backing: {})", name, esIndexName, backingIndex);
     }
 
     @Override
@@ -116,7 +126,10 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             index.addFieldKey(key);
         }
         graph.getGraphIndexesMap().put(indexName, index);
-        LOG.info("Created edge mixed index: {} (backing: {})", indexName, backingIndex);
+        // Use prefixed name matching what query callers expect
+        String esIndexName = Constants.INDEX_PREFIX + indexName;
+        ensureESIndexExists(esIndexName);
+        LOG.info("Created edge mixed index: {} (ES index: {}, backing: {})", indexName, esIndexName, backingIndex);
     }
 
     @Override
@@ -187,5 +200,69 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
     @Override
     public void printIndexRecoveryStats(Object txRecoveryObject) {
         // no-op
+    }
+
+    /**
+     * Ensures the Elasticsearch index exists, creating it with dynamic mapping if not.
+     * JanusGraph normally creates these indexes; in the Cassandra backend we manage them directly.
+     */
+    private void ensureESIndexExists(String indexName) {
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                LOG.warn("ES client not available, cannot ensure index {} exists", indexName);
+                return;
+            }
+
+            // Check if index already exists
+            Request headReq = new Request("HEAD", "/" + indexName);
+            Response headResp = client.performRequest(headReq);
+            if (headResp.getStatusLine().getStatusCode() == 200) {
+                LOG.info("ES index {} already exists", indexName);
+                return;
+            }
+        } catch (org.elasticsearch.client.ResponseException e) {
+            if (e.getResponse().getStatusLine().getStatusCode() == 404) {
+                // Index doesn't exist, create it
+                createESIndex(indexName);
+            } else {
+                LOG.warn("Failed to check ES index {}: {}", indexName, e.getMessage());
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to check ES index {}: {}", indexName, e.getMessage());
+        }
+    }
+
+    private void createESIndex(String indexName) {
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                return;
+            }
+
+            String settings = "{\n" +
+                "  \"settings\": {\n" +
+                "    \"number_of_shards\": 1,\n" +
+                "    \"number_of_replicas\": 0,\n" +
+                "    \"index.mapping.total_fields.limit\": 2000\n" +
+                "  },\n" +
+                "  \"mappings\": {\n" +
+                "    \"dynamic\": true\n" +
+                "  }\n" +
+                "}";
+
+            Request req = new Request("PUT", "/" + indexName);
+            req.setEntity(new StringEntity(settings, ContentType.APPLICATION_JSON));
+            Response resp = client.performRequest(req);
+
+            int status = resp.getStatusLine().getStatusCode();
+            if (status >= 200 && status < 300) {
+                LOG.info("Created ES index: {}", indexName);
+            } else {
+                LOG.warn("Failed to create ES index {}: status={}", indexName, status);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to create ES index {}: {}", indexName, e.getMessage());
+        }
     }
 }

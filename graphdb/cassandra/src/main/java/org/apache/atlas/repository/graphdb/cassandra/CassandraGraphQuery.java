@@ -1,12 +1,23 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.*;
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
+import org.apache.atlas.type.AtlasType;
+import org.apache.http.util.EntityUtils;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.RestClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, CassandraEdge> {
+
+    private static final Logger LOG = LoggerFactory.getLogger(CassandraGraphQuery.class);
 
     private final CassandraGraph graph;
     private final List<Predicate> predicates;
@@ -126,7 +137,7 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
 
     @SuppressWarnings("unchecked")
     private Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> executeVertexQuery(int offset, int limit) {
-        // Try index-based lookup for simple has predicates
+        // Try 1:1 index-based lookup for simple has predicates
         if (predicates.size() >= 1 && orQueries.isEmpty()) {
             Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> indexed = tryIndexLookup();
             if (indexed != null) {
@@ -137,6 +148,14 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
                     }
                 }
                 return applyPaging(result, offset, limit);
+            }
+        }
+
+        // Try 1:N property index lookup (e.g., findTypeVerticesByCategory / getAll)
+        if (predicates.size() >= 1 && orQueries.isEmpty()) {
+            List<AtlasVertex<CassandraVertex, CassandraEdge>> propertyIndexResults = tryPropertyIndexLookup();
+            if (!propertyIndexResults.isEmpty()) {
+                return applyPaging(propertyIndexResults, offset, limit);
             }
         }
 
@@ -174,53 +193,188 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
     }
 
     private Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> tryIndexLookup() {
-        // Check if we have a simple __guid lookup
+        // Extract known predicate keys for pattern matching
+        Map<String, String> hasPreds = new LinkedHashMap<>();
         for (Predicate p : predicates) {
             if (p instanceof HasPredicate) {
                 HasPredicate hp = (HasPredicate) p;
-                if ("__guid".equals(hp.key) || "Property.__guid".equals(hp.key)) {
-                    // Try Cassandra index first (works after commit)
-                    String vertexId = graph.getIndexRepository().lookupVertex("__guid_idx", String.valueOf(hp.value));
-                    if (vertexId != null) {
-                        AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
-                        if (vertex != null) {
-                            return Collections.singletonList(vertex);
-                        }
-                    }
-                    // Index entry may not be committed yet - scan vertex cache (pre-commit case)
-                    return scanVertexCache();
-                }
+                hasPreds.put(hp.key, String.valueOf(hp.value));
             }
         }
 
-        // Check for qualifiedName + __typeName composite lookup
-        // qualifiedName may appear as "qualifiedName" or "__u_qualifiedName" (unique shade property)
-        String qn = null, typeName = null;
-        for (Predicate p : predicates) {
-            if (p instanceof HasPredicate) {
-                HasPredicate hp = (HasPredicate) p;
-                if ("qualifiedName".equals(hp.key) || "Property.qualifiedName".equals(hp.key)
-                        || "__u_qualifiedName".equals(hp.key) || "Property.__u_qualifiedName".equals(hp.key)) {
-                    qn = String.valueOf(hp.value);
-                } else if ("__typeName".equals(hp.key) || "Property.__typeName".equals(hp.key)) {
-                    typeName = String.valueOf(hp.value);
-                }
-            }
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("tryIndexLookup: predicates={}", hasPreds);
         }
-        if (qn != null && typeName != null) {
-            // Try Cassandra index first (works after commit)
-            String vertexId = graph.getIndexRepository().lookupVertex("qn_type_idx", qn + ":" + typeName);
+
+        // 1. __guid lookup (entity or TypeDef vertex by GUID)
+        String guidValue = hasPreds.get("__guid");
+        if (guidValue == null) guidValue = hasPreds.get("Property.__guid");
+        if (guidValue == null) guidValue = hasPreds.get(Constants.GUID_PROPERTY_KEY);
+        if (guidValue != null) {
+            LOG.info("tryIndexLookup: GUID lookup for [{}]", guidValue);
+            String vertexId = graph.getIndexRepository().lookupVertex("__guid_idx", guidValue);
+            LOG.info("tryIndexLookup: __guid_idx returned vertexId=[{}]", vertexId);
+            if (vertexId != null) {
+                AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
+                if (vertex != null) {
+                    return Collections.singletonList(vertex);
+                }
+                LOG.warn("tryIndexLookup: index had vertexId [{}] but vertex not found in Cassandra!", vertexId);
+            }
+
+            // Fallback 1: check vertex cache (for uncommitted vertices)
+            List<AtlasVertex<CassandraVertex, CassandraEdge>> cached = scanVertexCache();
+            if (!cached.isEmpty()) {
+                return cached;
+            }
+
+            // Fallback 2: search ES for the GUID (the vertex might exist but index entry is missing)
+            AtlasVertex<CassandraVertex, CassandraEdge> esVertex = lookupVertexByGuidFromES(guidValue);
+            if (esVertex != null) {
+                LOG.warn("tryIndexLookup: GUID [{}] found via ES fallback (vertex_id={}), Cassandra index was missing! Rebuilding index.",
+                        guidValue, ((CassandraVertex) esVertex).getIdString());
+                // Rebuild the missing index entry so future lookups are fast
+                graph.getIndexRepository().addIndex("__guid_idx", guidValue, ((CassandraVertex) esVertex).getIdString());
+                return Collections.singletonList(esVertex);
+            }
+
+            LOG.info("tryIndexLookup: GUID [{}] not found in index, cache, or ES", guidValue);
+            return Collections.emptyList();
+        }
+
+        // 2. qualifiedName + __typeName composite lookup (entity vertex)
+        String qn = hasPreds.get("qualifiedName");
+        if (qn == null) qn = hasPreds.get("Property.qualifiedName");
+        if (qn == null) qn = hasPreds.get("__u_qualifiedName");
+        if (qn == null) qn = hasPreds.get("Property.__u_qualifiedName");
+        String entityTypeName = hasPreds.get("__typeName");
+        if (entityTypeName == null) entityTypeName = hasPreds.get("Property.__typeName");
+        if (entityTypeName == null) entityTypeName = hasPreds.get(Constants.ENTITY_TYPE_PROPERTY_KEY);
+        if (qn != null && entityTypeName != null) {
+            String indexKey = qn + ":" + entityTypeName;
+            String vertexId = graph.getIndexRepository().lookupVertex("qn_type_idx", indexKey);
             if (vertexId != null) {
                 AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
                 if (vertex != null) {
                     return Collections.singletonList(vertex);
                 }
             }
-            // Index entry may not be committed yet - scan vertex cache (pre-commit case)
+            return scanVertexCache();
+        }
+
+        // 3. VERTEX_TYPE + TYPENAME lookup (TypeDef vertex by name)
+        //    Pattern: has("__type", "typeSystem").has("__type.name"/"__type_name", name)
+        String vertexType  = hasPreds.get(Constants.VERTEX_TYPE_PROPERTY_KEY);
+        String typeDefName = hasPreds.get(Constants.TYPENAME_PROPERTY_KEY);
+        if (vertexType != null && typeDefName != null) {
+            String vertexId = graph.getIndexRepository().lookupVertex("type_typename_idx", vertexType + ":" + typeDefName);
+            if (vertexId != null) {
+                AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
+                if (vertex != null) {
+                    return Collections.singletonList(vertex);
+                }
+            }
             return scanVertexCache();
         }
 
         return null; // No index available
+    }
+
+    /**
+     * Fallback: search Elasticsearch for a vertex by GUID and load it from Cassandra.
+     * This handles the case where the Cassandra vertex_index entry is missing
+     * (e.g., entity was created before index code was added, or index write failed).
+     */
+    @SuppressWarnings("unchecked")
+    private AtlasVertex<CassandraVertex, CassandraEdge> lookupVertexByGuidFromES(String guid) {
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                return null;
+            }
+
+            String indexName = Constants.VERTEX_INDEX_NAME;
+            // Search ES for __guid field match; the _id is the vertex_id (UUID)
+            String query = "{\"query\":{\"term\":{\"__guid\":\"" + guid + "\"}},\"size\":1,\"_source\":false}";
+            Request req = new Request("POST", "/" + indexName + "/_search");
+            req.setJsonEntity(query);
+            Response resp = client.performRequest(req);
+
+            String body = EntityUtils.toString(resp.getEntity());
+            Map<String, Object> responseMap = AtlasType.fromJson(body, Map.class);
+            if (responseMap == null) {
+                return null;
+            }
+
+            Map<String, Object> hitsWrapper = (Map<String, Object>) responseMap.get("hits");
+            if (hitsWrapper == null) {
+                return null;
+            }
+
+            List<Map<String, Object>> hits = (List<Map<String, Object>>) hitsWrapper.get("hits");
+            if (hits == null || hits.isEmpty()) {
+                LOG.info("lookupVertexByGuidFromES: no ES hits for guid [{}]", guid);
+                return null;
+            }
+
+            String vertexId = (String) hits.get(0).get("_id");
+            if (vertexId == null) {
+                return null;
+            }
+
+            LOG.info("lookupVertexByGuidFromES: found vertexId [{}] for guid [{}]", vertexId, guid);
+            return graph.getVertex(vertexId);
+        } catch (Exception e) {
+            LOG.debug("lookupVertexByGuidFromES failed for guid [{}]: {}", guid, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Try 1:N property index lookup for queries that return multiple vertices.
+     * Currently supports: VERTEX_TYPE + TYPE_CATEGORY (findTypeVerticesByCategory / getAll).
+     */
+    @SuppressWarnings("unchecked")
+    private List<AtlasVertex<CassandraVertex, CassandraEdge>> tryPropertyIndexLookup() {
+        Map<String, String> hasPreds = new LinkedHashMap<>();
+        for (Predicate p : predicates) {
+            if (p instanceof HasPredicate) {
+                HasPredicate hp = (HasPredicate) p;
+                hasPreds.put(hp.key, String.valueOf(hp.value));
+            }
+        }
+
+        // VERTEX_TYPE + TYPE_CATEGORY lookup (findTypeVerticesByCategory)
+        String vertexType   = hasPreds.get(Constants.VERTEX_TYPE_PROPERTY_KEY);
+        String typeCategory = hasPreds.get(Constants.TYPE_CATEGORY_PROPERTY_KEY);
+        if (vertexType != null && typeCategory != null) {
+            List<String> vertexIds = graph.getIndexRepository().lookupVertices(
+                    "type_category_idx", vertexType + ":" + typeCategory);
+
+            // Collect matching vertices from Cassandra
+            Set<String> seenIds = new HashSet<>();
+            List<AtlasVertex<CassandraVertex, CassandraEdge>> results = new ArrayList<>();
+            for (String vertexId : vertexIds) {
+                AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
+                if (vertex != null && matchesAllPredicates(vertex)) {
+                    results.add(vertex);
+                    seenIds.add(vertexId);
+                }
+            }
+
+            // Also check vertex cache for uncommitted vertices
+            for (AtlasVertex<CassandraVertex, CassandraEdge> v : scanVertexCache()) {
+                if (!seenIds.contains(((CassandraVertex) v).getIdString())) {
+                    results.add(v);
+                }
+            }
+
+            LOG.debug("tryPropertyIndexLookup type_category_idx [{}:{}] found {} vertices",
+                    vertexType, typeCategory, results.size());
+            return results;
+        }
+
+        return Collections.emptyList();
     }
 
     /**

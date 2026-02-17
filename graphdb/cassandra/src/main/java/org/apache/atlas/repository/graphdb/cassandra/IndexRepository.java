@@ -13,9 +13,17 @@ public class IndexRepository {
     private static final Logger LOG = LoggerFactory.getLogger(IndexRepository.class);
 
     private final CqlSession session;
+
+    // 1:1 index (vertex_index table)
     private PreparedStatement insertIndexStmt;
     private PreparedStatement selectIndexStmt;
     private PreparedStatement deleteIndexStmt;
+
+    // 1:N index (vertex_property_index table)
+    private PreparedStatement insertPropertyIndexStmt;
+    private PreparedStatement selectPropertyIndexStmt;
+    private PreparedStatement deletePropertyIndexStmt;
+    private PreparedStatement deletePropertyIndexVertexStmt;
 
     public IndexRepository(CqlSession session) {
         this.session = session;
@@ -23,6 +31,7 @@ public class IndexRepository {
     }
 
     private void prepareStatements() {
+        // 1:1 unique index
         insertIndexStmt = session.prepare(
             "INSERT INTO vertex_index (index_name, index_value, vertex_id) VALUES (?, ?, ?)"
         );
@@ -34,16 +43,38 @@ public class IndexRepository {
         deleteIndexStmt = session.prepare(
             "DELETE FROM vertex_index WHERE index_name = ? AND index_value = ?"
         );
+
+        // 1:N property index
+        insertPropertyIndexStmt = session.prepare(
+            "INSERT INTO vertex_property_index (index_name, index_value, vertex_id) VALUES (?, ?, ?)"
+        );
+
+        selectPropertyIndexStmt = session.prepare(
+            "SELECT vertex_id FROM vertex_property_index WHERE index_name = ? AND index_value = ?"
+        );
+
+        deletePropertyIndexStmt = session.prepare(
+            "DELETE FROM vertex_property_index WHERE index_name = ? AND index_value = ?"
+        );
+
+        deletePropertyIndexVertexStmt = session.prepare(
+            "DELETE FROM vertex_property_index WHERE index_name = ? AND index_value = ? AND vertex_id = ?"
+        );
     }
+
+    // ---- 1:1 unique index (vertex_index) ----
 
     public void addIndex(String indexName, String indexValue, String vertexId) {
         session.execute(insertIndexStmt.bind(indexName, indexValue, vertexId));
     }
 
     public String lookupVertex(String indexName, String indexValue) {
+        LOG.info("lookupVertex: indexName=[{}], indexValue=[{}]", indexName, indexValue);
         ResultSet rs = session.execute(selectIndexStmt.bind(indexName, indexValue));
         Row row = rs.one();
-        return row != null ? row.getString("vertex_id") : null;
+        String result = row != null ? row.getString("vertex_id") : null;
+        LOG.info("lookupVertex: result=[{}]", result);
+        return result;
     }
 
     public void removeIndex(String indexName, String indexValue) {
@@ -61,6 +92,43 @@ public class IndexRepository {
         }
         session.execute(batch.build());
     }
+
+    // ---- 1:N property index (vertex_property_index) ----
+
+    public void addPropertyIndex(String indexName, String indexValue, String vertexId) {
+        session.execute(insertPropertyIndexStmt.bind(indexName, indexValue, vertexId));
+    }
+
+    public List<String> lookupVertices(String indexName, String indexValue) {
+        ResultSet rs = session.execute(selectPropertyIndexStmt.bind(indexName, indexValue));
+        List<String> result = new ArrayList<>();
+        for (Row row : rs) {
+            result.add(row.getString("vertex_id"));
+        }
+        return result;
+    }
+
+    public void removePropertyIndex(String indexName, String indexValue) {
+        session.execute(deletePropertyIndexStmt.bind(indexName, indexValue));
+    }
+
+    public void removePropertyIndexVertex(String indexName, String indexValue, String vertexId) {
+        session.execute(deletePropertyIndexVertexStmt.bind(indexName, indexValue, vertexId));
+    }
+
+    public void batchAddPropertyIndexes(List<IndexEntry> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+
+        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+        for (IndexEntry entry : entries) {
+            batch.addStatement(insertPropertyIndexStmt.bind(entry.indexName, entry.indexValue, entry.vertexId));
+        }
+        session.execute(batch.build());
+    }
+
+    // ---- Shared entry class ----
 
     public static class IndexEntry {
         public final String indexName;

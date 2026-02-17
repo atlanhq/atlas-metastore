@@ -6,8 +6,16 @@ import org.apache.atlas.ESAliasRequestBuilder;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.model.discovery.SearchParams;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.*;
+import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.atlas.type.AtlasType;
+import org.apache.http.entity.ContentType;
+import org.apache.http.entity.StringEntity;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
+import org.elasticsearch.client.ResponseException;
+import org.elasticsearch.client.RestClient;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -22,6 +30,9 @@ import java.util.concurrent.ConcurrentHashMap;
 public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge> {
 
     private static final Logger LOG = LoggerFactory.getLogger(CassandraGraph.class);
+
+    /** Tracks ES indexes that have been verified/created during this JVM session. */
+    private static final Set<String> VERIFIED_ES_INDEXES = ConcurrentHashMap.newKeySet();
 
     private final CqlSession        session;
     private final VertexRepository  vertexRepository;
@@ -252,11 +263,13 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public AtlasIndexQuery<CassandraVertex, CassandraEdge> elasticsearchQuery(String indexName, SearchSourceBuilder sourceBuilder) {
+        ensureESIndexExists(indexName);
         return new CassandraIndexQuery(this, indexName, sourceBuilder);
     }
 
     @Override
     public AtlasIndexQuery<CassandraVertex, CassandraEdge> elasticsearchQuery(String indexName, SearchParams searchParams) throws AtlasBaseException {
+        ensureESIndexExists(indexName);
         return new CassandraIndexQuery(this, indexName, searchParams);
     }
 
@@ -274,7 +287,77 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public AtlasIndexQuery elasticsearchQuery(String indexName) throws AtlasBaseException {
+        ensureESIndexExists(indexName);
         return new CassandraIndexQuery(this, indexName, (SearchSourceBuilder) null);
+    }
+
+    /**
+     * Ensures the given ES index exists, creating it if necessary.
+     * Called lazily from elasticsearchQuery() methods, which guarantees the ES client
+     * is available (unlike during startup when GraphBackedSearchIndexer runs before
+     * AtlasElasticsearchDatabase is initialized).
+     */
+    static void ensureESIndexExists(String indexName) {
+        if (indexName == null || VERIFIED_ES_INDEXES.contains(indexName)) {
+            return;
+        }
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                LOG.warn("ES client not available, cannot ensure index {} exists", indexName);
+                return;
+            }
+
+            // HEAD check - does the index exist?
+            Request headReq = new Request("HEAD", "/" + indexName);
+            Response headResp = client.performRequest(headReq);
+            if (headResp.getStatusLine().getStatusCode() == 200) {
+                VERIFIED_ES_INDEXES.add(indexName);
+                return;
+            }
+        } catch (ResponseException e) {
+            if (e.getResponse().getStatusLine().getStatusCode() == 404) {
+                createESIndex(indexName);
+            } else {
+                LOG.warn("Failed to check ES index {}: {}", indexName, e.getMessage());
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to check ES index {}: {}", indexName, e.getMessage());
+        }
+    }
+
+    private static void createESIndex(String indexName) {
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                return;
+            }
+
+            String settings = "{\n" +
+                "  \"settings\": {\n" +
+                "    \"number_of_shards\": 1,\n" +
+                "    \"number_of_replicas\": 0,\n" +
+                "    \"index.mapping.total_fields.limit\": 2000\n" +
+                "  },\n" +
+                "  \"mappings\": {\n" +
+                "    \"dynamic\": true\n" +
+                "  }\n" +
+                "}";
+
+            Request req = new Request("PUT", "/" + indexName);
+            req.setEntity(new StringEntity(settings, ContentType.APPLICATION_JSON));
+            Response resp = client.performRequest(req);
+
+            int status = resp.getStatusLine().getStatusCode();
+            if (status >= 200 && status < 300) {
+                LOG.info("Created ES index: {}", indexName);
+                VERIFIED_ES_INDEXES.add(indexName);
+            } else {
+                LOG.warn("Failed to create ES index {}: status={}", indexName, status);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to create ES index {}: {}", indexName, e.getMessage());
+        }
     }
 
     // ---- Transaction operations ----
@@ -310,17 +393,27 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 vertexRepository.deleteVertex(vertex.getIdString());
             }
 
-            // Update index entries for new vertices
-            List<IndexRepository.IndexEntry> indexEntries = new ArrayList<>();
+            // Update index entries for new and dirty vertices
+            List<IndexRepository.IndexEntry> uniqueIndexEntries   = new ArrayList<>();
+            List<IndexRepository.IndexEntry> propertyIndexEntries = new ArrayList<>();
             for (CassandraVertex v : newVertices) {
-                buildIndexEntries(v, indexEntries);
+                buildIndexEntries(v, uniqueIndexEntries, propertyIndexEntries);
             }
             for (CassandraVertex v : dirtyVertices) {
-                buildIndexEntries(v, indexEntries);
+                buildIndexEntries(v, uniqueIndexEntries, propertyIndexEntries);
             }
-            if (!indexEntries.isEmpty()) {
-                indexRepository.batchAddIndexes(indexEntries);
+            LOG.info("commit: {} new vertices, {} dirty vertices, {} unique index entries, {} property index entries",
+                    newVertices.size(), dirtyVertices.size(), uniqueIndexEntries.size(), propertyIndexEntries.size());
+            if (!uniqueIndexEntries.isEmpty()) {
+                indexRepository.batchAddIndexes(uniqueIndexEntries);
+                LOG.info("commit: wrote {} unique index entries to Cassandra", uniqueIndexEntries.size());
             }
+            if (!propertyIndexEntries.isEmpty()) {
+                indexRepository.batchAddPropertyIndexes(propertyIndexEntries);
+            }
+
+            // Sync vertices to Elasticsearch (replaces JanusGraph's mixed index sync)
+            syncVerticesToElasticsearch(newVertices, dirtyVertices, buffer.getRemovedVertices());
 
             // Mark all elements as persisted
             for (CassandraVertex v : newVertices) {
@@ -349,19 +442,108 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         vertexCache.get().clear();
     }
 
-    private void buildIndexEntries(CassandraVertex vertex, List<IndexRepository.IndexEntry> entries) {
+    private void buildIndexEntries(CassandraVertex vertex,
+                                   List<IndexRepository.IndexEntry> uniqueEntries,
+                                   List<IndexRepository.IndexEntry> propertyEntries) {
+        // ---- 1:1 unique indexes (vertex_index table) ----
+
         // Index by __guid
         Object guid = vertex.getProperty("__guid", String.class);
         if (guid != null) {
-            entries.add(new IndexRepository.IndexEntry("__guid_idx", String.valueOf(guid), vertex.getIdString()));
+            String guidStr = String.valueOf(guid);
+            uniqueEntries.add(new IndexRepository.IndexEntry("__guid_idx", guidStr, vertex.getIdString()));
+            LOG.info("buildIndexEntries: __guid_idx [{}] -> vertexId [{}]", guidStr, vertex.getIdString());
         }
 
-        // Index by qualifiedName + __typeName
+        // Index by qualifiedName + __typeName (entity lookup)
         Object qn = vertex.getProperty("qualifiedName", String.class);
-        Object typeName = vertex.getProperty("__typeName", String.class);
-        if (qn != null && typeName != null) {
-            entries.add(new IndexRepository.IndexEntry("qn_type_idx", qn + ":" + typeName, vertex.getIdString()));
+        Object entityTypeName = vertex.getProperty("__typeName", String.class);
+        if (qn != null && entityTypeName != null) {
+            String indexVal = qn + ":" + entityTypeName;
+            uniqueEntries.add(new IndexRepository.IndexEntry("qn_type_idx", indexVal, vertex.getIdString()));
+            LOG.info("buildIndexEntries: qn_type_idx [{}] -> vertexId [{}]", indexVal, vertex.getIdString());
         }
+
+        // Index by VERTEX_TYPE + TYPENAME (TypeDef lookup: findTypeVertexByName)
+        Object vertexType = vertex.getProperty(Constants.VERTEX_TYPE_PROPERTY_KEY, String.class);
+        Object typeDefName = vertex.getProperty(Constants.TYPENAME_PROPERTY_KEY, String.class);
+        if (vertexType != null && typeDefName != null) {
+            uniqueEntries.add(new IndexRepository.IndexEntry("type_typename_idx",
+                    String.valueOf(vertexType) + ":" + String.valueOf(typeDefName), vertex.getIdString()));
+        }
+
+        // ---- 1:N property indexes (vertex_property_index table) ----
+
+        // Index by VERTEX_TYPE + TYPE_CATEGORY (for findTypeVerticesByCategory / getAll)
+        Object typeCategory = vertex.getProperty(Constants.TYPE_CATEGORY_PROPERTY_KEY, String.class);
+        if (vertexType != null && typeCategory != null) {
+            propertyEntries.add(new IndexRepository.IndexEntry("type_category_idx",
+                    String.valueOf(vertexType) + ":" + String.valueOf(typeCategory), vertex.getIdString()));
+        }
+
+        if (guid == null && qn == null && vertexType == null) {
+            LOG.warn("buildIndexEntries: vertex [{}] has no indexable properties! Keys: {}",
+                    vertex.getIdString(), vertex.getPropertyKeys());
+        }
+    }
+
+    // ---- Elasticsearch sync (replaces JanusGraph's mixed index) ----
+
+    /**
+     * Syncs vertex properties to Elasticsearch after Cassandra commit.
+     * This replaces JanusGraph's automatic mixed-index sync.
+     * Uses the ES bulk API for efficiency.
+     */
+    private void syncVerticesToElasticsearch(List<CassandraVertex> newVertices,
+                                             List<CassandraVertex> dirtyVertices,
+                                             List<CassandraVertex> removedVertices) {
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                LOG.debug("ES client not available, skipping ES sync");
+                return;
+            }
+
+            String indexName = Constants.VERTEX_INDEX_NAME;
+            StringBuilder bulkBody = new StringBuilder();
+
+            // Index new vertices
+            for (CassandraVertex v : newVertices) {
+                appendESIndexAction(bulkBody, indexName, v);
+            }
+
+            // Re-index dirty (updated) vertices
+            for (CassandraVertex v : dirtyVertices) {
+                appendESIndexAction(bulkBody, indexName, v);
+            }
+
+            // Delete removed vertices
+            for (CassandraVertex v : removedVertices) {
+                bulkBody.append("{\"delete\":{\"_index\":\"").append(indexName)
+                        .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
+            }
+
+            if (bulkBody.length() > 0) {
+                Request bulkReq = new Request("POST", "/_bulk");
+                bulkReq.setEntity(new StringEntity(bulkBody.toString(), ContentType.APPLICATION_JSON));
+                Response resp = client.performRequest(bulkReq);
+                int status = resp.getStatusLine().getStatusCode();
+                if (status >= 200 && status < 300) {
+                    LOG.debug("Synced {} new + {} updated vertices to ES index {}",
+                            newVertices.size(), dirtyVertices.size(), indexName);
+                } else {
+                    LOG.warn("ES bulk sync returned status {}", status);
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to sync vertices to ES: {}", e.getMessage());
+        }
+    }
+
+    private void appendESIndexAction(StringBuilder bulkBody, String indexName, CassandraVertex v) {
+        bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+                .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
+        bulkBody.append(AtlasType.toJson(v.getProperties())).append("\n");
     }
 
     // ---- Management operations ----
@@ -468,6 +650,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         session.execute("TRUNCATE edges_in");
         session.execute("TRUNCATE edges_by_id");
         session.execute("TRUNCATE vertex_index");
+        session.execute("TRUNCATE vertex_property_index");
         vertexCache.get().clear();
         txBuffer.get().clear();
     }

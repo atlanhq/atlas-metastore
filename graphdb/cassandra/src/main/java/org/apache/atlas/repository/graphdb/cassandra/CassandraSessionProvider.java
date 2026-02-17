@@ -124,13 +124,23 @@ public class CassandraSessionProvider {
             ")"
         );
 
-        // Composite index simulation table
+        // Composite index simulation table (1:1 unique lookups)
         session.execute(
             "CREATE TABLE IF NOT EXISTS vertex_index (" +
             "  index_name text," +
             "  index_value text," +
             "  vertex_id text," +
             "  PRIMARY KEY ((index_name, index_value))" +
+            ")"
+        );
+
+        // Property index table (1:N lookups - multiple vertices per index key)
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS vertex_property_index (" +
+            "  index_name text," +
+            "  index_value text," +
+            "  vertex_id text," +
+            "  PRIMARY KEY ((index_name, index_value), vertex_id)" +
             ")"
         );
 
