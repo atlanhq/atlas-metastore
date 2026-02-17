@@ -426,10 +426,41 @@ This project uses standard GitHub flow with PR-based merges to `master` branch.
 
 
 
+## Documentation Index
+
+```
+docs/
+├── atlas-metastore-cohort-release-implementation.md  # Cohort (ring-based) release implementation plan
+├── helm/
+│   └── adding-configmap-properties.md                # How to add new ConfigMap properties to Helm charts
+├── tests/
+│   ├── integration-tests.md                          # In-process integration test framework (testcontainers)
+│   ├── precommit-checks.md                           # Pre-commit hook setup and troubleshooting
+│   └── running-tests.md                              # How to run unit and module tests
+└── ms-546/
+    ├── README.md                                     # Bedrock Purpose Fetching API optimization
+    ├── IMPLEMENTATION_PLAN.md                        # Implementation plan for MS-546
+    └── VALIDATION_SUMMARY.md                         # Validation results for MS-546
+```
+
+## Claude Skills Index
+
+```
+.claude/commands/
+├── qa-pipeline.md           # /qa-pipeline — Full AI-driven QA pipeline (code, security, arch, QA, tests, regression)
+├── review-code.md           # /review-code — Review for quality, null safety, error handling, metastore patterns
+├── review-security.md       # /review-security — Review for security vulnerabilities, injection risks, auth gaps
+├── review-architecture.md   # /review-architecture — Review for architecture violations, layer boundaries
+├── review-feature-flags.md  # /review-feature-flags — Review for feature flag inversion and safety bugs
+├── qa-review.md             # /qa-review — QA review for edge cases, regression risks, data integrity
+├── generate-unit-tests.md   # /generate-unit-tests — Generate unit tests using TestNG + Mockito conventions
+├── suggest-tests.md         # /suggest-tests — Analyze code changes and suggest integration tests
+├── fix-failing-tests.md     # /fix-failing-tests — Analyze CI test failures, identify root cause, generate fixes
+├── run-regression.md        # /run-regression — Identify and run regression tests affected by code changes
+└── rca.md                   # /rca <TICKET-ID> — Root Cause Analysis on a Linear ticket
+```
+
 ## External Resources
 
-
-
 - [Apache Atlas Documentation](https://atlas.apache.org/documentation.html)
-
-- [Internal Setup Guide](https://atlanhq.atlassian.net/wiki/spaces/c873aeb606dd4834a95d9909a757bfa6/pages/800424446/How+to+run+Atlas+on+the+local+machine
+- [Internal Setup Guide](https://atlanhq.atlassian.net/wiki/spaces/c873aeb606dd4834a95d9909a757bfa6/pages/800424446/How+to+run+Atlas+on+the+local+machine)
