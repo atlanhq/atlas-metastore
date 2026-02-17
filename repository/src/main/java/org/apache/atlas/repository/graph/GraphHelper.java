@@ -1773,6 +1773,17 @@ public final class GraphHelper {
             }
             return (List) instanceVertex.getMultiValuedProperty(propertyName, elementType.getClass());
         } else {
+            if (vertexEdgePropertiesCache != null && LEAN_GRAPH_ENABLED) {
+                List values = vertexEdgePropertiesCache.getMultiValuedProperties(instanceVertex.getIdForDisplay(), propertyName);
+
+                if (CollectionUtils.isEmpty(values)) {
+                    values = vertexEdgePropertiesCache.getMultiValuedProperties(instanceVertex.getIdForDisplay(), AtlasGraphUtilsV2.encodePropertyKey(propertyName));
+                }
+
+                if (values != null) {
+                    return values;
+                }
+            }
             return (List) instanceVertex.getListProperty(propertyName);
         }
     }

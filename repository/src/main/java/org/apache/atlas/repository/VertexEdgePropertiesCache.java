@@ -8,6 +8,8 @@ import org.javatuples.Pair;
 import java.util.*;
 
 import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
+import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 
 public class VertexEdgePropertiesCache {
     Map<String, Map<String, List<?>>> vertexProperties;
@@ -102,12 +104,65 @@ public class VertexEdgePropertiesCache {
         }
     }
 
+    public boolean hasPrimitiveProperty(String elementId, String propertyName, String encodedPropertyName) {
+        if (!LEAN_GRAPH_ENABLED) {
+            return getPropertyValue(elementId, encodedPropertyName, Object.class) != null;
+        }
+
+        return getPropertyValueWithFallback(elementId, propertyName, Object.class) != null;
+    }
+
+    public Date toDateValue(Long dateValue) {
+        return new Date(dateValue != null ? dateValue : 0L);
+    }
+
+    public <T> T getPrimitivePropertyValue(String elementId, String propertyName, String encodedPropertyName, Class<T> clazz) {
+        if (!LEAN_GRAPH_ENABLED) {
+            return getPropertyValue(elementId, encodedPropertyName, clazz);
+        }
+
+        return getPropertyValueWithFallback(elementId, propertyName, clazz);
+    }
+
+    public <T> T getPropertyValueWithFallback(String elementId, String propertyName, Class<T> clazz) {
+        if (propertyName == null) {
+            return null;
+        }
+
+        T value = getPropertyValue(elementId, propertyName, clazz);
+        if (value == null) {
+            value = getPropertyValue(elementId, encodePropertyKey(propertyName), clazz);
+        }
+
+        return value;
+    }
+
+    public List<?> getMultiValuedPropertiesWithFallback(String vertexId, String propertyName) {
+        if (propertyName == null) {
+            return Collections.emptyList();
+        }
+
+        List<?> values = getMultiValuedProperties(vertexId, propertyName);
+
+        if (values == null || values.isEmpty()) {
+            values = getMultiValuedProperties(vertexId, encodePropertyKey(propertyName));
+        }
+
+        return values;
+    }
+
     public String getGuid(String vertexId) {
         return getPropertyValue(vertexId, GUID_PROPERTY_KEY, String.class);
     }
 
     public String getTypeName(String vertexId) {
-        return getPropertyValue(vertexId, Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
+        String typeName = getPropertyValue(vertexId, Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+
+        if (typeName == null) {
+            typeName = getPropertyValueWithFallback(vertexId, Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
+        }
+
+        return typeName;
     }
 
     public Map<String, Map<String, List<?>>> getVertexProperties() {

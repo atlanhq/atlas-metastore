@@ -25,7 +25,7 @@ on:
       - master
       - staging
       - lite_master
-      - leangraph-dynamic
+      - leangraph-idx
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
