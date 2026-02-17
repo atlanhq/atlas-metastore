@@ -1,0 +1,14 @@
+**/.venv
+**/.venv/**
+**/__pycache__/**
+**/uv.lock
+.env
+*.cache
+node_modules/
+*.lock
+tests/fixtures/
+dist/
+build/
+local/
+tmp/
+*.png

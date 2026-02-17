@@ -429,7 +429,8 @@ gh pr create --repo atlanhq/atlas-metastore --title "..." --body "..."
 
 **Branch naming**: Feature branches typically use descriptive names (e.g., `ms-366-staging-smarter`, `fix-record-entity-update`)
 
-
+## Always Read (every task)
+- `.claudeignore` (respect exclusions — shared across AI tools)
 
 ## External Resources
 
