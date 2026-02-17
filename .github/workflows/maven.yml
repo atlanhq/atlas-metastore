@@ -28,6 +28,7 @@ on:
       - alcon-v2-418
       - ms-428-delete-optimisation-phase3
       - ring-*
+      - without-janusgraph
 
     paths-ignore:
       - '.claude/**'
