@@ -295,4 +295,50 @@ public class CassandraVertexTest {
         assertTrue(str.contains("v1"));
         assertTrue(str.contains("myLabel"));
     }
+
+    // ======================== Property Name Normalization ========================
+
+    @Test
+    public void testNormalize_typePrefixStripped() {
+        assertEquals(VertexRepository.normalizePropertyName("__type.Asset.certificateUpdatedAt"),
+                "certificateUpdatedAt");
+        assertEquals(VertexRepository.normalizePropertyName("__type.Asset.announcementMessage"),
+                "announcementMessage");
+    }
+
+    @Test
+    public void testNormalize_typeQualifiedStripped() {
+        assertEquals(VertexRepository.normalizePropertyName("Referenceable.qualifiedName"),
+                "qualifiedName");
+        assertEquals(VertexRepository.normalizePropertyName("Asset.name"), "name");
+        assertEquals(VertexRepository.normalizePropertyName("Asset.description"), "description");
+        assertEquals(VertexRepository.normalizePropertyName("Asset.connectorName"), "connectorName");
+    }
+
+    @Test
+    public void testNormalize_systemPropertiesKeptAsIs() {
+        assertEquals(VertexRepository.normalizePropertyName("__guid"), "__guid");
+        assertEquals(VertexRepository.normalizePropertyName("__typeName"), "__typeName");
+        assertEquals(VertexRepository.normalizePropertyName("__state"), "__state");
+        assertEquals(VertexRepository.normalizePropertyName("__type"), "__type");
+        assertEquals(VertexRepository.normalizePropertyName("__type_name"), "__type_name");
+        assertEquals(VertexRepository.normalizePropertyName("__createdBy"), "__createdBy");
+        assertEquals(VertexRepository.normalizePropertyName("__superTypeNames"), "__superTypeNames");
+        assertEquals(VertexRepository.normalizePropertyName("__qualifiedNameHierarchy"),
+                "__qualifiedNameHierarchy");
+    }
+
+    @Test
+    public void testNormalize_plainNamesKeptAsIs() {
+        assertEquals(VertexRepository.normalizePropertyName("qualifiedName"), "qualifiedName");
+        assertEquals(VertexRepository.normalizePropertyName("mongoDBCollectionIsCapped"),
+                "mongoDBCollectionIsCapped");
+        assertEquals(VertexRepository.normalizePropertyName("documentDBCollectionTotalIndexSize"),
+                "documentDBCollectionTotalIndexSize");
+    }
+
+    @Test
+    public void testNormalize_nullReturnsNull() {
+        assertNull(VertexRepository.normalizePropertyName(null));
+    }
 }

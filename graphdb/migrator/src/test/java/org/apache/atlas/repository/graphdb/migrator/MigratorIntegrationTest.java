@@ -658,7 +658,8 @@ public class MigratorIntegrationTest {
             if (propsJson == null) continue;
             try {
                 Map<String, Object> props = MAPPER.readValue(propsJson, Map.class);
-                Object qn = props.get("Referenceable.qualifiedName");
+                // After normalization, "Referenceable.qualifiedName" becomes "qualifiedName"
+                Object qn = props.get("qualifiedName");
                 if (qn != null && qn.toString().contains("TABLE_DELETED")) {
                     foundDeleted = true;
                     Object state = props.get("__state");

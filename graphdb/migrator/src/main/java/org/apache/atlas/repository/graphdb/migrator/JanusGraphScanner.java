@@ -390,7 +390,7 @@ public class JanusGraphScanner implements AutoCloseable {
                     continue;
                 }
 
-                String relTypeName = type.name();
+                String relTypeName = normalizePropertyName(type.name());
 
                 if (type.isPropertyKey()) {
                     Object value = rel.getValue();
@@ -468,7 +468,7 @@ public class JanusGraphScanner implements AutoCloseable {
 
                     RelationType propType = tx.getExistingRelationType(propTypeId);
                     if (propType != null && propValue != null) {
-                        edge.addProperty(propType.name(), propValue);
+                        edge.addProperty(normalizePropertyName(propType.name()), propValue);
                     }
                 } catch (Exception e) {
                     // Skip individual property on error
@@ -477,6 +477,33 @@ public class JanusGraphScanner implements AutoCloseable {
         } catch (Exception e) {
             LOG.trace("Failed to extract edge properties for edge {}", edge.getEdgeId(), e);
         }
+    }
+
+    /**
+     * Normalize JanusGraph property key names to Atlas attribute names.
+     * JanusGraph stores some properties with type-qualified names:
+     *   "__type.Asset.certificateUpdatedAt" → "certificateUpdatedAt"
+     *   "Referenceable.qualifiedName" → "qualifiedName"
+     * System properties (__guid, __typeName, etc.) are kept as-is.
+     */
+    static String normalizePropertyName(String name) {
+        if (name == null) return null;
+
+        // Strip "__type." prefix: "__type.Asset.name" → "Asset.name"
+        if (name.startsWith("__type.")) {
+            name = name.substring("__type.".length());
+        }
+
+        // For type-qualified names like "Asset.name" or "Referenceable.qualifiedName",
+        // strip the type prefix. System properties starting with "__" are kept as-is.
+        if (!name.startsWith("__")) {
+            int dotIndex = name.indexOf('.');
+            if (dotIndex > 0 && dotIndex < name.length() - 1) {
+                name = name.substring(dotIndex + 1);
+            }
+        }
+
+        return name;
     }
 
     private boolean isSystemRelation(long typeId) {

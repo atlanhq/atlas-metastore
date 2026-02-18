@@ -1850,12 +1850,32 @@ public class EntityGraphRetriever {
 
             if (entityType != null) {
                 ret.setSuperTypeNames(entityType.getAllSuperTypes());
+                int headerAttrCount = 0;
                 for (AtlasAttribute headerAttribute : entityType.getHeaderAttributes().values()) {
                     Object attrValue = getVertexAttribute(entityVertex, headerAttribute);
 
                     if (attrValue != null) {
                         ret.setAttribute(headerAttribute.getName(), attrValue);
+                        headerAttrCount++;
                     }
+                }
+
+                if (headerAttrCount == 0 && !entityType.getHeaderAttributes().isEmpty()) {
+                    Collection<? extends String> vertexPropKeys = entityVertex.getPropertyKeys();
+                    Set<String> expectedKeys = new LinkedHashSet<>();
+                    for (AtlasAttribute attr : entityType.getHeaderAttributes().values()) {
+                        expectedKeys.add(attr.getVertexPropertyName());
+                    }
+                    List<String> sampleKeys = new ArrayList<>();
+                    int count = 0;
+                    for (String key : vertexPropKeys) {
+                        if (count++ >= 20) break;
+                        sampleKeys.add(key);
+                    }
+                    LOG.warn("mapVertexToAtlasEntityHeader: NO header attributes found for vertex id={}, type={}. " +
+                             "Expected property keys: {}. Vertex has {} properties, first keys: {}",
+                             entityVertex.getIdForDisplay(), typeName, expectedKeys,
+                             vertexPropKeys.size(), sampleKeys);
                 }
 
                 Object displayText = getDisplayText(entityVertex, entityType);

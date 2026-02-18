@@ -124,13 +124,57 @@ public class VertexRepository {
 
         Map<String, Object> props = new LinkedHashMap<>();
         if (propsJson != null && !propsJson.isEmpty()) {
-            props = AtlasType.fromJson(propsJson, Map.class);
-            if (props == null) {
-                props = new LinkedHashMap<>();
+            Map<String, Object> rawProps = AtlasType.fromJson(propsJson, Map.class);
+            if (rawProps != null) {
+                // Normalize property names: strip JanusGraph type-qualified prefixes.
+                // Migrated data may have keys like "__type.Asset.certificateUpdatedAt"
+                // or "Referenceable.qualifiedName" — Atlas expects just "certificateUpdatedAt"
+                // and "qualifiedName".
+                for (Map.Entry<String, Object> entry : rawProps.entrySet()) {
+                    String key = normalizePropertyName(entry.getKey());
+                    props.put(key, entry.getValue());
+                }
+            } else {
+                LOG.warn("rowToVertex: AtlasType.fromJson returned null for vertex_id={}. propsJson length={}",
+                         vertexId, propsJson.length());
             }
+        } else {
+            LOG.warn("rowToVertex: empty/null properties JSON for vertex_id={}", vertexId);
+        }
+
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("rowToVertex: vertex_id={}, label={}, propCount={}, keys={}",
+                      vertexId, vertexLabel, props.size(), props.keySet());
         }
 
         CassandraVertex vertex = new CassandraVertex(vertexId, vertexLabel, props, graph);
         return vertex;
+    }
+
+    /**
+     * Normalize JanusGraph property key names to Atlas attribute names.
+     * JanusGraph stores some properties with type-qualified names:
+     *   "__type.Asset.certificateUpdatedAt" → "certificateUpdatedAt"
+     *   "Referenceable.qualifiedName" → "qualifiedName"
+     * System properties (__guid, __typeName, __state, etc.) are kept as-is.
+     */
+    static String normalizePropertyName(String name) {
+        if (name == null) return null;
+
+        // Strip "__type." prefix: "__type.Asset.name" → "Asset.name"
+        if (name.startsWith("__type.")) {
+            name = name.substring("__type.".length());
+        }
+
+        // For type-qualified names like "Asset.name" or "Referenceable.qualifiedName",
+        // strip the type prefix. System properties starting with "__" are kept as-is.
+        if (!name.startsWith("__")) {
+            int dotIndex = name.indexOf('.');
+            if (dotIndex > 0 && dotIndex < name.length() - 1) {
+                name = name.substring(dotIndex + 1);
+            }
+        }
+
+        return name;
     }
 }

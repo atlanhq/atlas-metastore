@@ -346,8 +346,10 @@ public class CassandraTargetWriter implements AutoCloseable {
         }
 
         // 1:1 composite index: qualifiedName + typeName → vertex_id
-        Object qn = props.get("Referenceable.qualifiedName");
-        if (qn == null) qn = props.get("qualifiedName");
+        // After property name normalization, qualifiedName is the canonical key.
+        // Fall back to legacy type-qualified name for safety.
+        Object qn = props.get("qualifiedName");
+        if (qn == null) qn = props.get("Referenceable.qualifiedName");
         String typeName = vertex.getTypeName();
         if (qn != null && typeName != null) {
             targetSession.execute(insertIndexStmt.bind("qn_type_idx", qn + ":" + typeName, vertexId));

@@ -159,4 +159,56 @@ public class JanusGraphScannerTest {
             assertEquals(ranges.get(i)[1] + 1, ranges.get(i + 1)[0]);
         }
     }
+
+    // --- normalizePropertyName tests ---
+
+    @Test
+    public void testNormalize_typePrefix() {
+        // "__type.Asset.certificateUpdatedAt" → "certificateUpdatedAt"
+        assertEquals(JanusGraphScanner.normalizePropertyName("__type.Asset.certificateUpdatedAt"),
+                "certificateUpdatedAt");
+    }
+
+    @Test
+    public void testNormalize_typeQualified() {
+        // "Referenceable.qualifiedName" → "qualifiedName"
+        assertEquals(JanusGraphScanner.normalizePropertyName("Referenceable.qualifiedName"),
+                "qualifiedName");
+        assertEquals(JanusGraphScanner.normalizePropertyName("Asset.name"), "name");
+        assertEquals(JanusGraphScanner.normalizePropertyName("Asset.description"), "description");
+    }
+
+    @Test
+    public void testNormalize_systemProperties() {
+        // System properties starting with "__" are kept as-is
+        assertEquals(JanusGraphScanner.normalizePropertyName("__guid"), "__guid");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__typeName"), "__typeName");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__state"), "__state");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__type"), "__type");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__type_name"), "__type_name");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__createdBy"), "__createdBy");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__superTypeNames"), "__superTypeNames");
+    }
+
+    @Test
+    public void testNormalize_plainNames() {
+        // Plain attribute names without dots are kept as-is
+        assertEquals(JanusGraphScanner.normalizePropertyName("qualifiedName"), "qualifiedName");
+        assertEquals(JanusGraphScanner.normalizePropertyName("mongoDBCollectionIsCapped"),
+                "mongoDBCollectionIsCapped");
+        assertEquals(JanusGraphScanner.normalizePropertyName("documentDBCollectionTotalIndexSize"),
+                "documentDBCollectionTotalIndexSize");
+    }
+
+    @Test
+    public void testNormalize_null() {
+        assertNull(JanusGraphScanner.normalizePropertyName(null));
+    }
+
+    @Test
+    public void testNormalize_edgeLabelsUnchanged() {
+        // Edge labels like "__Asset.schemaAttributes" start with "__" so dots are NOT stripped
+        assertEquals(JanusGraphScanner.normalizePropertyName("__Asset.schemaAttributes"),
+                "__Asset.schemaAttributes");
+    }
 }
