@@ -24,9 +24,6 @@ on:
       - beta
       - master
       - staging
-      - lite_master
-      - alcon-v2-418
-      - ms-428-delete-optimisation-phase3
       - ttd-105
 
     paths-ignore:
