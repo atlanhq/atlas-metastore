@@ -1398,6 +1398,24 @@
                 <version>${project.version}</version>
             </dependency>
 
+    
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-core</artifactId>
+                <version>8.10.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-analyzers-common</artifactId>
+                <version>8.10.1</version>
+            </dependency>
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-queryparser</artifactId>
+                <version>8.10.1</version>
+            </dependency>
+    
+
 <!--            <dependency>-->
 <!--                <groupId>org.apache.atlas</groupId>-->
 <!--                <artifactId>atlas-dashboardv2</artifactId>-->
