@@ -90,6 +90,9 @@ public class AsyncIngestionConsumerService {
     @Value("${atlas.async.ingestion.consumer.heartbeatIntervalMs:30000}")
     private int heartbeatIntervalMs;
 
+    @Value("${atlas.async.ingestion.consumer.autoOffsetReset:earliest}")
+    private String autoOffsetReset;
+
     @Value("${atlas.async.ingestion.consumer.pollTimeoutSeconds:15}")
     private int pollTimeoutSeconds;
 
@@ -203,7 +206,7 @@ public class AsyncIngestionConsumerService {
             props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
             props.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
             props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
-            props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
+            props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, autoOffsetReset);
             props.put(ConsumerConfig.MAX_POLL_RECORDS_CONFIG, String.valueOf(maxPollRecords));
             props.put(ConsumerConfig.MAX_POLL_INTERVAL_MS_CONFIG, String.valueOf(maxPollIntervalMs));
             props.put(ConsumerConfig.SESSION_TIMEOUT_MS_CONFIG, String.valueOf(sessionTimeoutMs));
