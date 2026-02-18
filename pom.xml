@@ -1414,7 +1414,12 @@
                 <artifactId>lucene-queryparser</artifactId>
                 <version>8.10.1</version>
             </dependency>
-    
+            <dependency>
+                <groupId>org.apache.lucene</groupId>
+                <artifactId>lucene-spatial-extras</artifactId>
+                <version>8.10.1</version>
+            </dependency>
+        
 
 <!--            <dependency>-->
 <!--                <groupId>org.apache.atlas</groupId>-->
