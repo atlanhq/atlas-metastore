@@ -566,14 +566,27 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             String indexName = Constants.VERTEX_INDEX_NAME;
             StringBuilder bulkBody = new StringBuilder();
 
-            // Index new vertices
+            // Index new vertices (only entity vertices that have __typeName)
+            int skipped = 0;
             for (CassandraVertex v : newVertices) {
-                appendESIndexAction(bulkBody, indexName, v);
+                if (isEntityVertex(v)) {
+                    appendESIndexAction(bulkBody, indexName, v);
+                } else {
+                    skipped++;
+                }
             }
 
-            // Re-index dirty (updated) vertices
+            // Re-index dirty (updated) vertices (only entity vertices)
             for (CassandraVertex v : dirtyVertices) {
-                appendESIndexAction(bulkBody, indexName, v);
+                if (isEntityVertex(v)) {
+                    appendESIndexAction(bulkBody, indexName, v);
+                } else {
+                    skipped++;
+                }
+            }
+
+            if (skipped > 0) {
+                LOG.info("syncVerticesToElasticsearch: skipped {} non-entity vertices (no __typeName)", skipped);
             }
 
             // Delete removed vertices
@@ -603,6 +616,26 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
                 .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
         bulkBody.append(AtlasType.toJson(v.getProperties())).append("\n");
+    }
+
+    /**
+     * Returns true if this vertex represents an entity or type definition
+     * that should be indexed in Elasticsearch. System vertices (patches,
+     * index recovery, etc.) lack __typeName and __type and should NOT be
+     * indexed since they pollute search results.
+     */
+    private boolean isEntityVertex(CassandraVertex v) {
+        // Entity vertices always have __typeName (e.g., "Table", "Column", "Connection")
+        Object typeName = v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
+        if (typeName != null) {
+            return true;
+        }
+        // Type definition vertices have __type = "typeSystem" — these should also be indexed
+        Object vertexType = v.getProperty(Constants.VERTEX_TYPE_PROPERTY_KEY, String.class);
+        if (vertexType != null) {
+            return true;
+        }
+        return false;
     }
 
     // ---- Management operations ----

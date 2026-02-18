@@ -5,6 +5,7 @@ import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.SearchParams;
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.AtlasIndexQuery.SortOrder;
 import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
@@ -70,7 +71,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     public CassandraIndexQuery(CassandraGraph graph, String index, String queryString, int offset) {
         this.graph           = graph;
-        this.index           = index;
+        this.index           = normalizeIndexName(index);
         this.queryString     = queryString;
         this.offset          = offset;
         this.sourceBuilder   = null;
@@ -81,7 +82,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     public CassandraIndexQuery(CassandraGraph graph, String index, SearchSourceBuilder sourceBuilder) {
         this.graph           = graph;
-        this.index           = index;
+        this.index           = normalizeIndexName(index);
         this.queryString     = null;
         this.offset          = 0;
         this.sourceBuilder   = sourceBuilder;
@@ -92,7 +93,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     public CassandraIndexQuery(CassandraGraph graph, String index, SearchParams searchParams) {
         this.graph           = graph;
-        this.index           = index;
+        this.index           = normalizeIndexName(index);
         this.queryString     = null;
         this.offset          = 0;
         this.sourceBuilder   = null;
@@ -103,13 +104,30 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     public CassandraIndexQuery(CassandraGraph graph, GraphIndexQueryParameters queryParameters) {
         this.graph           = graph;
-        this.index           = queryParameters.getIndexName();
+        this.index           = normalizeIndexName(queryParameters.getIndexName());
         this.queryString     = queryParameters.getGraphQueryString();
         this.offset          = queryParameters.getOffset();
         this.sourceBuilder   = null;
         this.searchParams    = null;
         this.queryParameters = queryParameters;
         initClients();
+    }
+
+    /**
+     * Normalizes ES index names by prepending Constants.INDEX_PREFIX if not already present.
+     * Callers may pass raw names like "vertex_index" (the JanusGraph internal name),
+     * but ES has the index as "atlas_graph_vertex_index".
+     */
+    private static String normalizeIndexName(String indexName) {
+        if (indexName == null) {
+            return null;
+        }
+        if (!indexName.startsWith(Constants.INDEX_PREFIX)) {
+            String normalized = Constants.INDEX_PREFIX + indexName;
+            LOG.debug("Normalized ES index name: '{}' -> '{}'", indexName, normalized);
+            return normalized;
+        }
+        return indexName;
     }
 
     private void initClients() {

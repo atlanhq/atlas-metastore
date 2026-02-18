@@ -130,7 +130,11 @@ public class VertexEdgePropertiesCache {
         if (clazz == String.class) {
             return (Tp) String.valueOf(value);
         }
-        throw new IllegalArgumentException("Property value is not of type " + clazz.getName());
+        // Atlas type classes (e.g. AtlasBuiltInTypes$AtlasStringType) are passed by
+        // GraphHelper.getArrayElementsProperty via elementType.getClass(). The vertex
+        // implementation (CassandraElement.getMultiValuedProperty) does an unchecked
+        // cast without actual type checking, so we do the same: return the raw value.
+        return (Tp) value;
     }
 
     public String getGuid(String vertexId) {

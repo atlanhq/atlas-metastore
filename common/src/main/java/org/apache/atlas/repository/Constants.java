@@ -284,7 +284,7 @@ public final class Constants {
     /**
      * elasticsearch index prefix.
      */
-    public static final String INDEX_PREFIX = "janusgraph_";
+    public static final String INDEX_PREFIX = "atlas_graph_";
 
     public static final String VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
     public static final String EDGE_INDEX_NAME = INDEX_PREFIX + EDGE_INDEX;
