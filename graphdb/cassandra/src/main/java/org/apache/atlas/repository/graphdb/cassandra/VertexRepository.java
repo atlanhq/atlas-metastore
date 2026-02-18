@@ -154,25 +154,29 @@ public class VertexRepository {
     /**
      * Normalize JanusGraph property key names to Atlas attribute names.
      * JanusGraph stores some properties with type-qualified names:
-     *   "__type.Asset.certificateUpdatedAt" → "certificateUpdatedAt"
      *   "Referenceable.qualifiedName" → "qualifiedName"
-     * System properties (__guid, __typeName, __state, etc.) are kept as-is.
+     *   "Asset.name" → "name"
+     *
+     * Properties starting with "__" are NEVER normalized — they are Atlas internal
+     * properties (e.g., "__guid", "__typeName", "__type.atlas_operation").
+     * The "__type." prefix is used by Atlas's TypeDef system (PROPERTY_PREFIX = "__type.")
+     * and must be preserved.
      */
     static String normalizePropertyName(String name) {
         if (name == null) return null;
 
-        // Strip "__type." prefix: "__type.Asset.name" → "Asset.name"
-        if (name.startsWith("__type.")) {
-            name = name.substring("__type.".length());
+        // Properties starting with "__" are Atlas internal — never normalize.
+        // This includes: __guid, __typeName, __state, __type, __type_name,
+        // __type.atlas_operation, __type.atlas_operation.CREATE, etc.
+        if (name.startsWith("__")) {
+            return name;
         }
 
         // For type-qualified names like "Asset.name" or "Referenceable.qualifiedName",
-        // strip the type prefix. System properties starting with "__" are kept as-is.
-        if (!name.startsWith("__")) {
-            int dotIndex = name.indexOf('.');
-            if (dotIndex > 0 && dotIndex < name.length() - 1) {
-                name = name.substring(dotIndex + 1);
-            }
+        // strip the type prefix to get just the attribute name.
+        int dotIndex = name.indexOf('.');
+        if (dotIndex > 0 && dotIndex < name.length() - 1) {
+            name = name.substring(dotIndex + 1);
         }
 
         return name;

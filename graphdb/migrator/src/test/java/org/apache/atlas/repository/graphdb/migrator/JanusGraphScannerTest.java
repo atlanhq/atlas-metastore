@@ -163,13 +163,6 @@ public class JanusGraphScannerTest {
     // --- normalizePropertyName tests ---
 
     @Test
-    public void testNormalize_typePrefix() {
-        // "__type.Asset.certificateUpdatedAt" → "certificateUpdatedAt"
-        assertEquals(JanusGraphScanner.normalizePropertyName("__type.Asset.certificateUpdatedAt"),
-                "certificateUpdatedAt");
-    }
-
-    @Test
     public void testNormalize_typeQualified() {
         // "Referenceable.qualifiedName" → "qualifiedName"
         assertEquals(JanusGraphScanner.normalizePropertyName("Referenceable.qualifiedName"),
@@ -179,8 +172,8 @@ public class JanusGraphScannerTest {
     }
 
     @Test
-    public void testNormalize_systemProperties() {
-        // System properties starting with "__" are kept as-is
+    public void testNormalize_doubleUnderscoreNeverNormalized() {
+        // ALL properties starting with "__" are Atlas internal — never normalize
         assertEquals(JanusGraphScanner.normalizePropertyName("__guid"), "__guid");
         assertEquals(JanusGraphScanner.normalizePropertyName("__typeName"), "__typeName");
         assertEquals(JanusGraphScanner.normalizePropertyName("__state"), "__state");
@@ -188,6 +181,14 @@ public class JanusGraphScannerTest {
         assertEquals(JanusGraphScanner.normalizePropertyName("__type_name"), "__type_name");
         assertEquals(JanusGraphScanner.normalizePropertyName("__createdBy"), "__createdBy");
         assertEquals(JanusGraphScanner.normalizePropertyName("__superTypeNames"), "__superTypeNames");
+        // TypeDef metadata — __type. prefix is Atlas's PROPERTY_PREFIX, must be preserved
+        assertEquals(JanusGraphScanner.normalizePropertyName("__type.atlas_operation"),
+                "__type.atlas_operation");
+        assertEquals(JanusGraphScanner.normalizePropertyName("__type.atlas_operation.CREATE"),
+                "__type.atlas_operation.CREATE");
+        // Edge labels starting with "__" are also preserved
+        assertEquals(JanusGraphScanner.normalizePropertyName("__Asset.schemaAttributes"),
+                "__Asset.schemaAttributes");
     }
 
     @Test
@@ -203,12 +204,5 @@ public class JanusGraphScannerTest {
     @Test
     public void testNormalize_null() {
         assertNull(JanusGraphScanner.normalizePropertyName(null));
-    }
-
-    @Test
-    public void testNormalize_edgeLabelsUnchanged() {
-        // Edge labels like "__Asset.schemaAttributes" start with "__" so dots are NOT stripped
-        assertEquals(JanusGraphScanner.normalizePropertyName("__Asset.schemaAttributes"),
-                "__Asset.schemaAttributes");
     }
 }

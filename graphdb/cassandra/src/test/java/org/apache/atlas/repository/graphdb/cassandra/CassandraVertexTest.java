@@ -299,15 +299,8 @@ public class CassandraVertexTest {
     // ======================== Property Name Normalization ========================
 
     @Test
-    public void testNormalize_typePrefixStripped() {
-        assertEquals(VertexRepository.normalizePropertyName("__type.Asset.certificateUpdatedAt"),
-                "certificateUpdatedAt");
-        assertEquals(VertexRepository.normalizePropertyName("__type.Asset.announcementMessage"),
-                "announcementMessage");
-    }
-
-    @Test
     public void testNormalize_typeQualifiedStripped() {
+        // Type-qualified names like "Asset.name" should be stripped to just the attribute name
         assertEquals(VertexRepository.normalizePropertyName("Referenceable.qualifiedName"),
                 "qualifiedName");
         assertEquals(VertexRepository.normalizePropertyName("Asset.name"), "name");
@@ -316,7 +309,9 @@ public class CassandraVertexTest {
     }
 
     @Test
-    public void testNormalize_systemPropertiesKeptAsIs() {
+    public void testNormalize_doubleUnderscoreNeverNormalized() {
+        // ALL properties starting with "__" are Atlas internal and must be preserved exactly.
+        // This includes the __type. prefix used by Atlas's TypeDef system.
         assertEquals(VertexRepository.normalizePropertyName("__guid"), "__guid");
         assertEquals(VertexRepository.normalizePropertyName("__typeName"), "__typeName");
         assertEquals(VertexRepository.normalizePropertyName("__state"), "__state");
@@ -326,6 +321,13 @@ public class CassandraVertexTest {
         assertEquals(VertexRepository.normalizePropertyName("__superTypeNames"), "__superTypeNames");
         assertEquals(VertexRepository.normalizePropertyName("__qualifiedNameHierarchy"),
                 "__qualifiedNameHierarchy");
+        // TypeDef metadata properties — __type. prefix must be preserved
+        assertEquals(VertexRepository.normalizePropertyName("__type.atlas_operation"),
+                "__type.atlas_operation");
+        assertEquals(VertexRepository.normalizePropertyName("__type.atlas_operation.CREATE"),
+                "__type.atlas_operation.CREATE");
+        assertEquals(VertexRepository.normalizePropertyName("__type.Asset.certificateUpdatedAt"),
+                "__type.Asset.certificateUpdatedAt");
     }
 
     @Test
