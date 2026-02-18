@@ -3557,6 +3557,84 @@
         },
         {
             "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "READ_CONTEXT_STUDIO_ENTITIES",
+                "qualifiedName": "READ_CONTEXT_STUDIO_ENTITIES",
+                "description": "Allows all users to read Context Studio assets.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
+                    "$admin",
+                    "$member",
+                    "$guest",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:ContextProduct",
+                    "entity-type:ContextMetric",
+                    "entity-type:ContextDimension",
+                    "entity-type:ContextFilter",
+                    "entity-type:ContextInstruction",
+                    "entity-type:ContextRelationship",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions": [
+                    "entity-read"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
+                "name": "CUD_CONTEXT_STUDIO_ENTITIES",
+                "qualifiedName": "CUD_CONTEXT_STUDIO_ENTITIES",
+                "description": "Allows user to perform cud operations on all Context Studio assets.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources":
+                [
+                    "entity-type:ContextProduct",
+                    "entity-type:ContextMetric",
+                    "entity-type:ContextDimension",
+                    "entity-type:ContextFilter",
+                    "entity-type:ContextInstruction",
+                    "entity-type:ContextRelationship",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions":
+                [
+                    "entity-create",
+                    "entity-update",
+                    "entity-delete"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
             "attributes":
             {
                 "name": "BM_UPDATE_AI_ASSETS",
