@@ -867,6 +867,44 @@
             </plugin>
 
             <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>build-atlas-itest-image</id>
+                        <phase>pre-integration-test</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <echo message="Building Docker image atlanhq/atlas:test for integration tests"/>
+                                <echo message="Ensuring distro server tarball exists for Docker build context"/>
+                                <exec executable="sh" dir="${project.basedir}/.." failonerror="true">
+                                    <arg value="-c"/>
+                                    <arg value="if [ ! -f distro/target/apache-atlas-${project.version}-server.tar.gz ]; then mvn -pl distro -Pdist -DskipTests -Drat.skip=true clean package; fi"/>
+                                </exec>
+                                <exec executable="docker" dir="${project.basedir}/.." failonerror="true">
+                                    <arg value="buildx"/>
+                                    <arg value="build"/>
+                                    <arg value="--load"/>
+                                    <arg value="-t"/>
+                                    <arg value="atlanhq/atlas:test"/>
+                                    <arg value="."/>
+                                </exec>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <phase>pre-integration-test</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-maven-plugin</artifactId>
                 <configuration>
