@@ -36,40 +36,40 @@
         <entity.repository.properties>atlas.EntityAuditRepository.impl=org.apache.atlas.repository.audit.HBaseBasedAuditRepository</entity.repository.properties>
         <graph.index.backend>solr</graph.index.backend>
         <graph.index.properties>#Solr
-#Solr cloud mode properties
-atlas.graph.index.search.solr.mode=cloud
-atlas.graph.index.search.solr.zookeeper-url=
-atlas.graph.index.search.solr.zookeeper-connect-timeout=60000
-atlas.graph.index.search.solr.zookeeper-session-timeout=60000
-atlas.graph.index.search.solr.wait-searcher=false
+            #Solr cloud mode properties
+            atlas.graph.index.search.solr.mode=cloud
+            atlas.graph.index.search.solr.zookeeper-url=
+            atlas.graph.index.search.solr.zookeeper-connect-timeout=60000
+            atlas.graph.index.search.solr.zookeeper-session-timeout=60000
+            atlas.graph.index.search.solr.wait-searcher=false
 
-#Solr http mode properties
-#atlas.graph.index.search.solr.mode=http
-#atlas.graph.index.search.solr.http-urls=http://localhost:8983/solr
+            #Solr http mode properties
+            #atlas.graph.index.search.solr.mode=http
+            #atlas.graph.index.search.solr.http-urls=http://localhost:8983/solr
 
-# ElasticSearch support (Tech Preview)
-# Comment out above solr configuration, and uncomment the following two lines. Additionally, make sure the
-# hostname field is set to a comma delimited set of elasticsearch master nodes, or an ELB that fronts the masters.
-#
-# Elasticsearch does not provide authentication out of the box, but does provide an option with the X-Pack product
-# https://www.elastic.co/products/x-pack/security
-#
-# Alternatively, the JanusGraph documentation provides some tips on how to secure Elasticsearch without additional
-# plugins: https://docs.janusgraph.org/latest/elasticsearch.html
-#atlas.graph.index.search.hostname=localhost
-#atlas.graph.index.search.elasticsearch.client-only=true
+            # ElasticSearch support (Tech Preview)
+            # Comment out above solr configuration, and uncomment the following two lines. Additionally, make sure the
+            # hostname field is set to a comma delimited set of elasticsearch master nodes, or an ELB that fronts the masters.
+            #
+            # Elasticsearch does not provide authentication out of the box, but does provide an option with the X-Pack product
+            # https://www.elastic.co/products/x-pack/security
+            #
+            # Alternatively, the JanusGraph documentation provides some tips on how to secure Elasticsearch without additional
+            # plugins: https://docs.janusgraph.org/latest/elasticsearch.html
+            #atlas.graph.index.search.hostname=localhost
+            #atlas.graph.index.search.elasticsearch.client-only=true
         </graph.index.properties>
         <graph.storage.backend>hbase2</graph.storage.backend>
         <graph.storage.properties>#Hbase
-#For standalone mode , specify localhost
-#for distributed mode, specify zookeeper quorum here
-atlas.graph.storage.hostname=
-atlas.graph.storage.hbase.regions-per-server=1
+            #For standalone mode , specify localhost
+            #for distributed mode, specify zookeeper quorum here
+            atlas.graph.storage.hostname=
+            atlas.graph.storage.hbase.regions-per-server=1
 
-#In order to use Cassandra as a backend, comment out the hbase specific properties above, and uncomment the
-#the following properties
-#atlas.graph.storage.clustername=
-#atlas.graph.storage.port=
+            #In order to use Cassandra as a backend, comment out the hbase specific properties above, and uncomment the
+            #the following properties
+            #atlas.graph.storage.clustername=
+            #atlas.graph.storage.port=
         </graph.storage.properties>
         <hbase.embedded>false</hbase.embedded>
         <solr.embedded>false</solr.embedded>
@@ -136,7 +136,7 @@ atlas.graph.storage.hbase.regions-per-server=1
     </profiles>
 
     <build>
-        <outputDirectory>target</outputDirectory>
+        <outputDirectory>target/classes</outputDirectory>
         <resources>
             <resource>
                 <directory>src/bin</directory>
@@ -159,26 +159,26 @@ atlas.graph.storage.hbase.regions-per-server=1
                 <version>1.2.1</version>
                 <inherited>false</inherited>
                 <executions>
-                <!-- <executions>
-                       <execution>
-                        <configuration>
-                            <skip>${skipTests}</skip>
-                            <executable>python</executable>
-                            <workingDirectory>src/test/python</workingDirectory>
-                            <arguments>
-                                <argument>unitTests.py</argument>
-                            </arguments>
-                            <environmentVariables>
-                                <PYTHONPATH>${python.path.l}</PYTHONPATH>
-                            </environmentVariables>
-                        </configuration>
-                        <id>python-test</id>
-                        <phase>test</phase>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                    </execution>
-                </executions> -->
+                    <!-- <executions>
+                           <execution>
+                            <configuration>
+                                <skip>${skipTests}</skip>
+                                <executable>python</executable>
+                                <workingDirectory>src/test/python</workingDirectory>
+                                <arguments>
+                                    <argument>unitTests.py</argument>
+                                </arguments>
+                                <environmentVariables>
+                                    <PYTHONPATH>${python.path.l}</PYTHONPATH>
+                                </environmentVariables>
+                            </configuration>
+                            <id>python-test</id>
+                            <phase>test</phase>
+                            <goals>
+                                <goal>exec</goal>
+                            </goals>
+                        </execution>
+                    </executions> -->
                 </executions>
             </plugin>
 
