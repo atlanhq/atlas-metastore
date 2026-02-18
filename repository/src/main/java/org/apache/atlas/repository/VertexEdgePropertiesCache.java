@@ -67,7 +67,7 @@ public class VertexEdgePropertiesCache {
             return null;
         }
         for (Object value : values) {
-            result.add((T) value);
+            result.add(coerceValue(value, clazz));
         }
         return result;
     }
@@ -84,22 +84,53 @@ public class VertexEdgePropertiesCache {
                 return null;
             }
             Object value = values.get(0);
-            if (clazz.isInstance(value)) {
-                return clazz.cast(value);
-            } else {
-                throw new IllegalArgumentException("Property value is not of type " + clazz.getName());
-            }
+            return coerceValue(value, clazz);
         } else {
             Object value = edgeProperties.get(propertyName);
             if (value == null) {
                 return null;
             }
-            if (clazz.isInstance(value)) {
-                return clazz.cast(value);
-            } else {
-                throw new IllegalArgumentException("Property value is not of type " + clazz.getName());
+            return coerceValue(value, clazz);
+        }
+    }
+
+    /**
+     * Coerce a value to the requested type. JSON deserialization (Jackson) produces
+     * Double for all floating-point numbers and Integer for small integers, but Atlas
+     * TypeDefs may request Float, Long, Short, or Byte. This method handles the
+     * necessary numeric conversions.
+     */
+    @SuppressWarnings("unchecked")
+    private <Tp> Tp coerceValue(Object value, Class<Tp> clazz) {
+        if (value == null) {
+            return null;
+        }
+        if (clazz.isInstance(value)) {
+            return clazz.cast(value);
+        }
+        // Numeric type coercion: Jackson deserializes 0.0 as Double, 0 as Integer,
+        // but Atlas TypeDefs may define the attribute as Float, Long, Short, etc.
+        if (value instanceof Number) {
+            Number num = (Number) value;
+            if (clazz == Float.class || clazz == float.class) {
+                return (Tp) Float.valueOf(num.floatValue());
+            } else if (clazz == Double.class || clazz == double.class) {
+                return (Tp) Double.valueOf(num.doubleValue());
+            } else if (clazz == Long.class || clazz == long.class) {
+                return (Tp) Long.valueOf(num.longValue());
+            } else if (clazz == Integer.class || clazz == int.class) {
+                return (Tp) Integer.valueOf(num.intValue());
+            } else if (clazz == Short.class || clazz == short.class) {
+                return (Tp) Short.valueOf(num.shortValue());
+            } else if (clazz == Byte.class || clazz == byte.class) {
+                return (Tp) Byte.valueOf(num.byteValue());
             }
         }
+        // String coercion
+        if (clazz == String.class) {
+            return (Tp) String.valueOf(value);
+        }
+        throw new IllegalArgumentException("Property value is not of type " + clazz.getName());
     }
 
     public String getGuid(String vertexId) {

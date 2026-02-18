@@ -97,7 +97,21 @@ public class ElasticsearchReindexer implements AutoCloseable {
 
             // Build ES document: merge properties with top-level vertex metadata
             try {
-                Map<String, Object> doc = MAPPER.readValue(propsJson, Map.class);
+                Map<String, Object> rawDoc = MAPPER.readValue(propsJson, Map.class);
+
+                // Sanitize field names: ES 7.x interprets dots in JSON keys as
+                // nested object paths. TypeDef vertices have properties like
+                // "__type.DbtTest.dbtTestStatus" alongside "__type": "typeSystem",
+                // which causes a mapping conflict (text vs object).
+                // Replace dots with underscores in field names to avoid this.
+                Map<String, Object> doc = new java.util.LinkedHashMap<>(rawDoc.size());
+                for (Map.Entry<String, Object> entry : rawDoc.entrySet()) {
+                    String key = entry.getKey();
+                    if (key.contains(".")) {
+                        key = key.replace('.', '_');
+                    }
+                    doc.put(key, entry.getValue());
+                }
 
                 // Ensure key fields are present at top level for ES queries
                 if (typeName != null) doc.putIfAbsent("__typeName", typeName);
