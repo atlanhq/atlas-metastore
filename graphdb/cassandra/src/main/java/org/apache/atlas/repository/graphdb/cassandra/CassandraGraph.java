@@ -163,6 +163,86 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return result;
     }
 
+    /**
+     * Bulk fetch edges for multiple vertices, filtered by specific edge labels.
+     * Uses per-label Cassandra queries (partition + clustering key) for efficiency,
+     * avoiding fetching all edges when only specific relationships are needed.
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> getEdgesForVertices(
+            Collection<String> vertexIds, Set<String> edgeLabels) {
+        if (edgeLabels == null || edgeLabels.isEmpty()) {
+            return getEdgesForVertices(vertexIds);
+        }
+
+        // Fetch persisted edges filtered by labels
+        Map<String, List<CassandraEdge>> persisted =
+            edgeRepository.getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, AtlasEdgeDirection.BOTH, this);
+
+        // Merge with transaction buffer (filtered by labels)
+        Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
+        for (String vertexId : vertexIds) {
+            List<CassandraEdge> persistedEdges = persisted.getOrDefault(vertexId, Collections.emptyList());
+
+            Map<String, CassandraEdge> merged = new LinkedHashMap<>();
+            for (CassandraEdge e : persistedEdges) {
+                if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+            // Add buffered edges that match the requested labels
+            List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null);
+            for (CassandraEdge e : bufferedEdges) {
+                if (edgeLabels.contains(e.getLabel())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+            result.put(vertexId, (List) new ArrayList<>(merged.values()));
+        }
+        return result;
+    }
+
+    /**
+     * Label-filtered edge fetch with per-label LIMIT pushed to Cassandra.
+     * Prevents reading thousands of rows for high-cardinality relationships
+     * (e.g. __Table.columns with 5000+ edges) when only ~100 are needed.
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> getEdgesForVertices(
+            Collection<String> vertexIds, Set<String> edgeLabels, int limitPerLabel) {
+        if (edgeLabels == null || edgeLabels.isEmpty()) {
+            return getEdgesForVertices(vertexIds);
+        }
+        if (limitPerLabel <= 0) {
+            return getEdgesForVertices(vertexIds, edgeLabels);
+        }
+
+        Map<String, List<CassandraEdge>> persisted =
+            edgeRepository.getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, AtlasEdgeDirection.BOTH, this, limitPerLabel);
+
+        Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
+        for (String vertexId : vertexIds) {
+            List<CassandraEdge> persistedEdges = persisted.getOrDefault(vertexId, Collections.emptyList());
+
+            Map<String, CassandraEdge> merged = new LinkedHashMap<>();
+            for (CassandraEdge e : persistedEdges) {
+                if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+            List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null);
+            for (CassandraEdge e : bufferedEdges) {
+                if (edgeLabels.contains(e.getLabel())) {
+                    merged.put(e.getIdString(), e);
+                }
+            }
+            result.put(vertexId, (List) new ArrayList<>(merged.values()));
+        }
+        return result;
+    }
+
     @Override
     public Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> getVertices(String key, Object value) {
         // Try composite index lookup first

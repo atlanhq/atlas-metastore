@@ -24,6 +24,8 @@ public class EdgeRepository {
     private PreparedStatement selectEdgesOutByLabelStmt;
     private PreparedStatement selectEdgesInStmt;
     private PreparedStatement selectEdgesInByLabelStmt;
+    private PreparedStatement selectEdgesOutByLabelLimitStmt;
+    private PreparedStatement selectEdgesInByLabelLimitStmt;
     private PreparedStatement deleteEdgeOutStmt;
     private PreparedStatement deleteEdgeInStmt;
     private PreparedStatement deleteEdgeByIdStmt;
@@ -72,6 +74,17 @@ public class EdgeRepository {
         selectEdgesInByLabelStmt = session.prepare(
             "SELECT edge_id, edge_label, out_vertex_id, properties, state " +
             "FROM edges_in WHERE in_vertex_id = ? AND edge_label = ?"
+        );
+
+        // LIMIT variants for capping high-cardinality edge fetches (e.g. __Table.columns with 5000+ edges)
+        selectEdgesOutByLabelLimitStmt = session.prepare(
+            "SELECT edge_id, edge_label, in_vertex_id, properties, state " +
+            "FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? LIMIT ?"
+        );
+
+        selectEdgesInByLabelLimitStmt = session.prepare(
+            "SELECT edge_id, edge_label, out_vertex_id, properties, state " +
+            "FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT ?"
         );
 
         deleteEdgeOutStmt = session.prepare(
@@ -224,6 +237,159 @@ public class EdgeRepository {
                 LOG.warn("Failed to fetch in-edges for vertex {}", vertexId, e);
             }
         }
+
+        return results;
+    }
+
+    /**
+     * Fetch edges for multiple vertices filtered by specific edge labels.
+     * Fires one async query per (vertex, label, direction) tuple — much more efficient
+     * than fetching ALL edges when only specific relationship types are needed.
+     *
+     * For 20 vertices × 10 labels × 2 directions = 400 tiny partition-scoped queries,
+     * all fired concurrently so wall-clock time ≈ 1 Cassandra round-trip.
+     */
+    public Map<String, List<CassandraEdge>> getEdgesForVerticesByLabelsAsync(
+            Collection<String> vertexIds, Set<String> edgeLabels,
+            AtlasEdgeDirection direction, CassandraGraph graph) {
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        // If no labels specified, fall back to the all-edges method
+        if (edgeLabels == null || edgeLabels.isEmpty()) {
+            return getEdgesForVerticesAsync(vertexIds, direction, graph);
+        }
+
+        // Fire all queries concurrently: one per (vertex, label, direction)
+        // Key: "vertexId:OUT" or "vertexId:IN" — value: list of futures for each label
+        Map<String, List<CompletionStage<AsyncResultSet>>> outFutures = new LinkedHashMap<>();
+        Map<String, List<CompletionStage<AsyncResultSet>>> inFutures = new LinkedHashMap<>();
+
+        for (String vertexId : vertexIds) {
+            if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
+                List<CompletionStage<AsyncResultSet>> futures = new ArrayList<>(edgeLabels.size());
+                for (String label : edgeLabels) {
+                    futures.add(session.executeAsync(selectEdgesOutByLabelStmt.bind(vertexId, label)));
+                }
+                outFutures.put(vertexId, futures);
+            }
+            if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
+                List<CompletionStage<AsyncResultSet>> futures = new ArrayList<>(edgeLabels.size());
+                for (String label : edgeLabels) {
+                    futures.add(session.executeAsync(selectEdgesInByLabelStmt.bind(vertexId, label)));
+                }
+                inFutures.put(vertexId, futures);
+            }
+        }
+
+        // Collect results
+        Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+
+        for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : outFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+            for (CompletionStage<AsyncResultSet> future : entry.getValue()) {
+                try {
+                    AsyncResultSet rs = future.toCompletableFuture().join();
+                    collectOutEdgePages(rs, vertexId, edges, graph);
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch out-edges by label for vertex {}", vertexId, e);
+                }
+            }
+        }
+
+        for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : inFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+            for (CompletionStage<AsyncResultSet> future : entry.getValue()) {
+                try {
+                    AsyncResultSet rs = future.toCompletableFuture().join();
+                    collectInEdgePages(rs, vertexId, edges, graph);
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch in-edges by label for vertex {}", vertexId, e);
+                }
+            }
+        }
+
+        LOG.debug("getEdgesForVerticesByLabelsAsync: {} vertices × {} labels = {} total edges fetched",
+                  vertexIds.size(), edgeLabels.size(),
+                  results.values().stream().mapToInt(List::size).sum());
+
+        return results;
+    }
+
+    /**
+     * Like getEdgesForVerticesByLabelsAsync but with a per-label LIMIT pushed down to Cassandra.
+     * Prevents fetching thousands of rows for high-cardinality relationships (e.g. __Table.columns).
+     *
+     * @param limitPerLabel max edges per (vertex, label, direction). 0 means no limit.
+     */
+    public Map<String, List<CassandraEdge>> getEdgesForVerticesByLabelsAsync(
+            Collection<String> vertexIds, Set<String> edgeLabels,
+            AtlasEdgeDirection direction, CassandraGraph graph, int limitPerLabel) {
+        if (limitPerLabel <= 0) {
+            return getEdgesForVerticesByLabelsAsync(vertexIds, edgeLabels, direction, graph);
+        }
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        if (edgeLabels == null || edgeLabels.isEmpty()) {
+            return getEdgesForVerticesAsync(vertexIds, direction, graph);
+        }
+
+        Map<String, List<CompletionStage<AsyncResultSet>>> outFutures = new LinkedHashMap<>();
+        Map<String, List<CompletionStage<AsyncResultSet>>> inFutures = new LinkedHashMap<>();
+
+        for (String vertexId : vertexIds) {
+            if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
+                List<CompletionStage<AsyncResultSet>> futures = new ArrayList<>(edgeLabels.size());
+                for (String label : edgeLabels) {
+                    futures.add(session.executeAsync(
+                        selectEdgesOutByLabelLimitStmt.bind(vertexId, label, limitPerLabel)));
+                }
+                outFutures.put(vertexId, futures);
+            }
+            if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
+                List<CompletionStage<AsyncResultSet>> futures = new ArrayList<>(edgeLabels.size());
+                for (String label : edgeLabels) {
+                    futures.add(session.executeAsync(
+                        selectEdgesInByLabelLimitStmt.bind(vertexId, label, limitPerLabel)));
+                }
+                inFutures.put(vertexId, futures);
+            }
+        }
+
+        Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+
+        for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : outFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+            for (CompletionStage<AsyncResultSet> future : entry.getValue()) {
+                try {
+                    AsyncResultSet rs = future.toCompletableFuture().join();
+                    collectOutEdgePages(rs, vertexId, edges, graph);
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch out-edges by label (limited) for vertex {}", vertexId, e);
+                }
+            }
+        }
+
+        for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : inFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+            for (CompletionStage<AsyncResultSet> future : entry.getValue()) {
+                try {
+                    AsyncResultSet rs = future.toCompletableFuture().join();
+                    collectInEdgePages(rs, vertexId, edges, graph);
+                } catch (Exception e) {
+                    LOG.warn("Failed to fetch in-edges by label (limited) for vertex {}", vertexId, e);
+                }
+            }
+        }
+
+        LOG.debug("getEdgesForVerticesByLabelsAsync(limited={}): {} vertices × {} labels = {} total edges",
+                  limitPerLabel, vertexIds.size(), edgeLabels.size(),
+                  results.values().stream().mapToInt(List::size).sum());
 
         return results;
     }

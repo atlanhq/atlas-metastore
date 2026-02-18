@@ -152,6 +152,53 @@ public interface AtlasGraph<V, E> {
     }
 
     /**
+     * Bulk fetch edges for multiple vertices, filtered by specific edge labels.
+     * Only returns edges whose label is in the provided set, avoiding fetching
+     * all edges when only specific relationship types are needed.
+     *
+     * @param vertexIds  vertices to fetch edges for
+     * @param edgeLabels edge labels to include (if empty/null, fetches all)
+     * @return map of vertexId to list of matching edges (both directions)
+     */
+    @SuppressWarnings("unchecked")
+    default java.util.Map<String, java.util.List<AtlasEdge<V, E>>> getEdgesForVertices(
+            java.util.Collection<String> vertexIds, java.util.Set<String> edgeLabels) {
+        // Default: delegate to the all-edges version (implementations can override for efficiency)
+        if (edgeLabels == null || edgeLabels.isEmpty()) {
+            return getEdgesForVertices(vertexIds);
+        }
+        java.util.Map<String, java.util.List<AtlasEdge<V, E>>> allEdges = getEdgesForVertices(vertexIds);
+        // Filter by labels in memory
+        java.util.Map<String, java.util.List<AtlasEdge<V, E>>> result = new java.util.LinkedHashMap<>();
+        for (java.util.Map.Entry<String, java.util.List<AtlasEdge<V, E>>> entry : allEdges.entrySet()) {
+            java.util.List<AtlasEdge<V, E>> filtered = new java.util.ArrayList<>();
+            for (AtlasEdge<V, E> edge : entry.getValue()) {
+                if (edgeLabels.contains(edge.getLabel())) {
+                    filtered.add(edge);
+                }
+            }
+            result.put(entry.getKey(), filtered);
+        }
+        return result;
+    }
+
+    /**
+     * Bulk fetch edges for multiple vertices, filtered by specific edge labels,
+     * with a per-label limit to avoid fetching high-cardinality relationships in full.
+     *
+     * @param vertexIds     vertices to fetch edges for
+     * @param edgeLabels    edge labels to include (if empty/null, fetches all)
+     * @param limitPerLabel max edges to fetch per (vertex, label, direction) — 0 means no limit
+     * @return map of vertexId to list of matching edges (both directions)
+     */
+    @SuppressWarnings("unchecked")
+    default java.util.Map<String, java.util.List<AtlasEdge<V, E>>> getEdgesForVertices(
+            java.util.Collection<String> vertexIds, java.util.Set<String> edgeLabels, int limitPerLabel) {
+        // Default: ignore limit, delegate to label-filtered version
+        return getEdgesForVertices(vertexIds, edgeLabels);
+    }
+
+    /**
      * Gets the names of the indexes on edges
      * type.
      *
