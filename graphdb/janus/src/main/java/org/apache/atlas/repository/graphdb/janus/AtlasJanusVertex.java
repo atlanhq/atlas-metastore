@@ -220,15 +220,23 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
     @Override
     public String getDocId() {
         if (docId == null) {
+            String rawDisplayId = this.getIdForDisplay();
             if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
-                Boolean leanMode = this.getProperty(LEANGRAPH_MODE, Boolean.class);
-                if (leanMode != null && leanMode) {
-                    docId = JG_ES_DOC_ID_PREFIX + this.getIdForDisplay();
-                } else  {
-                    docId = LongEncoding.encode(Long.parseLong(this.getIdForDisplay()));
+                Object isLean = this.getProperty(LEANGRAPH_MODE);
+                
+                if (Boolean.TRUE.equals(isLean)) {
+                    return JG_ES_DOC_ID_PREFIX + rawDisplayId; 
+                } else {
+                    // Check if the ID is actually numeric before parsing
+                    if (rawDisplayId.matches("-?\\d+")) {
+                        return LongEncoding.encode(Long.parseLong(rawDisplayId));
+                    } else {
+                        // It's a string ID like "aaaacNA", just return it like leangraph ID
+                        return JG_ES_DOC_ID_PREFIX + rawDisplayId;
+                    }
                 }
             } else {
-                docId = LongEncoding.encode(Long.parseLong(this.getIdForDisplay()));
+                docId = LongEncoding.encode(Long.parseLong(rawDisplayId));
             }
         }
         return docId;
