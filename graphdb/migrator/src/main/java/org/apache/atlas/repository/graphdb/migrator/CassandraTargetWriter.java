@@ -222,6 +222,8 @@ public class CassandraTargetWriter implements AutoCloseable {
         writerPool.shutdown();
         writerPool.awaitTermination(24, TimeUnit.HOURS);
         LOG.info("All writer threads completed");
+        LOG.info("DIAG WRITER SUMMARY: edge write attempts: {}, edge write errors: {}",
+                 edgeWriteAttempts.get(), edgeWriteErrors.get());
     }
 
     private void writerLoop() {
@@ -264,6 +266,11 @@ public class CassandraTargetWriter implements AutoCloseable {
         }
     }
 
+    // Diagnostic counters
+    private final java.util.concurrent.atomic.AtomicLong edgeWriteAttempts = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong edgeWriteErrors = new java.util.concurrent.atomic.AtomicLong(0);
+    private static final int WRITE_SAMPLE_LOG_LIMIT = 10;
+
     /**
      * Write a single decoded vertex: vertex row + edges + indexes.
      */
@@ -291,10 +298,26 @@ public class CassandraTargetWriter implements AutoCloseable {
         metrics.incrVerticesWritten();
 
         // Write edges
-        for (DecodedEdge edge : vertex.getOutEdges()) {
-            writeEdge(edge, now);
+        int edgeCount = vertex.getOutEdges().size();
+        if (edgeCount > 0) {
+            long totalAttempts = edgeWriteAttempts.addAndGet(edgeCount);
+            if (totalAttempts <= WRITE_SAMPLE_LOG_LIMIT) {
+                LOG.info("DIAG: Writing {} edges for vertex {} (typeName={}, guid={})",
+                         edgeCount, vertexId, vertex.getTypeName(), vertex.getGuid());
+            }
         }
-        metrics.incrEdgesWritten(vertex.getOutEdges().size());
+        for (DecodedEdge edge : vertex.getOutEdges()) {
+            try {
+                writeEdge(edge, now);
+            } catch (Exception e) {
+                long errCount = edgeWriteErrors.incrementAndGet();
+                if (errCount <= WRITE_SAMPLE_LOG_LIMIT) {
+                    LOG.error("DIAG: Failed to write edge {} -[{}]-> {}: {}",
+                              edge.getOutVertexId(), edge.getLabel(), edge.getInVertexId(), e.toString());
+                }
+            }
+        }
+        metrics.incrEdgesWritten(edgeCount);
 
         // Write indexes
         writeIndexes(vertex);

@@ -132,27 +132,40 @@ public class JanusGraphScanner implements AutoCloseable {
             }
         }
 
-        // Add Atlas's custom serializers (TypeCategory, ArrayList, BigInteger, BigDecimal)
-        // These match AtlasJanusGraphDatabase lines 108-119
-        janusConfig.setProperty("attributes.custom.attribute1.attribute-class",
-            "org.apache.atlas.model.typedef.AtlasBaseTypeDef$TypeCategory");
-        janusConfig.setProperty("attributes.custom.attribute1.serializer-class",
-            "org.apache.atlas.repository.graphdb.janus.serializer.TypeCategorySerializer");
+        // Add Atlas's custom serializers — MUST match AtlasJanusGraphDatabase exactly (lines 108-119).
+        // Using different class names corrupts JanusGraph's schema type ID resolution,
+        // causing all property key names to be systematically wrong.
+        //
+        // Only set custom attributes if the config file didn't already include them
+        // (i.e., if we stripped "atlas.graph." prefix and they came through).
+        if (!janusConfig.containsKey("attributes.custom.attribute1.attribute-class")) {
+            // Use the EXACT same classes as AtlasJanusGraphDatabase:
+            //   attribute1 = org.apache.atlas.typesystem.types.DataTypes$TypeCategory
+            //   attribute2 = java.util.ArrayList  (serialized with JanusGraph's own SerializableSerializer)
+            //   attribute3 = java.math.BigInteger
+            //   attribute4 = java.math.BigDecimal
+            janusConfig.setProperty("attributes.custom.attribute1.attribute-class",
+                "org.apache.atlas.typesystem.types.DataTypes$TypeCategory");
+            janusConfig.setProperty("attributes.custom.attribute1.serializer-class",
+                "org.apache.atlas.repository.graphdb.janus.serializer.TypeCategorySerializer");
 
-        janusConfig.setProperty("attributes.custom.attribute2.attribute-class",
-            ArrayList.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute2.serializer-class",
-            "org.apache.atlas.repository.graphdb.janus.serializer.SerializableSerializer");
+            janusConfig.setProperty("attributes.custom.attribute2.attribute-class",
+                ArrayList.class.getName());
+            janusConfig.setProperty("attributes.custom.attribute2.serializer-class",
+                "org.janusgraph.graphdb.database.serialize.attribute.SerializableSerializer");
 
-        janusConfig.setProperty("attributes.custom.attribute3.attribute-class",
-            BigInteger.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute3.serializer-class",
-            "org.apache.atlas.repository.graphdb.janus.serializer.BigIntegerSerializer");
+            janusConfig.setProperty("attributes.custom.attribute3.attribute-class",
+                BigInteger.class.getName());
+            janusConfig.setProperty("attributes.custom.attribute3.serializer-class",
+                "org.apache.atlas.repository.graphdb.janus.serializer.BigIntegerSerializer");
 
-        janusConfig.setProperty("attributes.custom.attribute4.attribute-class",
-            BigDecimal.class.getName());
-        janusConfig.setProperty("attributes.custom.attribute4.serializer-class",
-            "org.apache.atlas.repository.graphdb.janus.serializer.BigDecimalSerializer");
+            janusConfig.setProperty("attributes.custom.attribute4.attribute-class",
+                BigDecimal.class.getName());
+            janusConfig.setProperty("attributes.custom.attribute4.serializer-class",
+                "org.apache.atlas.repository.graphdb.janus.serializer.BigDecimalSerializer");
+        } else {
+            LOG.info("Custom attribute serializers already configured from config file — not overriding");
+        }
 
         LOG.info("JanusGraph config: storage.backend={}, storage.cql.keyspace={}, storage.hostname={}",
                  janusConfig.getString("storage.backend"),
@@ -252,6 +265,10 @@ public class JanusGraphScanner implements AutoCloseable {
                  String.format("%,d", metrics.getCqlRowsRead()),
                  String.format("%,d", metrics.getVerticesScanned()),
                  metrics.getDecodeErrors());
+        LOG.info("DIAG SUMMARY: edges decoded: {}, properties decoded: {}, system relations skipped: {}, " +
+                 "null-type relations skipped: {}, edge decode errors: {}",
+                 edgeDecodeCount.get(), propertyDecodeCount.get(), edgeSkippedSystem.get(),
+                 edgeSkippedNullType.get(), edgeDecodeErrors.get());
     }
 
     /**
@@ -353,6 +370,14 @@ public class JanusGraphScanner implements AutoCloseable {
         }
     }
 
+    // Counters for edge diagnostic logging (log first N edges at INFO level)
+    private final java.util.concurrent.atomic.AtomicLong edgeDecodeCount = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong edgeSkippedSystem = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong edgeSkippedNullType = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong edgeDecodeErrors = new java.util.concurrent.atomic.AtomicLong(0);
+    private final java.util.concurrent.atomic.AtomicLong propertyDecodeCount = new java.util.concurrent.atomic.AtomicLong(0);
+    private static final int EDGE_SAMPLE_LOG_LIMIT = 20;
+
     /**
      * Decode a vertex's full adjacency list from JanusGraph's binary format.
      * Extracts properties and edges (all directions).
@@ -375,6 +400,11 @@ public class JanusGraphScanner implements AutoCloseable {
 
         DecodedVertex vertex = new DecodedVertex(vertexId);
         StandardJanusGraphTx tx = threadLocalTx.get();
+        int entryEdges = 0;
+        int entryProps = 0;
+        int entrySystem = 0;
+        int entryNullType = 0;
+        int entryErrors = 0;
 
         for (Entry entry : entries) {
             try {
@@ -382,11 +412,17 @@ public class JanusGraphScanner implements AutoCloseable {
 
                 // Skip JanusGraph internal system relations (VertexExists, SchemaName, etc.)
                 if (isSystemRelation(rel.typeId)) {
+                    entrySystem++;
                     continue;
                 }
 
                 RelationType type = tx.getExistingRelationType(rel.typeId);
                 if (type == null) {
+                    entryNullType++;
+                    if (edgeSkippedNullType.incrementAndGet() <= EDGE_SAMPLE_LOG_LIMIT) {
+                        LOG.info("DIAG: Skipping relation with null type: typeId={}, vertexId={}, direction={}",
+                                 rel.typeId, vertexId, rel.direction);
+                    }
                     continue;
                 }
 
@@ -396,6 +432,7 @@ public class JanusGraphScanner implements AutoCloseable {
                     Object value = rel.getValue();
                     if (value != null) {
                         vertex.addProperty(relTypeName, value);
+                        entryProps++;
                     }
                 } else {
                     // Edge — process ALL directions. Each edge is stored twice in JG
@@ -428,12 +465,36 @@ public class JanusGraphScanner implements AutoCloseable {
                     extractEdgeProperties(edge, rel, tx);
 
                     vertex.addOutEdge(edge);
+                    entryEdges++;
+
+                    // Log first N edges at INFO for diagnostics
+                    long totalEdges = edgeDecodeCount.incrementAndGet();
+                    if (totalEdges <= EDGE_SAMPLE_LOG_LIMIT) {
+                        LOG.info("DIAG: Edge decoded #{}: {} -[{}]-> {} (relId={}, dir={}, props={})",
+                                 totalEdges, outVertexId, relTypeName, inVertexId,
+                                 relationId, dir, edge.getProperties().size());
+                    }
                 }
             } catch (Exception e) {
+                entryErrors++;
+                edgeDecodeErrors.incrementAndGet();
                 metrics.incrDecodeErrors();
-                LOG.trace("Decode error for vertex {} entry", vertexId, e);
+                // Log at WARN (not TRACE) to make decode errors visible
+                if (edgeDecodeErrors.get() <= EDGE_SAMPLE_LOG_LIMIT) {
+                    LOG.warn("Decode error for vertex {} entry: {}", vertexId, e.toString());
+                } else {
+                    LOG.trace("Decode error for vertex {} entry", vertexId, e);
+                }
             }
         }
+
+        // Log per-vertex breakdown for first few vertices that have edges
+        if (entryEdges > 0 && edgeDecodeCount.get() <= EDGE_SAMPLE_LOG_LIMIT * 2) {
+            LOG.info("DIAG: Vertex {} decoded: {} entries total, {} props, {} edges, {} system, {} nullType, {} errors",
+                     vertexId, entries.size(), entryProps, entryEdges, entrySystem, entryNullType, entryErrors);
+        }
+        propertyDecodeCount.addAndGet(entryProps);
+        edgeSkippedSystem.addAndGet(entrySystem);
 
         if (!vertex.getProperties().isEmpty() || !vertex.getOutEdges().isEmpty()) {
             metrics.incrVerticesScanned();
