@@ -8,14 +8,11 @@ import org.apache.http.HttpHost;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.client.RequestOptions;
+import org.apache.http.util.EntityUtils;
+import org.elasticsearch.client.Request;
+import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
 import org.elasticsearch.client.RestClientBuilder;
-import org.elasticsearch.client.RestHighLevelClient;
-import org.elasticsearch.xcontent.XContentType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -24,6 +21,9 @@ import java.util.Map;
 
 /**
  * Re-indexes all migrated vertices into Elasticsearch.
+ *
+ * Uses the ES low-level REST client (no Lucene dependency) to avoid
+ * version conflicts with JanusGraph's bundled Lucene in the fat jar.
  *
  * Reads from the target Cassandra vertices table and bulk-indexes into ES
  * using vertex_id as the ES document ID.
@@ -36,7 +36,7 @@ public class ElasticsearchReindexer implements AutoCloseable {
     private final MigratorConfig   config;
     private final MigrationMetrics metrics;
     private final CqlSession       targetSession;
-    private final RestHighLevelClient esClient;
+    private final RestClient       esClient;
 
     public ElasticsearchReindexer(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
         this.config        = config;
@@ -45,7 +45,7 @@ public class ElasticsearchReindexer implements AutoCloseable {
         this.esClient      = createEsClient();
     }
 
-    private RestHighLevelClient createEsClient() {
+    private RestClient createEsClient() {
         RestClientBuilder builder = RestClient.builder(
             new HttpHost(config.getTargetEsHostname(), config.getTargetEsPort(), config.getTargetEsProtocol()));
 
@@ -62,7 +62,7 @@ public class ElasticsearchReindexer implements AutoCloseable {
             .setConnectTimeout(30_000)
             .setSocketTimeout(120_000));
 
-        return new RestHighLevelClient(builder);
+        return builder.build();
     }
 
     /**
@@ -75,10 +75,13 @@ public class ElasticsearchReindexer implements AutoCloseable {
 
         LOG.info("Starting ES re-indexing from {}.vertices to ES index '{}'", ks, esIndex);
 
+        // Ensure the index exists
+        ensureIndexExists(esIndex);
+
         ResultSet rs = targetSession.execute(
             "SELECT vertex_id, properties, type_name, state FROM " + ks + ".vertices");
 
-        BulkRequest bulkRequest = new BulkRequest();
+        StringBuilder bulkBody = new StringBuilder();
         int batchCount = 0;
         long totalDocs = 0;
 
@@ -102,16 +105,17 @@ public class ElasticsearchReindexer implements AutoCloseable {
 
                 String docJson = MAPPER.writeValueAsString(doc);
 
-                bulkRequest.add(new IndexRequest(esIndex)
-                    .id(vertexId)
-                    .source(docJson, XContentType.JSON));
+                // NDJSON bulk format: action line + doc line
+                bulkBody.append("{\"index\":{\"_index\":\"").append(esIndex)
+                        .append("\",\"_id\":\"").append(escapeJson(vertexId)).append("\"}}\n");
+                bulkBody.append(docJson).append("\n");
 
                 batchCount++;
                 totalDocs++;
 
                 if (batchCount >= bulkSize) {
-                    executeBulk(bulkRequest, totalDocs);
-                    bulkRequest = new BulkRequest();
+                    executeBulk(bulkBody.toString(), batchCount, totalDocs);
+                    bulkBody.setLength(0);
                     batchCount = 0;
                 }
             } catch (Exception e) {
@@ -121,24 +125,66 @@ public class ElasticsearchReindexer implements AutoCloseable {
 
         // Flush remaining
         if (batchCount > 0) {
-            executeBulk(bulkRequest, totalDocs);
+            executeBulk(bulkBody.toString(), batchCount, totalDocs);
         }
 
-        LOG.info("ES re-indexing complete: {} documents indexed", totalDocs);
+        LOG.info("ES re-indexing complete: {} documents indexed", String.format("%,d", totalDocs));
     }
 
-    private void executeBulk(BulkRequest request, long totalSoFar) throws IOException {
-        BulkResponse response = esClient.bulk(request, RequestOptions.DEFAULT);
-        int indexed = request.numberOfActions();
-        metrics.incrEsDocsIndexed(indexed);
-
-        if (response.hasFailures()) {
-            LOG.warn("ES bulk had failures: {}", response.buildFailureMessage());
+    private void ensureIndexExists(String esIndex) {
+        try {
+            Response response = esClient.performRequest(new Request("HEAD", "/" + esIndex));
+            if (response.getStatusLine().getStatusCode() == 200) {
+                LOG.info("ES index '{}' already exists", esIndex);
+                return;
+            }
+        } catch (IOException e) {
+            // Index doesn't exist, create it
         }
 
-        if (totalSoFar % 10000 == 0) {
-            LOG.info("ES re-indexing progress: {} documents", totalSoFar);
+        try {
+            Request createReq = new Request("PUT", "/" + esIndex);
+            createReq.setJsonEntity("{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}}");
+            esClient.performRequest(createReq);
+            LOG.info("Created ES index '{}'", esIndex);
+        } catch (IOException e) {
+            LOG.warn("Failed to create ES index '{}' (may already exist): {}", esIndex, e.getMessage());
         }
+    }
+
+    private void executeBulk(String bulkBody, int docCount, long totalSoFar) throws IOException {
+        long bulkStart = System.currentTimeMillis();
+
+        Request request = new Request("POST", "/_bulk");
+        request.setJsonEntity(bulkBody);
+        Response response = esClient.performRequest(request);
+        long bulkMs = System.currentTimeMillis() - bulkStart;
+
+        metrics.incrEsDocsIndexed(docCount);
+
+        int statusCode = response.getStatusLine().getStatusCode();
+        if (statusCode >= 300) {
+            String body = EntityUtils.toString(response.getEntity());
+            LOG.warn("ES bulk response status {}: {}", statusCode, body.substring(0, Math.min(500, body.length())));
+        } else {
+            // Check for per-item errors in the response
+            String body = EntityUtils.toString(response.getEntity());
+            if (body.contains("\"errors\":true")) {
+                LOG.warn("ES bulk had item-level errors (total: {}): {}...",
+                         String.format("%,d", totalSoFar),
+                         body.substring(0, Math.min(500, body.length())));
+            }
+        }
+
+        LOG.info("ES bulk indexed {} docs in {}ms (total: {}, rate: {}/s)",
+                 docCount, bulkMs, String.format("%,d", totalSoFar),
+                 bulkMs > 0 ? (docCount * 1000L / bulkMs) : "N/A");
+    }
+
+    /** Escape special JSON characters in a string value */
+    private static String escapeJson(String value) {
+        if (value == null) return "";
+        return value.replace("\\", "\\\\").replace("\"", "\\\"");
     }
 
     @Override

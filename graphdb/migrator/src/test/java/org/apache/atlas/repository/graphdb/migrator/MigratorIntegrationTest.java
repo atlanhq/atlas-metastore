@@ -195,6 +195,7 @@ public class MigratorIntegrationTest {
         makePropertyKey(mgmt, "Asset.connectorName", String.class, Cardinality.SINGLE);
         makePropertyKey(mgmt, "Asset.connectionQualifiedName", String.class, Cardinality.SINGLE);
         makePropertyKey(mgmt, "__type_category", Integer.class, Cardinality.SINGLE);
+        makePropertyKey(mgmt, "__type_name", String.class, Cardinality.SINGLE);
 
         // Edge property keys
         makePropertyKey(mgmt, "__relationshipGuid", String.class, Cardinality.SINGLE);
@@ -280,6 +281,7 @@ public class MigratorIntegrationTest {
         typeDef.property("__guid", UUID.randomUUID().toString());
         typeDef.property("__typeName", "Table");
         typeDef.property("__type", "typeSystem");
+        typeDef.property("__type_name", "Table");
         typeDef.property("__type_category", 1);
         typeDef.property("__state", "ACTIVE");
         expectedVertexCount++;
@@ -608,6 +610,39 @@ public class MigratorIntegrationTest {
 
             LOG.info("TypeName index for '{}': {} entries", typeName, count);
             assertTrue(count > 0, "Should have at least 1 entry for type " + typeName);
+        }
+    }
+
+    @Test(dependsOnMethods = "testRunMigration")
+    public void testTypeDefLookupIndex() {
+        // Verify that the 1:1 type_typename_idx entry exists for TypeDef vertices.
+        // This is used by AtlasTypeDefGraphStoreV2.findTypeVertexByName():
+        //   graph.query().has("__type", "typeSystem").has("__type_name", name).vertices()
+        // The CassandraGraphQuery resolves this via:
+        //   vertex_index WHERE index_name='type_typename_idx' AND index_value='typeSystem:Table'
+        ResultSet rs = targetSession.execute(
+                "SELECT vertex_id FROM " + TARGET_KEYSPACE + ".vertex_index " +
+                "WHERE index_name = 'type_typename_idx' AND index_value = 'typeSystem:Table'");
+        Row row = rs.one();
+
+        LOG.info("TypeDef 1:1 index lookup (typeSystem:Table): {}",
+                row != null ? "found vertex_id=" + row.getString("vertex_id") : "NOT FOUND");
+        assertNotNull(row, "type_typename_idx should have 1:1 entry for 'typeSystem:Table'");
+
+        // Verify the vertex_id points to a real vertex
+        String vertexId = row.getString("vertex_id");
+        ResultSet vertexRs = targetSession.execute(
+                "SELECT properties FROM " + TARGET_KEYSPACE + ".vertices WHERE vertex_id = '" + vertexId + "'");
+        Row vertexRow = vertexRs.one();
+        assertNotNull(vertexRow, "TypeDef vertex should exist in vertices table");
+
+        // Verify it's actually a typeSystem vertex
+        try {
+            Map<String, Object> props = MAPPER.readValue(vertexRow.getString("properties"), Map.class);
+            assertEquals(props.get("__type"), "typeSystem", "Should be a typeSystem vertex");
+            assertEquals(props.get("__type_name"), "Table", "Should have __type_name=Table");
+        } catch (Exception e) {
+            fail("Failed to parse vertex properties: " + e.getMessage());
         }
     }
 

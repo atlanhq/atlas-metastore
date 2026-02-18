@@ -584,6 +584,43 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         return Arrays.stream(keywords).anyMatch(message::contains);
     }
 
+    // ---- ES doc ID decoding ----
+
+    /**
+     * Decode an ES document ID to a Cassandra vertex ID.
+     *
+     * JanusGraph-era ES documents use LongEncoding (base-62) for the _id field.
+     * For example, vertex 348 is stored as ES _id "5u".
+     * After migration, vertex_id in Cassandra is String.valueOf(longId) = "348".
+     *
+     * For Cassandra-native vertices using UUID IDs (contain hyphens), no decoding is needed.
+     *
+     * @param docId the ES document _id
+     * @return the vertex_id to use for Cassandra lookup
+     */
+    static String decodeDocId(String docId) {
+        if (docId == null || docId.isEmpty()) return docId;
+        // UUID strings contain hyphens — no decoding needed
+        if (docId.contains("-")) return docId;
+
+        // Try base-62 decode (JanusGraph LongEncoding format)
+        String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        try {
+            long value = 0;
+            for (int i = 0; i < docId.length(); i++) {
+                int digit = BASE_SYMBOLS.indexOf(docId.charAt(i));
+                if (digit < 0) {
+                    // Invalid base-62 character — return as-is
+                    return docId;
+                }
+                value = value * 62 + digit;
+            }
+            return String.valueOf(value);
+        } catch (Exception e) {
+            return docId;
+        }
+    }
+
     // ---- Result wrapper for SearchHit (high-level client) ----
 
     public final class ResultImpl implements Result<CassandraVertex, CassandraEdge> {
@@ -595,10 +632,15 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
         @Override
         public AtlasVertex<CassandraVertex, CassandraEdge> getVertex() {
-            // ES doc ID is the vertex ID (UUID string for Cassandra backend)
-            // For JanusGraph-era docs, it's a LongEncoded numeric ID
             String docId = hit.getId();
-            return graph.getVertex(docId);
+            String vertexId = decodeDocId(docId);
+            AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(vertexId);
+            if (v == null && !vertexId.equals(docId)) {
+                // Decoded value didn't match; try original doc ID as vertex ID
+                // (handles re-indexed ES data where _id = vertex_id directly)
+                v = graph.getVertex(docId);
+            }
+            return v;
         }
 
         @Override
@@ -644,7 +686,13 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         @Override
         public AtlasVertex<CassandraVertex, CassandraEdge> getVertex() {
             String docId = String.valueOf(hit.get("_id"));
-            return graph.getVertex(docId);
+            String vertexId = decodeDocId(docId);
+            AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(vertexId);
+            if (v == null && !vertexId.equals(docId)) {
+                // Decoded value didn't match; try original doc ID as vertex ID
+                v = graph.getVertex(docId);
+            }
+            return v;
         }
 
         @Override

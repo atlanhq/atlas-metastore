@@ -89,16 +89,12 @@
             <artifactId>java-driver-core</artifactId>
         </dependency>
 
-        <!-- Elasticsearch for re-indexing -->
+        <!-- Elasticsearch low-level REST client for re-indexing.
+             Uses only HTTP/JSON — no Lucene dependency, avoids version conflicts
+             with JanusGraph's bundled Lucene in the fat jar. -->
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
-            <artifactId>elasticsearch-rest-high-level-client</artifactId>
-            <version>${elasticsearch.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.elasticsearch</groupId>
-            <artifactId>elasticsearch</artifactId>
+            <artifactId>elasticsearch-rest-client</artifactId>
             <version>${elasticsearch.version}</version>
         </dependency>
 

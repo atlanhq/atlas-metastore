@@ -5,6 +5,8 @@ import com.datastax.oss.driver.api.core.cql.PreparedStatement;
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
 import org.apache.tinkerpop.gremlin.structure.Direction;
+import org.apache.commons.configuration2.BaseConfiguration;
+import org.apache.commons.configuration2.Configuration;
 import org.janusgraph.core.JanusGraph;
 import org.janusgraph.core.JanusGraphFactory;
 import org.janusgraph.core.RelationType;
@@ -21,6 +23,8 @@ import org.janusgraph.graphdb.transaction.StandardJanusGraphTx;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.FileInputStream;
+import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.nio.ByteBuffer;
 import java.util.*;
@@ -54,18 +58,24 @@ public class JanusGraphScanner implements AutoCloseable {
     private final EdgeSerializer       edgeSerializer;
     private final ThreadLocal<StandardJanusGraphTx> threadLocalTx;
 
+    /** Prefix used by Atlas for JanusGraph properties in atlas-application.properties */
+    private static final String ATLAS_GRAPH_PREFIX = "atlas.graph.";
+
     public JanusGraphScanner(MigratorConfig config, MigrationMetrics metrics, CqlSession sourceSession) {
         this.config        = config;
         this.metrics       = metrics;
         this.sourceSession = sourceSession;
 
         // Open JanusGraph instance ONLY for schema/type resolution (read-only).
-        // This connects to the same Cassandra as the source but only reads
-        // schema metadata (PropertyKey names, EdgeLabel names, etc.)
+        // Atlas stores JanusGraph config under "atlas.graph." prefix in atlas-application.properties.
+        // JanusGraph expects keys without this prefix (e.g., "storage.backend" not "atlas.graph.storage.backend").
+        // We strip the prefix and add Atlas's custom serializers, matching AtlasJanusGraphDatabase.getConfiguration().
         LOG.info("Opening JanusGraph for schema resolution from config: {}",
                  config.getSourceJanusGraphConfig());
 
-        JanusGraph jg = JanusGraphFactory.open(config.getSourceJanusGraphConfig());
+        Configuration janusConfig = buildJanusGraphConfig(config.getSourceJanusGraphConfig());
+
+        JanusGraph jg = JanusGraphFactory.open(janusConfig);
         this.janusGraph     = (StandardJanusGraph) jg;
         this.idManager      = janusGraph.getIDManager();
         this.edgeSerializer = janusGraph.getEdgeSerializer();
@@ -78,6 +88,78 @@ public class JanusGraphScanner implements AutoCloseable {
                 .vertexCacheSize(200)
                 .start()
         );
+    }
+
+    /**
+     * Load atlas-application.properties file, strip the "atlas.graph." prefix,
+     * and add Atlas's custom serializers — matching AtlasJanusGraphDatabase.getConfiguration().
+     */
+    /**
+     * Load a config file and produce a JanusGraph-compatible Configuration.
+     *
+     * Handles two formats:
+     *   1) atlas-application.properties: keys prefixed with "atlas.graph." (e.g., atlas.graph.storage.backend=cql)
+     *   2) Plain JanusGraph config: keys without prefix (e.g., storage.backend=cql)
+     *
+     * Detects format by checking if "atlas.graph.storage.backend" exists.
+     * Then adds Atlas's 4 custom serializers (TypeCategory, ArrayList, BigInteger, BigDecimal).
+     */
+    private static Configuration buildJanusGraphConfig(String configPath) {
+        Properties fileProps = new Properties();
+        try (FileInputStream fis = new FileInputStream(configPath)) {
+            fileProps.load(fis);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to load config: " + configPath, e);
+        }
+
+        BaseConfiguration janusConfig = new BaseConfiguration();
+
+        // Detect whether this is an Atlas config (atlas.graph.* prefix) or plain JanusGraph config
+        boolean isAtlasFormat = fileProps.containsKey("atlas.graph.storage.backend");
+
+        if (isAtlasFormat) {
+            LOG.info("Detected Atlas-format config (atlas.graph.* prefix), stripping prefix");
+            for (String key : fileProps.stringPropertyNames()) {
+                if (key.startsWith(ATLAS_GRAPH_PREFIX)) {
+                    String janusKey = key.substring(ATLAS_GRAPH_PREFIX.length());
+                    janusConfig.setProperty(janusKey, fileProps.getProperty(key));
+                }
+            }
+        } else {
+            LOG.info("Detected plain JanusGraph config (no prefix)");
+            for (String key : fileProps.stringPropertyNames()) {
+                janusConfig.setProperty(key, fileProps.getProperty(key));
+            }
+        }
+
+        // Add Atlas's custom serializers (TypeCategory, ArrayList, BigInteger, BigDecimal)
+        // These match AtlasJanusGraphDatabase lines 108-119
+        janusConfig.setProperty("attributes.custom.attribute1.attribute-class",
+            "org.apache.atlas.model.typedef.AtlasBaseTypeDef$TypeCategory");
+        janusConfig.setProperty("attributes.custom.attribute1.serializer-class",
+            "org.apache.atlas.repository.graphdb.janus.serializer.TypeCategorySerializer");
+
+        janusConfig.setProperty("attributes.custom.attribute2.attribute-class",
+            ArrayList.class.getName());
+        janusConfig.setProperty("attributes.custom.attribute2.serializer-class",
+            "org.apache.atlas.repository.graphdb.janus.serializer.SerializableSerializer");
+
+        janusConfig.setProperty("attributes.custom.attribute3.attribute-class",
+            BigInteger.class.getName());
+        janusConfig.setProperty("attributes.custom.attribute3.serializer-class",
+            "org.apache.atlas.repository.graphdb.janus.serializer.BigIntegerSerializer");
+
+        janusConfig.setProperty("attributes.custom.attribute4.attribute-class",
+            BigDecimal.class.getName());
+        janusConfig.setProperty("attributes.custom.attribute4.serializer-class",
+            "org.apache.atlas.repository.graphdb.janus.serializer.BigDecimalSerializer");
+
+        LOG.info("JanusGraph config: storage.backend={}, storage.cql.keyspace={}, storage.hostname={}",
+                 janusConfig.getString("storage.backend"),
+                 janusConfig.getString("storage.cql.keyspace"),
+                 janusConfig.getString("storage.hostname"));
+
+        return janusConfig;
     }
 
     /**
@@ -138,7 +220,7 @@ public class JanusGraphScanner implements AutoCloseable {
             long rangeEnd   = range[1];
 
             if (completedRanges.contains(rangeStart)) {
-                LOG.debug("Skipping completed token range [{}, {}]", rangeStart, rangeEnd);
+                LOG.info("Skipping already-completed token range [{}, {}] (resume mode)", rangeStart, rangeEnd);
                 metrics.incrTokenRangesDone();
                 continue;
             }
@@ -165,7 +247,11 @@ public class JanusGraphScanner implements AutoCloseable {
         }
 
         scannerPool.shutdown();
-        LOG.info("All token ranges scanned");
+        LOG.info("All {} token ranges scanned — total CQL rows: {}, vertices scanned: {}, decode errors: {}",
+                 tokenRanges.size(),
+                 String.format("%,d", metrics.getCqlRowsRead()),
+                 String.format("%,d", metrics.getVerticesScanned()),
+                 metrics.getDecodeErrors());
     }
 
     /**
@@ -230,8 +316,9 @@ public class JanusGraphScanner implements AutoCloseable {
         stateStore.markRangeCompleted(phase, rangeStart, rangeEnd, rangeVertices, rangeEdges);
         metrics.incrTokenRangesDone();
 
-        LOG.debug("Token range [{}, {}]: {} rows, {} vertices, {} out-edges",
-                  rangeStart, rangeEnd, rowCount, rangeVertices, rangeEdges);
+        LOG.info("Token range completed: [{}, {}] — {} CQL rows, {} vertices, {} edges (ranges done: {}/{})",
+                  rangeStart, rangeEnd, rowCount, rangeVertices, rangeEdges,
+                  metrics.getTokenRangesDone(), metrics.getTokenRangesTotal());
     }
 
     private long extractVertexId(ByteBuffer keyBuf) {
@@ -268,7 +355,13 @@ public class JanusGraphScanner implements AutoCloseable {
 
     /**
      * Decode a vertex's full adjacency list from JanusGraph's binary format.
-     * Extracts properties and OUT-direction edges.
+     * Extracts properties and edges (all directions).
+     *
+     * Each edge in JanusGraph is stored twice in the edgestore — once in each
+     * endpoint's adjacency list. We process ALL edges regardless of direction
+     * and correctly assign out/in vertex IDs based on rel.direction.
+     * Cassandra INSERT is an upsert, so duplicate writes from both endpoints
+     * produce the same final result (idempotent).
      */
     private DecodedVertex decodeVertex(long vertexId, List<Entry> entries) {
         // Skip invisible/internal JanusGraph system vertices
@@ -305,24 +398,36 @@ public class JanusGraphScanner implements AutoCloseable {
                         vertex.addProperty(relTypeName, value);
                     }
                 } else {
-                    // Edge — only process OUT direction to avoid double-counting.
-                    // Each undirected edge in JG is stored twice: once in each endpoint's
-                    // adjacency list (as OUT in source, IN in target).
-                    Direction dir = rel.direction;
-                    if (dir == Direction.OUT || dir == Direction.BOTH) {
-                        long otherVertexId = ((Number) rel.getOtherVertexId()).longValue();
-                        long relationId    = rel.relationId;
+                    // Edge — process ALL directions. Each edge is stored twice in JG
+                    // (once per endpoint). We determine correct out/in assignment from
+                    // the direction, and Cassandra upserts handle deduplication.
+                    long otherVertexId = ((Number) rel.getOtherVertexId()).longValue();
+                    long relationId    = rel.relationId;
+                    Direction dir      = rel.direction;
 
-                        DecodedEdge edge = new DecodedEdge(
-                            relationId, vertexId, otherVertexId, relTypeName);
+                    long outVertexId;
+                    long inVertexId;
 
-                        // Extract edge properties via RelationCache iteration.
-                        // RelationCache implements Iterable<LongObjectCursor<Object>>
-                        // where key = property type ID, value = property value.
-                        extractEdgeProperties(edge, rel, tx);
-
-                        vertex.addOutEdge(edge);
+                    if (dir == Direction.IN) {
+                        // We're reading from the IN-vertex's adjacency list:
+                        // current vertex is the target, other vertex is the source
+                        outVertexId = otherVertexId;
+                        inVertexId  = vertexId;
+                    } else {
+                        // OUT or BOTH: current vertex is the source
+                        outVertexId = vertexId;
+                        inVertexId  = otherVertexId;
                     }
+
+                    DecodedEdge edge = new DecodedEdge(
+                        relationId, outVertexId, inVertexId, relTypeName);
+
+                    // Extract edge properties via RelationCache iteration.
+                    // RelationCache implements Iterable<LongObjectCursor<Object>>
+                    // where key = property type ID, value = property value.
+                    extractEdgeProperties(edge, rel, tx);
+
+                    vertex.addOutEdge(edge);
                 }
             } catch (Exception e) {
                 metrics.incrDecodeErrors();

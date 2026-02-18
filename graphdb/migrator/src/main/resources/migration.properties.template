@@ -35,6 +35,12 @@ target.cassandra.datacenter=datacenter1
 target.cassandra.username=
 target.cassandra.password=
 
+# Replication strategy for the target keyspace (created if it doesn't exist).
+# For multi-node deployments use NetworkTopologyStrategy (default).
+# For local/dev use SimpleStrategy.
+target.cassandra.replication.strategy=NetworkTopologyStrategy
+target.cassandra.replication.factor=3
+
 # -----------------------------------------------------------------------------
 # Target: Elasticsearch
 # After vertex migration, the migrator bulk-indexes all vertices into ES.

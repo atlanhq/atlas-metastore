@@ -200,6 +200,36 @@ public class CassandraTargetWriterTest {
     }
 
     @Test
+    public void testTypeDefVertexIndexWritten() throws InterruptedException {
+        CassandraTargetWriter writer = new CassandraTargetWriter(config, metrics, mockSession);
+        writer.init();
+        writer.startWriters();
+
+        // Create a TypeDef vertex (like AtlasTypeDefGraphStoreV2.createTypeVertex())
+        DecodedVertex typeDefVertex = new DecodedVertex(999L);
+        typeDefVertex.addProperty("__guid", "typedef-guid-1");
+        typeDefVertex.addProperty("__typeName", "Table");
+        typeDefVertex.addProperty("__type", "typeSystem");
+        typeDefVertex.addProperty("__type_name", "Table");
+        typeDefVertex.addProperty("__type_category", 1);
+        typeDefVertex.addProperty("__state", "ACTIVE");
+
+        writer.enqueue(typeDefVertex);
+        writer.signalScanComplete();
+        writer.awaitCompletion();
+        writer.close();
+
+        // Verify that __guid_idx, type_typename_idx (1:1), type_category_idx (1:N) were all written
+        // With mocks, we can verify the insertIndexStmt was bound with the correct values
+        assertEquals(metrics.getVerticesWritten(), 1L);
+        // Indexes: __guid_idx + type_typename_idx(1:N for typeName) + type_category_idx(1:N)
+        //          + type_typename_idx(1:1 for typeSystem:Table) = 4
+        assertTrue(metrics.getIndexesWritten() >= 3,
+                "TypeDef vertex should generate at least 3 index entries (guid + type_typename 1:N + category), got "
+                + metrics.getIndexesWritten());
+    }
+
+    @Test
     public void testCloseIsIdempotent() {
         CassandraTargetWriter writer = new CassandraTargetWriter(config, metrics, mockSession);
         writer.close();

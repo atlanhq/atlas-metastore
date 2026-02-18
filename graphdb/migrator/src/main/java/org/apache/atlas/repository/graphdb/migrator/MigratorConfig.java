@@ -40,6 +40,10 @@ public class MigratorConfig {
     private final String targetEsUsername;
     private final String targetEsPassword;
 
+    // Target Cassandra replication
+    private final String targetReplicationStrategy;
+    private final int    targetReplicationFactor;
+
     // Migration tuning
     private final int scannerThreads;
     private final int writerThreads;
@@ -82,6 +86,10 @@ public class MigratorConfig {
         this.targetEsIndex    = get("target.elasticsearch.index", "janusgraph_vertex_index");
         this.targetEsUsername = get("target.elasticsearch.username", "");
         this.targetEsPassword = get("target.elasticsearch.password", "");
+
+        // Target replication
+        this.targetReplicationStrategy = get("target.cassandra.replication.strategy", "NetworkTopologyStrategy");
+        this.targetReplicationFactor   = getInt("target.cassandra.replication.factor", 3);
 
         // Tuning
         this.scannerThreads  = getInt("migration.scanner.threads", 32);
@@ -130,6 +138,9 @@ public class MigratorConfig {
     public String getTargetEsIndex()     { return targetEsIndex; }
     public String getTargetEsUsername()  { return targetEsUsername; }
     public String getTargetEsPassword()  { return targetEsPassword; }
+
+    public String  getTargetReplicationStrategy() { return targetReplicationStrategy; }
+    public int     getTargetReplicationFactor()  { return targetReplicationFactor; }
 
     public int     getScannerThreads()   { return scannerThreads; }
     public int     getWriterThreads()    { return writerThreads; }

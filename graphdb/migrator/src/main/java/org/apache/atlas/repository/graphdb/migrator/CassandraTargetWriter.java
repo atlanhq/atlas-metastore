@@ -66,9 +66,22 @@ public class CassandraTargetWriter implements AutoCloseable {
 
     private void createSchema() {
         // Create keyspace if not exists
+        String strategy = config.getTargetReplicationStrategy();
+        int rf = config.getTargetReplicationFactor();
+        String dc = config.getTargetCassandraDatacenter();
+
+        String replication;
+        if ("SimpleStrategy".equals(strategy)) {
+            replication = "{'class': 'SimpleStrategy', 'replication_factor': " + rf + "}";
+        } else {
+            // NetworkTopologyStrategy: replicate to the configured datacenter
+            replication = "{'class': 'NetworkTopologyStrategy', '" + dc + "': " + rf + "}";
+        }
+
+        LOG.info("Creating keyspace '{}' with replication: {}", ks, replication);
         targetSession.execute(
             "CREATE KEYSPACE IF NOT EXISTS " + ks +
-            " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}");
+            " WITH replication = " + replication);
 
         targetSession.execute(
             "CREATE TABLE IF NOT EXISTS " + ks + ".vertices (" +
@@ -176,6 +189,8 @@ public class CassandraTargetWriter implements AutoCloseable {
     public void enqueue(DecodedVertex vertex) {
         try {
             queue.put(vertex);
+            // Update queue depth in metrics for progress reporting
+            metrics.setQueueDepth(queue.size());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("Interrupted while enqueuing vertex", e);
@@ -186,10 +201,11 @@ public class CassandraTargetWriter implements AutoCloseable {
      * Start the writer threads that drain the queue and write to Cassandra.
      */
     public void startWriters() {
+        metrics.setQueueCapacity(config.getQueueCapacity());
         for (int i = 0; i < config.getWriterThreads(); i++) {
             writerPool.submit(this::writerLoop);
         }
-        LOG.info("Started {} writer threads", config.getWriterThreads());
+        LOG.info("Started {} writer threads (queue capacity: {})", config.getWriterThreads(), config.getQueueCapacity());
     }
 
     /**
@@ -351,6 +367,20 @@ public class CassandraTargetWriter implements AutoCloseable {
             targetSession.execute(insertPropertyIndexStmt.bind(
                 "type_category_idx", typeVertexType + ":" + typeCategory, vertexId));
             indexCount++;
+        }
+
+        // 1:1 index: TypeDef name lookup (__type:__type_name → vertex_id)
+        // Used by AtlasTypeDefGraphStoreV2.findTypeVertexByName():
+        //   graph.query().has("__type", "typeSystem").has("__type_name", name).vertices()
+        // Must match CassandraGraph.buildIndexEntries() which writes to vertex_index
+        if (typeVertexType != null) {
+            Object typeDefName = props.get("__type_name");
+            if (typeDefName == null) typeDefName = props.get("__type.name");
+            if (typeDefName != null) {
+                targetSession.execute(insertIndexStmt.bind(
+                    "type_typename_idx", typeVertexType + ":" + typeDefName, vertexId));
+                indexCount++;
+            }
         }
 
         metrics.incrIndexesWritten(indexCount);
