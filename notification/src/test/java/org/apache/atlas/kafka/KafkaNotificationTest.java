@@ -25,25 +25,27 @@ import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.v1.model.notification.HookNotificationV1.EntityCreateRequest;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.RandomStringUtils;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.BeforeClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 import org.apache.atlas.model.notification.HookNotification;
 
 import java.util.List;
 
-import static org.testng.Assert.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class KafkaNotificationTest {
     private EmbeddedKafkaServer kafkaServer;
     private KafkaNotification kafkaNotification;
 
-    @BeforeClass
+    @BeforeAll
     public void setup() throws Exception {
         startNotificationServicesWithRetry();
     }
 
-    @AfterClass
+    @AfterAll
     public void shutdown() throws Exception {
         cleanUpNotificationService();
     }

@@ -21,62 +21,61 @@ package org.apache.atlas.ha;
 import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.security.SecurityProperties;
 import org.apache.commons.configuration.Configuration;
-import org.mockito.Mock;
-import org.mockito.MockitoAnnotations;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.apache.commons.configuration.PropertiesConfiguration;
 
 import java.util.List;
 
-import static org.mockito.Mockito.when;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 public class HAConfigurationTest {
 
     private static final String[] TEST_ATLAS_SERVER_IDS_HA = new String[] { "id1", "id2" };
 
-    @Mock
-    private Configuration configuration;
-
-    @BeforeMethod
+    @BeforeEach
     public void setup() {
-        MockitoAnnotations.initMocks(this);
         System.setProperty(AtlasConstants.SYSTEM_PROPERTY_APP_PORT, AtlasConstants.DEFAULT_APP_PORT_STR);
+    }
+
+    private Configuration createConfiguration() {
+        return new PropertiesConfiguration();
     }
 
     @Test
     public void testIsHAEnabledByLegacyConfiguration() {
-        when(configuration.containsKey(HAConfiguration.ATLAS_SERVER_HA_ENABLED_KEY)).thenReturn(true);
-        when(configuration.getBoolean(HAConfiguration.ATLAS_SERVER_HA_ENABLED_KEY)).thenReturn(Boolean.TRUE);
+        Configuration configuration = createConfiguration();
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_HA_ENABLED_KEY, true);
 
         boolean isHAEnabled = HAConfiguration.isHAEnabled(configuration);
         assertTrue(isHAEnabled);
 
         // restore
-        when(configuration.containsKey(HAConfiguration.ATLAS_SERVER_HA_ENABLED_KEY)).thenReturn(false);
+        configuration.clearProperty(HAConfiguration.ATLAS_SERVER_HA_ENABLED_KEY);
         isHAEnabled = HAConfiguration.isHAEnabled(configuration);
         assertFalse(isHAEnabled);
     }
 
     @Test
     public void testIsHAEnabledByIds() {
-        when(configuration.containsKey(HAConfiguration.ATLAS_SERVER_HA_ENABLED_KEY)).thenReturn(false);
-        when(configuration.getStringArray(HAConfiguration.ATLAS_SERVER_IDS)).thenReturn(TEST_ATLAS_SERVER_IDS_HA);
+        Configuration configuration = createConfiguration();
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_IDS, TEST_ATLAS_SERVER_IDS_HA);
         boolean isHAEnabled = HAConfiguration.isHAEnabled(configuration);
         assertTrue(isHAEnabled);
 
         // restore
-        when(configuration.getStringArray(HAConfiguration.ATLAS_SERVER_IDS)).thenReturn(new String[] { "id1"});
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_IDS, new String[] {"id1"});
         isHAEnabled = HAConfiguration.isHAEnabled(configuration);
         assertFalse(isHAEnabled);
     }
 
     @Test
     public void testShouldReturnHTTPSBoundAddress() {
-        when(configuration.getString(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX +"id1")).thenReturn("127.0.0.1:21443");
-        when(configuration.getBoolean(SecurityProperties.TLS_ENABLED)).thenReturn(true);
+        Configuration configuration = createConfiguration();
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX + "id1", "127.0.0.1:21443");
+        configuration.setProperty(SecurityProperties.TLS_ENABLED, true);
 
         String address = HAConfiguration.getBoundAddressForId(configuration, "id1");
 
@@ -85,9 +84,11 @@ public class HAConfigurationTest {
 
     @Test
     public void testShouldReturnListOfAddressesInConfig() {
-        when(configuration.getStringArray(HAConfiguration.ATLAS_SERVER_IDS)).thenReturn(TEST_ATLAS_SERVER_IDS_HA);
-        when(configuration.getString(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX +"id1")).thenReturn("127.0.0.1:21000");
-        when(configuration.getString(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX +"id2")).thenReturn("127.0.0.1:31000");
+        Configuration configuration = createConfiguration();
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_IDS, TEST_ATLAS_SERVER_IDS_HA);
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX + "id1", "127.0.0.1:21000");
+        configuration.setProperty(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX + "id2", "127.0.0.1:31000");
+        configuration.setProperty(SecurityProperties.TLS_ENABLED, false);
 
         List<String> serverInstances = HAConfiguration.getServerInstances(configuration);
         assertEquals(serverInstances.size(), 2);
@@ -97,7 +98,8 @@ public class HAConfigurationTest {
 
     @Test
     public void testShouldGetZookeeperAcl() {
-        when(configuration.getString(HAConfiguration.HA_ZOOKEEPER_ACL)).thenReturn("sasl:myclient@EXAMPLE.COM");
+        Configuration configuration = createConfiguration();
+        configuration.setProperty(HAConfiguration.HA_ZOOKEEPER_ACL, "sasl:myclient@EXAMPLE.COM");
 
         HAConfiguration.ZookeeperProperties zookeeperProperties =
                 HAConfiguration.getZookeeperProperties(configuration);
@@ -106,7 +108,8 @@ public class HAConfigurationTest {
 
     @Test
     public void testShouldGetZookeeperAuth() {
-        when(configuration.getString(HAConfiguration.HA_ZOOKEEPER_AUTH)).thenReturn("sasl:myclient@EXAMPLE.COM");
+        Configuration configuration = createConfiguration();
+        configuration.setProperty(HAConfiguration.HA_ZOOKEEPER_AUTH, "sasl:myclient@EXAMPLE.COM");
 
         HAConfiguration.ZookeeperProperties zookeeperProperties =
                 HAConfiguration.getZookeeperProperties(configuration);

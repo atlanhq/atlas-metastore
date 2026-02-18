@@ -20,9 +20,9 @@ package org.apache.atlas.graph;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.commons.configuration.Configuration;
+import org.opentest4j.TestAbortedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testng.SkipException;
 
 import java.io.File;
 import java.util.UUID;
@@ -41,7 +41,7 @@ public class GraphSandboxUtil {
             LOG.debug("New Storage dir : {}", configuration.getProperty("atlas.graph.storage.directory"));
             LOG.debug("New Indexer dir : {}", configuration.getProperty("atlas.graph.index.search.directory"));
         } catch (AtlasException ignored) {
-            throw new SkipException("Failure to setup Sandbox: " + sandboxName);
+            throw new TestAbortedException("Failure to setup Sandbox: " + sandboxName);
         }
     }
 
@@ -67,7 +67,7 @@ public class GraphSandboxUtil {
                 ret = Boolean.valueOf((String) property);
             }
         } catch (AtlasException ignored) {
-            throw new SkipException("useLocalSolr: failed! ", ignored);
+            throw new TestAbortedException("useLocalSolr: failed! ", ignored);
         }
 
         return ret;

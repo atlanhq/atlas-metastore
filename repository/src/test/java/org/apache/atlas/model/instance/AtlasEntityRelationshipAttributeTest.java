@@ -17,13 +17,13 @@
  */
 package org.apache.atlas.model.instance;
 
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Tests for AtlasEntity relationship attributes deduplication.

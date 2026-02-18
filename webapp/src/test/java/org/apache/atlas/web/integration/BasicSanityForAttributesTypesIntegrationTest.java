@@ -29,8 +29,8 @@ import static org.junit.Assert.assertTrue;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @ExtendWith(TestcontainersExtension.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class BasicSanityForAttributesTypesTest extends AtlasDockerIntegrationTest {
-    private static final Logger LOG = LoggerFactory.getLogger(BasicSanityForAttributesTypesTest.class);
+public class BasicSanityForAttributesTypesIntegrationTest extends AtlasDockerIntegrationTest {
+    private static final Logger LOG = LoggerFactory.getLogger(BasicSanityForAttributesTypesIntegrationTest.class);
 
     private static long SLEEP = 2000;
 

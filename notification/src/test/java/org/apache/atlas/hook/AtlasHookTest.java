@@ -25,8 +25,9 @@ import org.apache.atlas.notification.NotificationInterface;
 import org.apache.atlas.v1.model.notification.HookNotificationV1.EntityCreateRequest;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,7 +36,7 @@ import java.util.List;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyZeroInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 
 public class AtlasHookTest {
@@ -46,12 +47,13 @@ public class AtlasHookTest {
     @Mock
     private FailedMessagesLogger failedMessagesLogger;
 
-    @BeforeMethod
+    @BeforeEach
     public void setup() {
         MockitoAnnotations.initMocks(this);
     }
 
-    @Test (timeOut = 10000)
+    @Timeout(value = 10000, unit = java.util.concurrent.TimeUnit.MILLISECONDS)
+    @Test
     public void testNotifyEntitiesDoesNotHangOnException() throws Exception {
         MessageSource source                     = new MessageSource(this.getClass().getSimpleName());
         List<HookNotification> hookNotifications = new ArrayList<>();
@@ -106,7 +108,7 @@ public class AtlasHookTest {
         AtlasHook.notifyEntitiesInternal(hookNotifications, 2, null, notificationInterface, false,
                 failedMessagesLogger, source);
 
-        verifyZeroInteractions(failedMessagesLogger);
+        verifyNoInteractions(failedMessagesLogger);
     }
 
     @Test
@@ -136,6 +138,6 @@ public class AtlasHookTest {
         AtlasHook.notifyEntitiesInternal(hookNotifications, 2, null, notificationInterface, true,
                 failedMessagesLogger, source);
 
-        verifyZeroInteractions(failedMessagesLogger);
+        verifyNoInteractions(failedMessagesLogger);
     }
 }

@@ -21,23 +21,24 @@ import org.apache.atlas.AtlasException;
 import org.apache.atlas.notification.AbstractNotification;
 import org.apache.atlas.notification.NotificationConsumer;
 import org.apache.atlas.notification.NotificationException;
+import org.apache.atlas.notification.spool.models.IndexRecord;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.RandomUtils;
-import org.testng.Assert;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 import static org.apache.atlas.notification.NotificationInterface.NotificationType.HOOK;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class AtlasFileSpoolTest extends BaseTest {
     private static int MAX_RECORDS = 50;
 
@@ -120,20 +121,27 @@ public class AtlasFileSpoolTest extends BaseTest {
         indexManagement.stop();
     }
 
-    @Test(dependsOnMethods = "spoolerTest")
+    @Test
     public void publisherTest() throws IOException, AtlasException, InterruptedException {
         SpoolConfiguration cfg = getSpoolConfigurationTest();
 
         IndexManagement indexManagement = new IndexManagement(cfg);
         indexManagement.init();
+        Spooler spooler = new Spooler(cfg, indexManagement);
+        spooler.write(Collections.singletonList("publisher-test-message"));
+        indexManagement.stop();
+
+        indexManagement = new IndexManagement(cfg);
+        indexManagement.init();
+        List<IndexRecord> records = indexManagement.getIndexFileManager().getRecords();
+        Assertions.assertFalse(records.isEmpty(), "Expected at least one spool record to publish");
 
         MessageHandlerSpy messageHandler = new MessageHandlerSpy();
         Publisher publisher = new Publisher(cfg, indexManagement, messageHandler);
-        boolean ret = publisher.processAndDispatch(indexManagement.getIndexFileManager().getRecords().get(0));
+        boolean ret = publisher.processAndDispatch(records.get(0));
 
         publisher.setDrain();
-        Assert.assertTrue(ret);
-        TimeUnit.SECONDS.sleep(5);
+        Assertions.assertTrue(ret);
         assertTrue(messageHandler.getMessages().size() >= 0);
     }
 
@@ -164,7 +172,7 @@ public class AtlasFileSpoolTest extends BaseTest {
 
         IndexManagement imVerify = new IndexManagement(spoolCfg);
         imVerify.init();
-        Assert.assertTrue(imVerify.getIndexFileManager().getRecords().size() >= 0);
+        Assertions.assertTrue(imVerify.getIndexFileManager().getRecords().size() >= 0);
 
         Thread[] th1 = new Thread[MAX_PROCESSES];
         for (int i = 0; i < MAX_PROCESSES; i++) {
@@ -181,9 +189,9 @@ public class AtlasFileSpoolTest extends BaseTest {
 
         imVerify = new IndexManagement(spoolCfg);
         imVerify.init();
-        Assert.assertEquals(imVerify.getIndexFileManager().getRecords().size(), 0);
+        Assertions.assertEquals(imVerify.getIndexFileManager().getRecords().size(), 0);
         for (int i = 0; i < MAX_PROCESSES; i++) {
-            Assert.assertTrue(messageHandlerSpy[i].getMessages().size() >= 0);
+            Assertions.assertTrue(messageHandlerSpy[i].getMessages().size() >= 0);
         }
     }
 
@@ -226,7 +234,7 @@ public class AtlasFileSpoolTest extends BaseTest {
     }
 
 
-    @AfterClass
+    @AfterAll
     public void tearDown() {
         FileUtils.deleteQuietly(new File(spoolDirTest));
     }

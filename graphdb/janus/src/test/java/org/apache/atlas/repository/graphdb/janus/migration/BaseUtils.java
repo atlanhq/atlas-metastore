@@ -26,8 +26,9 @@ import org.apache.tinkerpop.gremlin.structure.io.graphson.TypeInfo;
 import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerGraph;
 import org.apache.tinkerpop.shaded.jackson.databind.JsonNode;
 import org.apache.tinkerpop.shaded.jackson.databind.ObjectMapper;
-import org.testng.SkipException;
-import org.testng.annotations.BeforeClass;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.TestInstance;
+import org.opentest4j.TestAbortedException;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,8 +38,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.testng.AssertJUnit.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class BaseUtils {
     private static final String resourcesDirRelativePath = "/src/test/resources/";
     private String resourceDir;
@@ -51,7 +53,7 @@ public class BaseUtils {
         try {
             return getEntityNode(FileUtils.readFileToString(f));
         } catch (IOException e) {
-            throw new SkipException("getJsonNodeFromFile: " + s, e);
+            throw new TestAbortedException("getJsonNodeFromFile: " + s, e);
         }
     }
 
@@ -59,7 +61,7 @@ public class BaseUtils {
         return Paths.get(resourceDir, fileName).toString();
     }
 
-    @BeforeClass
+    @BeforeAll
     public void setup() {
         resourceDir = System.getProperty("user.dir") + resourcesDirRelativePath;
         graphSONUtility = new GraphSONUtility(emptyRelationshipCache);

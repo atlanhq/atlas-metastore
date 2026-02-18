@@ -399,21 +399,22 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.11.0</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <version>4.11.0</version>
             <scope>test</scope>
         </dependency>
 
-        <!--<dependency>
-            <groupId>org.testng</groupId>
-            <artifactId>testng</artifactId>
-        </dependency>-->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-inline</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!---->
 
         <dependency>
             <groupId>com.google.inject</groupId>
@@ -816,6 +817,7 @@
                                 <exclude>**/*Base*.java</exclude>
                                 <exclude>**/*Secure*.java</exclude>
                                 <exclude>**/*Server*.java</exclude>
+                                <exclude>**/*IntegrationTest.java</exclude>
                                 <exclude>**/*$*.java</exclude>
                             </excludes>
                         </configuration>
@@ -992,6 +994,16 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*IntegrationTest.java</include>
+                    </includes>
+                </configuration>
             </plugin>
 
             <plugin>

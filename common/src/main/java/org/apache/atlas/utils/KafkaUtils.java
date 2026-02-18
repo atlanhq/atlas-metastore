@@ -193,6 +193,11 @@ public class KafkaUtils implements AutoCloseable {
     }
 
     public static void setKafkaJAASProperties(Configuration configuration, Properties kafkaProperties) {
+        setKafkaJAASProperties(configuration, kafkaProperties, isLoginKeytabBased(), isLoginTicketBased());
+    }
+
+    static void setKafkaJAASProperties(Configuration configuration, Properties kafkaProperties,
+                                       boolean loginKeytabBased, boolean loginTicketBased) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> KafkaUtils.setKafkaJAASProperties()");
         }
@@ -210,7 +215,7 @@ public class KafkaUtils implements AutoCloseable {
             String jaasClientName = JAAS_DEFAULT_CLIENT_NAME;
 
             // Required for backward compatability for Hive CLI
-            if (!isLoginKeytabBased() && isLoginTicketBased()) {
+            if (!loginKeytabBased && loginTicketBased) {
                 if (LOG.isDebugEnabled()) {
                     LOG.debug("Checking if ticketBased-KafkaClient is set");
                 }
