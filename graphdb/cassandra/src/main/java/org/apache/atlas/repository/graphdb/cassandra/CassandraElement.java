@@ -96,6 +96,12 @@ public abstract class CassandraElement implements AtlasElement {
                 return (T) Byte.valueOf(((Number) value).byteValue());
             }
             return (T) Byte.valueOf(String.valueOf(value));
+        } else if (clazz == List.class) {
+            // Handle String→List JSON deserialization (e.g., TypeDef enum values stored as JSON string)
+            if (value instanceof String) {
+                List<?> parsed = AtlasType.fromJson((String) value, List.class);
+                return (T) parsed;
+            }
         }
 
         return (T) value;

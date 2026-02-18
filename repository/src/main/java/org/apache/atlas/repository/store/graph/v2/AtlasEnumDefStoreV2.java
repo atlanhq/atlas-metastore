@@ -313,15 +313,28 @@ class AtlasEnumDefStoreV2 extends AtlasAbstractDefStoreV2<AtlasEnumDef> {
         typeDefStore.vertexToTypeDef(vertex, ret);
 
         List<AtlasEnumElementDef> elements = new ArrayList<>();
-        List<String> elemValues = vertex.getProperty(AtlasGraphUtilsV2.getTypeDefPropertyKey(ret), List.class);
-        for (String elemValue : elemValues) {
-            String elemKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret, elemValue);
-            String descKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(elemKey, "description");
+        String                    propKey  = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret);
+        List<String>              elemValues = vertex.getProperty(propKey, List.class);
 
-            Integer ordinal = AtlasGraphUtilsV2.getProperty(vertex, elemKey, Integer.class);
-            String  desc    = AtlasGraphUtilsV2.getProperty(vertex, descKey, String.class);
+        // Fallback: try getListProperty which handles String→List JSON deserialization
+        if (elemValues == null) {
+            elemValues = vertex.getListProperty(propKey);
+        }
 
-            elements.add(new AtlasEnumElementDef(elemValue, desc, ordinal));
+        if (elemValues == null) {
+            LOG.warn("toEnumDef: enum values list is null for type='{}', propKey='{}', vertexId={}. " +
+                     "Vertex property keys: {}", ret.getName(), propKey, vertex.getIdForDisplay(),
+                     vertex.getPropertyKeys());
+        } else {
+            for (String elemValue : elemValues) {
+                String elemKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(ret, elemValue);
+                String descKey = AtlasGraphUtilsV2.getTypeDefPropertyKey(elemKey, "description");
+
+                Integer ordinal = AtlasGraphUtilsV2.getProperty(vertex, elemKey, Integer.class);
+                String  desc    = AtlasGraphUtilsV2.getProperty(vertex, descKey, String.class);
+
+                elements.add(new AtlasEnumElementDef(elemValue, desc, ordinal));
+            }
         }
         ret.setElementDefs(elements);
 
