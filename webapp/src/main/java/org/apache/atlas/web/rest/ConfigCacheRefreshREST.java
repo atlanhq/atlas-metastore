@@ -14,7 +14,9 @@ import org.springframework.stereotype.Service;
 
 import javax.inject.Inject;
 import javax.inject.Singleton;
+import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
+import javax.ws.rs.core.Context;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 
@@ -115,6 +117,68 @@ public class ConfigCacheRefreshREST {
 
         } catch (Exception e) {
             LOG.error("ConfigCacheRefreshREST: Error getting cache state for key: {}", key, e);
+            return Response.serverError()
+                .entity("{\"error\": \"" + e.getMessage() + "\"}")
+                .build();
+        }
+    }
+
+    /**
+     * Set a config value via DynamicConfigStore.
+     * Writes to Cassandra, updates local cache, and propagates to other pods.
+     *
+     * @param key   the config key
+     * @param value the config value
+     * @return 200 if successful
+     */
+    @PUT
+    @Path("/cache/{key}")
+    @Timed
+    public Response setConfig(@PathParam("key") String key, @QueryParam("value") String value,
+                              @Context HttpServletRequest servletRequest) {
+        try {
+            if (!DynamicConfigStore.isEnabled()) {
+                return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity("{\"error\": \"DynamicConfigStore is not enabled\"}")
+                    .build();
+            }
+
+            if (key == null || key.isEmpty()) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("{\"error\": \"Config key is required\"}")
+                    .build();
+            }
+
+            if (!ConfigKey.isValidKey(key)) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("{\"error\": \"Invalid config key: " + key + "\"}")
+                    .build();
+            }
+
+            if (value == null) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                    .entity("{\"error\": \"Config value is required (use ?value=...)\"}")
+                    .build();
+            }
+
+            String updatedBy = servletRequest.getRemoteUser() != null ? servletRequest.getRemoteUser() : "api";
+            DynamicConfigStore.setConfig(key, value, updatedBy);
+
+            LOG.info("ConfigCacheRefreshREST: Config set via API - key: {}, value: {}, by: {}", key, value, updatedBy);
+
+            ConfigEntry entry = configStore.getCacheStore().get(key);
+            return Response.ok()
+                .entity(new CacheStateResponse(
+                    key,
+                    entry != null ? entry.getValue() : value,
+                    entry != null ? entry.getUpdatedBy() : updatedBy,
+                    entry != null && entry.getLastUpdated() != null ? entry.getLastUpdated().toString() : null,
+                    System.getenv().getOrDefault("HOSTNAME", "unknown")
+                ))
+                .build();
+
+        } catch (Exception e) {
+            LOG.error("ConfigCacheRefreshREST: Error setting config for key: {}", key, e);
             return Response.serverError()
                 .entity("{\"error\": \"" + e.getMessage() + "\"}")
                 .build();
