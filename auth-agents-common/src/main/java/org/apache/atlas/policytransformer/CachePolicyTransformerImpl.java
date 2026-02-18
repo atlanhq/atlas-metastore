@@ -635,9 +635,13 @@ public class CachePolicyTransformerImpl {
             return null;
         }
 
-        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+        List<Object> conditionsRaw = (List<Object>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
 
-        for (AtlasStruct condition : conditions) {
+        for (Object conditionObj : conditionsRaw) {
+            // Convert LinkedHashMap (from JSON deserialization) to AtlasStruct
+            AtlasStruct condition = (conditionObj instanceof AtlasStruct) ?
+                    (AtlasStruct) conditionObj :
+                    new AtlasStruct((Map) conditionObj);
             RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
 
             rangerCondition.setType((String) condition.getAttribute("policyConditionType"));
