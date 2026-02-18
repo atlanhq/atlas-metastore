@@ -131,6 +131,11 @@ public final class ApplicationProperties extends PropertiesConfiguration {
 
                     url = ApplicationProperties.class.getClassLoader().getResource("/" + fileName);
                 }
+
+                if (url == null) {
+                    // IntelliJ single-test runs often miss atlas.conf. Fall back to repo layout.
+                    url = findFromLocalRepoLayout(fileName);
+                }
             } else {
                 url = new File(confLocation, fileName).toURI().toURL();
             }
@@ -150,6 +155,27 @@ public final class ApplicationProperties extends PropertiesConfiguration {
         } catch (Exception e) {
             throw new AtlasException("Failed to load application properties", e);
         }
+    }
+
+    private static URL findFromLocalRepoLayout(String fileName) {
+        String userDir = System.getProperty("user.dir");
+        File   current = StringUtils.isEmpty(userDir) ? null : new File(userDir);
+
+        while (current != null) {
+            File candidate = new File(current, "distro/src/conf/" + fileName);
+            if (candidate.isFile()) {
+                try {
+                    LOG.info("Loading {} from local repo layout at {}", fileName, candidate.getAbsolutePath());
+                    return candidate.toURI().toURL();
+                } catch (Exception e) {
+                    LOG.warn("Failed to convert {} to URL", candidate.getAbsolutePath(), e);
+                    return null;
+                }
+            }
+            current = current.getParentFile();
+        }
+
+        return null;
     }
 
     private static void logConfiguration(Configuration configuration) {

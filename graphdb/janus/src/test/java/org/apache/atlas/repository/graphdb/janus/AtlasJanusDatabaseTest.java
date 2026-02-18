@@ -18,6 +18,7 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.graph.GraphSandboxUtil;
 import org.apache.atlas.repository.Constants;
@@ -33,8 +34,10 @@ import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.runner.LocalSolrRunner;
 import org.apache.atlas.typesystem.types.DataTypes.TypeCategory;
 import org.apache.commons.configuration.Configuration;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.math.BigDecimal;
 import java.math.BigInteger;
@@ -48,20 +51,29 @@ import java.util.Map;
 
 import static org.apache.atlas.graph.GraphSandboxUtil.useLocalSolr;
 import static org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase.initJanusGraph;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertNull;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Sanity test of basic graph operations using the Janus graphdb
  * abstraction layer implementation.
  */
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class AtlasJanusDatabaseTest {
 
     private AtlasGraph<?, ?> atlasGraph;
+    private String originalAtlasConf;
+
+    @BeforeAll
+    public void setAtlasConfForTests() {
+        originalAtlasConf = System.getProperty("atlas.conf");
+        System.setProperty("atlas.conf", "src/test/resources");
+        ApplicationProperties.forceReload();
+    }
 
     private <V, E> AtlasGraph<V, E> getGraph() throws Exception {
         GraphSandboxUtil.create();
@@ -88,7 +100,7 @@ public class AtlasJanusDatabaseTest {
         return (AtlasGraph<V, E>) atlasGraph;
     }
 
-    @AfterClass
+    @AfterAll
     public void cleanup() throws Exception {
         if (atlasGraph != null) {
             atlasGraph.clear();
@@ -98,6 +110,13 @@ public class AtlasJanusDatabaseTest {
         if (useLocalSolr()) {
             LocalSolrRunner.stop();
         }
+
+        if (originalAtlasConf != null) {
+            System.setProperty("atlas.conf", originalAtlasConf);
+        } else {
+            System.clearProperty("atlas.conf");
+        }
+        ApplicationProperties.forceReload();
     }
 
     @Test

@@ -25,8 +25,8 @@ import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
 import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerGraph;
 import org.apache.tinkerpop.shaded.jackson.databind.JsonNode;
-import org.testng.Assert;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -44,12 +44,12 @@ import static org.apache.atlas.repository.Constants.CLASSIFICATION_VERTEX_PROPAG
 import static org.apache.atlas.repository.Constants.EDGE_ID_IN_IMPORT_KEY;
 import static org.apache.atlas.repository.Constants.STATE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.VERTEX_ID_IN_IMPORT_KEY;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertFalse;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertNull;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class GraphSONUtilityTest extends BaseUtils {
 
@@ -106,7 +106,7 @@ public class GraphSONUtilityTest extends BaseUtils {
         GraphSONUtility gu = new GraphSONUtility(emptyRelationshipCache);
         gu.vertexFromJson(tg, entityNode);
 
-        Assert.assertEquals((long) tg.traversal().V().count().next(), 0L);
+        Assertions.assertEquals((long) tg.traversal().V().count().next(), 0L);
     }
 
     @Test
@@ -158,8 +158,8 @@ public class GraphSONUtilityTest extends BaseUtils {
         addVertexToGraph(tg, gu, getDBV(), getTableV());
         addEdgeToGraph(tg, gu, new MappedElementCache(), getEdge());
 
-        Assert.assertEquals((long) tg.traversal().V().count().next(), 2L);
-        Assert.assertEquals((long) tg.traversal().E().count().next(), 1L);
+        Assertions.assertEquals((long) tg.traversal().V().count().next(), 2L);
+        Assertions.assertEquals((long) tg.traversal().E().count().next(), 1L);
 
         Edge e = tg.edges().next();
         assertTrue(e.property(EDGE_ID_IN_IMPORT_KEY).isPresent());

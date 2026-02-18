@@ -23,22 +23,28 @@ import org.apache.atlas.graph.GraphSandboxUtil;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.runner.LocalSolrRunner;
 import org.apache.commons.configuration.Configuration;
-import org.testng.Assert;
-import org.testng.annotations.AfterClass;
-import org.testng.annotations.BeforeTest;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import static org.apache.atlas.graph.GraphSandboxUtil.useLocalSolr;
 
 
-@Test
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class JanusGraphProviderTest {
 
     private Configuration configuration;
     private AtlasGraph<?, ?> graph;
+    private String originalAtlasConf;
 
-    @BeforeTest
+    @BeforeAll
     public void setUp() throws Exception {
+        originalAtlasConf = System.getProperty("atlas.conf");
+        System.setProperty("atlas.conf", "src/test/resources");
+        ApplicationProperties.forceReload();
+
         GraphSandboxUtil.create();
 
         if (useLocalSolr()) {
@@ -50,7 +56,7 @@ public class JanusGraphProviderTest {
         configuration = ApplicationProperties.getSubsetConfiguration(ApplicationProperties.get(), AtlasJanusGraphDatabase.GRAPH_PREFIX);
     }
 
-    @AfterClass
+    @AfterAll
     public void tearDown() throws Exception {
         try {
             graph.shutdown();
@@ -67,6 +73,13 @@ public class JanusGraphProviderTest {
         if (useLocalSolr()) {
             LocalSolrRunner.stop();
         }
+
+        if (originalAtlasConf != null) {
+            System.setProperty("atlas.conf", originalAtlasConf);
+        } else {
+            System.clearProperty("atlas.conf");
+        }
+        ApplicationProperties.forceReload();
     }
 
     @Test
@@ -74,18 +87,23 @@ public class JanusGraphProviderTest {
         try {
             AtlasJanusGraphDatabase.validateIndexBackend(configuration);
         } catch (Exception e) {
-            Assert.fail("Unexpected exception ", e);
+            Assertions.fail("Unexpected exception ", e);
         }
 
-        //Change backend
-        configuration.setProperty(AtlasJanusGraphDatabase.INDEX_BACKEND_CONF, AtlasJanusGraphDatabase.INDEX_BACKEND_LUCENE);
+        // Change backend to a different value from whatever is currently configured.
+        String currentBackend = configuration.getString(AtlasJanusGraphDatabase.INDEX_BACKEND_CONF);
+        String changedBackend = AtlasJanusGraphDatabase.INDEX_BACKEND_LUCENE.equals(currentBackend)
+                ? "solr"
+                : AtlasJanusGraphDatabase.INDEX_BACKEND_LUCENE;
+
+        configuration.setProperty(AtlasJanusGraphDatabase.INDEX_BACKEND_CONF, changedBackend);
         try {
             AtlasJanusGraphDatabase.validateIndexBackend(configuration);
-            Assert.fail("Expected exception");
+            Assertions.fail("Expected exception");
         } catch (Exception e) {
-            Assert.assertEquals(e.getMessage(),
-                    "Configured Index Backend lucene differs from earlier configured "
-                    + "Index Backend solr. Aborting!");
+            Assertions.assertEquals(e.getMessage(),
+                    "Configured Index Backend " + changedBackend + " differs from earlier configured "
+                    + "Index Backend " + currentBackend + ". Aborting!");
         }
     }
 }
