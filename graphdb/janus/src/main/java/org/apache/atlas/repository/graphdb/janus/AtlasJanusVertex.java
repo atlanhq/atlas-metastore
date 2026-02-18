@@ -222,9 +222,14 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
         if (docId == null) {
             String rawDisplayId = this.getIdForDisplay();
             if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
-                Object isLean = this.getProperty(LEANGRAPH_MODE);
-                
-                if (Boolean.TRUE.equals(isLean)) {
+                Object leanVal = this.getProperty(LEANGRAPH_MODE, Object.class);
+                boolean isLeanMode = false;
+                if (leanVal instanceof Boolean) {
+                    isLeanMode = (Boolean) leanVal;
+                } else if (leanVal instanceof String) {
+                    isLeanMode = Boolean.parseBoolean((String) leanVal);
+                }
+                if (isLeanMode) {
                     return JG_ES_DOC_ID_PREFIX + rawDisplayId; 
                 } else {
                     // Check if the ID is actually numeric before parsing
