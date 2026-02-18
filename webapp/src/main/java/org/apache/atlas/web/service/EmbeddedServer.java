@@ -84,15 +84,20 @@ public class EmbeddedServer {
         LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet with ClassLoader Alignment");
         WebAppContext application = new WebAppContext(path, "/");
 
-        Configuration configuration = ApplicationProperties.get();
+        try {
+            Configuration configuration = ApplicationProperties.get();
 
-        if (configuration.getProperty("atlas.graph.kafka.bootstrap.servers") == null &&
-            configuration.getProperty("atlas.kafka.bootstrap.servers") != null) {
-            LOG.info("Explicitly setting atlas.graph.kafka.bootstrap.servers");
-            configuration.setProperty(
-                "atlas.graph.kafka.bootstrap.servers",
-                configuration.getProperty("atlas.kafka.bootstrap.servers")
-            );
+            if (configuration.getProperty("atlas.graph.kafka.bootstrap.servers") == null &&
+                configuration.getProperty("atlas.kafka.bootstrap.servers") != null) {
+                LOG.info("Explicitly setting atlas.graph.kafka.bootstrap.servers");
+                configuration.setProperty(
+                    "atlas.graph.kafka.bootstrap.servers",
+                    configuration.getProperty("atlas.kafka.bootstrap.servers")
+                );
+            }
+        } catch (AtlasException e) {
+            LOG.error("Failed to load application properties", e);
+            throw new RuntimeException("Configuration initialization failed", e);
         }
         // final ClassLoader atlasLoader = Thread.currentThread().getContextClassLoader();
         // application.setClassLoader(atlasLoader);
