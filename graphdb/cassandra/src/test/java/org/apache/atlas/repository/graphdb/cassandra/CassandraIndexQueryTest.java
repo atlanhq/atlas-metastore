@@ -24,34 +24,43 @@ public class CassandraIndexQueryTest {
         mockGraph = mock(CassandraGraph.class);
     }
 
-    // ======================== ES doc ID decoding ========================
+    // ======================== ES doc ID decoding (base-36) ========================
 
     @Test
-    public void testDecodeDocIdBase62() {
-        // JanusGraph encodes vertex ID 348 → base-62 string "5u"
-        // 5*62 + 56 = 310 + 56... wait, let me compute: 'u' is index 30 in base-62
-        // Actually, let's just verify the round-trip: encode a long, then decode it
-        // JanusGraph LongEncoding: 256 → "48" (4*62 + 8 = 256)
-        assertEquals(CassandraIndexQuery.decodeDocId("48"), "256");
+    public void testDecodeDocIdBase36() {
+        // JanusGraph LongEncoding uses base-36 (0-9, a-z)
+        // "48" in base-36 = 4*36 + 8 = 152
+        assertEquals(CassandraIndexQuery.decodeDocId("48"), "152");
     }
 
     @Test
     public void testDecodeDocIdSmallNumbers() {
-        // Single digit base-62: '0'=0, '1'=1, 'a'=10, 'z'=35, 'A'=36, 'Z'=61
+        // Single digit base-36: '0'=0, '1'=1, '9'=9, 'a'=10, 'z'=35
         assertEquals(CassandraIndexQuery.decodeDocId("0"), "0");
         assertEquals(CassandraIndexQuery.decodeDocId("1"), "1");
+        assertEquals(CassandraIndexQuery.decodeDocId("9"), "9");
         assertEquals(CassandraIndexQuery.decodeDocId("a"), "10");
         assertEquals(CassandraIndexQuery.decodeDocId("z"), "35");
-        assertEquals(CassandraIndexQuery.decodeDocId("A"), "36");
-        assertEquals(CassandraIndexQuery.decodeDocId("Z"), "61");
     }
 
     @Test
     public void testDecodeDocIdMultiDigit() {
-        // "10" in base-62 = 1*62 + 0 = 62
-        assertEquals(CassandraIndexQuery.decodeDocId("10"), "62");
-        // "11" in base-62 = 1*62 + 1 = 63
-        assertEquals(CassandraIndexQuery.decodeDocId("11"), "63");
+        // "10" in base-36 = 1*36 + 0 = 36
+        assertEquals(CassandraIndexQuery.decodeDocId("10"), "36");
+        // "11" in base-36 = 1*36 + 1 = 37
+        assertEquals(CassandraIndexQuery.decodeDocId("11"), "37");
+        // "zz" in base-36 = 35*36 + 35 = 1295
+        assertEquals(CassandraIndexQuery.decodeDocId("zz"), "1295");
+        // "100" in base-36 = 1*1296 + 0 + 0 = 1296
+        assertEquals(CassandraIndexQuery.decodeDocId("100"), "1296");
+    }
+
+    @Test
+    public void testDecodeDocIdUppercasePassesThrough() {
+        // JanusGraph base-36 only uses lowercase — uppercase chars pass through as-is
+        assertEquals(CassandraIndexQuery.decodeDocId("A"), "A");
+        assertEquals(CassandraIndexQuery.decodeDocId("Z"), "Z");
+        assertEquals(CassandraIndexQuery.decodeDocId("5A"), "5A");
     }
 
     @Test
@@ -69,8 +78,19 @@ public class CassandraIndexQueryTest {
 
     @Test
     public void testDecodeDocIdInvalidCharPassesThrough() {
-        // Characters not in base-62 (like special chars) cause pass-through
+        // Characters not in base-36 (special chars, uppercase) cause pass-through
         assertEquals(CassandraIndexQuery.decodeDocId("abc!def"), "abc!def");
+    }
+
+    @Test
+    public void testDecodeDocIdRealWorldExamples() {
+        // JanusGraph vertex IDs are typically large numbers
+        // e.g., vertex 4096 → "348" in base-36 (3*1296 + 4*36 + 8 = 3888 + 144 + 8 = 4040)
+        // Actually: let's verify specific values
+        // vertex 256: 256 / 36 = 7 remainder 4 → "74"
+        assertEquals(CassandraIndexQuery.decodeDocId("74"), "256");
+        // vertex 1000: 1000 / 36 = 27 rem 28 → 27='r', 28='s' → "rs"
+        assertEquals(CassandraIndexQuery.decodeDocId("rs"), "1000");
     }
 
     // ======================== Construction ========================

@@ -587,13 +587,22 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
     // ---- ES doc ID decoding ----
 
     /**
+     * JanusGraph's LongEncoding uses base-36: digits 0-9 then lowercase a-z.
+     * This matches the actual JanusGraph source (janusgraph-driver LongEncoding.java).
+     */
+    private static final String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyz";
+    private static final int    BASE         = BASE_SYMBOLS.length(); // 36
+
+    /**
      * Decode an ES document ID to a Cassandra vertex ID.
      *
-     * JanusGraph-era ES documents use LongEncoding (base-62) for the _id field.
-     * For example, vertex 348 is stored as ES _id "5u".
-     * After migration, vertex_id in Cassandra is String.valueOf(longId) = "348".
+     * JanusGraph-era ES documents use LongEncoding (base-36) for the _id field.
+     * For example, vertex 36 is stored as ES _id "10" (1*36 + 0 = 36).
+     * After migration, vertex_id in Cassandra is String.valueOf(longId) = "36".
      *
      * For Cassandra-native vertices using UUID IDs (contain hyphens), no decoding is needed.
+     * For IDs containing uppercase letters or special characters, no decoding is attempted
+     * since JanusGraph base-36 only uses digits and lowercase letters.
      *
      * @param docId the ES document _id
      * @return the vertex_id to use for Cassandra lookup
@@ -603,17 +612,16 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         // UUID strings contain hyphens — no decoding needed
         if (docId.contains("-")) return docId;
 
-        // Try base-62 decode (JanusGraph LongEncoding format)
-        String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        // Try base-36 decode (JanusGraph LongEncoding format: 0-9, a-z)
         try {
             long value = 0;
             for (int i = 0; i < docId.length(); i++) {
                 int digit = BASE_SYMBOLS.indexOf(docId.charAt(i));
                 if (digit < 0) {
-                    // Invalid base-62 character — return as-is
+                    // Character not in base-36 set (e.g., uppercase letter) — return as-is
                     return docId;
                 }
-                value = value * 62 + digit;
+                value = value * BASE + digit;
             }
             return String.valueOf(value);
         } catch (Exception e) {
@@ -639,6 +647,12 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
                 // Decoded value didn't match; try original doc ID as vertex ID
                 // (handles re-indexed ES data where _id = vertex_id directly)
                 v = graph.getVertex(docId);
+            }
+            if (v == null) {
+                LOG.warn("ResultImpl.getVertex: vertex not found. ES docId='{}', decodedVertexId='{}', index='{}'",
+                        docId, vertexId, index);
+            } else if (LOG.isDebugEnabled()) {
+                LOG.debug("ResultImpl.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());
             }
             return v;
         }
@@ -691,6 +705,12 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
             if (v == null && !vertexId.equals(docId)) {
                 // Decoded value didn't match; try original doc ID as vertex ID
                 v = graph.getVertex(docId);
+            }
+            if (v == null) {
+                LOG.warn("ResultImplDirect.getVertex: vertex not found. ES docId='{}', decodedVertexId='{}', index='{}'",
+                        docId, vertexId, index);
+            } else if (LOG.isDebugEnabled()) {
+                LOG.debug("ResultImplDirect.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());
             }
             return v;
         }

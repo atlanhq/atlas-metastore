@@ -26,6 +26,10 @@ public class SearchContextCache {
 
 
     public static void put(String key, Integer sequence, String esAsyncId) {
+        if (redisService == null) {
+            LOG.debug("SearchContextCache.put: redisService not available, skipping");
+            return;
+        }
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("putInCache");
        try {
            // Build the string in format `sequence/esAsyncId` and store it in redis
@@ -36,6 +40,9 @@ public class SearchContextCache {
        }
     }
     public static String get(String key) {
+        if (redisService == null) {
+            return null;
+        }
         try {
             return redisService.getValue(key);
         } catch (Exception e) {
@@ -46,6 +53,9 @@ public class SearchContextCache {
     }
 
     public static String getESAsyncSearchIdFromContextCache(String key, Integer sequence){
+        if (redisService == null) {
+            return null;
+        }
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getESAsyncSearchIdFromContextCache");
         try {
             //Get the context cache for the given key
@@ -71,6 +81,9 @@ public class SearchContextCache {
 
     }
     public static void remove(String key) {
+        if (redisService == null) {
+            return;
+        }
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("removeFromCache");
         try {
             redisService.removeValue(key);

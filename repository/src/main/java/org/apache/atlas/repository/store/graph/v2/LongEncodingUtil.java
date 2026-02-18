@@ -5,15 +5,15 @@ package org.apache.atlas.repository.store.graph.v2;
  * Encodes/decodes long values to/from compact string representation
  * compatible with JanusGraph's Elasticsearch document ID format.
  *
- * The encoding uses a base-62 like character set to represent long values compactly.
- * This is a direct reimplementation of JanusGraph's LongEncoding to remove
- * the JanusGraph dependency while maintaining backward compatibility with
- * existing Elasticsearch document IDs.
+ * The encoding uses base-36 (digits 0-9 then lowercase a-z) matching
+ * JanusGraph's actual LongEncoding implementation (janusgraph-driver).
+ * This is a direct reimplementation to remove the JanusGraph dependency
+ * while maintaining backward compatibility with existing ES document IDs.
  */
 public final class LongEncodingUtil {
 
-    private static final String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    private static final int    BASE         = BASE_SYMBOLS.length();
+    private static final String BASE_SYMBOLS = "0123456789abcdefghijklmnopqrstuvwxyz";
+    private static final int    BASE         = BASE_SYMBOLS.length(); // 36
 
     private LongEncodingUtil() {
         // utility class
@@ -57,7 +57,7 @@ public final class LongEncodingUtil {
 
     /**
      * Compute the ES document ID from a vertex ID string.
-     * For JanusGraph numeric vertex IDs: encodes the long value using base-62.
+     * For JanusGraph numeric vertex IDs: encodes the long value using base-36.
      * For non-numeric vertex IDs (e.g., UUID strings from Cassandra graph backend):
      * returns the vertex ID as-is (it already serves as the ES doc ID).
      */
