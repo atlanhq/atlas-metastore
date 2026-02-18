@@ -166,10 +166,15 @@ public class EntityAuthorizer {
         }
 
         List<String> attributeValues = new ArrayList<>();
+        String currentUser = RequestContext.get().getUser();
         if (attributeValueNode.isArray()) {
-            attributeValueNode.elements().forEachRemaining(node -> attributeValues.add(node.asText()));
+            attributeValueNode.elements().forEachRemaining(node -> {
+                String val = node.asText();
+                attributeValues.add("{USER}".equals(val) && currentUser != null ? currentUser : val);
+            });
         } else {
-            attributeValues.add(attributeValueNode.asText());
+            String val = attributeValueNode.asText();
+            attributeValues.add("{USER}".equals(val) && currentUser != null ? currentUser : val);
         }
 
         switch (operator) {
