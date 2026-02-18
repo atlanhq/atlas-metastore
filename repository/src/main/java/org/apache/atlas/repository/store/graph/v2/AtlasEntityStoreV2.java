@@ -82,6 +82,7 @@ import org.apache.atlas.repository.store.graph.v2.preprocessor.resource.ReadmePr
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryCollectionPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryFolderPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.sql.QueryPreProcessor;
+import org.apache.atlas.repository.store.graph.v2.preprocessor.AtlanAppWorkflowPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.tags.PaginatedVertexIdResult;
 import org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTask;
 import org.apache.atlas.tasks.TaskManagement;
@@ -2336,6 +2337,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
                 preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever, dynamicVertexService));
+                break;
+
+            case Constants.ATLAN_APP_WORKFLOW_ENTITY_TYPE:
+                preProcessors.add(new AtlanAppWorkflowPreProcessor());
                 break;
         }
 
