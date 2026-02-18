@@ -127,6 +127,31 @@ public interface AtlasGraph<V, E> {
     Set<AtlasVertex> getVertices(String... vertexIds);
 
     /**
+     * Bulk fetch all edges for multiple vertices concurrently.
+     * Default implementation falls back to sequential per-vertex calls.
+     * Implementations may override with async parallel queries.
+     *
+     * @param vertexIds vertices to fetch edges for
+     * @return map of vertexId to list of edges (both directions, all labels)
+     */
+    @SuppressWarnings("unchecked")
+    default java.util.Map<String, java.util.List<AtlasEdge<V, E>>> getEdgesForVertices(
+            java.util.Collection<String> vertexIds) {
+        java.util.Map<String, java.util.List<AtlasEdge<V, E>>> result = new java.util.LinkedHashMap<>();
+        for (String vertexId : vertexIds) {
+            AtlasVertex<V, E> vertex = getVertex(vertexId);
+            if (vertex != null) {
+                java.util.List<AtlasEdge<V, E>> edges = new java.util.ArrayList<>();
+                for (AtlasEdge<V, E> edge : vertex.getEdges(AtlasEdgeDirection.BOTH)) {
+                    edges.add(edge);
+                }
+                result.put(vertexId, edges);
+            }
+        }
+        return result;
+    }
+
+    /**
      * Gets the names of the indexes on edges
      * type.
      *

@@ -9,6 +9,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletionStage;
 
 public class EdgeRepository {
 
@@ -171,6 +172,104 @@ public class EdgeRepository {
         }
 
         return result;
+    }
+
+    /**
+     * Fetch all edges for multiple vertices concurrently using async Cassandra queries.
+     * Queries both edges_out and edges_in for each vertex in parallel, reducing
+     * 2N sequential round-trips to ~1 round-trip wall-clock time.
+     *
+     * @return Map of vertexId → list of all edges (both directions, all labels)
+     */
+    public Map<String, List<CassandraEdge>> getEdgesForVerticesAsync(
+            Collection<String> vertexIds, AtlasEdgeDirection direction, CassandraGraph graph) {
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        // Fire all queries concurrently
+        Map<String, CompletionStage<AsyncResultSet>> outFutures = new LinkedHashMap<>();
+        Map<String, CompletionStage<AsyncResultSet>> inFutures = new LinkedHashMap<>();
+
+        for (String vertexId : vertexIds) {
+            if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
+                outFutures.put(vertexId, session.executeAsync(selectEdgesOutStmt.bind(vertexId)));
+            }
+            if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
+                inFutures.put(vertexId, session.executeAsync(selectEdgesInStmt.bind(vertexId)));
+            }
+        }
+
+        // Collect results
+        Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+
+        for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : outFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            try {
+                AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
+                List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+                collectOutEdgePages(rs, vertexId, edges, graph);
+            } catch (Exception e) {
+                LOG.warn("Failed to fetch out-edges for vertex {}", vertexId, e);
+            }
+        }
+
+        for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : inFutures.entrySet()) {
+            String vertexId = entry.getKey();
+            try {
+                AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
+                List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
+                collectInEdgePages(rs, vertexId, edges, graph);
+            } catch (Exception e) {
+                LOG.warn("Failed to fetch in-edges for vertex {}", vertexId, e);
+            }
+        }
+
+        return results;
+    }
+
+    private void collectOutEdgePages(AsyncResultSet rs, String vertexId,
+                                      List<CassandraEdge> edges, CassandraGraph graph) {
+        while (rs != null) {
+            for (Row row : rs.currentPage()) {
+                String state = row.getString("state");
+                if (!"DELETED".equals(state)) {
+                    String edgeId     = row.getString("edge_id");
+                    String label      = row.getString("edge_label");
+                    String inVertexId = row.getString("in_vertex_id");
+                    String propsJson  = row.getString("properties");
+                    Map<String, Object> props = parseProperties(propsJson);
+                    edges.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
+                }
+            }
+            if (rs.hasMorePages()) {
+                rs = rs.fetchNextPage().toCompletableFuture().join();
+            } else {
+                break;
+            }
+        }
+    }
+
+    private void collectInEdgePages(AsyncResultSet rs, String vertexId,
+                                     List<CassandraEdge> edges, CassandraGraph graph) {
+        while (rs != null) {
+            for (Row row : rs.currentPage()) {
+                String state = row.getString("state");
+                if (!"DELETED".equals(state)) {
+                    String edgeId      = row.getString("edge_id");
+                    String label       = row.getString("edge_label");
+                    String outVertexId = row.getString("out_vertex_id");
+                    String propsJson   = row.getString("properties");
+                    Map<String, Object> props = parseProperties(propsJson);
+                    edges.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
+                }
+            }
+            if (rs.hasMorePages()) {
+                rs = rs.fetchNextPage().toCompletableFuture().join();
+            } else {
+                break;
+            }
+        }
     }
 
     public void deleteEdge(CassandraEdge edge) {

@@ -8,6 +8,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class VertexRepository {
 
@@ -73,16 +75,42 @@ public class VertexRepository {
         return rowToVertex(row, graph);
     }
 
-    public List<CassandraVertex> getVertices(Collection<String> vertexIds, CassandraGraph graph) {
-        List<CassandraVertex> results = new ArrayList<>();
-        // Use async or batch for performance in production; simple loop for correctness
+    /**
+     * Fetch multiple vertices concurrently using async Cassandra queries.
+     * All queries are fired in parallel and results collected, reducing
+     * wall-clock time from N sequential round-trips to ~1 round-trip.
+     */
+    public Map<String, CassandraVertex> getVerticesAsync(Collection<String> vertexIds, CassandraGraph graph) {
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        // Fire all queries concurrently
+        Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
         for (String vertexId : vertexIds) {
-            CassandraVertex v = getVertex(vertexId, graph);
-            if (v != null) {
-                results.add(v);
+            futures.put(vertexId, session.executeAsync(selectVertexStmt.bind(vertexId)));
+        }
+
+        // Collect results
+        Map<String, CassandraVertex> results = new LinkedHashMap<>();
+        for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
+            try {
+                AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
+                Row row = rs.one();
+                if (row != null) {
+                    CassandraVertex vertex = rowToVertex(row, graph);
+                    results.put(vertex.getIdString(), vertex);
+                }
+            } catch (Exception e) {
+                LOG.warn("Failed to fetch vertex {}", entry.getKey(), e);
             }
         }
+
         return results;
+    }
+
+    public List<CassandraVertex> getVertices(Collection<String> vertexIds, CassandraGraph graph) {
+        return new ArrayList<>(getVerticesAsync(vertexIds, graph).values());
     }
 
     public void deleteVertex(String vertexId) {

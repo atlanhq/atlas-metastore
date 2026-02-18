@@ -1209,11 +1209,13 @@ public class EntityGraphRetriever {
             Map<String, Map<String, List<?>>> vertexPropertyMap = new HashMap<>();
             Map<String, AtlasVertex> vertexMap = new HashMap<>();
 
+            // Use bulk getVertices() which fires async parallel queries in CassandraGraph,
+            // instead of sequential getVertex() calls that cause N round-trips.
             ListUtils.partition(new ArrayList<>(vertexIds), batchSize).forEach(batch -> {
-                for (Object id : batch) {
-                    AtlasVertex vertex = graph.getVertex(id.toString());
-                    if (vertex == null) continue;
+                String[] batchIds = batch.stream().map(Object::toString).toArray(String[]::new);
+                Set<AtlasVertex> vertices = graph.getVertices(batchIds);
 
+                for (AtlasVertex vertex : vertices) {
                     vertexMap.put(vertex.getIdForDisplay(), vertex);
                     Map<String, List<?>> vertexProperties = new HashMap<>();
                     for (String key : vertex.getPropertyKeys()) {
@@ -1274,29 +1276,26 @@ public class EntityGraphRetriever {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private List<Map<String, Object>> getEdgeInfoMapsForVertices(Set<String> vertexIds, Set<String> edgeLabels) {
         List<Map<String, Object>> results = new ArrayList<>();
         Set<String> seenEdgeIds = new HashSet<>();
 
-        for (String vertexId : vertexIds) {
-            AtlasVertex vertex = graph.getVertex(vertexId);
-            if (vertex == null) continue;
+        // Bulk fetch ALL edges for ALL vertices in parallel async queries.
+        // This replaces the previous per-vertex × per-label loop that caused
+        // N_vertices × N_labels × 2 Cassandra queries.
+        // Now: N_vertices × 2 queries fired concurrently (~1 round-trip wall time).
+        Map<String, List<AtlasEdge>> allEdgesMap = (Map) graph.getEdgesForVertices(vertexIds);
 
-            Iterable<AtlasEdge> edges;
-            if (CollectionUtils.isEmpty(edgeLabels)) {
-                edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
-            } else {
-                List<AtlasEdge> allEdges = new ArrayList<>();
-                for (String label : edgeLabels) {
-                    Iterable edgeIter = vertex.getEdges(AtlasEdgeDirection.BOTH, label);
-                    for (Object e : edgeIter) {
-                        allEdges.add((AtlasEdge) e);
-                    }
-                }
-                edges = allEdges;
-            }
+        for (String vertexId : vertexIds) {
+            List<AtlasEdge> edges = allEdgesMap.getOrDefault(vertexId, Collections.emptyList());
 
             for (AtlasEdge edge : edges) {
+                // Filter by requested edge labels in-memory
+                if (CollectionUtils.isNotEmpty(edgeLabels) && !edgeLabels.contains(edge.getLabel())) {
+                    continue;
+                }
+
                 String edgeId = edge.getIdForDisplay();
                 if (!seenEdgeIds.add(edgeId)) continue; // dedup
 

@@ -92,14 +92,73 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public Set<AtlasVertex> getVertices(String... vertexIds) {
+        if (vertexIds == null || vertexIds.length == 0) {
+            return Collections.emptySet();
+        }
+
+        // Separate cached from uncached
         Set<AtlasVertex> result = new LinkedHashSet<>();
-        if (vertexIds != null) {
-            for (String id : vertexIds) {
-                AtlasVertex v = getVertex(id);
-                if (v != null) {
-                    result.add(v);
+        List<String> uncachedIds = new ArrayList<>();
+        for (String id : vertexIds) {
+            CassandraVertex cached = vertexCache.get().get(id);
+            if (cached != null) {
+                result.add(cached);
+            } else {
+                uncachedIds.add(id);
+            }
+        }
+
+        // Fetch uncached vertices in parallel using async queries
+        if (!uncachedIds.isEmpty()) {
+            Map<String, CassandraVertex> fetched = vertexRepository.getVerticesAsync(uncachedIds, this);
+            for (CassandraVertex v : fetched.values()) {
+                vertexCache.get().put(v.getIdString(), v);
+                result.add(v);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * Bulk fetch all edges for multiple vertices concurrently.
+     * Returns a map of vertexId → list of all edges (both directions, all labels).
+     * Edges from the transaction buffer are merged in; removed edges are excluded.
+     */
+    @SuppressWarnings("unchecked")
+    public Map<String, List<CassandraEdge>> getAllEdgesForVertices(Collection<String> vertexIds) {
+        // Fetch persisted edges for all vertices in parallel
+        Map<String, List<CassandraEdge>> persisted =
+            edgeRepository.getEdgesForVerticesAsync(vertexIds, AtlasEdgeDirection.BOTH, this);
+
+        // Merge with transaction buffer
+        Map<String, List<CassandraEdge>> result = new LinkedHashMap<>();
+        for (String vertexId : vertexIds) {
+            List<CassandraEdge> persistedEdges = persisted.getOrDefault(vertexId, Collections.emptyList());
+            List<CassandraEdge> bufferedEdges = txBuffer.get().getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null);
+
+            Map<String, CassandraEdge> merged = new LinkedHashMap<>();
+            for (CassandraEdge e : persistedEdges) {
+                if (!txBuffer.get().isEdgeRemoved(e.getIdString())) {
+                    merged.put(e.getIdString(), e);
                 }
             }
+            for (CassandraEdge e : bufferedEdges) {
+                merged.put(e.getIdString(), e);
+            }
+            result.put(vertexId, new ArrayList<>(merged.values()));
+        }
+        return result;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> getEdgesForVertices(
+            Collection<String> vertexIds) {
+        Map<String, List<CassandraEdge>> raw = getAllEdgesForVertices(vertexIds);
+        Map<String, List<AtlasEdge<CassandraVertex, CassandraEdge>>> result = new LinkedHashMap<>();
+        for (Map.Entry<String, List<CassandraEdge>> entry : raw.entrySet()) {
+            result.put(entry.getKey(), (List) entry.getValue());
         }
         return result;
     }
