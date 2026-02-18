@@ -85,6 +85,8 @@ public class ElasticsearchReindexer implements AutoCloseable {
         int batchCount = 0;
         long totalDocs = 0;
 
+        long skipped = 0;
+
         for (Row row : rs) {
             String vertexId = row.getString("vertex_id");
             String propsJson = row.getString("properties");
@@ -93,6 +95,24 @@ public class ElasticsearchReindexer implements AutoCloseable {
 
             if (propsJson == null || propsJson.equals("{}")) {
                 continue;
+            }
+
+            // Skip non-entity vertices: system vertices (patches, index recovery, etc.)
+            // that lack both __typeName and __type should NOT be indexed in ES.
+            // They pollute search results — the UI can't render them as assets.
+            if (typeName == null || typeName.isEmpty()) {
+                // Check if it's a type definition vertex (__type = "typeSystem")
+                try {
+                    Map<String, Object> checkProps = MAPPER.readValue(propsJson, Map.class);
+                    Object vertexType = checkProps.get("__type");
+                    if (vertexType == null) {
+                        skipped++;
+                        continue;
+                    }
+                } catch (Exception e) {
+                    skipped++;
+                    continue;
+                }
             }
 
             // Build ES document: merge properties with top-level vertex metadata
@@ -142,7 +162,8 @@ public class ElasticsearchReindexer implements AutoCloseable {
             executeBulk(bulkBody.toString(), batchCount, totalDocs);
         }
 
-        LOG.info("ES re-indexing complete: {} documents indexed", String.format("%,d", totalDocs));
+        LOG.info("ES re-indexing complete: {} documents indexed, {} non-entity vertices skipped",
+                 String.format("%,d", totalDocs), String.format("%,d", skipped));
     }
 
     private void ensureIndexExists(String esIndex) {
@@ -156,11 +177,15 @@ public class ElasticsearchReindexer implements AutoCloseable {
             // Index doesn't exist, create it
         }
 
+        // Create with empty body so the ES index template (atlan-template) applies
+        // its analyzers, normalizers, mappings, and settings automatically.
+        // IMPORTANT: The atlan-template must be applied BEFORE running the migrator.
+        // If no matching template exists, ES will create the index with defaults.
         try {
             Request createReq = new Request("PUT", "/" + esIndex);
-            createReq.setJsonEntity("{\"settings\":{\"number_of_shards\":1,\"number_of_replicas\":0}}");
+            createReq.setJsonEntity("{}");
             esClient.performRequest(createReq);
-            LOG.info("Created ES index '{}'", esIndex);
+            LOG.info("Created ES index '{}' (settings from matching index template if available)", esIndex);
         } catch (IOException e) {
             LOG.warn("Failed to create ES index '{}' (may already exist): {}", esIndex, e.getMessage());
         }
