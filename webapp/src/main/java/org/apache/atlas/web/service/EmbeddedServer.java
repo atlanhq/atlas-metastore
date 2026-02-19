@@ -179,6 +179,16 @@ public class EmbeddedServer {
                     application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
                     application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/health");
                     application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/status");
+
+                    // This bypasses AuditFilter and MetricsFilter defined in web.xml
+                    String securityFilterName = "springSecurityFilterChain";
+
+                    org.eclipse.jetty.servlet.FilterMapping securityMapping = new org.eclipse.jetty.servlet.FilterMapping();
+                    securityMapping.setFilterName(securityFilterName);
+                    securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
+
+                    // Add security mapping to the handler
+                    application.getServletHandler().addFilterMapping(securityMapping);
                     LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully via LifeCycle Listener.");
                 } catch (Exception e) {
                     LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
