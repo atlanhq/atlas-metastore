@@ -26,6 +26,7 @@ on:
       - staging
       - lite_master
       - leangraph-dynamic
+      - ms-600-leangraph-ingest
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
