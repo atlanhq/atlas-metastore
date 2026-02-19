@@ -207,10 +207,14 @@ public class EmbeddedServer {
         try {
             server.start();
 
-            server.join();
+           // server.join();
         } catch(Exception e) {
             throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         }
+    }
+
+    public Server getServer() {
+        return this.server;
     }
 
     public void stop() {
