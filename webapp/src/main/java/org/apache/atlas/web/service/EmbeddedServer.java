@@ -164,11 +164,12 @@ public class EmbeddedServer {
                     holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
 
                     // Use the late-bound loader
-                    holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                                            "com.sun.jersey.api.core.ClassNamesResourceConfig");
+                    // holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                    //                         "com.sun.jersey.api.core.ClassNamesResourceConfig");
                     
                     
-                    holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");              
+                    holder.setInitParameter("com.sun.jersey.config.property.packages", 
+                        "org.apache.atlas.web.resources;org.apache.atlas.web.providers");
                   // holder.setInitParameter("com.sun.jersey.config.property.classnames",   
                     //                         "org.apache.atlas.web.resources.EntityResourceV2," +
                     //                         "org.apache.atlas.web.resources.TypesResourceV2," +
