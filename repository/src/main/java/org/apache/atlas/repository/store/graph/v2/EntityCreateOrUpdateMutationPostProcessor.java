@@ -217,11 +217,16 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
 
     private void rollbackUpdateOrDelete(String entityGuid, CassandraTagOperation op) throws AtlasBaseException {
         switch (op.getOperationType()) {
-            case UPDATE, DELETE -> tagDAO.putDirectTag(op.getVertexId(),
-                    op.getTagTypeName(),
-                    op.getAtlasClassification(),
-                    op.getMinAssetMap());
-            default -> LOG.warn("Unknown operation type {} for entity {}", op.getOperationType(), entityGuid);
+            case UPDATE:
+            case DELETE:
+                tagDAO.putDirectTag(op.getVertexId(),
+                        op.getTagTypeName(),
+                        op.getAtlasClassification(),
+                        op.getMinAssetMap());
+                break;
+            default:
+                LOG.warn("Unknown operation type {} for entity {}", op.getOperationType(), entityGuid);
+                break;
         }
     }
 

@@ -107,10 +107,11 @@ public class UserGroupAttributeValidator {
         if (entity.hasAttribute(ATTR_ANNOUNCEMENT_MESSAGE)) {
             Object attributeValue = entity.getAttribute(ATTR_ANNOUNCEMENT_MESSAGE);
             if (attributeValue != null) {
-                if (!(attributeValue instanceof String message)) {
+                if (!(attributeValue instanceof String)) {
                     LOG.warn("Invalid announcementMessage: must be string for asset: {}", getAssetIdentifier(entity));
                     throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid announcementMessage: must be string");
                 }
+                String message = (String) attributeValue;
                 if (StringUtils.isNotEmpty(message) && SSI_TAG_PATTERN.matcher(message).find()) {
                     LOG.warn("SSI tags detected in announcementMessage for asset: {}", getAssetIdentifier(entity));
                     throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Invalid announcementMessage: SSI tags are not allowed");
@@ -144,7 +145,8 @@ public class UserGroupAttributeValidator {
             return;
         }
 
-        if (attributeValue instanceof Collection<?> values) {
+        if (attributeValue instanceof Collection<?>) {
+            Collection<?> values = (Collection<?>) attributeValue;
             for (Object itemObj : values) {
                 validateAttribute(itemObj, type, validNames);
             }
@@ -205,4 +207,3 @@ public class UserGroupAttributeValidator {
         return true;
     }
 }
-

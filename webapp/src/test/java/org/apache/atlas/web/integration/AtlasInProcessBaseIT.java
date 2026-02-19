@@ -17,17 +17,20 @@
  */
 package org.apache.atlas.web.integration;
 
+import com.datastax.oss.driver.api.core.CqlSession;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasClientV2;
+import org.apache.atlas.web.integration.client.OKClient;
+import org.apache.atlas.web.integration.utils.ESUtil;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.containers.CassandraContainer;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.elasticsearch.ElasticsearchContainer;
+import org.testcontainers.lifecycle.Startables;
 import org.testcontainers.utility.DockerImageName;
 
 import java.io.File;
@@ -37,6 +40,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintWriter;
 import java.net.HttpURLConnection;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -44,6 +48,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * Base class for in-process Atlas integration tests.
@@ -61,14 +67,14 @@ public abstract class AtlasInProcessBaseIT {
 
     private static final Logger LOG = LoggerFactory.getLogger(AtlasInProcessBaseIT.class);
 
-    private static final int MAX_STARTUP_WAIT_SECONDS = 100; // 5 minutes
+    private static final int MAX_STARTUP_WAIT_SECONDS = 60*5; // 5 minutes
 
     // Singleton containers (shared across all test classes, stopped by JVM shutdown hook)
-    private static final CassandraContainer<?> cassandra;
-    private static final ElasticsearchContainer elasticsearch;
-    private static final GenericContainer<?> redis;
-    private static final KafkaContainer kafka;
-    private static final GenericContainer<?> zookeeper;
+    protected static final GenericContainer<?> scylla;
+    protected static final ElasticsearchContainer elasticsearch;
+    protected static final GenericContainer<?> redis;
+    private static int embeddedKafkaPort;
+    private static int embeddedKafkaZkPort;
 
     private static volatile boolean containersStarted = false;
 
@@ -76,10 +82,11 @@ public abstract class AtlasInProcessBaseIT {
         // Must be set before any testcontainers Docker client initialization (Docker 29+ requires API >= 1.44)
         System.setProperty("api.version", "1.44");
 
-        cassandra = new CassandraContainer<>(DockerImageName.parse("cassandra:2.1"))
-                .withStartupTimeout(Duration.ofMinutes(3))
-                .withEnv("CASSANDRA_CLUSTER_NAME", "atlas-test-cluster")
-                .withEnv("CASSANDRA_DC", "datacenter1");
+        scylla = new GenericContainer<>(DockerImageName.parse("scylladb/scylla:5.4"))
+                .withExposedPorts(9042)
+                .withCommand("--smp", "1", "--memory", "1G", "--overprovisioned", "1", "--developer-mode", "1")
+                .waitingFor(Wait.forListeningPort())
+                .withStartupTimeout(Duration.ofMinutes(4));
 
         elasticsearch = new ElasticsearchContainer(
                 DockerImageName.parse("elasticsearch:7.17.27"))
@@ -92,13 +99,6 @@ public abstract class AtlasInProcessBaseIT {
                 .withCommand("redis-server", "--requirepass", "", "--protected-mode", "no")
                 .waitingFor(Wait.forListeningPort());
 
-        kafka = new KafkaContainer(DockerImageName.parse("confluentinc/cp-kafka:7.4.0"))
-                .withStartupTimeout(Duration.ofMinutes(2));
-
-        zookeeper = new GenericContainer<>(DockerImageName.parse("zookeeper:3.8"))
-                .withExposedPorts(2181)
-                .waitingFor(Wait.forListeningPort())
-                .withStartupTimeout(Duration.ofMinutes(1));
     }
 
     protected static AtlasClientV2 atlasClient;
@@ -107,10 +107,39 @@ public abstract class AtlasInProcessBaseIT {
     private static Path tempDir;
     private static volatile boolean serverStarted = false;
 
+    private static final class StartupProfiler {
+        private final Map<String, Long> durationsNanos = new LinkedHashMap<>();
+        private final long overallStartNanos = System.nanoTime();
+
+        void record(String stage, long startNanos) {
+            durationsNanos.put(stage, System.nanoTime() - startNanos);
+        }
+
+        void logSummary() {
+            long totalNanos = 0L;
+            for (Long duration : durationsNanos.values()) {
+                totalNanos += duration;
+            }
+
+            long wallNanos = System.nanoTime() - overallStartNanos;
+            LOG.info("Atlas startup breakdown (measured_total={} ms, wall={} ms)", totalNanos / 1_000_000, wallNanos / 1_000_000);
+            for (Map.Entry<String, Long> entry : durationsNanos.entrySet()) {
+                long ms = entry.getValue() / 1_000_000;
+                double pct = totalNanos > 0 ? (entry.getValue() * 100.0 / totalNanos) : 0.0;
+                LOG.info("  - {}: {} ms ({})", entry.getKey(), ms, String.format("%.1f%%", pct));
+            }
+        }
+    }
+
     @BeforeAll
     void startAtlas() throws Exception {
         startContainers();
         startServerOnce();
+    }
+
+    @AfterAll
+    void stopAtlasAndContainers() {
+        LOG.info("Skipping per-class teardown for AtlasInProcessBaseIT; shared server/containers stay up for subsequent integration tests in this JVM");
     }
 
     /**
@@ -123,25 +152,40 @@ public abstract class AtlasInProcessBaseIT {
             return;
         }
 
-        setupConfiguration();
-        initElasticsearchTemplate();
-        startServer();
-        waitForAtlasReady();
-        createClient();
+        StartupProfiler profiler = new StartupProfiler();
 
-        // Register shutdown hook so the server is stopped when the JVM exits
+        long stageStart = System.nanoTime();
+        setupConfiguration();
+        profiler.record("setupConfiguration", stageStart);
+
+        stageStart = System.nanoTime();
+        initElasticsearchTemplate();
+        profiler.record("initElasticsearchTemplate", stageStart);
+
+        stageStart = System.nanoTime();
+        startServer();
+        profiler.record("startServer", stageStart);
+
+        stageStart = System.nanoTime();
+        waitForAtlasReady();
+        profiler.record("waitForAtlasReady", stageStart);
+
+        stageStart = System.nanoTime();
+        createClient();
+        profiler.record("createClient", stageStart);
+
+        stageStart = System.nanoTime();
+        configureLegacyIntegrationTestClients();
+        profiler.record("configureLegacyIntegrationTestClients", stageStart);
+
+        // Register shutdown hook so server and containers are stopped when the JVM exits
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            LOG.info("Shutdown hook: stopping Atlas server");
-            try {
-                if (atlasServer != null && atlasServer.isRunning()) {
-                    atlasServer.stop();
-                }
-            } catch (Exception e) {
-                LOG.warn("Error stopping Atlas server in shutdown hook", e);
-            }
+            LOG.info("Shutdown hook: stopping Atlas server and testcontainers");
+            stopServerAndContainers();
         }));
 
         serverStarted = true;
+        profiler.logSummary();
     }
 
     private static synchronized void startContainers() {
@@ -150,23 +194,123 @@ public abstract class AtlasInProcessBaseIT {
             return;
         }
 
-        LOG.info("Starting testcontainers (Cassandra, Elasticsearch, Redis)...");
-        cassandra.start();
-        LOG.info("Cassandra started on port {}", cassandra.getMappedPort(9042));
+        LOG.info("Starting testcontainers in parallel (Scylla, Elasticsearch, Redis)...");
+        long start = System.nanoTime();
+        Startables.deepStart(scylla, elasticsearch, redis).join();
+        long totalMs = (System.nanoTime() - start) / 1_000_000;
 
-        elasticsearch.start();
+        LOG.info("Scylla started on port {}", scylla.getMappedPort(9042));
         LOG.info("Elasticsearch started on {}", elasticsearch.getHttpHostAddress());
-
-        redis.start();
         LOG.info("Redis started on port {}", redis.getMappedPort(6379));
-
-        kafka.start();
-        LOG.info("Kafka started on {}", kafka.getBootstrapServers());
-
-        zookeeper.start();
-        LOG.info("ZooKeeper started on port {}", zookeeper.getMappedPort(2181));
+        waitForScyllaResponsive(Duration.ofMinutes(2));
+        waitForElasticsearchResponsive(Duration.ofMinutes(2));
+        LOG.info("Container startup timing (parallel total): {} ms", totalMs);
 
         containersStarted = true;
+    }
+
+    private static synchronized void stopServerAndContainers() {
+        try {
+            if (atlasServer != null && atlasServer.isRunning()) {
+                atlasServer.stop();
+                LOG.info("Atlas server stopped");
+            }
+        } catch (Exception e) {
+            LOG.warn("Error stopping Atlas server", e);
+        } finally {
+            serverStarted = false;
+            atlasServer = null;
+        }
+
+        try {
+            if (containersStarted) {
+                try {
+                    redis.stop();
+                } catch (Exception e) {
+                    LOG.warn("Error stopping Redis container", e);
+                }
+                try {
+                    elasticsearch.stop();
+                } catch (Exception e) {
+                    LOG.warn("Error stopping Elasticsearch container", e);
+                }
+                try {
+                    scylla.stop();
+                } catch (Exception e) {
+                    LOG.warn("Error stopping Scylla container", e);
+                }
+
+                containersStarted = false;
+                LOG.info("Testcontainers stopped");
+            }
+        } catch (Exception e) {
+            LOG.warn("Error stopping testcontainers", e);
+        }
+    }
+
+    private static void waitForScyllaResponsive(Duration timeout) {
+        long deadlineNanos = System.nanoTime() + timeout.toNanos();
+        int port = scylla.getMappedPort(9042);
+        int attempt = 0;
+
+        while (System.nanoTime() < deadlineNanos) {
+            attempt++;
+            try (CqlSession session = CqlSession.builder()
+                    .addContactPoint(new InetSocketAddress("localhost", port))
+                    .withLocalDatacenter("datacenter1")
+                    .build()) {
+                session.execute("SELECT release_version FROM system.local");
+                LOG.info("Scylla is responsive after {} attempt(s)", attempt);
+                return;
+            } catch (Exception e) {
+                LOG.info("Scylla not responsive yet (attempt {}): {}", attempt, e.getMessage());
+                sleep(2000);
+            }
+        }
+
+        throw new RuntimeException("Scylla did not become responsive within " + timeout.toSeconds() + " seconds");
+    }
+
+    private static void waitForElasticsearchResponsive(Duration timeout) {
+        long deadlineNanos = System.nanoTime() + timeout.toNanos();
+        int attempt = 0;
+
+        while (System.nanoTime() < deadlineNanos) {
+            attempt++;
+            HttpURLConnection conn = null;
+
+            try {
+                URL url = new URL("http://" + elasticsearch.getHttpHostAddress() + "/_cluster/health?wait_for_status=yellow&timeout=1s");
+                conn = (HttpURLConnection) url.openConnection();
+                conn.setRequestMethod("GET");
+                conn.setConnectTimeout(2000);
+                conn.setReadTimeout(2000);
+
+                if (conn.getResponseCode() == 200) {
+                    LOG.info("Elasticsearch is responsive after {} attempt(s)", attempt);
+                    return;
+                }
+            } catch (Exception e) {
+                LOG.info("Elasticsearch not responsive yet (attempt {}): {}", attempt, e.getMessage());
+            } finally {
+                if (conn != null) {
+                    conn.disconnect();
+                }
+            }
+
+            sleep(2000);
+        }
+
+        throw new RuntimeException("Elasticsearch did not become responsive within " + timeout.toSeconds() + " seconds");
+    }
+
+    private static void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting for service readiness", e);
+        }
     }
 
     private static void initElasticsearchTemplate() throws IOException {
@@ -221,6 +365,8 @@ public abstract class AtlasInProcessBaseIT {
         // Resolve paths
         String deployDir = resolveDeployDir();
         atlasPort = findFreePort();
+        embeddedKafkaZkPort = findFreePort();
+        embeddedKafkaPort = findFreePort();
 
         // Copy users-credentials.properties to temp conf dir
         Path srcCredentials = Path.of(deployDir, "conf", "users-credentials.properties");
@@ -255,7 +401,7 @@ public abstract class AtlasInProcessBaseIT {
     private static void generateAtlasProperties(Path confDir, String deployDir, int port) throws IOException {
         File propsFile = confDir.resolve("atlas-application.properties").toFile();
 
-        int cassandraPort = cassandra.getMappedPort(9042);
+        int cassandraPort = scylla.getMappedPort(9042);
         String esAddress = elasticsearch.getHttpHostAddress(); // host:port
 
         try (PrintWriter w = new PrintWriter(new FileWriter(propsFile))) {
@@ -267,7 +413,6 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.storage.cql.replication-factor=1");
             w.println("atlas.graph.storage.clustername=atlas-test-cluster");
             w.println("atlas.graph.storage.port=" + cassandraPort);
-            w.println("atlas.graph.storage.cql.local-datacenter=datacenter1");
             w.println("atlas.graph.query.fast-property=true");
             w.println("atlas.graph.query.batch=true");
             w.println("query.batch.properties-mode=all-properties");
@@ -275,6 +420,11 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.storage.lock.retries=5");
             w.println("atlas.graph.cache.db-cache=false");
             w.println("atlas.graph.storage.write-time=10000");
+            // Reduce ID allocation contention in test startup (StandardIDPool hotspots).
+            w.println("atlas.graph.ids.num-partitions=4");
+            w.println("atlas.graph.ids.block-size=5000");
+            w.println("atlas.graph.ids.renew-percentage=0.5");
+            w.println("atlas.graph.ids.authority.wait-time=150");
 
             // Graph index - Elasticsearch
             w.println("atlas.graph.index.search.backend=elasticsearch");
@@ -283,10 +433,11 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.index.search.elasticsearch.retry_on_conflict=5");
             w.println("atlas.rebuild.index=true");
 
-            // Notification - External Kafka container
-            String kafkaBootstrap = kafka.getBootstrapServers();
-            String zkConnect = "localhost:" + zookeeper.getMappedPort(2181);
-            w.println("atlas.notification.embedded=false");
+            // Notification - Embedded Kafka
+            String kafkaBootstrap = "localhost:" + embeddedKafkaPort;
+            String zkConnect = "localhost:" + embeddedKafkaZkPort;
+            w.println("atlas.notification.embedded=true");
+            w.println("atlas.kafka.data=" + confDir.getParent().resolve("data").resolve("kafka"));
             w.println("atlas.kafka.bootstrap.servers=" + kafkaBootstrap);
             w.println("atlas.graph.kafka.bootstrap.servers=" + kafkaBootstrap);
             w.println("atlas.kafka.zookeeper.connect=" + zkConnect);
@@ -362,10 +513,6 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.config.store.cassandra.activated=true");
             w.println("atlas.config.store.cassandra.consistency.level=LOCAL_ONE");
             w.println("atlas.config.store.cassandra.replication.factor=1");
-
-            // Feature flag store - use LOCAL_ONE for single-node testcontainer
-            w.println("atlas.feature.flag.cassandra.consistency.level=LOCAL_ONE");
-            w.println("atlas.feature.flag.cassandra.replication.factor=1");
         }
     }
 
@@ -380,10 +527,17 @@ public abstract class AtlasInProcessBaseIT {
     private static void waitForAtlasReady() {
         LOG.info("Waiting for Atlas to become ready (max {}s)...", MAX_STARTUP_WAIT_SECONDS);
         long deadline = System.currentTimeMillis() + MAX_STARTUP_WAIT_SECONDS * 1000L;
+        int attempts = 0;
+        int successStatusChecks = 0;
+        long totalResponseTimeMs = 0;
+        Map<Integer, Integer> statusHistogram = new LinkedHashMap<>();
+        String lastFailureReason = null;
 
         while (System.currentTimeMillis() < deadline) {
+            attempts++;
             HttpURLConnection conn = null;
             try {
+                long requestStart = System.nanoTime();
                 conn = (HttpURLConnection)
                         new URL("http://localhost:" + atlasPort + "/api/atlas/admin/status")
                                 .openConnection();
@@ -392,12 +546,20 @@ public abstract class AtlasInProcessBaseIT {
                 conn.setReadTimeout(5000);
 
                 int status = conn.getResponseCode();
+                long responseMs = (System.nanoTime() - requestStart) / 1_000_000;
+                successStatusChecks++;
+                totalResponseTimeMs += responseMs;
+                statusHistogram.put(status, statusHistogram.getOrDefault(status, 0) + 1);
+
                 if (status == 200) {
-                    LOG.info("Atlas is ready (HTTP {})", status);
+                    long avgMs = successStatusChecks > 0 ? totalResponseTimeMs / successStatusChecks : 0;
+                    LOG.info("Atlas is ready (HTTP {}) after {} attempts; avg status-check latency={} ms; status histogram={}",
+                            status, attempts, avgMs, statusHistogram);
                     return;
                 }
-                LOG.info("Atlas not ready yet (HTTP {}), retrying...", status);
+                LOG.info("Atlas not ready yet (HTTP {}, {} ms, attempt {}), retrying...", status, responseMs, attempts);
             } catch (Exception e) {
+                lastFailureReason = e.getClass().getSimpleName() + ": " + e.getMessage();
                 LOG.debug("Atlas not ready yet: {}", e.getMessage());
             } finally {
                 if (conn != null) {
@@ -413,6 +575,9 @@ public abstract class AtlasInProcessBaseIT {
             }
         }
 
+        long avgMs = successStatusChecks > 0 ? totalResponseTimeMs / successStatusChecks : 0;
+        LOG.error("Atlas readiness timeout: attempts={}, successfulStatusChecks={}, avgStatusCheckLatency={} ms, statusHistogram={}, lastFailure={}",
+                attempts, successStatusChecks, avgMs, statusHistogram, lastFailureReason);
         throw new RuntimeException("Atlas did not become ready within " + MAX_STARTUP_WAIT_SECONDS + " seconds");
     }
 
@@ -422,6 +587,14 @@ public abstract class AtlasInProcessBaseIT {
                 new String[]{"admin", "admin"}
         );
         LOG.info("AtlasClientV2 created (http://localhost:{})", atlasPort);
+    }
+
+    private static void configureLegacyIntegrationTestClients() {
+        String atlasApiBase = "http://localhost:" + atlasPort + "/api/atlas/v2";
+        OKClient.configureBaseUrl(atlasApiBase);
+        ESUtil.configureAddress(elasticsearch.getHttpHostAddress());
+        LOG.info("Configured legacy integration clients (atlasApiBase={}, esAddress={})",
+                atlasApiBase, elasticsearch.getHttpHostAddress());
     }
 
     private static String resolveDeployDir() {
@@ -478,5 +651,9 @@ public abstract class AtlasInProcessBaseIT {
 
     protected String getElasticsearchAddress() {
         return elasticsearch.getHttpHostAddress();
+    }
+
+    protected String getKafkaBootstrapServers() {
+        return "localhost:" + embeddedKafkaPort;
     }
 }

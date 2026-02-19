@@ -58,7 +58,7 @@ public class JsonToElasticsearchQuery {
         }
 
         switch (operator) {
-            case POLICY_FILTER_CRITERIA_EQUALS -> {
+            case POLICY_FILTER_CRITERIA_EQUALS:
                 if (attributeValueNode.isArray()) {
                     ArrayNode filterArray = queryNode.putObject("bool").putArray("filter");
                     for (JsonNode valueNode : attributeValueNode) {
@@ -67,15 +67,15 @@ public class JsonToElasticsearchQuery {
                 } else {
                     queryNode.putObject("term").put(attributeName, attributeValue);
                 }
-            }
-            case POLICY_FILTER_CRITERIA_NOT_EQUALS -> {
+                break;
+            case POLICY_FILTER_CRITERIA_NOT_EQUALS:
                 if (attributeValueNode.isArray()) { // same as not_in operator
                     queryNode.putObject("bool").putObject("must_not").putObject("terms").set(attributeName, attributeValueNode);
                 } else {
                     queryNode.putObject("bool").putObject("must_not").putObject("term").put(attributeName, attributeValue);
                 }
-            }
-            case POLICY_FILTER_CRITERIA_STARTS_WITH -> {
+                break;
+            case POLICY_FILTER_CRITERIA_STARTS_WITH:
                 if (attributeValueNode.isArray()) {
                     ArrayNode shouldArray = queryNode.putObject("bool").putArray("should");
                     for (JsonNode valueNode : attributeValueNode) {
@@ -84,8 +84,8 @@ public class JsonToElasticsearchQuery {
                 } else {
                     queryNode.putObject("prefix").put(attributeName, attributeValue);
                 }
-            }
-            case POLICY_FILTER_CRITERIA_ENDS_WITH -> {
+                break;
+            case POLICY_FILTER_CRITERIA_ENDS_WITH:
                 if (attributeValueNode.isArray() && attributeValueNode.size() > 0) {
                     List<String> escapedValues = new ArrayList<>();
                     for (JsonNode valueNode : attributeValueNode) {
@@ -96,10 +96,16 @@ public class JsonToElasticsearchQuery {
                 } else {
                     queryNode.putObject("wildcard").put(attributeName, "*" + attributeValue);
                 }
-            }
-            case POLICY_FILTER_CRITERIA_IN -> queryNode.putObject("terms").set(attributeName, attributeValueNode);
-            case POLICY_FILTER_CRITERIA_NOT_IN -> queryNode.putObject("bool").putObject("must_not").putObject("terms").set(attributeName, attributeValueNode);
-            default -> LOG.warn("Found unknown operator {}", operator);
+                break;
+            case POLICY_FILTER_CRITERIA_IN:
+                queryNode.putObject("terms").set(attributeName, attributeValueNode);
+                break;
+            case POLICY_FILTER_CRITERIA_NOT_IN:
+                queryNode.putObject("bool").putObject("must_not").putObject("terms").set(attributeName, attributeValueNode);
+                break;
+            default:
+                LOG.warn("Found unknown operator {}", operator);
+                break;
         }
         return queryNode;
     }
@@ -166,7 +172,7 @@ public class JsonToElasticsearchQuery {
         ObjectNode queryNode = mapper.createObjectNode();
 
         switch (operator) {
-            case POLICY_FILTER_CRITERIA_EQUALS -> {
+            case POLICY_FILTER_CRITERIA_EQUALS:
                 if (attributeValueNode.isArray()) {
                     ArrayNode filterArray = queryNode.putObject("bool").putArray("filter");
                     for (JsonNode valueNode : attributeValueNode) {
@@ -175,8 +181,9 @@ public class JsonToElasticsearchQuery {
                 } else {
                     return createDSLForTagKeyValue(attributeName, attributeValueNode);
                 }
-            }
-            case POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_NOT_IN -> {
+                break;
+            case POLICY_FILTER_CRITERIA_NOT_EQUALS:
+            case POLICY_FILTER_CRITERIA_NOT_IN:
                 ObjectNode mustNotNode = queryNode.putObject("bool").putObject("must_not");
                 if (attributeValueNode.isArray()) {
                     ArrayNode shouldArray = mustNotNode.putObject("bool").putArray("should");
@@ -186,8 +193,8 @@ public class JsonToElasticsearchQuery {
                 } else {
                     mustNotNode.setAll((ObjectNode) createDSLForTagKeyValue(attributeName, attributeValueNode));
                 }
-            }
-            case POLICY_FILTER_CRITERIA_IN -> {
+                break;
+            case POLICY_FILTER_CRITERIA_IN:
                 ArrayNode shouldArray = queryNode.putObject("bool").putArray("should");
                 if (attributeValueNode.isArray()) {
                     for (JsonNode valueNode : attributeValueNode) {
@@ -196,8 +203,10 @@ public class JsonToElasticsearchQuery {
                 } else {
                     shouldArray.add(createDSLForTagKeyValue(attributeName, attributeValueNode));
                 }
-            }
-            default -> LOG.warn("Found unknown operator {}", operator);
+                break;
+            default:
+                LOG.warn("Found unknown operator {}", operator);
+                break;
         }
         return queryNode;
     }

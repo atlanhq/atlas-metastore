@@ -8,10 +8,8 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -27,12 +25,11 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@ExtendWith(TestcontainersExtension.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class BasicSanityForAttributesTypesIntegrationTest extends AtlasDockerIntegrationTest {
+public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcessBaseIT {
     private static final Logger LOG = LoggerFactory.getLogger(BasicSanityForAttributesTypesIntegrationTest.class);
 
-    private static long SLEEP = 2000;
+    private static long SLEEP = 1000;
 
     public static String TYPE_PROJECT = "TableauProject";
     public static String TYPE_WORKOBOOK = "TableauWorkbook";

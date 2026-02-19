@@ -1,6 +1,7 @@
 package org.apache.atlas.web.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -13,12 +14,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -31,10 +31,15 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@ExtendWith(TestcontainersExtension.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrationTest {
+public class BasicServiceAvailabilityIntegrationTest extends AtlasInProcessBaseIT {
     private static final Logger LOG = LoggerFactory.getLogger(BasicServiceAvailabilityIntegrationTest.class);
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+
+    private String apiBase() {
+        return getAtlasBaseUrl() + "/api/atlas/v2";
+    }
 
     @Test
     @Order(1)
@@ -47,7 +52,7 @@ public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrat
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL.replace("/api/atlas/v2", "") + "/api/atlas/admin/version"))
+                .uri(URI.create(getAtlasBaseUrl() + "/api/atlas/admin/version"))
                 .header("Authorization", "Basic "+encodedAuth)
                 .GET()
                 .timeout(Duration.ofSeconds(10))
@@ -69,7 +74,7 @@ public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrat
         String auth = "admin:admin";
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL + "/types/typedefs"))
+                .uri(URI.create(apiBase() + "/types/typedefs"))
                 .header("Accept", "application/json")
                 .header("Authorization", "Basic "+encodedAuth)
                 .GET()
@@ -121,7 +126,7 @@ public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrat
 
         // Create the request
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL + "/entity/bulk"))
+                .uri(URI.create(apiBase() + "/entity/bulk"))
                 .header("Content-Type", "application/json")
                 .header("Accept", "application/json")
                 .header("Authorization", "Basic " + encodedAuth)
@@ -130,8 +135,7 @@ public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrat
                 .build();
 
         // Send the request
-        HttpResponse<String> response =
-                super.httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
         LOG.info("Create asset response: {} - {}", response.statusCode(), response.body());
         assertEquals(200, response.statusCode());
@@ -207,7 +211,7 @@ public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrat
 
     private KafkaConsumer<String, String> createKafkaConsumer() {
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, "localhost:" + kafka.getFirstMappedPort());
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getKafkaBootstrapServers());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, "test-group");
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());

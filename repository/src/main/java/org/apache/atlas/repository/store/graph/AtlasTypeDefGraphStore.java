@@ -976,6 +976,7 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
     private AtlasTypesDef addToGraphStore(AtlasTypesDef typesDef, AtlasTransientTypeRegistry ttr) throws AtlasBaseException {
         AtlasTypesDef ret = new AtlasTypesDef();
+        long overallStartNanos = System.nanoTime();
 
         AtlasDefStore<AtlasEnumDef>             enumDefStore             = getEnumDefStore(ttr);
         AtlasDefStore<AtlasStructDef>           structDefStore           = getStructDefStore(ttr);
@@ -992,12 +993,17 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
         // for enumerations run the create
         if (CollectionUtils.isNotEmpty(typesDef.getEnumDefs())) {
+            long phaseStartNanos = System.nanoTime();
+            int total = typesDef.getEnumDefs().size();
+            int processed = 0;
             for (AtlasEnumDef enumDef : typesDef.getEnumDefs()) {
                 AtlasEnumDef createdDef = enumDefStore.create(enumDef, null);
 
                 ttr.updateGuid(createdDef.getName(), createdDef.getGuid());
 
                 ret.getEnumDefs().add(createdDef);
+                processed++;
+                logCreateProgress("enum", processed, total, phaseStartNanos);
             }
         }
         // run the preCreates
@@ -1033,6 +1039,8 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
         }
 
         if (CollectionUtils.isNotEmpty(typesDef.getStructDefs())) {
+            long phaseStartNanos = System.nanoTime();
+            int total = typesDef.getStructDefs().size();
             int i = 0;
             for (AtlasStructDef structDef : typesDef.getStructDefs()) {
                 AtlasStructDef createdDef = structDefStore.create(structDef, preCreateStructDefs.get(i));
@@ -1041,10 +1049,13 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
                 ret.getStructDefs().add(createdDef);
                 i++;
+                logCreateProgress("struct", i, total, phaseStartNanos);
             }
         }
 
         if (CollectionUtils.isNotEmpty(typesDef.getClassificationDefs())) {
+            long phaseStartNanos = System.nanoTime();
+            int total = typesDef.getClassificationDefs().size();
             int i = 0;
             for (AtlasClassificationDef classifiDef : typesDef.getClassificationDefs()) {
                 AtlasClassificationDef createdDef = classifiDefStore.create(classifiDef, preCreateClassifiDefs.get(i));
@@ -1053,10 +1064,13 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
                 ret.getClassificationDefs().add(createdDef);
                 i++;
+                logCreateProgress("classification", i, total, phaseStartNanos);
             }
         }
 
         if (CollectionUtils.isNotEmpty(typesDef.getEntityDefs())) {
+            long phaseStartNanos = System.nanoTime();
+            int total = typesDef.getEntityDefs().size();
             int i = 0;
             for (AtlasEntityDef entityDef : typesDef.getEntityDefs()) {
                 AtlasEntityDef createdDef = entityDefStore.create(entityDef, preCreateEntityDefs.get(i));
@@ -1065,9 +1079,12 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
                 ret.getEntityDefs().add(createdDef);
                 i++;
+                logCreateProgress("entity", i, total, phaseStartNanos);
             }
         }
         if (CollectionUtils.isNotEmpty(typesDef.getRelationshipDefs())) {
+            long phaseStartNanos = System.nanoTime();
+            int total = typesDef.getRelationshipDefs().size();
             int i = 0;
             for (AtlasRelationshipDef relationshipDef : typesDef.getRelationshipDefs()) {
                 AtlasRelationshipDef createdDef = relationshipDefStore.create(relationshipDef, preCreateRelationshipDefs.get(i));
@@ -1076,10 +1093,13 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
                 ret.getRelationshipDefs().add(createdDef);
                 i++;
+                logCreateProgress("relationship", i, total, phaseStartNanos);
             }
         }
 
         if (CollectionUtils.isNotEmpty(typesDef.getBusinessMetadataDefs())) {
+            long phaseStartNanos = System.nanoTime();
+            int total = typesDef.getBusinessMetadataDefs().size();
             int i = 0;
             for (AtlasBusinessMetadataDef businessMetadataDef : typesDef.getBusinessMetadataDefs()) {
                 AtlasBusinessMetadataDef createdDef = businessMetadataDefStore.create(businessMetadataDef, preCreateBusinessMetadataDefs.get(i));
@@ -1088,10 +1108,38 @@ public abstract class AtlasTypeDefGraphStore implements AtlasTypeDefStore {
 
                 ret.getBusinessMetadataDefs().add(createdDef);
                 i++;
+                logCreateProgress("business-metadata", i, total, phaseStartNanos);
             }
         }
 
+        int totalCreated = CollectionUtils.size(ret.getEnumDefs())
+                + CollectionUtils.size(ret.getStructDefs())
+                + CollectionUtils.size(ret.getClassificationDefs())
+                + CollectionUtils.size(ret.getEntityDefs())
+                + CollectionUtils.size(ret.getRelationshipDefs())
+                + CollectionUtils.size(ret.getBusinessMetadataDefs());
+        long elapsedNanos = System.nanoTime() - overallStartNanos;
+        double throughput = elapsedNanos > 0 ? (totalCreated * 1_000_000_000.0 / elapsedNanos) : 0.0;
+        LOG.info("addToGraphStore completed: created {} typedefs in {} ms (throughput={} types/s)",
+                totalCreated, elapsedNanos / 1_000_000, String.format("%.1f", throughput));
+
         return ret;
+    }
+
+    private static void logCreateProgress(String typeCategory, int processed, int total, long phaseStartNanos) {
+        if (processed <= 0 || total <= 0) {
+            return;
+        }
+
+        if (processed != total && processed % 100 != 0) {
+            return;
+        }
+
+        long elapsedNanos = System.nanoTime() - phaseStartNanos;
+        double throughput = elapsedNanos > 0 ? (processed * 1_000_000_000.0 / elapsedNanos) : 0.0;
+
+        LOG.info("addToGraphStore progress: {} {}/{} in {} ms (throughput={} types/s)",
+                typeCategory, processed, total, elapsedNanos / 1_000_000, String.format("%.1f", throughput));
     }
 
     private AtlasTypesDef updateGraphStore(AtlasTypesDef typesDef, AtlasTransientTypeRegistry ttr) throws AtlasBaseException {
