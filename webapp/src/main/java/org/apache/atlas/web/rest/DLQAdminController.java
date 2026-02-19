@@ -18,7 +18,7 @@ import java.util.Map;
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class DLQAdminController {
 
-    //@Autowired//(required = false)
+    @Autowired
     @Lazy
     private DLQReplayService dlqReplayService;
 
