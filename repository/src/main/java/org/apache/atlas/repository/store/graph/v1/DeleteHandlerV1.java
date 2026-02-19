@@ -67,7 +67,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSo
 import org.apache.tinkerpop.gremlin.structure.Direction;
 import org.apache.tinkerpop.gremlin.structure.Edge;
 import org.apache.tinkerpop.gremlin.structure.Vertex;
-import org.janusgraph.util.encoding.LongEncoding;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -309,7 +309,7 @@ public abstract class DeleteHandlerV1 {
 
             AtlasEntityHeader entity = entityRetriever.toAtlasEntityHeader(vertex, attributes);
             entity.setVertexId(vertex.getIdForDisplay());
-            entity.setDocId(LongEncoding.encode(Long.parseLong(vertex.getIdForDisplay())));
+            entity.setDocId(LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay()));
             entity.setSuperTypeNames(entityType.getAllSuperTypes());
             vertexInfoMap.put(guid, new GraphHelper.VertexInfo(entity, vertex));
 
