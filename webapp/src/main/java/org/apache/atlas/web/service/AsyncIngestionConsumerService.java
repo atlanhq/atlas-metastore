@@ -27,6 +27,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.errors.WakeupException;
+import org.janusgraph.diskstorage.TemporaryBackendException;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -148,6 +149,9 @@ public class AsyncIngestionConsumerService {
     private final AtomicLong dlqPublishCount = new AtomicLong(0);
     private volatile long lastProcessedTime = 0;
     private volatile String lastEventType = null;
+
+    // Cached lag info — updated on the consumer thread, safe to read from HTTP threads
+    private volatile Map<String, Object> cachedLagInfo = Collections.emptyMap();
 
     // Retry & backoff trackers keyed by "partition-offset"
     private final ConcurrentHashMap<String, RetryTrackerEntry> retryTracker = new ConcurrentHashMap<>();
@@ -322,6 +326,10 @@ public class AsyncIngestionConsumerService {
                     cleanupStaleTrackersIfNeeded();
 
                     ConsumerRecords<String, String> records = consumer.poll(Duration.ofSeconds(pollTimeoutSeconds));
+
+                    // Update lag info on consumer thread (KafkaConsumer is not thread-safe)
+                    updateCachedLagInfo();
+
                     if (records.isEmpty()) {
                         continue;
                     }
@@ -350,6 +358,23 @@ public class AsyncIngestionConsumerService {
                                 processedCount.incrementAndGet();
                                 lastProcessedTime = System.currentTimeMillis();
 
+                            } catch (TemporaryBackendException tbe) {
+                                // Transient backend error — exponential backoff without counting toward max retries
+                                errorCount.incrementAndGet();
+                                long backoff = calculateExponentialBackoff(trackerKey);
+                                LOG.warn("AsyncIngestionConsumer: temporary backend exception at partition={} offset={}, " +
+                                                "backoff {}ms. Will retry without incrementing retry count.",
+                                        record.partition(), record.offset(), backoff, tbe);
+                                failedPartition = new TopicPartition(record.topic(), record.partition());
+                                failedOffset = record.offset();
+
+                                try {
+                                    Thread.sleep(backoff);
+                                } catch (InterruptedException ie) {
+                                    Thread.currentThread().interrupt();
+                                    return;
+                                }
+                                break; // Break out of record loop, will seek back
                             } catch (Exception e) {
                                 errorCount.incrementAndGet();
                                 RetryTrackerEntry entry = retryTracker.computeIfAbsent(trackerKey, k -> new RetryTrackerEntry());
@@ -895,25 +920,37 @@ public class AsyncIngestionConsumerService {
 
     /**
      * Returns per-partition consumer lag. Useful for switchover readiness checks.
+     * Returns a cached snapshot computed on the consumer thread (thread-safe).
      */
     public Map<String, Object> getConsumerLag() {
-        Map<String, Object> lagInfo = new LinkedHashMap<>();
-        if (consumer == null || !isRunning.get()) {
+        if (!isRunning.get()) {
+            Map<String, Object> lagInfo = new LinkedHashMap<>();
             lagInfo.put("totalLag", -1);
             lagInfo.put("error", "Consumer is not running");
             return lagInfo;
         }
+        return cachedLagInfo;
+    }
 
+    /**
+     * Compute consumer lag on the consumer thread (KafkaConsumer is not thread-safe).
+     * Must only be called from the consumer thread.
+     */
+    private void updateCachedLagInfo() {
         try {
             Set<TopicPartition> assignment = consumer.assignment();
+            if (assignment.isEmpty()) {
+                return;
+            }
             Map<TopicPartition, Long> endOffsets = consumer.endOffsets(assignment);
+            Map<TopicPartition, OffsetAndMetadata> committedOffsets = consumer.committed(assignment);
             Map<String, Long> partitionLags = new LinkedHashMap<>();
             long totalLag = 0;
 
             for (TopicPartition tp : assignment) {
                 long endOffset = endOffsets.getOrDefault(tp, 0L);
                 long committed = 0;
-                OffsetAndMetadata committedMeta = consumer.committed(tp);
+                OffsetAndMetadata committedMeta = committedOffsets.get(tp);
                 if (committedMeta != null) {
                     committed = committedMeta.offset();
                 }
@@ -922,15 +959,14 @@ public class AsyncIngestionConsumerService {
                 totalLag += lag;
             }
 
+            Map<String, Object> lagInfo = new LinkedHashMap<>();
             lagInfo.put("totalLag", totalLag);
             lagInfo.put("partitions", partitionLags);
+            lagInfo.put("updatedAt", System.currentTimeMillis());
+            cachedLagInfo = lagInfo;
         } catch (Exception e) {
             LOG.warn("Failed to compute consumer lag", e);
-            lagInfo.put("totalLag", -1);
-            lagInfo.put("error", e.getMessage());
         }
-
-        return lagInfo;
     }
 
     // TODO: Once ordering by entity GUID is implemented on the producer side,
