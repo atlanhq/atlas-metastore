@@ -158,6 +158,7 @@ public class EdgeRepository {
                     String inVertexId  = row.getString("in_vertex_id");
                     String propsJson   = row.getString("properties");
                     Map<String, Object> props = parseProperties(propsJson);
+                    props.put("__state", state != null ? state : "ACTIVE");
                     result.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
                 }
             }
@@ -179,6 +180,7 @@ public class EdgeRepository {
                     String outVertexId  = row.getString("out_vertex_id");
                     String propsJson    = row.getString("properties");
                     Map<String, Object> props = parseProperties(propsJson);
+                    props.put("__state", state != null ? state : "ACTIVE");
                     result.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
                 }
             }
@@ -405,6 +407,7 @@ public class EdgeRepository {
                     String inVertexId = row.getString("in_vertex_id");
                     String propsJson  = row.getString("properties");
                     Map<String, Object> props = parseProperties(propsJson);
+                    props.put("__state", state != null ? state : "ACTIVE");
                     edges.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
                 }
             }
@@ -427,6 +430,7 @@ public class EdgeRepository {
                     String outVertexId = row.getString("out_vertex_id");
                     String propsJson   = row.getString("properties");
                     Map<String, Object> props = parseProperties(propsJson);
+                    props.put("__state", state != null ? state : "ACTIVE");
                     edges.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
                 }
             }
@@ -509,8 +513,10 @@ public class EdgeRepository {
         String inVertexId  = row.getString("in_vertex_id");
         String label       = row.getString("edge_label");
         String propsJson   = row.getString("properties");
+        String state       = row.getString("state");
 
         Map<String, Object> props = parseProperties(propsJson);
+        props.put("__state", state != null ? state : "ACTIVE");
         return new CassandraEdge(edgeId, outVertexId, inVertexId, label, props, graph);
     }
 }
