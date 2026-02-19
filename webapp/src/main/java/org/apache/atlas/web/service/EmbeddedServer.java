@@ -167,6 +167,8 @@ public class EmbeddedServer {
                     // holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                     //                         "com.sun.jersey.api.core.ClassNamesResourceConfig");
                     
+                    holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                        "com.sun.jersey.api.core.PackagesResourceConfig");
                     
                     holder.setInitParameter("com.sun.jersey.config.property.packages", 
                         "org.apache.atlas.web.resources;org.apache.atlas.web.providers");
