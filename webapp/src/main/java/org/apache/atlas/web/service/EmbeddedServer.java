@@ -148,11 +148,16 @@ public class EmbeddedServer {
                     // At this point, Jetty has set up the WebAppClassLoader
                     ClassLoader webAppLoader = application.getClassLoader();
                     
-                    com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
-                        new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
+                    // com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
+                    //     new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
                     
-                    org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
-                    holder.setName("atlas-v2-shallowstack");
+                    // org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
+                    // holder.setName("atlas-v2-shallowstack");
+
+                    org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(
+                        "atlas-v2-shallowstack", 
+                        com.sun.jersey.spi.spring.container.servlet.SpringServlet.class
+                    );
 
                     // Use the late-bound loader
                     holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
