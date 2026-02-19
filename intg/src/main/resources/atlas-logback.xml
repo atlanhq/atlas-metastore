@@ -68,10 +68,12 @@
   </appender>
 
   <logger name="org.apache.atlas" additivity="false" level="info">
+    <appender-ref ref="console"/>
     <appender-ref ref="FILE"/>
   </logger>
 
   <logger name="org.janusgraph" additivity="false" level="warn">
+    <appender-ref ref="console"/>
     <appender-ref ref="FILE"/>
   </logger>
 

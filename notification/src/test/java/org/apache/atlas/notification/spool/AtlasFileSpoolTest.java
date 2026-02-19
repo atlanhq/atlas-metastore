@@ -136,7 +136,7 @@ public class AtlasFileSpoolTest extends BaseTest {
         indexManagement = new IndexManagement(cfg);
         indexManagement.init();
         List<IndexRecord> records = indexManagement.getIndexFileManager().getRecords();
-        TimeUnit.SECONDS.sleep(2);
+        TimeUnit.SECONDS.sleep(4);
         Assertions.assertFalse(records.isEmpty(), "Expected at least one spool record to publish");
 
         MessageHandlerSpy messageHandler = new MessageHandlerSpy();
@@ -145,7 +145,7 @@ public class AtlasFileSpoolTest extends BaseTest {
 
         publisher.setDrain();
         Assertions.assertTrue(ret);
-        TimeUnit.SECONDS.sleep(2);
+        TimeUnit.SECONDS.sleep(4);
         assertTrue(messageHandler.getMessages().size() >= 0);
     }
 

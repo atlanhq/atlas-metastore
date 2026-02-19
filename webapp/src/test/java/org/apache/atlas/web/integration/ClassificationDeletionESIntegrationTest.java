@@ -7,12 +7,11 @@ import org.apache.atlas.web.integration.utils.ESUtil;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.search.SearchHit;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -29,11 +28,16 @@ import static org.junit.jupiter.api.Assertions.*;
  * This test validates the fix for stale classification data in ES after deletion.
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@ExtendWith(TestcontainersExtension.class)
-public class ClassificationDeletionESIntegrationTest extends AtlasDockerIntegrationTest {
+public class ClassificationDeletionESIntegrationTest extends AtlasInProcessBaseIT {
     
     private static final Logger LOG = LoggerFactory.getLogger(ClassificationDeletionESIntegrationTest.class);
     private static final int ES_SYNC_WAIT_MS = 3000; // Wait for ES to sync after operations
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+
+    private String apiBase() {
+        return getAtlasBaseUrl() + "/api/atlas/v2";
+    }
     
     @Test
     @Disabled
@@ -169,7 +173,7 @@ public class ClassificationDeletionESIntegrationTest extends AtlasDockerIntegrat
             }""", displayName);
         
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL + "/types/typedefs"))
+                .uri(URI.create(apiBase() + "/types/typedefs"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Basic " + encodedAuth)
                 .POST(HttpRequest.BodyPublishers.ofString(typedefPayload))
@@ -190,7 +194,7 @@ public class ClassificationDeletionESIntegrationTest extends AtlasDockerIntegrat
         String auth = "admin:admin";
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
         
-        String url = ATLAS_BASE_URL + "/entity/bulk";
+        String url = apiBase() + "/entity/bulk";
         if (queryParams != null && !queryParams.isEmpty()) {
             url += "?" + queryParams;
         }
@@ -214,7 +218,7 @@ public class ClassificationDeletionESIntegrationTest extends AtlasDockerIntegrat
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
         
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL + "/entity/bulk/setClassifications"))
+                .uri(URI.create(apiBase() + "/entity/bulk/setClassifications"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Basic " + encodedAuth)
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
@@ -258,7 +262,7 @@ public class ClassificationDeletionESIntegrationTest extends AtlasDockerIntegrat
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
         
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL + "/entity/guid/" + entityGuid))
+                .uri(URI.create(apiBase() + "/entity/guid/" + entityGuid))
                 .header("Accept", "application/json;charset=UTF-8")
                 .header("Authorization", "Basic " + encodedAuth)
                 .GET()

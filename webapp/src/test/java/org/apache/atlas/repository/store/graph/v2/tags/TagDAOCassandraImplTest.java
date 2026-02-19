@@ -35,7 +35,6 @@ import static org.junit.jupiter.api.Assertions.*;
  * data is correctly written to and read from the Cassandra tables.
  *
  * Prerequisites:
- * - A Cassandra instance running and accessible on localhost:9042.
  * - The keyspace 'tags_v2' should be accessible (the DAO will create it if not present).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
@@ -92,6 +91,9 @@ public class TagDAOCassandraImplTest {
         }
         if (testSession != null && !testSession.isClosed()) {
             testSession.close();
+        }
+        if (cassandra != null && cassandra.isRunning()) {
+            cassandra.stop();
         }
 
         ApplicationProperties.forceReload();
