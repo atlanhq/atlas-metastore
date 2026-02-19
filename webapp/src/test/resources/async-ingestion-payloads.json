@@ -52,18 +52,29 @@
     "user" : "admin"
   },
   "operationMetadata" : { },
-  "payload" : [ {
-    "typeName" : "PII",
-    "attributes" : {
-      "level" : "HIGH"
-    },
-    "entityGuid" : "guid-table-001",
-    "entityStatus" : "ACTIVE"
-  }, {
-    "typeName" : "Confidential",
-    "entityGuid" : "guid-col-001",
-    "entityStatus" : "ACTIVE"
-  } ]
+  "payload" : {
+    "guidHeaderMap" : {
+      "guid-table-001" : {
+        "guid" : "guid-table-001",
+        "classifications" : [ {
+          "typeName" : "PII",
+          "attributes" : {
+            "level" : "HIGH"
+          },
+          "entityGuid" : "guid-table-001",
+          "entityStatus" : "ACTIVE"
+        } ]
+      },
+      "guid-col-001" : {
+        "guid" : "guid-col-001",
+        "classifications" : [ {
+          "typeName" : "Confidential",
+          "entityGuid" : "guid-col-001",
+          "entityStatus" : "ACTIVE"
+        } ]
+      }
+    }
+  }
 }, {
   "eventId" : "d6a36da6-c812-492a-89dd-9e7e6dea1452",
   "eventType" : "DELETE_BY_GUID",
@@ -76,7 +87,7 @@
     "deleteType" : "SOFT"
   },
   "payload" : {
-    "guid" : "guid-table-001"
+    "guids" : [ "guid-table-001" ]
   }
 }, {
   "eventId" : "b4cfd8fe-fa84-4251-bc06-1b3d10f54611",
@@ -105,7 +116,6 @@
     "typeName" : "Table"
   },
   "payload" : {
-    "typeName" : "Table",
     "uniqueAttributes" : {
       "qualifiedName" : "default/snowflake/db1/schema1/table1"
     }
@@ -121,17 +131,19 @@
   "operationMetadata" : {
     "deleteType" : "SOFT"
   },
-  "payload" : [ {
-    "typeName" : "Table",
-    "uniqueAttributes" : {
-      "qualifiedName" : "default/snowflake/db1/schema1/table1"
-    }
-  }, {
-    "typeName" : "Table",
-    "uniqueAttributes" : {
-      "qualifiedName" : "default/snowflake/db1/schema1/table2"
-    }
-  } ]
+  "payload" : {
+    "objectIds" : [ {
+      "typeName" : "Table",
+      "uniqueAttributes" : {
+        "qualifiedName" : "default/snowflake/db1/schema1/table1"
+      }
+    }, {
+      "typeName" : "Table",
+      "uniqueAttributes" : {
+        "qualifiedName" : "default/snowflake/db1/schema1/table2"
+      }
+    } ]
+  }
 }, {
   "eventId" : "b166afdc-9bdd-45eb-933f-89ecd528f196",
   "eventType" : "RESTORE_BY_GUIDS",
@@ -334,5 +346,95 @@
   "payload" : {
     "guid" : "guid-table-001",
     "labels" : [ "label1", "label2", "label3" ]
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567001",
+  "eventType" : "ADD_CLASSIFICATIONS",
+  "eventTime" : 1770888880980,
+  "requestMetadata" : {
+    "traceId" : "trace-add-cls",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "guid" : "guid-table-001",
+    "classifications" : [ {
+      "typeName" : "PII",
+      "attributes" : {
+        "level" : "HIGH"
+      }
+    }, {
+      "typeName" : "Confidential"
+    } ]
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567002",
+  "eventType" : "UPDATE_CLASSIFICATIONS",
+  "eventTime" : 1770888880981,
+  "requestMetadata" : {
+    "traceId" : "trace-upd-cls",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "guid" : "guid-table-001",
+    "classifications" : [ {
+      "typeName" : "PII",
+      "attributes" : {
+        "level" : "LOW"
+      }
+    } ]
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567003",
+  "eventType" : "DELETE_CLASSIFICATION",
+  "eventTime" : 1770888880982,
+  "requestMetadata" : {
+    "traceId" : "trace-del-cls",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "guid" : "guid-table-001",
+    "classificationName" : "PII"
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567005",
+  "eventType" : "ADD_CLASSIFICATION_BULK",
+  "eventTime" : 1770888880984,
+  "requestMetadata" : {
+    "traceId" : "trace-add-cls-bulk",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "guids" : [ "guid-table-001", "guid-col-001" ],
+    "classification" : {
+      "typeName" : "Confidential"
+    }
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567006",
+  "eventType" : "DELETE_RELATIONSHIP",
+  "eventTime" : 1770888880985,
+  "requestMetadata" : {
+    "traceId" : "trace-del-rel",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "guid" : "rel-guid-001"
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567007",
+  "eventType" : "DELETE_RELATIONSHIPS",
+  "eventTime" : 1770888880986,
+  "requestMetadata" : {
+    "traceId" : "trace-del-rels",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "guids" : [ "rel-guid-001", "rel-guid-002" ]
   }
 } ]

@@ -120,10 +120,22 @@ class AsyncIngestionConsumerServiceTest {
               "eventTime": 1770888880940,
               "requestMetadata": { "traceId": "trace-d1617835", "user": "admin" },
               "operationMetadata": {},
-              "payload": [
-                { "typeName": "PII", "attributes": { "level": "HIGH" }, "entityGuid": "guid-table-001", "entityStatus": "ACTIVE" },
-                { "typeName": "Confidential", "entityGuid": "guid-col-001", "entityStatus": "ACTIVE" }
-              ]
+              "payload": {
+                "guidHeaderMap": {
+                  "guid-table-001": {
+                    "guid": "guid-table-001",
+                    "classifications": [
+                      { "typeName": "PII", "attributes": { "level": "HIGH" }, "entityGuid": "guid-table-001", "entityStatus": "ACTIVE" }
+                    ]
+                  },
+                  "guid-col-001": {
+                    "guid": "guid-col-001",
+                    "classifications": [
+                      { "typeName": "Confidential", "entityGuid": "guid-col-001", "entityStatus": "ACTIVE" }
+                    ]
+                  }
+                }
+              }
             }
             """;
 
@@ -135,7 +147,7 @@ class AsyncIngestionConsumerServiceTest {
               "eventTime": 1770888880941,
               "requestMetadata": { "traceId": "trace-1f0c2a7c", "user": "admin" },
               "operationMetadata": { "deleteType": "SOFT" },
-              "payload": { "guid": "guid-table-001" }
+              "payload": { "guids": ["guid-table-001"] }
             }
             """;
 
@@ -160,7 +172,6 @@ class AsyncIngestionConsumerServiceTest {
               "requestMetadata": { "traceId": "trace-ead61c93", "user": "admin" },
               "operationMetadata": { "deleteType": "SOFT", "typeName": "Table" },
               "payload": {
-                "typeName": "Table",
                 "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table1" }
               }
             }
@@ -174,10 +185,12 @@ class AsyncIngestionConsumerServiceTest {
               "eventTime": 1770888880947,
               "requestMetadata": { "traceId": "trace-cde941ff", "user": "admin" },
               "operationMetadata": { "deleteType": "SOFT" },
-              "payload": [
-                { "typeName": "Table", "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table1" } },
-                { "typeName": "Table", "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table2" } }
-              ]
+              "payload": {
+                "objectIds": [
+                  { "typeName": "Table", "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table1" } },
+                  { "typeName": "Table", "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table2" } }
+                ]
+              }
             }
             """;
 
@@ -294,6 +307,114 @@ class AsyncIngestionConsumerServiceTest {
               "requestMetadata": { "traceId": "trace-add-labels", "user": "admin" },
               "operationMetadata": {},
               "payload": { "guid": "guid-table-001", "labels": ["label1", "label2", "label3"] }
+            }
+            """;
+
+    // Sample #15: ADD_CLASSIFICATIONS
+    private static final String ADD_CLASSIFICATIONS_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567001",
+              "eventType": "ADD_CLASSIFICATIONS",
+              "eventTime": 1770888880980,
+              "requestMetadata": { "traceId": "trace-add-cls", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "guid": "guid-table-001",
+                "classifications": [
+                  { "typeName": "PII", "attributes": { "level": "HIGH" } },
+                  { "typeName": "Confidential" }
+                ]
+              }
+            }
+            """;
+
+    // Sample #16: UPDATE_CLASSIFICATIONS
+    private static final String UPDATE_CLASSIFICATIONS_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567002",
+              "eventType": "UPDATE_CLASSIFICATIONS",
+              "eventTime": 1770888880981,
+              "requestMetadata": { "traceId": "trace-upd-cls", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "guid": "guid-table-001",
+                "classifications": [
+                  { "typeName": "PII", "attributes": { "level": "LOW" } }
+                ]
+              }
+            }
+            """;
+
+    // Sample #17: DELETE_CLASSIFICATION (without associatedEntityGuid)
+    private static final String DELETE_CLASSIFICATION_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567003",
+              "eventType": "DELETE_CLASSIFICATION",
+              "eventTime": 1770888880982,
+              "requestMetadata": { "traceId": "trace-del-cls", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "guid": "guid-table-001",
+                "classificationName": "PII"
+              }
+            }
+            """;
+
+    // Sample #18: DELETE_CLASSIFICATION (with associatedEntityGuid)
+    private static final String DELETE_CLASSIFICATION_WITH_ASSOCIATED_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567004",
+              "eventType": "DELETE_CLASSIFICATION",
+              "eventTime": 1770888880983,
+              "requestMetadata": { "traceId": "trace-del-cls-assoc", "user": "admin" },
+              "operationMetadata": { "associatedEntityGuid": "guid-col-001" },
+              "payload": {
+                "guid": "guid-table-001",
+                "classificationName": "PII"
+              }
+            }
+            """;
+
+    // Sample #19: ADD_CLASSIFICATION_BULK
+    private static final String ADD_CLASSIFICATION_BULK_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567005",
+              "eventType": "ADD_CLASSIFICATION_BULK",
+              "eventTime": 1770888880984,
+              "requestMetadata": { "traceId": "trace-add-cls-bulk", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "guids": ["guid-table-001", "guid-col-001"],
+                "classification": { "typeName": "Confidential" }
+              }
+            }
+            """;
+
+    // Sample #20: DELETE_RELATIONSHIP
+    private static final String DELETE_RELATIONSHIP_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567006",
+              "eventType": "DELETE_RELATIONSHIP",
+              "eventTime": 1770888880985,
+              "requestMetadata": { "traceId": "trace-del-rel", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "guid": "rel-guid-001"
+              }
+            }
+            """;
+
+    // Sample #21: DELETE_RELATIONSHIPS
+    private static final String DELETE_RELATIONSHIPS_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567007",
+              "eventType": "DELETE_RELATIONSHIPS",
+              "eventTime": 1770888880986,
+              "requestMetadata": { "traceId": "trace-del-rels", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "guids": ["rel-guid-001", "rel-guid-002"]
+              }
             }
             """;
 
@@ -463,6 +584,92 @@ class AsyncIngestionConsumerServiceTest {
         assertTrue(labelsCaptor.getValue().contains("label1"));
         assertTrue(labelsCaptor.getValue().contains("label2"));
         assertTrue(labelsCaptor.getValue().contains("label3"));
+    }
+
+    // ── Classification & Relationship Stub Tests ────────────────────────
+
+    @Test
+    void testReplayAddClassifications() throws Exception {
+        doNothing().when(entityMutationService).addClassifications(anyString(), anyList());
+
+        processEvent(ADD_CLASSIFICATIONS_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<List<AtlasClassification>> clsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(entityMutationService).addClassifications(guidCaptor.capture(), clsCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertEquals(2, clsCaptor.getValue().size());
+        assertEquals("PII", clsCaptor.getValue().get(0).getTypeName());
+        assertEquals("Confidential", clsCaptor.getValue().get(1).getTypeName());
+    }
+
+    @Test
+    void testReplayUpdateClassifications() throws Exception {
+        doNothing().when(entityMutationService).updateClassifications(anyString(), anyList());
+
+        processEvent(UPDATE_CLASSIFICATIONS_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<List<AtlasClassification>> clsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(entityMutationService).updateClassifications(guidCaptor.capture(), clsCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertEquals(1, clsCaptor.getValue().size());
+        assertEquals("PII", clsCaptor.getValue().get(0).getTypeName());
+    }
+
+    @Test
+    void testReplayDeleteClassification() throws Exception {
+        doNothing().when(entityMutationService).deleteClassification(anyString(), anyString());
+
+        processEvent(DELETE_CLASSIFICATION_EVENT);
+
+        verify(entityMutationService).deleteClassification("guid-table-001", "PII");
+    }
+
+    @Test
+    void testReplayDeleteClassification_WithAssociatedEntityGuid() throws Exception {
+        doNothing().when(entityMutationService).deleteClassification(anyString(), anyString(), anyString());
+
+        processEvent(DELETE_CLASSIFICATION_WITH_ASSOCIATED_EVENT);
+
+        verify(entityMutationService).deleteClassification("guid-table-001", "PII", "guid-col-001");
+    }
+
+    @Test
+    void testReplayAddClassificationBulk() throws Exception {
+        doNothing().when(entityMutationService).addClassification(anyList(), any(AtlasClassification.class));
+
+        processEvent(ADD_CLASSIFICATION_BULK_EVENT);
+
+        ArgumentCaptor<List<String>> guidsCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<AtlasClassification> clsCaptor = ArgumentCaptor.forClass(AtlasClassification.class);
+        verify(entityMutationService).addClassification(guidsCaptor.capture(), clsCaptor.capture());
+        assertEquals(2, guidsCaptor.getValue().size());
+        assertTrue(guidsCaptor.getValue().contains("guid-table-001"));
+        assertTrue(guidsCaptor.getValue().contains("guid-col-001"));
+        assertEquals("Confidential", clsCaptor.getValue().getTypeName());
+    }
+
+    @Test
+    void testReplayDeleteRelationship() throws Exception {
+        doNothing().when(entityMutationService).deleteRelationshipById(anyString());
+
+        processEvent(DELETE_RELATIONSHIP_EVENT);
+
+        verify(entityMutationService).deleteRelationshipById("rel-guid-001");
+    }
+
+    @Test
+    void testReplayDeleteRelationships() throws Exception {
+        doNothing().when(entityMutationService).deleteRelationshipsByIds(anyList());
+
+        processEvent(DELETE_RELATIONSHIPS_EVENT);
+
+        ArgumentCaptor<List<String>> guidsCaptor = ArgumentCaptor.forClass(List.class);
+        verify(entityMutationService).deleteRelationshipsByIds(guidsCaptor.capture());
+        assertEquals(2, guidsCaptor.getValue().size());
+        assertTrue(guidsCaptor.getValue().contains("rel-guid-001"));
+        assertTrue(guidsCaptor.getValue().contains("rel-guid-002"));
     }
 
     @Test
@@ -663,13 +870,13 @@ class AsyncIngestionConsumerServiceTest {
 
     @Test
     void testProcessAllEventTypes_EndToEnd() throws Exception {
-        // Read all 14 events from the payloads JSON fixture
+        // Read all 20 events from the payloads JSON fixture
         JsonNode events;
         try (java.io.InputStream is = getClass().getResourceAsStream("/async-ingestion-payloads.json")) {
             assertNotNull(is, "async-ingestion-payloads.json not found on classpath");
             events = MAPPER.readTree(is);
         }
-        assertEquals(14, events.size(), "Expected 14 events in payloads file");
+        assertEquals(20, events.size(), "Expected 20 events in payloads file");
 
         // Set up mocks for all event types
         when(entityMutationService.createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class)))
@@ -686,13 +893,19 @@ class AsyncIngestionConsumerServiceTest {
         when(typeDefStore.updateTypesDef(any(AtlasTypesDef.class))).thenReturn(null);
         doNothing().when(typeDefStore).deleteTypesDef(any(AtlasTypesDef.class));
         when(typeDefStore.deleteTypeByName(anyString())).thenReturn(null);
-        // New event type mocks
         when(entitiesStore.updateEntityAttributeByGuid(anyString(), anyString(), any())).thenReturn(null);
         when(entityMutationService.updateByUniqueAttributes(
                 any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class))).thenReturn(null);
         doNothing().when(entitiesStore).addLabels(anyString(), anySet());
+        // Classification/relationship stub mocks
+        doNothing().when(entityMutationService).addClassifications(anyString(), anyList());
+        doNothing().when(entityMutationService).updateClassifications(anyString(), anyList());
+        doNothing().when(entityMutationService).deleteClassification(anyString(), anyString());
+        doNothing().when(entityMutationService).addClassification(anyList(), any(AtlasClassification.class));
+        doNothing().when(entityMutationService).deleteRelationshipById(anyString());
+        doNothing().when(entityMutationService).deleteRelationshipsByIds(anyList());
 
-        // Process all 14 events sequentially (same order as published by fatgraph)
+        // Process all 20 events sequentially
         for (JsonNode event : events) {
             processEvent(MAPPER.writeValueAsString(event));
         }
@@ -764,6 +977,24 @@ class AsyncIngestionConsumerServiceTest {
 
         // 14. ADD_LABELS → addLabels
         inOrder.verify(entitiesStore).addLabels(eq("guid-table-001"), anySet());
+
+        // 15. ADD_CLASSIFICATIONS → addClassifications
+        inOrder.verify(entityMutationService).addClassifications(eq("guid-table-001"), anyList());
+
+        // 16. UPDATE_CLASSIFICATIONS → updateClassifications
+        inOrder.verify(entityMutationService).updateClassifications(eq("guid-table-001"), anyList());
+
+        // 17. DELETE_CLASSIFICATION → deleteClassification
+        inOrder.verify(entityMutationService).deleteClassification("guid-table-001", "PII");
+
+        // 18. ADD_CLASSIFICATION_BULK → addClassification(guids, classification)
+        inOrder.verify(entityMutationService).addClassification(anyList(), any(AtlasClassification.class));
+
+        // 19. DELETE_RELATIONSHIP → deleteRelationshipById
+        inOrder.verify(entityMutationService).deleteRelationshipById("rel-guid-001");
+
+        // 20. DELETE_RELATIONSHIPS → deleteRelationshipsByIds
+        inOrder.verify(entityMutationService).deleteRelationshipsByIds(anyList());
 
         inOrder.verifyNoMoreInteractions();
     }

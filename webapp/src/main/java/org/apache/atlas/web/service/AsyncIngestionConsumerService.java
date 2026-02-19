@@ -9,7 +9,6 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
-import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
@@ -571,11 +570,11 @@ public class AsyncIngestionConsumerService {
     }
 
     /**
-     * DELETE_BY_GUID: payload = {"guid": "guid-table-001"}
+     * DELETE_BY_GUID: payload = {"guids": ["guid-table-001"]}
      */
     private void replayDeleteByGuid(JsonNode payload) throws AtlasBaseException {
-        String guid = payload.get("guid").asText();
-        entityMutationService.deleteById(guid);
+        List<String> guids = MAPPER.convertValue(payload.get("guids"), new TypeReference<List<String>>() {});
+        entityMutationService.deleteById(guids.get(0));
     }
 
     /**
@@ -595,11 +594,11 @@ public class AsyncIngestionConsumerService {
     }
 
     /**
-     * DELETE_BY_UNIQUE_ATTRIBUTE: payload = {"typeName": "Table", "uniqueAttributes": {"qualifiedName": "..."}}
-     * operationMetadata = {"deleteType": "SOFT", "typeName": "Table"}
+     * DELETE_BY_UNIQUE_ATTRIBUTE: operationMetadata = {"deleteType": "SOFT", "typeName": "Table"}
+     * payload = {"uniqueAttributes": {"qualifiedName": "..."}}
      */
     private void replayDeleteByUniqueAttribute(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
-        String typeName = payload.get("typeName").asText();
+        String typeName = operationMetadata.get("typeName").asText();
         Map<String, Object> uniqAttrs = MAPPER.convertValue(payload.get("uniqueAttributes"),
                 new TypeReference<Map<String, Object>>() {});
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
@@ -610,33 +609,19 @@ public class AsyncIngestionConsumerService {
     }
 
     /**
-     * BULK_DELETE_BY_UNIQUE_ATTRIBUTES: payload = [{typeName, uniqueAttributes}, ...]
+     * BULK_DELETE_BY_UNIQUE_ATTRIBUTES: payload = {"objectIds": [{typeName, uniqueAttributes}, ...]}
      */
     private void replayBulkDeleteByUniqueAttributes(JsonNode payload) throws AtlasBaseException {
-        List<AtlasObjectId> objectIds = MAPPER.convertValue(payload, new TypeReference<List<AtlasObjectId>>() {});
+        List<AtlasObjectId> objectIds = MAPPER.convertValue(payload.get("objectIds"), new TypeReference<List<AtlasObjectId>>() {});
         entityMutationService.deleteByUniqueAttributes(objectIds);
     }
 
     /**
-     * SET_CLASSIFICATIONS: payload = [{typeName, attributes, entityGuid, entityStatus}, ...]
+     * SET_CLASSIFICATIONS: payload = AtlasEntityHeaders JSON {"guidHeaderMap": {"guid1": {...}, ...}}
      * operationMetadata = {"overrideClassifications": false}
      */
     private void replaySetClassifications(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
-        // The payload is an array of classification entries with entityGuid.
-        // We need to convert them to AtlasEntityHeaders (guidHeaderMap).
-        Map<String, AtlasEntityHeader> guidHeaderMap = new HashMap<>();
-        for (JsonNode entry : payload) {
-            String entityGuid = entry.get("entityGuid").asText();
-            AtlasEntityHeader header = guidHeaderMap.computeIfAbsent(entityGuid, g -> {
-                AtlasEntityHeader h = new AtlasEntityHeader();
-                h.setGuid(g);
-                h.setClassifications(new ArrayList<>());
-                return h;
-            });
-            AtlasClassification classification = AtlasType.fromJson(entry.toString(), AtlasClassification.class);
-            header.getClassifications().add(classification);
-        }
-        AtlasEntityHeaders entityHeaders = new AtlasEntityHeaders(guidHeaderMap);
+        AtlasEntityHeaders entityHeaders = AtlasType.fromJson(payload.toString(), AtlasEntityHeaders.class);
         boolean override = operationMetadata.path("overrideClassifications").asBoolean(false);
         entityMutationService.setClassifications(entityHeaders, override);
     }
