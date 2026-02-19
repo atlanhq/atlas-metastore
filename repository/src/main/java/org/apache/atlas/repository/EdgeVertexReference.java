@@ -3,9 +3,9 @@ package org.apache.atlas.repository;
 import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.typedef.AtlasRelationshipDef;
-import org.apache.tinkerpop.gremlin.structure.T;
 
 import java.util.Date;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -60,9 +60,7 @@ public class EdgeVertexReference {
     }
 
     public void setProperties(LinkedHashMap<Object, Object> properties) {
-        // Remove the id and label from properties
-        properties.remove(T.id);
-        properties.remove(T.label);
+        // Keep only String-keyed properties (filters out TinkerPop T.id, T.label enum keys)
         Map<String, Object> newProperties = new LinkedHashMap<>();
         for (Map.Entry<Object, Object> entry : properties.entrySet()) {
             if (entry.getKey() instanceof String) {
@@ -70,7 +68,6 @@ public class EdgeVertexReference {
             }
         }
         this.properties = newProperties;
-
     }
 
     public AtlasRelationship toAtlasRelationship(VertexEdgePropertiesCache cache) {
