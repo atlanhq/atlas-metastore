@@ -166,7 +166,8 @@ public class EmbeddedServer {
                     holder.setInitOrder(1);
 
                     application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
-                    
+                    application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/health");
+                    application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/status");
                     LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully via LifeCycle Listener.");
                 } catch (Exception e) {
                     LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
