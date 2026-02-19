@@ -3,6 +3,7 @@ package org.apache.atlas.web.rest;
 import org.apache.atlas.web.service.DLQReplayService;
 import org.apache.atlas.web.util.Servlets;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import javax.inject.Singleton;
