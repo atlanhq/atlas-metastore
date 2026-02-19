@@ -8,17 +8,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
-  workflow_dispatch:
-    inputs:
-      pr_number:
-        description: 'PR number to review'
-        required: true
-        type: number
-  # Trigger after integration tests complete
-  workflow_run:
-    workflows: ["Integration Tests"]
-    types: [completed]
+    types: [opened, synchronize, ready_for_review]
 
 jobs:
   # Job 1: Respond to @claude mentions in comments
@@ -34,145 +24,105 @@ jobs:
       issues: write
       id-token: write
       actions: read
-    env:
-      ANTHROPIC_BASE_URL: https://aigateway.atlan.dev
-      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      - name: Connect to VPN
-        uses: ./.github/actions/globalprotect-connect-action
-        with:
-          portal-url: vpn2.atlan.app
-          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
-          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
-
-      - name: Verify AI Gateway connectivity
-        env:
-          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-        run: |
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Testing AI Gateway API endpoint..."
-          HTTP_CODE=$(curl -k -sS -o /tmp/gw-response.txt -w '%{http_code}' --max-time 30 \
-            -X POST https://aigateway.atlan.dev/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $LITELLM_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" -eq 000 ]; then
-            echo "::error::AI Gateway unreachable — request timed out after 30s"
-            exit 1
-          fi
-          echo "Pre-flight check passed (HTTP $HTTP_CODE)"
-
       - name: Run Claude Code
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: "@claude"
-          show_full_output: true
           claude_args: |
-            --model claude-sonnet-4
-            --allowedTools "Skill,Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(git diff:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr review:*),Bash(gh api:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr edit:*)"
 
   # Job 2: Auto-review PRs on open/sync
   claude-review:
     if: |
-      (github.event_name == 'pull_request' && !github.event.pull_request.draft) ||
-      github.event_name == 'workflow_dispatch'
+      github.event_name == 'pull_request' &&
+      !github.event.pull_request.draft
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       id-token: write
       actions: read
-    timeout-minutes: 30
-    env:
-      ANTHROPIC_BASE_URL: https://aigateway.atlan.dev
-      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1'
-    concurrency:
-      group: claude-review-${{ github.event.pull_request.number || inputs.pr_number }}
-      cancel-in-progress: true
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Connect to VPN
-        uses: ./.github/actions/globalprotect-connect-action
-        with:
-          portal-url: vpn2.atlan.app
-          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
-          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
-
-      - name: Verify AI Gateway connectivity
-        env:
-          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-        run: |
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Testing AI Gateway API endpoint..."
-          HTTP_CODE=$(curl -k -sS -o /tmp/gw-response.txt -w '%{http_code}' --max-time 30 \
-            -X POST https://aigateway.atlan.dev/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $LITELLM_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" -eq 000 ]; then
-            echo "::error::AI Gateway unreachable — request timed out after 30s"
-            exit 1
-          fi
-          echo "Pre-flight check passed (HTTP $HTTP_CODE)"
-
       - name: Claude PR Review
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
-          track_progress: ${{ github.event_name != 'workflow_dispatch' }}
-          show_full_output: true
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          track_progress: true
           prompt: |
             REPO: ${{ github.repository }}
-            PR NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
             PR TITLE: ${{ github.event.pull_request.title }}
             PR AUTHOR: ${{ github.event.pull_request.user.login }}
 
-            Review PR #${{ github.event.pull_request.number || inputs.pr_number }}.
+            You are reviewing a PR for Apache Atlas Metastore — a Java 17 / Maven project
+            that implements a metadata catalog built on JanusGraph, Cassandra, Elasticsearch, and Kafka.
 
-            IMPORTANT: Check if a previous Claude review comment exists on this PR.
-            - Use `gh api repos/${{ github.repository }}/issues/${{ github.event.pull_request.number || inputs.pr_number }}/comments` to find existing comments
-            - Look for comments containing "<!-- CLAUDE_REVIEW -->"
+            ## Project Context
+            - Core business logic lives in `repository/` module
+            - Entity preprocessors in `repository/src/main/java/org/apache/atlas/repository/store/graph/v2/preprocessor/`
+            - REST API layer in `webapp/`
+            - API models and client libraries in `intg/`
+            - Helm charts in `helm/`
+            - CI/CD workflows in `.github/workflows/`
 
-            If a previous review exists:
-            1. Parse the previous issues from the REVIEW_DATA JSON in the comment
-            2. Re-check if each issue is still present in the current diff
-            3. Mark fixed issues as RESOLVED
-            4. Add any NEW issues found
-            5. Update the existing comment using `gh api repos/${{ github.repository }}/issues/comments/{COMMENT_ID} --method PATCH -f body="..."`
+            ## Review Focus Areas
 
-            If no previous review exists:
-            1. Run /review-pr to get the review guidelines
-            2. Post a new comment with the marker "<!-- CLAUDE_REVIEW -->" using `gh pr comment ${{ github.event.pull_request.number || inputs.pr_number }} --body "..."`
+            1. **Java Code Quality**
+               - Thread safety (Atlas is multi-threaded)
+               - Proper null checks and error handling
+               - Resource cleanup (try-with-resources for streams, graph transactions)
+               - Consistent use of existing patterns (PreProcessor pattern, store pattern)
 
-            Always include a "Review History" section showing:
-            - Issues from previous review that are now fixed
-            - Issues that are still pending
-            - New issues found in this review
+            2. **Graph Database Concerns**
+               - JanusGraph transaction handling (commit/rollback)
+               - Vertex/Edge property access patterns
+               - Index usage and query efficiency
 
-            Use the format specified in the /review-pr skill for tracking.
+            3. **Security**
+               - Authorization checks in REST endpoints
+               - Input validation (especially qualifiedName, GUID parameters)
+               - No secrets or credentials in code
 
-            After completing the review, make a DECISION:
-            - If the PR is small, safe, and has NO critical issues -> APPROVE with `gh pr review`
-            - If the PR is large, architectural, or has critical issues -> COMMENT only (defer to human)
-            - When in doubt, COMMENT (defer to human)
+            4. **Performance**
+               - N+1 query patterns in graph traversals
+               - Unnecessary object creation in hot paths
+               - Elasticsearch query efficiency
+               - Proper use of caching
 
-            Use the review decision guidelines in /review-pr skill for the exact commands.
+            5. **Backward Compatibility**
+               - REST API contract changes
+               - TypeDef changes that could break existing entities
+               - Kafka message format changes
+
+            6. **Helm / CI Changes** (if applicable)
+               - Chart version bumps
+               - Values.yaml schema changes
+               - Workflow correctness
+
+            ## Review Rules — IMPORTANT
+            - ONLY leave inline comments for: critical bugs, security vulnerabilities, unexpected runtime issues (NPE, resource leaks, race conditions), or concrete improvement suggestions with code examples
+            - Every inline comment MUST reference the specific code line it's about and explain WHY it's a problem — not just describe WHAT the code does
+            - NEVER leave positive/affirmation comments like "Good change", "Nice refactoring", "This looks correct" — these are noise and waste reviewers' time
+            - NEVER comment on trivial style, formatting, or naming unless it introduces a real bug
+            - If you have a suggestion, include a concrete code snippet showing the improvement
+            - Use a single top-level PR comment for a brief overall summary
+            - If the PR is clean with no real issues, just post a short top-level summary — ZERO inline comments
+            - Fewer high-quality comments >> many low-value comments
 
           claude_args: |
-            --model claude-sonnet-4
-            --allowedTools "Skill,Read,Glob,Grep,mcp__github_inline_comment__create_inline_comment,Bash(git diff:*),Bash(gh pr view:*),Bash(gh pr comment:*),Bash(gh pr review:*),Bash(gh api:*),Bash(gh pr diff:*)"
+            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
 
   # Job 3: Full QA Pipeline — triggered by /claude-qa-pipeline comment on a PR
   claude-qa-pipeline:
@@ -187,21 +137,11 @@ jobs:
       issues: write
       id-token: write
       actions: read
-    env:
-      ANTHROPIC_BASE_URL: https://aigateway.atlan.dev
-      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Connect to VPN
-        uses: ./.github/actions/globalprotect-connect-action
-        with:
-          portal-url: vpn2.atlan.app
-          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
-          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
 
       - name: Get PR metadata
         id: pr
@@ -223,28 +163,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify AI Gateway connectivity
-        env:
-          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-        run: |
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Testing AI Gateway API endpoint..."
-          HTTP_CODE=$(curl -k -sS -o /tmp/gw-response.txt -w '%{http_code}' --max-time 30 \
-            -X POST https://aigateway.atlan.dev/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $LITELLM_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" -eq 000 ]; then
-            echo "::error::AI Gateway unreachable — request timed out after 30s"
-            exit 1
-          fi
-          echo "Pre-flight check passed (HTTP $HTTP_CODE)"
-
       - name: Run QA Pipeline
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: "/claude-qa-pipeline"
           prompt: |
             REPO: ${{ github.repository }}
@@ -290,9 +212,6 @@ jobs:
       pull-requests: write
       actions: read
       id-token: write
-    env:
-      ANTHROPIC_BASE_URL: https://aigateway.atlan.dev
-      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -344,14 +263,6 @@ jobs:
               core.setOutput('found', 'false');
             }
 
-      - name: Connect to VPN
-        if: steps.pr.outputs.found == 'true'
-        uses: ./.github/actions/globalprotect-connect-action
-        with:
-          portal-url: vpn2.atlan.app
-          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
-          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
-
       - name: Download test artifacts
         if: steps.pr.outputs.found == 'true'
         uses: actions/download-artifact@v4
@@ -373,31 +284,30 @@ jobs:
           SKIPPED=0
           FAILED_TESTS=""
 
-          if [ -d "test-results" ] && [ -f "test-results/TEST-"*.xml ] 2>/dev/null; then
+          mapfile -t XML_FILES < <(find test-results -type f -name 'TEST-*.xml' 2>/dev/null)
+
+          if [ ${#XML_FILES[@]} -gt 0 ]; then
             # Parse JUnit XML files
-            for xml in test-results/TEST-*.xml; do
-              if [ -f "$xml" ]; then
-                # Extract test counts from XML
-                tests=$(grep -oP 'tests="\K[0-9]+' "$xml" | head -1 || echo "0")
-                failures=$(grep -oP 'failures="\K[0-9]+' "$xml" | head -1 || echo "0")
-                errors=$(grep -oP 'errors="\K[0-9]+' "$xml" | head -1 || echo "0")
-                skipped=$(grep -oP 'skipped="\K[0-9]+' "$xml" | head -1 || echo "0")
+            for xml in "${XML_FILES[@]}"; do
+              tests=$(grep -oP 'tests="\K[0-9]+' "$xml" | head -1 || echo "0")
+              failures=$(grep -oP 'failures="\K[0-9]+' "$xml" | head -1 || echo "0")
+              errors=$(grep -oP 'errors="\K[0-9]+' "$xml" | head -1 || echo "0")
+              skipped=$(grep -oP 'skipped="\K[0-9]+' "$xml" | head -1 || echo "0")
 
-                TOTAL=$((TOTAL + tests))
-                FAILED=$((FAILED + failures + errors))
-                SKIPPED=$((SKIPPED + skipped))
+              TOTAL=$((TOTAL + tests))
+              FAILED=$((FAILED + failures + errors))
+              SKIPPED=$((SKIPPED + skipped))
 
-                # Extract failed test names
-                if [ $((failures + errors)) -gt 0 ]; then
-                  failed_names=$(grep -oP '<testcase[^>]*name="\K[^"]+' "$xml" | while read name; do
-                    # Check if this test has a failure or error element
-                    if grep -q "testcase.*name=\"$name\"" "$xml" && grep -A5 "name=\"$name\"" "$xml" | grep -q "<failure\|<error"; then
-                      echo "$name"
-                    fi
-                  done)
-                  if [ -n "$failed_names" ]; then
-                    FAILED_TESTS="$FAILED_TESTS$failed_names"$'\n'
+              # Extract failed test names
+              if [ $((failures + errors)) -gt 0 ]; then
+                failed_names=$(grep -oP '<testcase[^>]*name="\K[^"]+' "$xml" | while read name; do
+                  # Check if this test has a failure or error element
+                  if grep -q "testcase.*name=\"$name\"" "$xml" && grep -A5 "name=\"$name\"" "$xml" | grep -q "<failure\|<error"; then
+                    echo "$name"
                   fi
+                done)
+                if [ -n "$failed_names" ]; then
+                  FAILED_TESTS="$FAILED_TESTS$failed_names"$'\n'
                 fi
               fi
             done
@@ -478,30 +388,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify AI Gateway connectivity
-        if: steps.pr.outputs.found == 'true'
-        env:
-          LITELLM_API_KEY: ${{ secrets.LITELLM_API_KEY }}
-        run: |
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] Testing AI Gateway API endpoint..."
-          HTTP_CODE=$(curl -k -sS -o /tmp/gw-response.txt -w '%{http_code}' --max-time 30 \
-            -X POST https://aigateway.atlan.dev/v1/messages \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $LITELLM_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
-          echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
-          if [ "$HTTP_CODE" -eq 000 ]; then
-            echo "::error::AI Gateway unreachable — request timed out after 30s"
-            exit 1
-          fi
-          echo "Pre-flight check passed (HTTP $HTTP_CODE)"
-
       - name: Claude Test Analysis
         if: steps.pr.outputs.found == 'true'
         uses: anthropics/claude-code-action@v1
         with:
-          anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           # Note: track_progress is not supported for workflow_run events
           prompt: |
             REPO: ${{ github.repository }}
