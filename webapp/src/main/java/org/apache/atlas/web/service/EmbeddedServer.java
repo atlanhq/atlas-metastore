@@ -167,10 +167,10 @@ public class EmbeddedServer {
                     holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                                             "com.sun.jersey.api.core.ClassNamesResourceConfig");
                     
-                    holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                            "org.apache.atlas.web.resources.EntityResourceV2," +
-                                            "org.apache.atlas.web.resources.TypesResourceV2," +
-                                            "org.apache.atlas.web.resources.DiscoveryResourceV2");
+                    // holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+                    //                         "org.apache.atlas.web.resources.EntityResourceV2," +
+                    //                         "org.apache.atlas.web.resources.TypesResourceV2," +
+                    //                         "org.apache.atlas.web.resources.DiscoveryResourceV2");
 
                     holder.setInitOrder(1);
 
