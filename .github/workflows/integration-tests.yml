@@ -90,6 +90,17 @@ jobs:
         env:
           MAVEN_OPTS: -Xmx2g
 
+      - name: Run common module unit tests
+        id: unit-tests
+        run: |
+          echo "Running common module unit tests..."
+          mvn test -pl common \
+            -Dtest="SimpleCacheTest,FeatureFlagCacheStoreTest,LruCacheTest" \
+            -Drat.skip=true \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            2>&1 | tee common-test-output.log
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+
       - name: Run integration tests
         id: tests
         continue-on-error: true
@@ -115,10 +126,12 @@ jobs:
 
       - name: Publish test results
         uses: dorny/test-reporter@v1
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && (steps.tests.outcome != 'skipped' || steps.unit-tests.outcome != 'skipped')
         with:
-          name: Integration Test Results
-          path: webapp/target/surefire-reports/TEST-*.xml
+          name: Test Results
+          path: |
+            webapp/target/surefire-reports/TEST-*.xml
+            common/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
 
@@ -140,17 +153,26 @@ jobs:
 
       - name: Upload test reports
         uses: actions/upload-artifact@v4
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && (steps.tests.outcome != 'skipped' || steps.unit-tests.outcome != 'skipped')
         with:
-          name: integration-test-reports-${{ github.run_id }}
+          name: test-reports-${{ github.run_id }}
           path: |
             webapp/target/surefire-reports/
+            common/target/surefire-reports/
             webapp/target/site/test-report.html
             test-output.log
+            common-test-output.log
           retention-days: 14
 
       - name: Fail if tests failed
-        if: steps.tests.outputs.exit_code != '0'
+        if: steps.tests.outputs.exit_code != '0' || steps.unit-tests.outputs.exit_code != '0'
         run: |
-          echo "Integration tests failed with exit code ${{ steps.tests.outputs.exit_code }}"
+          echo "Unit tests exit code: ${{ steps.unit-tests.outputs.exit_code }}"
+          echo "Integration tests exit code: ${{ steps.tests.outputs.exit_code }}"
+          if [ "${{ steps.unit-tests.outputs.exit_code }}" != "0" ]; then
+            echo "Unit tests failed!"
+          fi
+          if [ "${{ steps.tests.outputs.exit_code }}" != "0" ]; then
+            echo "Integration tests failed!"
+          fi
           exit 1
