@@ -142,80 +142,56 @@ public class EmbeddedServer {
         //LifeCycle Listener for Late Binding of resource files after all the JARs are loaded
         //and Atlas finds resource classes
         application.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
-            @Override
-            public void lifeCycleStarting(org.eclipse.jetty.util.component.LifeCycle event) {
-                try {
-                    // At this point, Jetty has set up the WebAppClassLoader
-                    ClassLoader webAppLoader = application.getClassLoader();
-                    
-                    // com.sun.jersey.spi.spring.container.servlet.SpringServlet jerseyServlet = 
-                    //     new com.sun.jersey.spi.spring.container.servlet.SpringServlet();
-                    
-                    // org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(jerseyServlet);
-                    // holder.setName("atlas-v2-shallowstack");
+        @Override
+        public void lifeCycleStarting(org.eclipse.jetty.util.component.LifeCycle event) {
+            try {
+                // 1. Setup the new "Fast-Lane" Servlet for shallow stack
+                org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder();
+                holder.setName("atlas-v2-shallowstack");
+                holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
+                holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.PackagesResourceConfig");
+                holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources;org.apache.atlas.web.providers");
+                holder.setInitOrder(1);
 
-                    // org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder(
-                    //     "atlas-v2-shallowstack", 
-                    //     com.sun.jersey.spi.spring.container.servlet.SpringServlet.class
-                    // );
+                // Register the paths
+                application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
+                application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/health");
+                application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/status");
 
-                    org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder();
-                    holder.setName("atlas-v2-shallowstack");
-                    holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
+                // Setup the Security Filter Mapping for these paths
+                org.eclipse.jetty.servlet.FilterMapping securityMapping = new org.eclipse.jetty.servlet.FilterMapping();
+                securityMapping.setFilterName("springSecurityFilterChain");
+                
+                // IMPORTANT: Map to both the specific paths AND the specific Servlet Name
+                // This tells Jetty: "If the request is going to the new shallow stack, use this filter first."
+                securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
+                securityMapping.setServletName("atlas-v2-shallowstack");
+                
+                // Ensure it triggers on standard requests
+                securityMapping.setDispatcherTypes(java.util.EnumSet.of(javax.servlet.DispatcherType.REQUEST));
 
-                    // Use the late-bound loader
-                    // holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                    //                         "com.sun.jersey.api.core.ClassNamesResourceConfig");
-                    
-                    holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                        "com.sun.jersey.api.core.PackagesResourceConfig");
-                    
-                    holder.setInitParameter("com.sun.jersey.config.property.packages", 
-                        "org.apache.atlas.web.resources;org.apache.atlas.web.providers");
-                  // holder.setInitParameter("com.sun.jersey.config.property.classnames",   
-                    //                         "org.apache.atlas.web.resources.EntityResourceV2," +
-                    //                         "org.apache.atlas.web.resources.TypesResourceV2," +
-                    //                         "org.apache.atlas.web.resources.DiscoveryResourceV2");
-                    
-                    holder.setInitOrder(1);
+                // 3. Robust Array Injection
+                org.eclipse.jetty.servlet.FilterMapping[] currentMappings = application.getServletHandler().getFilterMappings();
+                org.eclipse.jetty.servlet.FilterMapping[] newMappings;
 
-                    application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
-                    application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/health");
-                    application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/status");
-
-                    // This bypasses AuditFilter and MetricsFilter defined in web.xml
-                    String securityFilterName = "springSecurityFilterChain";
-
-                    org.eclipse.jetty.servlet.FilterMapping securityMapping = new org.eclipse.jetty.servlet.FilterMapping();
-                    securityMapping.setFilterName(securityFilterName);
-                    securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
-
-                    // Get current mappings, create a new array, and insert securityMapping at index 0 (the front)
-                    org.eclipse.jetty.servlet.FilterMapping[] currentMappings = application.getServletHandler().getFilterMappings();
-                    org.eclipse.jetty.servlet.FilterMapping[] newMappings;
-
-                    if (currentMappings == null || currentMappings.length == 0) {
-                        // If no mappings exist yet, just create an array for yours
-                        newMappings = new org.eclipse.jetty.servlet.FilterMapping[]{securityMapping};
-                        LOG.info("No existing filter mappings found. Initializing with security bypass.");
-                    } else {
-                        // If mappings exist, prepend yours to the front
-                        newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
-                        newMappings[0] = securityMapping;
-                        System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
-                        LOG.info("Prepended security bypass to {} existing filter mappings.", currentMappings.length);
-                    }
-                    // Update Jetty with the new ordered filter list
-                    application.getServletHandler().setFilterMappings(newMappings);
-                    // Add security mapping to the handler
-                    //application.getServletHandler().addFilterMapping(securityMapping);
-                    LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully via LifeCycle Listener.");
-                } catch (Exception e) {
-                    LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
+                if (currentMappings == null || currentMappings.length == 0) {
+                    newMappings = new org.eclipse.jetty.servlet.FilterMapping[]{securityMapping};
+                    LOG.info("Initializing filter chain with Fast-Lane security bypass.");
+                } else {
+                    newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
+                    newMappings[0] = securityMapping;
+                    System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
+                    LOG.info("Prepended security bypass to existing filters.");
                 }
-            }
-        });
 
+                application.getServletHandler().setFilterMappings(newMappings);
+                LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully with Servlet-specific filter priority.");
+
+            } catch (Exception e) {
+                LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
+            }
+        }
+    });
         // Disable directory listing 
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
         
