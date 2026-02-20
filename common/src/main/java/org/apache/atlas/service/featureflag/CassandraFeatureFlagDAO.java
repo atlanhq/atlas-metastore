@@ -51,6 +51,7 @@ public class CassandraFeatureFlagDAO implements AutoCloseable {
     private static final String PROP_KEYSPACE = "atlas.feature.flag.cassandra.keyspace";
     private static final String PROP_TABLE = "atlas.feature.flag.cassandra.table";
     private static final String PROP_REPLICATION_FACTOR = "atlas.feature.flag.cassandra.replication.factor";
+    private static final String PROP_CONSISTENCY_LEVEL = "atlas.feature.flag.cassandra.consistency.level";
 
     // Default values
     private static final String DEFAULT_KEYSPACE = "feature_flags";
@@ -59,6 +60,7 @@ public class CassandraFeatureFlagDAO implements AutoCloseable {
     private static final String DEFAULT_DATACENTER = "datacenter1";
     private static final int DEFAULT_PORT = 9042;
     private static final int DEFAULT_REPLICATION_FACTOR = 3;
+    private static final String DEFAULT_CONSISTENCY_LEVEL = "LOCAL_QUORUM";
 
     // Retry configuration
     private static final int MAX_RETRIES = 3;
@@ -77,6 +79,7 @@ public class CassandraFeatureFlagDAO implements AutoCloseable {
     private final CqlSession session;
     private final String keyspace;
     private final String table;
+    private final DefaultConsistencyLevel consistencyLevel;
 
     // Prepared statements
     private final PreparedStatement selectStmt;
@@ -134,9 +137,11 @@ public class CassandraFeatureFlagDAO implements AutoCloseable {
             this.keyspace = config.getString(PROP_KEYSPACE, DEFAULT_KEYSPACE);
             this.table = config.getString(PROP_TABLE, DEFAULT_TABLE);
             int replicationFactor = config.getInt(PROP_REPLICATION_FACTOR, DEFAULT_REPLICATION_FACTOR);
+            String consistencyLevelStr = config.getString(PROP_CONSISTENCY_LEVEL, DEFAULT_CONSISTENCY_LEVEL);
+            this.consistencyLevel = parseConsistencyLevel(consistencyLevelStr);
 
-            LOG.info("Initializing CassandraFeatureFlagDAO - hostname: {}, port: {}, keyspace: {}, table: {}",
-                    hostname, port, keyspace, table);
+            LOG.info("Initializing CassandraFeatureFlagDAO - hostname: {}, port: {}, keyspace: {}, table: {}, consistency: {}",
+                    hostname, port, keyspace, table, consistencyLevel);
 
             DriverConfigLoader configLoader = DriverConfigLoader.programmaticBuilder()
                     .withDuration(DefaultDriverOption.CONNECTION_INIT_QUERY_TIMEOUT, CONNECTION_TIMEOUT)
@@ -181,17 +186,26 @@ public class CassandraFeatureFlagDAO implements AutoCloseable {
 
     private PreparedStatement prepare(String cql) {
         return session.prepare(SimpleStatement.builder(cql)
-                .setConsistencyLevel(DefaultConsistencyLevel.LOCAL_QUORUM)
+                .setConsistencyLevel(consistencyLevel)
                 .build());
     }
 
+    private static DefaultConsistencyLevel parseConsistencyLevel(String level) {
+        try {
+            return DefaultConsistencyLevel.valueOf(level.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            LOG.warn("Invalid consistency level '{}', falling back to LOCAL_QUORUM", level);
+            return DefaultConsistencyLevel.LOCAL_QUORUM;
+        }
+    }
+
     private void initializeSchema(int replicationFactor) {
-        // Create keyspace
+        // Create keyspace - use configured consistency level for DDL
         String createKeyspaceQuery = String.format(
                 "CREATE KEYSPACE IF NOT EXISTS %s WITH replication = {'class': 'SimpleStrategy', 'replication_factor': '%d'} AND durable_writes = true",
                 keyspace, replicationFactor);
         executeWithRetry(SimpleStatement.builder(createKeyspaceQuery)
-                .setConsistencyLevel(DefaultConsistencyLevel.ALL)
+                .setConsistencyLevel(consistencyLevel)
                 .build());
         LOG.info("Ensured keyspace {} exists", keyspace);
 
@@ -205,7 +219,7 @@ public class CassandraFeatureFlagDAO implements AutoCloseable {
                         ")",
                 keyspace, table);
         executeWithRetry(SimpleStatement.builder(createTableQuery)
-                .setConsistencyLevel(DefaultConsistencyLevel.ALL)
+                .setConsistencyLevel(consistencyLevel)
                 .build());
         LOG.info("Ensured table {}.{} exists", keyspace, table);
     }

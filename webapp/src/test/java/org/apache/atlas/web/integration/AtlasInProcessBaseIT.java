@@ -359,6 +359,10 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.config.store.cassandra.activated=true");
             w.println("atlas.config.store.cassandra.consistency.level=LOCAL_ONE");
             w.println("atlas.config.store.cassandra.replication.factor=1");
+
+            // Feature flag store - use LOCAL_ONE for single-node testcontainer
+            w.println("atlas.feature.flag.cassandra.consistency.level=LOCAL_ONE");
+            w.println("atlas.feature.flag.cassandra.replication.factor=1");
         }
     }
 
