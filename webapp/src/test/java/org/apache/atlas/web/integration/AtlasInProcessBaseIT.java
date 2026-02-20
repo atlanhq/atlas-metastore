@@ -264,6 +264,7 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.storage.cql.replication-factor=1");
             w.println("atlas.graph.storage.clustername=atlas-test-cluster");
             w.println("atlas.graph.storage.port=" + cassandraPort);
+            w.println("atlas.graph.storage.cql.local-datacenter=datacenter1");
             w.println("atlas.graph.query.fast-property=true");
             w.println("atlas.graph.query.batch=true");
             w.println("query.batch.properties-mode=all-properties");
