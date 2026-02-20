@@ -26,4 +26,14 @@ public interface RedisService {
 
   Logger getLogger();
 
+  /**
+   * Check if Redis is available for operations.
+   * This is used to check if Redis is connected and healthy.
+   *
+   * @return true if Redis is connected and healthy, false otherwise
+   */
+  default boolean isAvailable() {
+    return true;  // Default for backward compatibility
+  }
+
 }

@@ -2,14 +2,12 @@ package org.apache.atlas.service;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.DependsOn;
 import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 import java.time.Duration;
 
 @Component
-@DependsOn({"redisServiceImpl"})
 public class FeatureFlagCacheStore {
     private static final Logger LOG = LoggerFactory.getLogger(FeatureFlagCacheStore.class);
     

@@ -327,6 +327,23 @@ public abstract class AbstractRedisService implements RedisService {
         }).toArray(String[]::new);
     }
 
+    /**
+     * Check if Redis clients are connected and healthy.
+     * @return true if both Redis clients are available, false otherwise
+     */
+    @Override
+    public boolean isAvailable() {
+        try {
+            return redisClient != null &&
+                   !redisClient.isShutdown() &&
+                   redisCacheClient != null &&
+                   !redisCacheClient.isShutdown();
+        } catch (Exception e) {
+            getLogger().warn("Error checking Redis availability", e);
+            return false;
+        }
+    }
+
     @PreDestroy
     public void flushLocks(){
         // Cancel all health check tasks
