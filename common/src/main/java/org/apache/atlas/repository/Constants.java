@@ -188,6 +188,7 @@ public final class Constants {
     public static final String QUERY_ENTITY_TYPE            = "Query";
     public static final String QUERY_FOLDER_ENTITY_TYPE     = "Folder";
     public static final String QUERY_COLLECTION_ENTITY_TYPE = "Collection";
+    public static final String ATLAN_APP_WORKFLOW_ENTITY_TYPE = "AtlanAppWorkflow";
 
     /*
      * Purpose / Persona

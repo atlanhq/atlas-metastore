@@ -3770,9 +3770,9 @@
         {
             "typeName": "AuthPolicy",
             "attributes": {
-                "name": "CRUD_AUTOMATION_ENTITIES",
-                "qualifiedName": "CRUD_AUTOMATION_ENTITIES",
-                "description": "Allows admins, api tokens, and service accounts to perform CRUD operations on Automation entities.",
+                "name": "CRUD_AUTOMATION_ENTITIES_READ_CREATE",
+                "qualifiedName": "CRUD_AUTOMATION_ENTITIES_READ_CREATE",
+                "description": "Allows admins and api tokens to read and create Automation entities (AtlanAppWorkflow, AppWorkflowRun). Update/delete for AtlanAppWorkflow restricted to creator and service accounts.",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
                 "policyServiceName": "atlas",
@@ -3794,9 +3794,104 @@
                 ],
                 "policyActions": [
                     "entity-create",
-                    "entity-read",
+                    "entity-read"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "CRUD_APP_WORKFLOW_RUN",
+                "qualifiedName": "CRUD_APP_WORKFLOW_RUN",
+                "description": "Allows admins and api tokens to update and delete AppWorkflowRun entities.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:AppWorkflowRun",
+                    "entity-classification:*",
+                    "entity:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions": [
                     "entity-update",
-                    "entity-delete"
+                    "entity-delete",
+                    "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "UPDATE_ATLAN_APP_WORKFLOW_SERVICE_ACCOUNTS",
+                "qualifiedName": "UPDATE_ATLAN_APP_WORKFLOW_SERVICE_ACCOUNTS",
+                "description": "Allows service accounts to update and delete AtlanAppWorkflow entities.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [
+                    "service-account-atlan-argo",
+                    "service-account-atlan-backend",
+                    "atlan-governance-workflows"
+                ],
+                "policyGroups": [],
+                "policyRoles": [],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:AtlanAppWorkflow",
+                    "entity-classification:*",
+                    "entity:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions": [
+                    "entity-update",
+                    "entity-delete",
+                    "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "UPDATE_ATLAN_APP_WORKFLOW_CREATOR",
+                "qualifiedName": "UPDATE_ATLAN_APP_WORKFLOW_CREATOR",
+                "description": "Allows the creator of an AtlanAppWorkflow to update and delete it (ownerUsers IN current user).",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas_abac",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [
+                    "public"
+                ],
+                "policyRoles": [],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyFilterCriteria": "{\"entity\":{\"condition\":\"AND\",\"criterion\":[{\"attributeName\":\"ownerUsers\",\"attributeValue\":\"{USER}\",\"operator\":\"IN\"}]}}",
+                "policyResources": [
+                    "entity-type:AtlanAppWorkflow",
+                    "entity-classification:*",
+                    "entity:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions": [
+                    "entity-update",
+                    "entity-delete",
+                    "entity-update-business-metadata"
                 ]
             }
         }
