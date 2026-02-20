@@ -21,6 +21,7 @@ import org.apache.atlas.AtlasServiceException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.MethodOrderer;
@@ -110,8 +111,12 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         AtlasEntity subDomain = new AtlasEntity("DataDomain");
         subDomain.setAttribute("name", "test-subdomain-" + testId);
         subDomain.setAttribute("qualifiedName", domainQN + "/domain/sub-" + testId);
-        subDomain.setAttribute("parentDomainQualifiedName", domainQN);
-        subDomain.setAttribute("superDomainQualifiedName", domainQN);
+
+        // Set parent domain via relationship attribute (required by preprocessor)
+        AtlasObjectId parentDomainRef = new AtlasObjectId();
+        parentDomainRef.setGuid(domainGuid);
+        parentDomainRef.setTypeName("DataDomain");
+        subDomain.setRelationshipAttribute("parentDomain", parentDomainRef);
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(subDomain));
         AtlasEntityHeader created = response.getFirstEntityCreated();
@@ -164,9 +169,14 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         AtlasEntity product = new AtlasEntity("DataProduct");
         product.setAttribute("name", "test-product-" + testId);
         product.setAttribute("qualifiedName", domainQN + "/product/test-" + testId);
-        product.setAttribute("domainQualifiedName", domainQN);
         // dataProductAssetsDSL is mandatory - provide a valid JSON object
         product.setAttribute("dataProductAssetsDSL", "{\"query\":{\"match_all\":{}}}");
+
+        // Set data domain via relationship attribute (required by preprocessor)
+        AtlasObjectId domainRef = new AtlasObjectId();
+        domainRef.setGuid(domainGuid);
+        domainRef.setTypeName("DataDomain");
+        product.setRelationshipAttribute("dataDomain", domainRef);
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(product));
         AtlasEntityHeader created = response.getFirstEntityCreated();
