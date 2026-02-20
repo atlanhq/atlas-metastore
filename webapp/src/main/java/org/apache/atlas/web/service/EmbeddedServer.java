@@ -190,8 +190,17 @@ public class EmbeddedServer {
                     securityMapping.setFilterName(securityFilterName);
                     securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
 
+                    // Get current mappings, create a new array, and insert securityMapping at index 0 (the front)
+                    org.eclipse.jetty.servlet.FilterMapping[] currentMappings = application.getServletHandler().getFilterMappings();
+                    org.eclipse.jetty.servlet.FilterMapping[] newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
+
+                    newMappings[0] = securityMapping; // Your bypass now runs BEFORE the global AuditFilter
+                    System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
+
+                    // Update Jetty with the new ordered filter list
+                    application.getServletHandler().setFilterMappings(newMappings);
                     // Add security mapping to the handler
-                    application.getServletHandler().addFilterMapping(securityMapping);
+                    //application.getServletHandler().addFilterMapping(securityMapping);
                     LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully via LifeCycle Listener.");
                 } catch (Exception e) {
                     LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
