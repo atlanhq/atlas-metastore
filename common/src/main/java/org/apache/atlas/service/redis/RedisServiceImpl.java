@@ -187,4 +187,87 @@ public class RedisServiceImpl extends AbstractRedisService {
         return LOG;
     }
 
+    // ========== Override Redis Operations with Availability Checks ==========
+
+    @Override
+    public boolean acquireDistributedLock(String key) throws Exception {
+        if (!isAvailable()) {
+            LOG.warn("Cannot acquire distributed lock {} - Redis unavailable", key);
+            return false;
+        }
+        return super.acquireDistributedLock(key);
+    }
+
+    @Override
+    public java.util.concurrent.locks.Lock acquireDistributedLockV2(String key) throws Exception {
+        if (!isAvailable()) {
+            LOG.warn("Cannot acquire distributed lock {} - Redis unavailable", key);
+            return null;
+        }
+        return super.acquireDistributedLockV2(key);
+    }
+
+    @Override
+    public void releaseDistributedLock(String key) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot release lock {} - Redis unavailable", key);
+            return;
+        }
+        super.releaseDistributedLock(key);
+    }
+
+    @Override
+    public void releaseDistributedLockV2(java.util.concurrent.locks.Lock lock, String key) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot release lock {} - Redis unavailable", key);
+            return;
+        }
+        super.releaseDistributedLockV2(lock, key);
+    }
+
+    @Override
+    public String getValue(String key) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot get value for {} - Redis unavailable", key);
+            return null;
+        }
+        return super.getValue(key);
+    }
+
+    @Override
+    public String getValue(String key, String defaultValue) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot get value for {} - Redis unavailable, returning default", key);
+            return defaultValue;
+        }
+        return super.getValue(key, defaultValue);
+    }
+
+    @Override
+    public String putValue(String key, String value) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot put value for {} - Redis unavailable", key);
+            return null;
+        }
+        return super.putValue(key, value);
+    }
+
+    @Override
+    public String putValue(String key, String value, int timeout) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot put value for {} - Redis unavailable", key);
+            return null;
+        }
+        return super.putValue(key, value, timeout);
+    }
+
+    @Override
+    public void removeValue(String key) {
+        if (!isAvailable()) {
+            LOG.warn("Cannot remove value for {} - Redis unavailable", key);
+            return;
+        }
+        super.removeValue(key);
+    }
+
 }
