@@ -28,6 +28,7 @@ import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletionStage;
 import java.util.stream.Collectors;
 
 import static org.apache.atlas.AtlasConfiguration.CLASSIFICATION_PROPAGATION_DEFAULT;
@@ -359,6 +360,55 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         } catch (Exception e) {
             LOG.error("Error fetching all classifications for vertexId={}", vertexId, e);
             throw new AtlasBaseException("Error fetching all classifications", e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    @Override
+    public Map<String, List<AtlasClassification>> getAllClassificationsForVertices(Collection<String> vertexIds) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getAllClassificationsForVertices");
+        Map<String, List<AtlasClassification>> result = new HashMap<>();
+
+        if (vertexIds == null || vertexIds.isEmpty()) {
+            return result;
+        }
+
+        try {
+            // Fire all queries in parallel using executeAsync
+            Map<String, CompletionStage<AsyncResultSet>> futures = new LinkedHashMap<>();
+            for (String vertexId : vertexIds) {
+                int bucket = calculateBucket(vertexId);
+                BoundStatement bound = findAllTagsForAssetStmt.bind(bucket, vertexId);
+                futures.put(vertexId, cassSession.executeAsync(bound));
+            }
+
+            // Collect results from all futures
+            for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
+                String vertexId = entry.getKey();
+                try {
+                    AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
+                    List<AtlasClassification> tags = new ArrayList<>();
+                    // Drain all pages (AsyncResultSet does not auto-page like sync ResultSet)
+                    while (rs != null) {
+                        for (Row row : rs.currentPage()) {
+                            if (!row.getBoolean("is_deleted")) {
+                                tags.add(convertToAtlasClassification(row.getString("tag_meta_json")));
+                            }
+                        }
+                        rs = rs.hasMorePages() ? rs.fetchNextPage().toCompletableFuture().join() : null;
+                    }
+                    result.put(vertexId, tags);
+                } catch (Exception e) {
+                    LOG.warn("Async classification fetch failed for vertexId={}, will fall back to sync", vertexId, e);
+                    // Don't put in result — caller falls back to sync getAllClassificationsForVertex
+                }
+            }
+
+            return result;
+        } catch (Exception e) {
+            LOG.error("Error in batch classification fetch", e);
+            throw new AtlasBaseException("Error fetching classifications in batch", e);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }

@@ -132,6 +132,7 @@ public class RequestContext {
     // Track Cassandra operations for rollback
     private final Map<String, Stack<CassandraTagOperation>> cassandraTagOperations = new HashMap<>();
     private final List<ESDeferredOperation> esDeferredOperations = new ArrayList<>();
+    private Map<String, List<AtlasClassification>> classificationCache;
     private static final String X_ATLAN_CLIENT_ORIGIN = "X-Atlan-Client-Origin";
     private static final String CLIENT_ORIGIN_PRODUCT = "product_webapp";
 
@@ -204,6 +205,10 @@ public class RequestContext {
         addedClassificationAndVertices.clear();
         esDeferredOperations.clear();
         this.cassandraTagOperations.clear();
+        if (classificationCache != null) {
+            classificationCache.clear();
+            classificationCache = null;
+        }
         this.allInternalAttributesMap.clear();
 
         // Reset observability timing fields
@@ -980,6 +985,26 @@ public class RequestContext {
 
     public long getLineageCalcTime() {
         return this.lineageCalcTime.get();
+    }
+
+    /**
+     * Returns cached classifications for the given vertex ID, or null if not cached.
+     */
+    public List<AtlasClassification> getCachedClassifications(String vertexId) {
+        return classificationCache != null ? classificationCache.get(vertexId) : null;
+    }
+
+    /**
+     * Caches a batch of classifications by vertex ID. Merges with any existing cached entries.
+     */
+    public void cacheClassifications(Map<String, List<AtlasClassification>> batch) {
+        if (batch == null || batch.isEmpty()) {
+            return;
+        }
+        if (classificationCache == null) {
+            classificationCache = new HashMap<>();
+        }
+        classificationCache.putAll(batch);
     }
 
 }

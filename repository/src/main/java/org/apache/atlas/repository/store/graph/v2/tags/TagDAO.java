@@ -4,6 +4,8 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -53,5 +55,25 @@ public interface TagDAO {
                                                                        String pagingStateStr, int pageSize) throws AtlasBaseException;
 
     PaginatedVertexIdResult getVertexIdFromTagsByIdTableWithPagination(String pagingStateStr, int pageSize) throws AtlasBaseException;
+
+    /**
+     * Batch-fetches classifications for multiple vertices in parallel.
+     * Returns a map of vertex ID to its classifications list.
+     * Vertices with no tags will have an empty list in the result.
+     * Vertices that fail to fetch will be absent from the result (caller should fall back to sync fetch).
+     *
+     * @param vertexIds Collection of vertex IDs to fetch classifications for
+     * @return Map of vertex ID to list of classifications
+     * @throws AtlasBaseException If an error occurs during retrieval
+     */
+    default Map<String, List<AtlasClassification>> getAllClassificationsForVertices(Collection<String> vertexIds) throws AtlasBaseException {
+        Map<String, List<AtlasClassification>> result = new HashMap<>();
+        if (vertexIds != null) {
+            for (String vertexId : vertexIds) {
+                result.put(vertexId, getAllClassificationsForVertex(vertexId));
+            }
+        }
+        return result;
+    }
 }
 

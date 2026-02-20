@@ -548,11 +548,16 @@ public class EntityGraphRetriever {
     public AtlasEntitiesWithExtInfo toAtlasEntitiesWithExtInfo(List<String> guids, boolean isMinExtInfo) throws AtlasBaseException {
         AtlasEntitiesWithExtInfo ret = new AtlasEntitiesWithExtInfo();
 
+        // Collect all vertices first, then prefetch classifications in parallel
+        List<AtlasVertex> vertices = new ArrayList<>(guids.size());
         for (String guid : guids) {
-            AtlasVertex vertex = getEntityVertex(guid);
+            vertices.add(getEntityVertex(guid));
+        }
 
+        prefetchClassifications(vertices);
+
+        for (AtlasVertex vertex : vertices) {
             AtlasEntity entity = mapVertexToAtlasEntity(vertex, ret, isMinExtInfo);
-
             ret.addEntity(entity);
         }
 
@@ -1484,7 +1489,9 @@ public class EntityGraphRetriever {
             }
 
             if(!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()) {
-                entity.setClassifications(tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay()));
+                String vertexId = entityVertex.getIdForDisplay();
+                List<AtlasClassification> cached = RequestContext.get().getCachedClassifications(vertexId);
+                entity.setClassifications(cached != null ? new ArrayList<>(cached) : tagDAO.getAllClassificationsForVertex(vertexId));
             } else {
                 mapClassifications(entityVertex, entity);
             }
@@ -1715,13 +1722,12 @@ public class EntityGraphRetriever {
             RequestContext context = RequestContext.get();
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
-            if(includeClassifications || includeClassificationNames){
+            if (includeClassifications) {
                 List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
-
-                if (includeClassifications) {
-                    ret.setClassifications(tags);
-                }
+                ret.setClassifications(tags);
                 ret.setClassificationNames(getAllTagNames(tags));
+            } else if (includeClassificationNames) {
+                ret.setClassificationNames(getClassificationNamesFromVertex(entityVertex));
             }
             ret.setLabels(getLabels(entityVertex));
 
@@ -1821,13 +1827,12 @@ public class EntityGraphRetriever {
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
 
-            if(includeClassifications || includeClassificationNames){
+            if (includeClassifications) {
                 List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
-
-                if(includeClassifications){
-                    ret.setClassifications(tags);
-                }
+                ret.setClassifications(tags);
                 ret.setClassificationNames(getAllTagNames(tags));
+            } else if (includeClassificationNames) {
+                ret.setClassificationNames(getClassificationNamesFromVertex(entityVertex));
             }
 
             ret.setIsIncomplete(isIncomplete);
@@ -1950,13 +1955,12 @@ public class EntityGraphRetriever {
             boolean includeClassifications = context.includeClassifications();
             boolean includeClassificationNames = context.isIncludeClassificationNames();
 
-            if(includeClassifications || includeClassificationNames){
+            if (includeClassifications) {
                 List<AtlasClassification> tags = handleGetAllClassifications(entityVertex);
-
-                if (includeClassifications) {
-                    ret.setClassifications(tags);
-                }
+                ret.setClassifications(tags);
                 ret.setClassificationNames(getAllTagNames(tags));
+            } else if (includeClassificationNames) {
+                ret.setClassificationNames(getClassificationNamesFromVertex(entityVertex));
             }
 
             ret.setIsIncomplete(isIncomplete);
@@ -2192,7 +2196,10 @@ public class EntityGraphRetriever {
             if (LOG.isDebugEnabled())
                 LOG.debug("Performing getAllClassifications_V2");
 
-            List<AtlasClassification> classifications = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+            // Check request-scoped cache first (populated by prefetchClassifications)
+            String vertexId = entityVertex.getIdForDisplay();
+            List<AtlasClassification> cached = RequestContext.get().getCachedClassifications(vertexId);
+            List<AtlasClassification> classifications = cached != null ? new ArrayList<>(cached) : tagDAO.getAllClassificationsForVertex(vertexId);
 
             // Map each classification's attributes with defaults
             if (CollectionUtils.isNotEmpty(classifications)) {
@@ -2306,6 +2313,29 @@ public class EntityGraphRetriever {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    /**
+     * Pre-fetches classifications for multiple vertices in parallel and caches them in RequestContext.
+     * Subsequent calls to getAllClassificationsForVertex for these vertices will hit the cache.
+     * Only active when TagV2 is enabled and authorization checks are not skipped.
+     */
+    private void prefetchClassifications(List<AtlasVertex> vertices) throws AtlasBaseException {
+        if (!DynamicConfigStore.isTagV2Enabled() || RequestContext.get().isSkipAuthorizationCheck()) {
+            return;
+        }
+
+        if (vertices.isEmpty()) {
+            return;
+        }
+
+        List<String> vertexIds = new ArrayList<>(vertices.size());
+        for (AtlasVertex v : vertices) {
+            vertexIds.add(v.getIdForDisplay());
+        }
+
+        Map<String, List<AtlasClassification>> batch = tagDAO.getAllClassificationsForVertices(vertexIds);
+        RequestContext.get().cacheClassifications(batch);
     }
 
     public List<AtlasTermAssignmentHeader> mapAssignedTerms(AtlasVertex entityVertex) {

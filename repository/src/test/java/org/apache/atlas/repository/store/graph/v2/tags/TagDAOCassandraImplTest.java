@@ -389,6 +389,68 @@ public class TagDAOCassandraImplTest {
 
 
 
+    // =================== Batch Classification Tests ===================
+
+    @Test
+    void testGetAllClassificationsForVertices_MultipleVertices() throws AtlasBaseException {
+        // Setup: Insert tags for 3 different assets
+        String asset1 = "2001", asset2 = "2002", asset3 = "2003";
+        AtlasClassification tag1 = createClassification("TAG_A", asset1);
+        AtlasClassification tag2 = createClassification("TAG_B", asset2);
+        AtlasClassification tag3 = createClassification("TAG_C", asset3);
+        tagDAO.putDirectTag(asset1, "TAG_A", tag1, createAssetMetadata("a1", "q/a1"));
+        tagDAO.putDirectTag(asset2, "TAG_B", tag2, createAssetMetadata("a2", "q/a2"));
+        tagDAO.putDirectTag(asset3, "TAG_C", tag3, createAssetMetadata("a3", "q/a3"));
+
+        // Action: Batch fetch
+        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList(asset1, asset2, asset3));
+
+        // Assert: All 3 assets have their tags
+        assertEquals(3, result.size());
+        assertEquals(1, result.get(asset1).size());
+        assertEquals("TAG_A", result.get(asset1).get(0).getTypeName());
+        assertEquals(1, result.get(asset2).size());
+        assertEquals("TAG_B", result.get(asset2).get(0).getTypeName());
+        assertEquals(1, result.get(asset3).size());
+        assertEquals("TAG_C", result.get(asset3).get(0).getTypeName());
+    }
+
+    @Test
+    void testGetAllClassificationsForVertices_EmptyInput() throws AtlasBaseException {
+        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Collections.emptyList());
+        assertTrue(result.isEmpty());
+    }
+
+    @Test
+    void testGetAllClassificationsForVertices_VertexWithNoTags() throws AtlasBaseException {
+        // Asset 3001 has no tags inserted
+        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList("3001"));
+        assertTrue(result.containsKey("3001"));
+        assertTrue(result.get("3001").isEmpty());
+    }
+
+    @Test
+    void testGetAllClassificationsForVertices_FiltersDeletedTags() throws AtlasBaseException {
+        String assetId = "4001";
+        AtlasClassification tag = createClassification("DELETED_TAG", assetId);
+        tagDAO.putDirectTag(assetId, "DELETED_TAG", tag, createAssetMetadata("a4", "q/a4"));
+        tagDAO.deleteDirectTag(assetId, tag);
+
+        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList(assetId));
+        assertTrue(result.containsKey(assetId));
+        assertTrue(result.get(assetId).isEmpty(), "Deleted tags should be filtered out");
+    }
+
+    @Test
+    void testGetAllClassificationsForVertices_MultipleTagsPerVertex() throws AtlasBaseException {
+        String assetId = "5001";
+        tagDAO.putDirectTag(assetId, "TAG_X", createClassification("TAG_X", assetId), createAssetMetadata("a5", "q/a5"));
+        tagDAO.putDirectTag(assetId, "TAG_Y", createClassification("TAG_Y", assetId), createAssetMetadata("a5", "q/a5"));
+
+        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList(assetId));
+        assertEquals(2, result.get(assetId).size());
+    }
+
     // =================== Helper Methods ===================
 
     private AtlasClassification createClassification(String typeName, String entityGuid) {

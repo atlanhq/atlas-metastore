@@ -1010,25 +1010,45 @@ public final class GraphHelper {
         return ret;
     }
 
-    public static List<String> getTraitNamesV2(AtlasVertex entityVertex, Boolean propagated) {
-        List<String>     ret   = new ArrayList<>();
-        try {
-            TagDAO tagDAOCassandra = TagDAOCassandraImpl.getInstance();
-            if (!propagated) {
-                ret = tagDAOCassandra.getAllDirectClassificationsForVertex(entityVertex.getIdForDisplay())
-                                     .stream()
-                                     .map(AtlasClassification::getTypeName)
-                                     .collect(Collectors.toList());
-            } else {
-                ret = tagDAOCassandra.findByVertexIdAndPropagated(entityVertex.getIdForDisplay())
-                                     .stream()
-                                     .map(AtlasClassification::getTypeName)
-                                     .collect(Collectors.toList());
+    public static List<String> getClassificationNamesFromVertex(AtlasVertex entityVertex) {
+        List<String> ret = new ArrayList<>();
+        String delimitedNames = entityVertex.getProperty(CLASSIFICATION_NAMES_KEY, String.class);
+        if (StringUtils.isNotEmpty(delimitedNames)) {
+            String[] names = StringUtils.split(delimitedNames, CLASSIFICATION_NAME_DELIMITER);
+            for (String name : names) {
+                if (StringUtils.isNotBlank(name)) {
+                    ret.add(name);
+                }
             }
-        } catch (AtlasBaseException e) {
-            throw new RuntimeException(e);
         }
         return ret;
+    }
+
+    public static List<String> getPropagatedClassificationNamesFromVertex(AtlasVertex entityVertex) {
+        List<String> ret = new ArrayList<>();
+        String delimitedNames = entityVertex.getProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class);
+        if (StringUtils.isNotEmpty(delimitedNames)) {
+            String[] names = StringUtils.split(delimitedNames, CLASSIFICATION_NAME_DELIMITER);
+            for (String name : names) {
+                if (StringUtils.isNotBlank(name)) {
+                    ret.add(name);
+                }
+            }
+        }
+        return ret;
+    }
+
+    public static List<String> getTraitNamesV2(AtlasVertex entityVertex, Boolean propagated) {
+        if (propagated == null) {
+            List<String> ret = new ArrayList<>();
+            ret.addAll(getClassificationNamesFromVertex(entityVertex));
+            ret.addAll(getPropagatedClassificationNamesFromVertex(entityVertex));
+            return ret;
+        } else if (propagated) {
+            return getPropagatedClassificationNamesFromVertex(entityVertex);
+        } else {
+            return getClassificationNamesFromVertex(entityVertex);
+        }
     }
 
     public static List<AtlasVertex> getPropagatableClassifications(AtlasEdge edge) {
