@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ .Values.atlas.name }}
-  namespace: {{ .Values.Namespace  }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace  }}
   labels:
     app: {{ template "name" . }}
     release: {{ .Release.Name }}
@@ -91,21 +91,21 @@ spec:
       {{- if .Values.priorityClassName }}
       priorityClassName: {{ .Values.priorityClassName }}
       {{- end }}
-      initContainers:
       {{- if .Values.atlas.initContainers }}
+      initContainers:
         {{- toYaml .Values.atlas.initContainers | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ .Values.atlas.serviceAccount.name }}
       containers:
         - name: {{ .Chart.Name }}-main
-          command: [
-            "/bin/bash",
-            "-c",
-            "/create-atlas-keycloak-config.sh;
-            /env_change.sh;
-            /opt/apache-atlas/bin/atlas_start.py;
-            tail -F /opt/apache-atlas/logs/*.log;"
-          ]
+          {{- with .Values.atlas.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.atlas.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           image: "{{ .Values.atlas.image.repository }}:{{ .Values.atlas.image.tag }}"
           imagePullPolicy: {{ .Values.atlas.image.pullPolicy }}
           ports:
@@ -237,7 +237,7 @@ spec:
             - name: nginx-log-volume
               mountPath: /var/log/nginx
         {{- end }}
-      {{- if .Values.atlas.imagePullSecrets }}
+      {{- if gt (len .Values.atlas.imagePullSecrets) 0 }}
       imagePullSecrets:
       {{- toYaml .Values.atlas.imagePullSecrets | nindent 8 }}
       {{- end }}

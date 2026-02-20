@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: rate-limit-nginx-config
-  namespace: {{ .Values.Namespace }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
 data:
   nginx.conf: |-
     # Load the dynamic VTS module (must be at the top level)

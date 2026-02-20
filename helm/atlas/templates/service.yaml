@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: atlas-service-atlas
-  namespace: {{ .Values.Namespace  }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace  }}
   annotations:
     {{- if eq .Values.global.cloud "gcp" }}
     cloud.google.com/neg: '{"exposed_ports": {"80":{"name": "{{ .Values.global.tenantName }}-atlas-80-neg-http"}}}'

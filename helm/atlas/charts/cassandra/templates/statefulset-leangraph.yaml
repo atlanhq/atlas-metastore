@@ -5,7 +5,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: atlas-leangraph-cassandra
-  namespace: {{ .Values.Namespace }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
   labels:
     app: leangraph-cassandra
     release: {{ .Release.Name }}
@@ -160,7 +160,7 @@ spec:
           {{- if .Values.hostNetwork }}
           value: {{ required "You must fill \".Values.config.seeds\" with list of Cassandra seeds when hostNetwork is set to true" .Values.config.seeds | quote }}
           {{- else }}
-          value: "{{- range $i, $e := until $seed_size }}atlas-leangraph-cassandra-{{ $i }}.atlas-leangraph-cassandra.{{ $.Values.Namespace }}.svc.{{ $.Values.config.cluster_domain }}{{- if (lt ( add1 $i ) $seed_size ) }},{{- end }}{{- end }}"
+          value: "{{- range $i, $e := until $seed_size }}atlas-leangraph-cassandra-{{ $i }}.atlas-leangraph-cassandra.{{ $.Values.Namespace | default $.Release.Namespace }}.svc.{{ $.Values.config.cluster_domain }}{{- if (lt ( add1 $i ) $seed_size ) }},{{- end }}{{- end }}"
           {{- end }}
         - name: MAX_HEAP_SIZE
           value: {{ default "8192M" .Values.max_heap_size | quote }}

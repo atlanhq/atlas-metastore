@@ -3,7 +3,7 @@ apiVersion: v1
 kind: Service
 metadata:
   name: atlas-leangraph-cassandra
-  namespace: {{ .Values.Namespace }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
   labels:
     app: leangraph-cassandra
     release: {{ .Release.Name }}

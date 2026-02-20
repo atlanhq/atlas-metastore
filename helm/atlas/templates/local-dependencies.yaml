@@ -1,0 +1,487 @@
+{{- if .Values.localDependencies.enabled }}
+{{- if .Values.localDependencies.cassandra.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-cassandra
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: atlas-cassandra
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: atlas-cassandra
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: atlas-cassandra
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: cassandra
+          image: {{ .Values.localDependencies.cassandra.image.repository }}:{{ .Values.localDependencies.cassandra.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.cassandra.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.cassandra.service.port }}
+              name: cql
+          env:
+            - name: CASSANDRA_CLUSTER_NAME
+              value: atlas
+          {{- with .Values.localDependencies.cassandra.env }}
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          readinessProbe:
+            tcpSocket:
+              port: {{ .Values.localDependencies.cassandra.service.port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 30
+          resources:
+{{ toYaml .Values.localDependencies.cassandra.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.cassandra.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: atlas-cassandra
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: atlas-cassandra
+    release: {{ .Release.Name }}
+  ports:
+    - name: cql
+      port: {{ .Values.localDependencies.cassandra.service.port }}
+      targetPort: {{ .Values.localDependencies.cassandra.service.port }}
+{{- end }}
+{{- if .Values.localDependencies.elasticsearch.enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: elasticsearch-synonym-config
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: atlas-elasticsearch-master
+    release: {{ .Release.Name }}
+data:
+  synonym.txt: |
+    db,database
+    tbl,table
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: atlas-elasticsearch-master
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: atlas-elasticsearch-master
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: atlas-elasticsearch-master
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: atlas-elasticsearch-master
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: elasticsearch
+          image: {{ .Values.localDependencies.elasticsearch.image.repository }}:{{ .Values.localDependencies.elasticsearch.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.elasticsearch.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.elasticsearch.service.port }}
+              name: http
+          env:
+            - name: discovery.type
+              value: single-node
+            - name: xpack.security.enabled
+              value: "false"
+            - name: ES_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          resources:
+{{ toYaml .Values.localDependencies.elasticsearch.resources | indent 12 }}
+          volumeMounts:
+            - name: elasticsearch-synonym-config
+              mountPath: /usr/share/elasticsearch/config/synonym.txt
+              subPath: synonym.txt
+      volumes:
+        - name: elasticsearch-synonym-config
+          configMap:
+            name: elasticsearch-synonym-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.elasticsearch.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: atlas-elasticsearch-master
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: atlas-elasticsearch-master
+    release: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.localDependencies.elasticsearch.service.port }}
+      targetPort: {{ .Values.localDependencies.elasticsearch.service.port }}
+{{- end }}
+{{- if .Values.localDependencies.redis.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: redis
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: redis
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: redis
+          image: {{ .Values.localDependencies.redis.image.repository }}:{{ .Values.localDependencies.redis.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.redis.image.pullPolicy }}
+          {{- if .Values.atlas.redis.password }}
+          command:
+            - redis-server
+            - --requirepass
+            - {{ .Values.atlas.redis.password | quote }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.redis.service.port }}
+              name: redis
+          resources:
+{{ toYaml .Values.localDependencies.redis.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.redis.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: redis
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: redis
+    release: {{ .Release.Name }}
+  ports:
+    - name: redis
+      port: {{ .Values.localDependencies.redis.service.port }}
+      targetPort: {{ .Values.localDependencies.redis.service.port }}
+{{- end }}
+{{- if .Values.localDependencies.zookeeper.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: zookeeper
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: zookeeper
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: zookeeper
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: zookeeper
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: zookeeper
+          image: {{ .Values.localDependencies.zookeeper.image.repository }}:{{ .Values.localDependencies.zookeeper.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.zookeeper.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.zookeeper.service.port }}
+              name: zk
+          {{- with .Values.localDependencies.zookeeper.env }}
+          env:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.localDependencies.zookeeper.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.zookeeper.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: zookeeper
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: zookeeper
+    release: {{ .Release.Name }}
+  ports:
+    - name: zk
+      port: {{ .Values.localDependencies.zookeeper.service.port }}
+      targetPort: {{ .Values.localDependencies.zookeeper.service.port }}
+{{- end }}
+{{- if .Values.localDependencies.kafka.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kafka
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: kafka
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kafka
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: kafka
+        release: {{ .Release.Name }}
+    spec:
+      enableServiceLinks: false
+      containers:
+        - name: kafka
+          image: {{ .Values.localDependencies.kafka.image.repository }}:{{ .Values.localDependencies.kafka.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.kafka.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.kafka.service.port }}
+              name: kafka
+          env:
+            - name: KAFKA_BROKER_ID
+              value: "1"
+            - name: KAFKA_ZOOKEEPER_CONNECT
+              value: "zookeeper:2181"
+            - name: KAFKA_LISTENERS
+              value: "PLAINTEXT://0.0.0.0:9092"
+            - name: KAFKA_ADVERTISED_LISTENERS
+              value: "PLAINTEXT://kafka:9092"
+            - name: KAFKA_LISTENER_SECURITY_PROTOCOL_MAP
+              value: "PLAINTEXT:PLAINTEXT"
+            - name: KAFKA_INTER_BROKER_LISTENER_NAME
+              value: "PLAINTEXT"
+            - name: KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR
+              value: "1"
+            - name: KAFKA_TRANSACTION_STATE_LOG_MIN_ISR
+              value: "1"
+          resources:
+{{ toYaml .Values.localDependencies.kafka.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.kafka.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: kafka
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: kafka
+    release: {{ .Release.Name }}
+  ports:
+    - name: kafka
+      port: {{ .Values.localDependencies.kafka.service.port }}
+      targetPort: {{ .Values.localDependencies.kafka.service.port }}
+{{- end }}
+{{- if .Values.localDependencies.keycloak.enabled }}
+---
+{{- if .Values.localDependencies.keycloak.postgres.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-postgres
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: keycloak-postgres
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-postgres
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: keycloak-postgres
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.localDependencies.keycloak.postgres.image.repository }}:{{ .Values.localDependencies.keycloak.postgres.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.keycloak.postgres.image.pullPolicy }}
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.localDependencies.keycloak.postgres.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.localDependencies.keycloak.postgres.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.localDependencies.keycloak.postgres.auth.password | quote }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.keycloak.postgres.service.port }}
+              name: postgres
+          resources:
+{{ toYaml .Values.localDependencies.keycloak.postgres.resources | indent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.keycloak.postgres.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: keycloak-postgres
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: keycloak-postgres
+    release: {{ .Release.Name }}
+  ports:
+    - name: postgres
+      port: {{ .Values.localDependencies.keycloak.postgres.service.port }}
+      targetPort: {{ .Values.localDependencies.keycloak.postgres.service.port }}
+---
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-config
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: keycloak
+    release: {{ .Release.Name }}
+data:
+  atlas-realm.json: |
+    {
+      "realm": "{{ .Values.localDependencies.keycloak.realmImport.realm }}",
+      "enabled": true,
+      "clients": [
+        {
+          "clientId": "{{ .Values.localDependencies.keycloak.realmImport.clientId }}",
+          "enabled": true,
+          "publicClient": false,
+          "secret": "{{ .Values.localDependencies.keycloak.realmImport.clientSecret }}",
+          "directAccessGrantsEnabled": true,
+          "serviceAccountsEnabled": true,
+          "standardFlowEnabled": true,
+          "protocol": "openid-connect"
+        }
+      ],
+      "users": [
+        {
+          "username": "{{ .Values.localDependencies.keycloak.realmImport.testUser.username }}",
+          "enabled": true,
+          "emailVerified": true,
+          "credentials": [
+            {
+              "type": "password",
+              "value": "{{ .Values.localDependencies.keycloak.realmImport.testUser.password }}",
+              "temporary": false
+            }
+          ]
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: keycloak
+    release: {{ .Release.Name }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: keycloak
+        release: {{ .Release.Name }}
+    spec:
+      containers:
+        - name: keycloak
+          image: {{ .Values.localDependencies.keycloak.image.repository }}:{{ .Values.localDependencies.keycloak.image.tag }}
+          imagePullPolicy: {{ .Values.localDependencies.keycloak.image.pullPolicy }}
+          {{- with .Values.localDependencies.keycloak.command }}
+          command:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          {{- with .Values.localDependencies.keycloak.args }}
+          args:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          ports:
+            - containerPort: {{ .Values.localDependencies.keycloak.service.port }}
+              name: http
+          {{- with .Values.localDependencies.keycloak.env }}
+          env:
+{{ toYaml . | indent 12 }}
+          {{- end }}
+          resources:
+{{ toYaml .Values.localDependencies.keycloak.resources | indent 12 }}
+          {{- if .Values.localDependencies.keycloak.realmImport.enabled }}
+          volumeMounts:
+            - name: keycloak-realm-config
+              mountPath: /opt/keycloak/data/import/atlas-realm.json
+              subPath: atlas-realm.json
+          {{- end }}
+      {{- if .Values.localDependencies.keycloak.realmImport.enabled }}
+      volumes:
+        - name: keycloak-realm-config
+          configMap:
+            name: keycloak-realm-config
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.localDependencies.keycloak.service.name }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
+  labels:
+    app: keycloak
+    release: {{ .Release.Name }}
+spec:
+  selector:
+    app: keycloak
+    release: {{ .Release.Name }}
+  ports:
+    - name: http
+      port: {{ .Values.localDependencies.keycloak.service.port }}
+      targetPort: {{ .Values.localDependencies.keycloak.service.port }}
+{{- end }}
+{{- end }}

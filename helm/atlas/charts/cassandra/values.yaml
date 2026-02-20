@@ -371,6 +371,7 @@ exporter:
 ## Sidecar for backup/restore
 ## ref: https://github.com/instaclustr/icarus
 icarus:
+  enabled: true
   image:
     repo: ghcr.io/atlanhq/cassandra-icarus-atlan-v2
     tag: 1.0.4

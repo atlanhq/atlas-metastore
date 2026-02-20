@@ -3,7 +3,7 @@ apiVersion: batch/v1
 kind: CronJob
 metadata:
   name: {{ template "cassandra.fullname" . }}-reaper-cron
-  namespace: {{ .Values.Namespace }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
   labels:
     app: {{ template "cassandra.name" . }}-reaper
     release: {{ .Release.Name }}
@@ -153,6 +153,8 @@ spec:
                   {{- end }}
                   resources:
                     {{- toYaml .Values.reaper.sidecar.resources | nindent 20 }}
-            imagePullSecrets: 
+            {{- if .Values.image.pullSecrets }}
+            imagePullSecrets:
                 - name: {{ .Values.image.pullSecrets }}
+            {{- end }}
 {{- end}}

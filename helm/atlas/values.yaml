@@ -29,7 +29,8 @@ global:
       enabled: false  # Creates dedicated Cassandra and Elasticsearch StatefulSets
       active: false   # Uses dedicated resources in configmap
     
-Namespace: atlas
+# Leave empty to use Helm release namespace.
+Namespace: ""
 sentry_flag: disable
 albTenant: false
 podDisruptionBudget:
@@ -170,7 +171,12 @@ atlas:
     repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
     tag: ATLAS_LATEST_IMAGE_TAG
     pullPolicy: IfNotPresent
-  imagePullSecrets: {}
+  imagePullSecrets: []
+  command:
+    - /bin/bash
+  args:
+    - -c
+    - /create-atlas-keycloak-config.sh; /env_change.sh; /opt/apache-atlas/bin/atlas_start.py; tail -F /opt/apache-atlas/logs/*.log;
   tolerations: []
 
   # Affinity rules for atlas
@@ -653,6 +659,171 @@ nginx:
     format: '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$http_x_forwarded_for" "$http_x_atlan_client_origin" "$http_x_atlan_agent_id"'
   vts:
     zoneMemory: "32m"
+
+# Optional lightweight local dependencies for single-node development.
+localDependencies:
+  enabled: false
+
+  cassandra:
+    enabled: true
+    image:
+      repository: cassandra
+      tag: "4.1"
+      pullPolicy: IfNotPresent
+    service:
+      name: atlas-cassandra
+      port: 9042
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+  elasticsearch:
+    enabled: true
+    image:
+      repository: docker.elastic.co/elasticsearch/elasticsearch
+      tag: "7.17.24"
+      pullPolicy: IfNotPresent
+    service:
+      name: atlas-elasticsearch-master
+      port: 9200
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+  redis:
+    enabled: true
+    image:
+      repository: redis
+      tag: "7-alpine"
+      pullPolicy: IfNotPresent
+    service:
+      name: redis
+      port: 6379
+    resources:
+      requests:
+        cpu: 50m
+        memory: 128Mi
+      limits:
+        cpu: 300m
+        memory: 512Mi
+
+  zookeeper:
+    enabled: true
+    image:
+      repository: bitnami/zookeeper
+      tag: "3.9"
+      pullPolicy: IfNotPresent
+    service:
+      name: zookeeper
+      port: 2181
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 1Gi
+
+  kafka:
+    enabled: true
+    image:
+      repository: confluentinc/cp-kafka
+      tag: "7.6.1"
+      pullPolicy: IfNotPresent
+    service:
+      name: kafka
+      port: 9092
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+  keycloak:
+    enabled: false
+    postgres:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "14"
+        pullPolicy: IfNotPresent
+      service:
+        name: keycloak-postgres
+        port: 5432
+      auth:
+        database: keycloak
+        username: keycloak
+        password: keycloak
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
+        limits:
+          cpu: 500m
+          memory: 1Gi
+    realmImport:
+      enabled: true
+      realm: atlas
+      clientId: atlas
+      clientSecret: atlas-dev-secret
+      testUser:
+        username: atlas
+        password: atlas
+    image:
+      repository: quay.io/keycloak/keycloak
+      tag: "24.0.4"
+      pullPolicy: IfNotPresent
+    service:
+      name: keycloak
+      port: 8080
+    command:
+      - /opt/keycloak/bin/kc.sh
+    args:
+      - start
+      - --http-port=8080
+      - --http-enabled=true
+      - --http-relative-path=/auth
+      - --hostname-strict=false
+    env:
+      - name: KEYCLOAK_ADMIN
+        value: admin
+      - name: KEYCLOAK_ADMIN_PASSWORD
+        value: admin
+      - name: KC_HEALTH_ENABLED
+        value: "true"
+      - name: KC_DB
+        value: postgres
+      - name: KC_DB_URL_HOST
+        value: keycloak-postgres
+      - name: KC_DB_URL_PORT
+        value: "5432"
+      - name: KC_DB_URL_DATABASE
+        value: keycloak
+      - name: KC_DB_USERNAME
+        value: keycloak
+      - name: KC_DB_PASSWORD
+        value: keycloak
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+
+auth:
+  localKeycloakEnabled: false
+  authorizerImplOverride: ""
 
 # Summary of Timeout Settings in Nginx
 

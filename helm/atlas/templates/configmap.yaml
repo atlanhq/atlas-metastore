@@ -2,7 +2,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: atlas-config
-  namespace: {{ .Values.Namespace }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
   labels:
     app: {{ template "name" . }}
     release: {{ .Release.Name }}
@@ -155,12 +155,18 @@ data:
     # atlas.graph.index.search.max-result-set-size=150
 
     #########  Notification Configs  #########
+    {{- if .Values.localDependencies.enabled }}
+    atlas.kafka.bootstrap.servers=kafka:9092
+    {{- else }}
     atlas.kafka.bootstrap.servers=kafka-0.kafka-headless.kafka.svc.cluster.local:9092,kafka-1.kafka-headless.kafka.svc.cluster.local:9092,kafka-2.kafka-headless.kafka.svc.cluster.local:9092
+    {{- end }}
     
     atlas.kafka.zookeeper.session.timeout.ms=60000
     atlas.kafka.zookeeper.connection.timeout.ms=30000
     atlas.kafka.zookeeper.sync.time.ms=20
-    {{- if eq .Values.global.Infra_Tier "Lite" }}
+    {{- if .Values.localDependencies.enabled }}
+    atlas.kafka.zookeeper.connect=zookeeper:2181
+    {{- else if eq .Values.global.Infra_Tier "Lite" }}
     atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181
     {{- else }}
     atlas.kafka.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
@@ -175,7 +181,11 @@ data:
     atlas.kafka.poll.timeout.ms=2000
 
     atlas.notification.create.topics=true
+    {{- if .Values.localDependencies.enabled }}
+    atlas.notification.replicas=1
+    {{- else }}
     atlas.notification.replicas=3
+    {{- end }}
     atlas.notification.topics=ATLAS_HOOK,ATLAS_ENTITIES
     atlas.notification.log.failed.messages=true
     atlas.notification.failed.messages.filename=atlas_hook_failed_messages.log
@@ -205,9 +215,13 @@ data:
     atlas.authentication.method.kerberos=false
     atlas.authentication.method.file=false
 
+    {{- if or (not .Values.localDependencies.enabled) .Values.auth.localKeycloakEnabled }}
     atlas.authentication.method.keycloak=true
     atlas.authentication.method.keycloak.file=${sys:atlas.home}/conf/keycloak.json
     atlas.authentication.method.keycloak.stateless.enabled=true
+    {{- else }}
+    atlas.authentication.method.keycloak=false
+    {{- end }}
     atlas.authentication.method.keycloak.ugi-groups=false
     atlas.authentication.method.keycloak.groups_claim=groups
 
@@ -276,7 +290,9 @@ data:
     atlas.server.ids=id1,id2
     atlas.server.address.id1=atlas-0.atlas-service-atlas.atlas.svc.cluster.local:21000
     atlas.server.address.id2=atlas-1.atlas-service-atlas.atlas.svc.cluster.local:21000
-    {{- if eq .Values.global.Infra_Tier "Lite" }}
+    {{- if .Values.localDependencies.enabled }}
+    atlas.server.ha.zookeeper.connect=zookeeper:2181
+    {{- else if eq .Values.global.Infra_Tier "Lite" }}
     atlas.server.ha.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181
     {{- else }}
     atlas.server.ha.zookeeper.connect=zookeeper-0.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-1.zookeeper-headless.atlas.svc.cluster.local:2181,zookeeper-2.zookeeper-headless.atlas.svc.cluster.local:2181
@@ -291,7 +307,9 @@ data:
     ######### Atlas Authorization #########
     #atlas.authorizer.impl=none
 
-    {{- if eq .Values.atlas_auth true }}
+    {{- if .Values.auth.authorizerImplOverride }}
+    atlas.authorizer.impl={{ .Values.auth.authorizerImplOverride }}
+    {{- else if eq .Values.atlas_auth true }}
     atlas.authorizer.impl=atlas
     {{- else }}
     atlas.authorizer.impl=org.apache.ranger.authorization.atlas.authorizer.RangerAtlasAuthorizer
@@ -303,7 +321,11 @@ data:
     #atlas.authorizer.simple.authz.policy.file=atlas-simple-authz-policy.json
     
     ######### Atlas User service #########
+    {{- if .Values.localDependencies.enabled }}
+    atlas.user-service-url=http://localhost
+    {{- else }}
     atlas.user-service-url=http://heracles-service.heracles.svc.cluster.local
+    {{- end }}
 
     #########  Type Cache Implementation ########
     # A type cache class which implements
@@ -454,15 +476,24 @@ data:
     # org.apache.atlas.service.redis.RedisServiceImpl - connects to sentinel cluster, for prod.
     # org.apache.atlas.service.redis.RedisServiceLocalImpl - connects to local redis cluster, for local dev.
     # org.apache.atlas.service.redis.NoRedisServiceImpl - default, dummy redis implementation.
+    {{- if .Values.localDependencies.enabled }}
+    atlas.redis.service.impl = org.apache.atlas.service.redis.NoRedisServiceImpl
+    {{- else }}
     atlas.redis.service.impl = org.apache.atlas.service.redis.RedisServiceImpl
+    {{- end }}
     atlas.redis.url = redis://{{ .Values.atlas.redis.host }}:{{ .Values.atlas.redis.port }}
     {{- if eq .Values.global.Infra_Tier "Lite" }}
     atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls_lite }}
     {{- else }}
     atlas.redis.sentinel.urls = {{ .Values.atlas.redis.sentinel_urls }}
     {{- end }}
+    {{- if .Values.localDependencies.enabled }}
+    atlas.redis.username = default
+    atlas.redis.password = {{ .Values.atlas.redis.password }}
+    {{- else }}
     atlas.redis.username = {{ .Values.atlas.redis.username }}
     atlas.redis.password = {{ .Values.atlas.redis.password }}
+    {{- end }}
     atlas.redis.master_name = {{ .Values.atlas.redis.master_name }}
     atlas.redis.lock.wait_time.ms=15000
     # Renew lock for every 10mins
