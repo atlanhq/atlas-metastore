@@ -143,55 +143,39 @@ public class EmbeddedServer {
         //and Atlas finds resource classes
         application.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
         @Override
-        public void lifeCycleStarting(org.eclipse.jetty.util.component.LifeCycle event) {
+        public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) { // CHANGE TO STARTED
             try {
-                // 1. Setup the new "Fast-Lane" Servlet for shallow stack
-                org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder();
-                holder.setName("atlas-v2-shallowstack");
-                holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
-                holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.PackagesResourceConfig");
-                holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources;org.apache.atlas.web.providers");
-                holder.setInitOrder(1);
+                    LOG.info("Jetty Started. Re-ordering filters to ensure Fast-Lane priority.");
+                    
+                    // 1. Create the Mapping
+                    org.eclipse.jetty.servlet.FilterMapping securityMapping = new org.eclipse.jetty.servlet.FilterMapping();
+                    securityMapping.setFilterName("springSecurityFilterChain");
+                    securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
+                    securityMapping.setDispatcherTypes(java.util.EnumSet.of(javax.servlet.DispatcherType.REQUEST));
 
-                // Register the paths
-                application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
-                application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/health");
-                application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/status");
+                    // 2. Perform the Swap on the FINAL list
+                    org.eclipse.jetty.servlet.ServletHandler handler = application.getServletHandler();
+                    org.eclipse.jetty.servlet.FilterMapping[] currentMappings = handler.getFilterMappings();
 
-                // Setup the Security Filter Mapping for these paths
-                org.eclipse.jetty.servlet.FilterMapping securityMapping = new org.eclipse.jetty.servlet.FilterMapping();
-                securityMapping.setFilterName("springSecurityFilterChain");
-                
-                // IMPORTANT: Map to both the specific paths AND the specific Servlet Name
-                // This tells Jetty: "If the request is going to the new shallow stack, use this filter first."
-                securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
-                securityMapping.setServletName("atlas-v2-shallowstack");
-                
-                // Ensure it triggers on standard requests
-                securityMapping.setDispatcherTypes(java.util.EnumSet.of(javax.servlet.DispatcherType.REQUEST));
+                    if (currentMappings != null) {
+                        // Check if we are already there to avoid duplicates on restart
+                        if (currentMappings.length > 0 && "springSecurityFilterChain".equals(currentMappings[0].getFilterName())) {
+                            LOG.info("Security bypass already at index 0. No change needed.");
+                            return;
+                        }
 
-                // 3. Robust Array Injection
-                org.eclipse.jetty.servlet.FilterMapping[] currentMappings = application.getServletHandler().getFilterMappings();
-                org.eclipse.jetty.servlet.FilterMapping[] newMappings;
-
-                if (currentMappings == null || currentMappings.length == 0) {
-                    newMappings = new org.eclipse.jetty.servlet.FilterMapping[]{securityMapping};
-                    LOG.info("Initializing filter chain with Fast-Lane security bypass.");
-                } else {
-                    newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
-                    newMappings[0] = securityMapping;
-                    System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
-                    LOG.info("Prepended security bypass to existing filters.");
+                        org.eclipse.jetty.servlet.FilterMapping[] newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
+                        newMappings[0] = securityMapping;
+                        System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
+                        
+                        handler.setFilterMappings(newMappings);
+                        LOG.info("Fast-Lane filter PREPENDED to the front of the active chain.");
+                    }
+                } catch (Exception e) {
+                    LOG.error("Failed to re-order filters in lifeCycleStarted", e);
                 }
-
-                application.getServletHandler().setFilterMappings(newMappings);
-                LOG.info("Late-bound Atlas V2 Fast-Lane registered successfully with Servlet-specific filter priority.");
-
-            } catch (Exception e) {
-                LOG.error("Failed to register Fast-Lane in LifeCycle event", e);
             }
-        }
-    });
+        });
         // Disable directory listing 
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
         
