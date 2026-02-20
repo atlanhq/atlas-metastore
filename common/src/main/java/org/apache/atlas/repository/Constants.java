@@ -19,10 +19,7 @@
 package org.apache.atlas.repository;
 
 import org.apache.atlas.ApplicationProperties;
-import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasException;
-import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -564,25 +561,14 @@ public final class Constants {
     }
 
     /**
-     * Get the Elasticsearch index name, with optional suffix for maintenance mode.
+     * Get the Elasticsearch index name.
      *
-     * TODO: Migrate to DynamicConfigStore once module dependencies are refactored.
-     * Currently using deprecated FeatureFlagStore because Constants is in 'common' module
-     * and cannot import DynamicConfigStore from 'repository' module.
+     * Note: Temp ES index suffix logic (for maintenance mode) is now handled by
+     * DynamicConfigStore.useTempEsIndex() in the repository module.
+     * Callers in the repository module should use that method if they need the temp suffix.
      */
-    @SuppressWarnings("deprecation")
     public static String getESIndex() {
-        String indexSuffix  = null;
-        if(AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean()) {
-            try {
-                if (FeatureFlagStore.evaluate( USE_TEMP_ES_INDEX.getKey(), "true")) {
-                    indexSuffix = "_temp";
-                }
-            } catch (Exception e) {
-                LOG.error("Failed to evaluate feature flag with error", e);
-            }
-        }
-        return indexSuffix == null ? VERTEX_INDEX_NAME : VERTEX_INDEX_NAME + indexSuffix;
+        return VERTEX_INDEX_NAME;
     }
 
     public static String getStaticFileAsString(String fileName) throws IOException {

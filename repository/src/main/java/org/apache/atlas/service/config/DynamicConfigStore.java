@@ -59,7 +59,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
     private static final String METRIC_PREFIX = "atlas_config_store";
     private static final String METRIC_FLAG_VALUE = METRIC_PREFIX + "_flag_value";
     private static final String METRIC_DEFAULT_FALLBACK = METRIC_PREFIX + "_default_fallback_total";
-    private static final String METRIC_REDIS_RECOVERY = METRIC_PREFIX + "_redis_recovery_total";
+    private static final String METRIC_DEFAULT_RECOVERY = METRIC_PREFIX + "_default_recovery_total";
 
     @Inject
     public DynamicConfigStore(DynamicConfigStoreConfig config, DynamicConfigCacheStore cacheStore,
@@ -88,35 +88,31 @@ public class DynamicConfigStore implements ApplicationContextAware {
             CassandraConfigDAO.initialize(config);
             cassandraAvailable = true;
 
-            // Phase 1 (enabled=true, activated=false): Sync feature flags from Redis to Cassandra
-            // This ensures Cassandra has the current Redis values before activation
-            // Phase 2 (enabled=true, activated=true): Skip Redis sync, Cassandra is the source of truth
+            // Seed default config values in Cassandra for any missing keys
             if (!config.isActivated()) {
-                syncFeatureFlagsFromRedis();
+                seedDefaultConfigs();
             } else {
-                LOG.info("Cassandra config store is activated - skipping Redis sync, using Cassandra as source of truth");
+                LOG.info("Cassandra config store is activated - using Cassandra as source of truth");
             }
 
             // Load initial data into cache from Cassandra
             loadAllConfigsIntoCache();
 
-            // DEFENSIVE CHECK: If activated but Cassandra has no/partial rows, a previous
-            // Phase 1 deployment may have been missed (e.g., ArgoCD sync gap). Recover by
-            // syncing from Redis so we don't serve empty defaults.
+            // DEFENSIVE CHECK: If activated but Cassandra has no/partial rows, seed defaults
+            // to ensure all ConfigKeys have a value.
             if (config.isActivated()) {
                 int loadedCount = cacheStore.size();
                 int expectedCount = ConfigKey.values().length;
 
                 if (loadedCount < expectedCount) {
                     LOG.warn("CONFIG STORE RECOVERY: Activated store has {}/{} config rows in Cassandra. " +
-                            "Phase 1 (Redis sync) may have been missed for this tenant. " +
-                            "Performing recovery sync from Redis...", loadedCount, expectedCount);
+                            "Seeding missing defaults...", loadedCount, expectedCount);
 
-                    syncFeatureFlagsFromRedis();
+                    seedDefaultConfigs();
                     loadAllConfigsIntoCache();
 
                     int recoveredCount = cacheStore.size();
-                    LOG.warn("CONFIG STORE RECOVERY: After Redis sync, store has {}/{} config rows",
+                    LOG.warn("CONFIG STORE RECOVERY: After seeding defaults, store has {}/{} config rows",
                             recoveredCount, expectedCount);
 
                     recordRecoveryMetric();
@@ -178,7 +174,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
      *             With DynamicConfigStore enabled and activated by default, this is rarely needed.
      */
     @Deprecated
-    private void syncFeatureFlagsFromRedis() {
+    private void seedDefaultConfigs() {
         LOG.info("Seeding default config values in Cassandra...");
         int seededWithDefault = 0;
 
@@ -644,8 +640,8 @@ public class DynamicConfigStore implements ApplicationContextAware {
      */
     private void recordRecoveryMetric() {
         try {
-            Counter.builder(METRIC_REDIS_RECOVERY)
-                    .description("Count of times Redis recovery sync was triggered on an activated store with missing rows")
+            Counter.builder(METRIC_DEFAULT_RECOVERY)
+                    .description("Count of times default seeding was triggered on an activated store with missing rows")
                     .register(org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry())
                     .increment();
         } catch (Exception e) {
