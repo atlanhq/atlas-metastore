@@ -563,6 +563,14 @@ public final class Constants {
         }
     }
 
+    /**
+     * Get the Elasticsearch index name, with optional suffix for maintenance mode.
+     *
+     * TODO: Migrate to DynamicConfigStore once module dependencies are refactored.
+     * Currently using deprecated FeatureFlagStore because Constants is in 'common' module
+     * and cannot import DynamicConfigStore from 'repository' module.
+     */
+    @SuppressWarnings("deprecation")
     public static String getESIndex() {
         String indexSuffix  = null;
         if(AtlasConfiguration.ATLAS_MAINTENANCE_MODE.getBoolean()) {

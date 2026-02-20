@@ -35,9 +35,24 @@ public abstract class AbstractRedisService implements RedisService {
     private static final String ATLAS_REDIS_LOCK_WATCHDOG_TIMEOUT_MS = "atlas.redis.lock.watchdog_timeout.ms";
     private static final String ATLAS_REDIS_LEASE_TIME_MS = "atlas.redis.lease_time.ms";
     private static final String CHECK_SENTINELS_LIST = "atlas.redis.sentinel.check_list.enabled";
+    private static final String ATLAS_REDIS_CONNECT_TIMEOUT_MS = "atlas.redis.connect.timeout.ms";
+    private static final String ATLAS_REDIS_SCAN_INTERVAL_MS = "atlas.redis.sentinel.scan.interval.ms";
+    private static final String ATLAS_REDIS_DNS_MONITORING_INTERVAL_MS = "atlas.redis.dns.monitoring.interval.ms";
+    private static final String ATLAS_REDIS_FAILED_SLAVE_CHECK_INTERVAL_MS = "atlas.redis.failed.slave.check.interval.ms";
+    private static final String ATLAS_REDIS_FAILED_SLAVE_RECONNECTION_INTERVAL_MS = "atlas.redis.failed.slave.reconnection.interval.ms";
+    private static final String ATLAS_REDIS_RETRY_ATTEMPTS = "atlas.redis.retry.attempts";
+    private static final String ATLAS_REDIS_RETRY_INTERVAL_MS = "atlas.redis.retry.interval.ms";
     private static final int DEFAULT_REDIS_WAIT_TIME_MS = 15_000;
     private static final int DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS = 600_000;
     private static final int DEFAULT_REDIS_LEASE_TIME_MS = 60_000;
+    // Defaults for 2-node availability - allow operation with partial Redis cluster
+    private static final int DEFAULT_REDIS_CONNECT_TIMEOUT_MS = 3_000;        // Don't wait too long for dead nodes
+    private static final int DEFAULT_REDIS_SCAN_INTERVAL_MS = 5_000;          // Don't scan too frequently
+    private static final int DEFAULT_REDIS_DNS_MONITORING_INTERVAL_MS = 10_000; // Less frequent DNS checks
+    private static final int DEFAULT_REDIS_FAILED_SLAVE_CHECK_INTERVAL_MS = 60_000; // Check failed slaves periodically
+    private static final int DEFAULT_REDIS_FAILED_SLAVE_RECONNECTION_INTERVAL_MS = 5_000; // Reconnect failed slaves
+    private static final int DEFAULT_REDIS_RETRY_ATTEMPTS = 3;                // Bounded retries
+    private static final int DEFAULT_REDIS_RETRY_INTERVAL_MS = 1_000;         // Retry interval
     private static final String ATLAS_METASTORE_SERVICE = "atlas-metastore-service";
     // Heartbeat monitoring for lock health checking (not for renewal)
     private final ScheduledExecutorService heartbeatExecutor = Executors.newScheduledThreadPool(1);
@@ -52,6 +67,14 @@ public abstract class AbstractRedisService implements RedisService {
     long leaseTimeInMS;
     long watchdogTimeoutInMS;
     boolean checkSentinelsList;
+    // 2-node availability settings
+    int connectTimeoutMs;
+    int scanIntervalMs;
+    int dnsMonitoringIntervalMs;
+    int failedSlaveCheckIntervalMs;
+    int failedSlaveReconnectionIntervalMs;
+    int retryAttempts;
+    int retryIntervalMs;
 
     // Inner class to track lock information
     private static class LockInfo {
@@ -257,6 +280,14 @@ public abstract class AbstractRedisService implements RedisService {
         leaseTimeInMS = atlasConfig.getLong(ATLAS_REDIS_LEASE_TIME_MS, DEFAULT_REDIS_LEASE_TIME_MS);
         watchdogTimeoutInMS = atlasConfig.getLong(ATLAS_REDIS_LOCK_WATCHDOG_TIMEOUT_MS, DEFAULT_REDIS_LOCK_WATCHDOG_TIMEOUT_MS);
         checkSentinelsList = atlasConfig.getBoolean(CHECK_SENTINELS_LIST, true);
+        // 2-node availability settings - allow operation with partial Redis cluster
+        connectTimeoutMs = atlasConfig.getInt(ATLAS_REDIS_CONNECT_TIMEOUT_MS, DEFAULT_REDIS_CONNECT_TIMEOUT_MS);
+        scanIntervalMs = atlasConfig.getInt(ATLAS_REDIS_SCAN_INTERVAL_MS, DEFAULT_REDIS_SCAN_INTERVAL_MS);
+        dnsMonitoringIntervalMs = atlasConfig.getInt(ATLAS_REDIS_DNS_MONITORING_INTERVAL_MS, DEFAULT_REDIS_DNS_MONITORING_INTERVAL_MS);
+        failedSlaveCheckIntervalMs = atlasConfig.getInt(ATLAS_REDIS_FAILED_SLAVE_CHECK_INTERVAL_MS, DEFAULT_REDIS_FAILED_SLAVE_CHECK_INTERVAL_MS);
+        failedSlaveReconnectionIntervalMs = atlasConfig.getInt(ATLAS_REDIS_FAILED_SLAVE_RECONNECTION_INTERVAL_MS, DEFAULT_REDIS_FAILED_SLAVE_RECONNECTION_INTERVAL_MS);
+        retryAttempts = atlasConfig.getInt(ATLAS_REDIS_RETRY_ATTEMPTS, DEFAULT_REDIS_RETRY_ATTEMPTS);
+        retryIntervalMs = atlasConfig.getInt(ATLAS_REDIS_RETRY_INTERVAL_MS, DEFAULT_REDIS_RETRY_INTERVAL_MS);
         Config redisConfig = new Config();
         redisConfig.setLockWatchdogTimeout(watchdogTimeoutInMS);
         return redisConfig;
@@ -290,7 +321,15 @@ public abstract class AbstractRedisService implements RedisService {
                 .setMasterName(atlasConfig.getString(ATLAS_REDIS_MASTER_NAME))
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
-                .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD));
+                .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
+                // 2-node availability settings - allow operation with partial Redis cluster
+                .setConnectTimeout(connectTimeoutMs)
+                .setScanInterval(scanIntervalMs)
+                .setDnsMonitoringInterval(dnsMonitoringIntervalMs)
+                .setFailedSlaveCheckInterval(failedSlaveCheckIntervalMs)
+                .setFailedSlaveReconnectionInterval(failedSlaveReconnectionIntervalMs)
+                .setRetryAttempts(retryAttempts)
+                .setRetryInterval(retryIntervalMs);
         return config;
     }
 
@@ -310,7 +349,13 @@ public abstract class AbstractRedisService implements RedisService {
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
                 .setTimeout(50) //Setting UP timeout to 50ms
-                .setRetryAttempts(10); //Retry 10 times;
+                .setRetryAttempts(10) //Retry 10 times
+                // 2-node availability settings - allow operation with partial Redis cluster
+                .setConnectTimeout(connectTimeoutMs)
+                .setScanInterval(scanIntervalMs)
+                .setDnsMonitoringInterval(dnsMonitoringIntervalMs)
+                .setFailedSlaveCheckInterval(failedSlaveCheckIntervalMs)
+                .setFailedSlaveReconnectionInterval(failedSlaveReconnectionIntervalMs);
         return config;
     }
 

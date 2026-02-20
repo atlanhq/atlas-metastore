@@ -17,6 +17,13 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 
+/**
+ * @deprecated Use {@link org.apache.atlas.service.config.DynamicConfigStore} instead.
+ *             DynamicConfigStore is now enabled and activated by default, providing
+ *             Cassandra-backed configuration storage. This class is kept for backward
+ *             compatibility during the migration period but will be removed in a future release.
+ */
+@Deprecated
 @Component
 public class FeatureFlagStore implements ApplicationContextAware {
     private static final Logger LOG = LoggerFactory.getLogger(FeatureFlagStore.class);
