@@ -192,11 +192,19 @@ public class EmbeddedServer {
 
                     // Get current mappings, create a new array, and insert securityMapping at index 0 (the front)
                     org.eclipse.jetty.servlet.FilterMapping[] currentMappings = application.getServletHandler().getFilterMappings();
-                    org.eclipse.jetty.servlet.FilterMapping[] newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
+                    org.eclipse.jetty.servlet.FilterMapping[] newMappings;
 
-                    newMappings[0] = securityMapping; // Your bypass now runs BEFORE the global AuditFilter
-                    System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
-
+                    if (currentMappings == null || currentMappings.length == 0) {
+                        // If no mappings exist yet, just create an array for yours
+                        newMappings = new org.eclipse.jetty.servlet.FilterMapping[]{securityMapping};
+                        LOG.info("No existing filter mappings found. Initializing with security bypass.");
+                    } else {
+                        // If mappings exist, prepend yours to the front
+                        newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
+                        newMappings[0] = securityMapping;
+                        System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
+                        LOG.info("Prepended security bypass to {} existing filter mappings.", currentMappings.length);
+                    }
                     // Update Jetty with the new ordered filter list
                     application.getServletHandler().setFilterMappings(newMappings);
                     // Add security mapping to the handler
