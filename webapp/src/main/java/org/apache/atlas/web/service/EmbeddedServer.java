@@ -199,8 +199,7 @@ public class EmbeddedServer {
             fastLaneServlet.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                                             "com.sun.jersey.api.core.ClassNamesResourceConfig");
             fastLaneServlet.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                            "org.apache.atlas.web.resources.AdminResource;" + 
-                                            "org.apache.atlas.web.resources.EntityResourceV2");
+                                            "org.apache.atlas.web.resources.AdminResource");
 
             // Map the endpoints specifically to this lean handler
             fastLaneContext.addServlet(fastLaneServlet, "/admin/health");
