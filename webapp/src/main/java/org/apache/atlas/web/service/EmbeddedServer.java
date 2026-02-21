@@ -184,11 +184,19 @@ public class EmbeddedServer {
         //     throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         // }
         try {
-            // 1. Creating an Independent Fast-Lane Context
+            
+            // Get the deep stack Main App
+            org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
+
+
+            //  Creating an Independent Fast-Lane Context
             // This context lives at /api/atlas but it is SEPARATE from the main app
             org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
                 new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
             fastLaneContext.setContextPath("/api/atlas");
+
+            //Share the same ClassLoader so the Fast-Lane can see Atlas classes
+            fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
             // Definition for the Lean Servlet
             org.eclipse.jetty.servlet.ServletHolder fastLaneServlet = new org.eclipse.jetty.servlet.ServletHolder(
@@ -206,9 +214,7 @@ public class EmbeddedServer {
             fastLaneContext.addServlet(fastLaneServlet, "/admin/status");
             fastLaneContext.addServlet(fastLaneServlet, "/api/atlas/v2/*");
 
-            // 3. Get the heavy Main App
-            org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
-
+            
             // Combining all of them using a new ContextHandlerCollection
             // Jetty will check the FastLaneContext FIRST because it's more specific than in web.xml?
             //If not, we will not be able to override filters defined in web.xmk
