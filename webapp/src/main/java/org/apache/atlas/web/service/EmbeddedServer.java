@@ -33,7 +33,10 @@ import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
+import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.server.handler.ContextHandlerCollection;
+import com.sun.jersey.spi.container.servlet.ServletContainer;
 import com.sun.jersey.spi.spring.container.servlet.SpringServlet;
 import org.eclipse.jetty.util.thread.ExecutorThreadPool;
 import org.eclipse.jetty.webapp.WebAppContext;
@@ -198,18 +201,12 @@ public class EmbeddedServer {
             //Share the same ClassLoader so the Fast-Lane can see Atlas classes
             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
-            fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
-            fastLaneContext.getServletContext().setAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
-                //mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
-                new org.apache.atlas.web.setup.SpringContextContextAttributeExporter(mainAppContext)
-            );
-
             // Definition for the Lean Servlet
             org.eclipse.jetty.servlet.ServletHolder fastLaneServlet = new org.eclipse.jetty.servlet.ServletHolder(
-                new com.sun.jersey.spi.spring.container.servlet.SpringServlet()
+                new com.sun.jersey.spi.container.servlet.ServletContainer()
             );
-            
+
+           
             // Using  the explicit ClassNames to avoid the earlier 500 error triggered scanner crash
             fastLaneServlet.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                                             "com.sun.jersey.api.core.ClassNamesResourceConfig");
