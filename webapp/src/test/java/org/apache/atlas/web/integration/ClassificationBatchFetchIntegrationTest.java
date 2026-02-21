@@ -54,9 +54,9 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <p>Validates three optimization paths:</p>
  * <ol>
- *   <li><b>Batch prefetch</b>: Bulk get entities by GUIDs uses parallel Cassandra queries + request-scoped cache</li>
+ *   <li><b>Batch prefetch</b>: Bulk get entities by GUIDs uses parallel Cassandra queries + short-lived local cache</li>
  *   <li><b>Names-only path</b>: Search with excludeClassifications=true returns classificationNames
- *       from JanusGraph vertex properties (no Cassandra round-trip)</li>
+ *       via a lightweight Cassandra query (tag_type_name only, no JSON deserialization)</li>
  *   <li><b>Full classifications</b>: Bulk get with full classifications returns complete objects from Cassandra</li>
  * </ol>
  *

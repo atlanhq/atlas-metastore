@@ -107,6 +107,9 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     private final PreparedStatement insertPropagationBySourceStmt;
     private final PreparedStatement deletePropagationStmt;
 
+    // Lightweight query: returns only tag_type_name (avoids JSON deserialization)
+    private final PreparedStatement findTagNamesForAssetStmt;
+
     // Health check prepared statement
     private final PreparedStatement healthCheckStmt;
 
@@ -176,6 +179,10 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
             deletePropagationStmt = prepare(String.format(
                     "DELETE FROM %s.%s WHERE source_id = ? AND tag_type_name = ? AND propagated_asset_id = ?", KEYSPACE, PROPAGATED_TAGS_TABLE_NAME));
+
+            // Lightweight query for tag names only (skips tag_meta_json deserialization)
+            findTagNamesForAssetStmt = prepare(String.format(
+                    "SELECT tag_type_name, is_propagated, is_deleted FROM %s.%s WHERE bucket = ? AND id = ?", KEYSPACE, EFFECTIVE_TAGS_TABLE_NAME));
 
             // === Health check statement ===
             healthCheckStmt = prepare("SELECT release_version FROM system.local");
@@ -366,6 +373,31 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
     }
 
     @Override
+    public List<String> getClassificationNamesForVertex(String vertexId, Boolean propagated) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getClassificationNamesForVertex");
+        try {
+            int bucket = calculateBucket(vertexId);
+            BoundStatement bound = findTagNamesForAssetStmt.bind(bucket, vertexId);
+            ResultSet rs = cassSession.execute(bound);
+
+            List<String> names = new ArrayList<>();
+            for (Row row : rs) {
+                if (!row.getBoolean("is_deleted")) {
+                    if (propagated == null || propagated.equals(row.getBoolean("is_propagated"))) {
+                        names.add(row.getString("tag_type_name"));
+                    }
+                }
+            }
+            return names;
+        } catch (Exception e) {
+            LOG.error("Error fetching classification names for vertexId={}", vertexId, e);
+            throw new AtlasBaseException("Error fetching classification names", e);
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
+    @Override
     public Map<String, List<AtlasClassification>> getAllClassificationsForVertices(Collection<String> vertexIds) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("getAllClassificationsForVertices");
         Map<String, List<AtlasClassification>> result = new HashMap<>();
@@ -401,7 +433,9 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
                     result.put(vertexId, tags);
                 } catch (Exception e) {
                     LOG.warn("Async classification fetch failed for vertexId={}, will fall back to sync", vertexId, e);
-                    // Don't put in result — caller falls back to sync getAllClassificationsForVertex
+                    // Deliberately omit this vertex from the result map. The caller
+                    // (mapVertexToAtlasEntity) detects the missing key and falls back to
+                    // a synchronous per-vertex call via tagDAO.getAllClassificationsForVertex().
                 }
             }
 

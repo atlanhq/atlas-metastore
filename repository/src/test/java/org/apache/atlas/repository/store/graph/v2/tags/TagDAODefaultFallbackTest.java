@@ -101,6 +101,58 @@ class TagDAODefaultFallbackTest {
         assertEquals(2, callCount[0], "getAllClassificationsForVertex should be called twice even for duplicate IDs");
     }
 
+    // =================== getClassificationNamesForVertex default tests ===================
+
+    /**
+     * Test: default getClassificationNamesForVertex with null (all) delegates to getAllClassificationsForVertex
+     * and extracts type names.
+     */
+    @Test
+    void testDefaultGetClassificationNamesForVertexAll() throws AtlasBaseException {
+        TagDAO dao = createStubDAOWithDirectAndPropagated(
+                Arrays.asList(new AtlasClassification("DIRECT_TAG")),
+                Arrays.asList(new AtlasClassification("PROPAGATED_TAG")),
+                Arrays.asList(new AtlasClassification("DIRECT_TAG"), new AtlasClassification("PROPAGATED_TAG"))
+        );
+
+        List<String> names = dao.getClassificationNamesForVertex("v1", null);
+        assertEquals(2, names.size());
+        assertTrue(names.contains("DIRECT_TAG"));
+        assertTrue(names.contains("PROPAGATED_TAG"));
+    }
+
+    /**
+     * Test: default getClassificationNamesForVertex with false returns only direct tag names.
+     */
+    @Test
+    void testDefaultGetClassificationNamesForVertexDirectOnly() throws AtlasBaseException {
+        TagDAO dao = createStubDAOWithDirectAndPropagated(
+                Arrays.asList(new AtlasClassification("DIRECT_TAG")),
+                Arrays.asList(new AtlasClassification("PROPAGATED_TAG")),
+                Arrays.asList(new AtlasClassification("DIRECT_TAG"), new AtlasClassification("PROPAGATED_TAG"))
+        );
+
+        List<String> names = dao.getClassificationNamesForVertex("v1", false);
+        assertEquals(1, names.size());
+        assertEquals("DIRECT_TAG", names.get(0));
+    }
+
+    /**
+     * Test: default getClassificationNamesForVertex with true returns only propagated tag names.
+     */
+    @Test
+    void testDefaultGetClassificationNamesForVertexPropagatedOnly() throws AtlasBaseException {
+        TagDAO dao = createStubDAOWithDirectAndPropagated(
+                Arrays.asList(new AtlasClassification("DIRECT_TAG")),
+                Arrays.asList(new AtlasClassification("PROPAGATED_TAG")),
+                Arrays.asList(new AtlasClassification("DIRECT_TAG"), new AtlasClassification("PROPAGATED_TAG"))
+        );
+
+        List<String> names = dao.getClassificationNamesForVertex("v1", true);
+        assertEquals(1, names.size());
+        assertEquals("PROPAGATED_TAG", names.get(0));
+    }
+
     // =================== Helper ===================
 
     @FunctionalInterface
@@ -126,6 +178,34 @@ class TagDAODefaultFallbackTest {
             @Override public Tag findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(String v, String t, boolean d) { throw new UnsupportedOperationException(); }
             @Override public PaginatedTagResult getPropagationsForAttachmentBatch(String s, String t, String p) { throw new UnsupportedOperationException(); }
             @Override public List<AtlasClassification> findByVertexIdAndPropagated(String v) { throw new UnsupportedOperationException(); }
+            @Override public AtlasClassification findDirectTagByVertexIdAndTagTypeName(String v, String t, boolean d) { throw new UnsupportedOperationException(); }
+            @Override public void putPropagatedTags(String s, String t, Set<String> p, Map<String, Map<String, Object>> m, AtlasClassification tag) { throw new UnsupportedOperationException(); }
+            @Override public void putDirectTag(String a, String t, AtlasClassification tag, Map<String, Object> m) { throw new UnsupportedOperationException(); }
+            @Override public void deleteDirectTag(String s, AtlasClassification t) { throw new UnsupportedOperationException(); }
+            @Override public void deleteTags(List<Tag> t) { throw new UnsupportedOperationException(); }
+            @Override public List<AtlasClassification> getPropagationsForAttachment(String v, String s) { throw new UnsupportedOperationException(); }
+            @Override public PaginatedTagResult getPropagationsForAttachmentBatchWithPagination(String s, String t, String p, int ps) { throw new UnsupportedOperationException(); }
+            @Override public PaginatedVertexIdResult getVertexIdFromTagsByIdTableWithPagination(String p, int ps) { throw new UnsupportedOperationException(); }
+        };
+    }
+
+    /**
+     * Creates a TagDAO stub that supports getAllClassificationsForVertex, getAllDirectClassificationsForVertex,
+     * and findByVertexIdAndPropagated (needed for getClassificationNamesForVertex default method).
+     */
+    private TagDAO createStubDAOWithDirectAndPropagated(
+            List<AtlasClassification> directTags,
+            List<AtlasClassification> propagatedTags,
+            List<AtlasClassification> allTags) {
+        return new TagDAO() {
+            @Override public List<AtlasClassification> getAllClassificationsForVertex(String vertexId) { return allTags; }
+            @Override public List<AtlasClassification> getAllDirectClassificationsForVertex(String vertexId) { return directTags; }
+            @Override public List<AtlasClassification> findByVertexIdAndPropagated(String vertexId) { return propagatedTags; }
+
+            @Override public List<Tag> getAllTagsByVertexId(String vertexId) { throw new UnsupportedOperationException(); }
+            @Override public AtlasClassification findDirectDeletedTagByVertexIdAndTagTypeName(String v, String t) { throw new UnsupportedOperationException(); }
+            @Override public Tag findDirectTagByVertexIdAndTagTypeNameWithAssetMetadata(String v, String t, boolean d) { throw new UnsupportedOperationException(); }
+            @Override public PaginatedTagResult getPropagationsForAttachmentBatch(String s, String t, String p) { throw new UnsupportedOperationException(); }
             @Override public AtlasClassification findDirectTagByVertexIdAndTagTypeName(String v, String t, boolean d) { throw new UnsupportedOperationException(); }
             @Override public void putPropagatedTags(String s, String t, Set<String> p, Map<String, Map<String, Object>> m, AtlasClassification tag) { throw new UnsupportedOperationException(); }
             @Override public void putDirectTag(String a, String t, AtlasClassification tag, Map<String, Object> m) { throw new UnsupportedOperationException(); }

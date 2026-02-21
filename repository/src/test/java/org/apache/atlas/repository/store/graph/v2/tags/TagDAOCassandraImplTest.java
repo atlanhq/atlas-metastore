@@ -451,6 +451,80 @@ public class TagDAOCassandraImplTest {
         assertEquals(2, result.get(assetId).size());
     }
 
+    // =================== Lightweight Names-Only Query Tests ===================
+
+    @Test
+    void testGetClassificationNamesForVertex_AllNames() throws AtlasBaseException {
+        String assetId = "9001";
+        String sourceAssetId = "9002";
+
+        // Add a direct tag
+        tagDAO.putDirectTag(assetId, "DIRECT_TAG", createClassification("DIRECT_TAG", assetId),
+                createAssetMetadata("a9001", "q/a9001"));
+
+        // Add a propagated tag
+        tagDAO.putPropagatedTags(sourceAssetId, "PROPAGATED_TAG", Collections.singleton(assetId),
+                Collections.singletonMap(assetId, createAssetMetadata("a9001", "q/a9001")),
+                createClassification("PROPAGATED_TAG", sourceAssetId));
+
+        // Get all names (null = both direct and propagated)
+        List<String> allNames = tagDAO.getClassificationNamesForVertex(assetId, null);
+        assertEquals(2, allNames.size());
+        assertTrue(allNames.contains("DIRECT_TAG"));
+        assertTrue(allNames.contains("PROPAGATED_TAG"));
+    }
+
+    @Test
+    void testGetClassificationNamesForVertex_DirectOnly() throws AtlasBaseException {
+        String assetId = "9003";
+        String sourceAssetId = "9004";
+
+        tagDAO.putDirectTag(assetId, "DIRECT_ONLY", createClassification("DIRECT_ONLY", assetId),
+                createAssetMetadata("a9003", "q/a9003"));
+        tagDAO.putPropagatedTags(sourceAssetId, "PROPAGATED_ONLY", Collections.singleton(assetId),
+                Collections.singletonMap(assetId, createAssetMetadata("a9003", "q/a9003")),
+                createClassification("PROPAGATED_ONLY", sourceAssetId));
+
+        // Get direct only (propagated = false)
+        List<String> directNames = tagDAO.getClassificationNamesForVertex(assetId, false);
+        assertEquals(1, directNames.size());
+        assertEquals("DIRECT_ONLY", directNames.get(0));
+    }
+
+    @Test
+    void testGetClassificationNamesForVertex_PropagatedOnly() throws AtlasBaseException {
+        String assetId = "9005";
+        String sourceAssetId = "9006";
+
+        tagDAO.putDirectTag(assetId, "DIRECT_TAG2", createClassification("DIRECT_TAG2", assetId),
+                createAssetMetadata("a9005", "q/a9005"));
+        tagDAO.putPropagatedTags(sourceAssetId, "PROPAGATED_TAG2", Collections.singleton(assetId),
+                Collections.singletonMap(assetId, createAssetMetadata("a9005", "q/a9005")),
+                createClassification("PROPAGATED_TAG2", sourceAssetId));
+
+        // Get propagated only (propagated = true)
+        List<String> propagatedNames = tagDAO.getClassificationNamesForVertex(assetId, true);
+        assertEquals(1, propagatedNames.size());
+        assertEquals("PROPAGATED_TAG2", propagatedNames.get(0));
+    }
+
+    @Test
+    void testGetClassificationNamesForVertex_FiltersDeleted() throws AtlasBaseException {
+        String assetId = "9007";
+        AtlasClassification tag = createClassification("DELETED_NAME_TAG", assetId);
+        tagDAO.putDirectTag(assetId, "DELETED_NAME_TAG", tag, createAssetMetadata("a9007", "q/a9007"));
+        tagDAO.deleteDirectTag(assetId, tag);
+
+        List<String> names = tagDAO.getClassificationNamesForVertex(assetId, null);
+        assertTrue(names.isEmpty(), "Deleted tags should be filtered from names-only query");
+    }
+
+    @Test
+    void testGetClassificationNamesForVertex_EmptyVertex() throws AtlasBaseException {
+        List<String> names = tagDAO.getClassificationNamesForVertex("99999", null);
+        assertTrue(names.isEmpty());
+    }
+
     // =================== Helper Methods ===================
 
     private AtlasClassification createClassification(String typeName, String entityGuid) {

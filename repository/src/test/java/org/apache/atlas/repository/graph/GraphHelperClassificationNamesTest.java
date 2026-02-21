@@ -12,9 +12,11 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * Tests for GraphHelper.getClassificationNamesFromVertex() and getPropagatedClassificationNamesFromVertex().
- * These methods read classification names directly from JanusGraph vertex properties,
- * avoiding Cassandra queries entirely.
+ * Tests for GraphHelper classification name methods (V1/legacy vertex property path).
+ *
+ * Note: getTraitNamesV2() queries Cassandra via TagDAOCassandraImpl and is covered by
+ * integration tests (ClassificationBatchFetchIntegrationTest) rather than unit tests,
+ * since TagDAOCassandraImpl's static initializer requires a Cassandra connection.
  */
 class GraphHelperClassificationNamesTest {
 
@@ -41,41 +43,36 @@ class GraphHelperClassificationNamesTest {
     }
 
     @Test
-    void testGetTraitNamesV2DirectOnly() {
+    void testGetClassificationNamesFromVertexEmpty() {
+        AtlasVertex vertex = mockVertexWithProperty(CLASSIFICATION_NAMES_KEY, "||");
+
+        List<String> names = GraphHelper.getClassificationNamesFromVertex(vertex);
+
+        assertNotNull(names);
+        assertTrue(names.isEmpty());
+    }
+
+    @Test
+    void testGetPropagatedClassificationNamesFromVertex() {
         AtlasVertex vertex = mock(AtlasVertex.class);
-        when(vertex.getProperty(CLASSIFICATION_NAMES_KEY, String.class)).thenReturn("|PII|Confidential|");
+        when(vertex.getProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class)).thenReturn("|Sensitive|PII|");
+
+        List<String> names = GraphHelper.getPropagatedClassificationNamesFromVertex(vertex);
+
+        assertEquals(2, names.size());
+        assertEquals("Sensitive", names.get(0));
+        assertEquals("PII", names.get(1));
+    }
+
+    @Test
+    void testGetPropagatedClassificationNamesFromVertexNull() {
+        AtlasVertex vertex = mock(AtlasVertex.class);
         when(vertex.getProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class)).thenReturn(null);
 
-        List<String> names = GraphHelper.getTraitNamesV2(vertex, false);
+        List<String> names = GraphHelper.getPropagatedClassificationNamesFromVertex(vertex);
 
-        assertEquals(2, names.size());
-        assertEquals("PII", names.get(0));
-        assertEquals("Confidential", names.get(1));
-    }
-
-    @Test
-    void testGetTraitNamesV2PropagatedOnly() {
-        AtlasVertex vertex = mock(AtlasVertex.class);
-        when(vertex.getProperty(CLASSIFICATION_NAMES_KEY, String.class)).thenReturn(null);
-        when(vertex.getProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class)).thenReturn("|Sensitive|");
-
-        List<String> names = GraphHelper.getTraitNamesV2(vertex, true);
-
-        assertEquals(1, names.size());
-        assertEquals("Sensitive", names.get(0));
-    }
-
-    @Test
-    void testGetTraitNamesV2AllCombined() {
-        AtlasVertex vertex = mock(AtlasVertex.class);
-        when(vertex.getProperty(CLASSIFICATION_NAMES_KEY, String.class)).thenReturn("|PII|");
-        when(vertex.getProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, String.class)).thenReturn("|Sensitive|");
-
-        List<String> names = GraphHelper.getTraitNamesV2(vertex, null);
-
-        assertEquals(2, names.size());
-        assertTrue(names.contains("PII"));
-        assertTrue(names.contains("Sensitive"));
+        assertNotNull(names);
+        assertTrue(names.isEmpty());
     }
 
     private AtlasVertex mockVertexWithProperty(String propertyKey, String value) {
