@@ -337,10 +337,12 @@ public abstract class CassandraElement implements AtlasElement {
 
     public void markDirty() {
         isDirty = true;
-        // Notify the transaction buffer so existing (non-new) vertices
+        // Notify the transaction buffer so existing (non-new) elements
         // are tracked as dirty and flushed to Cassandra on commit
         if (!isNew && this instanceof CassandraVertex) {
             graph.notifyVertexDirty((CassandraVertex) this);
+        } else if (!isNew && this instanceof CassandraEdge) {
+            graph.notifyEdgeDirty((CassandraEdge) this);
         }
     }
 

@@ -15,6 +15,7 @@ public class TransactionBuffer {
     private final Map<String, CassandraVertex> dirtyVertices   = new LinkedHashMap<>();
     private final Map<String, CassandraVertex> removedVertices = new LinkedHashMap<>();
     private final Map<String, CassandraEdge>   newEdges        = new LinkedHashMap<>();
+    private final Map<String, CassandraEdge>   dirtyEdges      = new LinkedHashMap<>();
     private final Map<String, CassandraEdge>   removedEdges    = new LinkedHashMap<>();
 
     public void addVertex(CassandraVertex vertex) {
@@ -38,9 +39,16 @@ public class TransactionBuffer {
         newEdges.put(edge.getIdString(), edge);
     }
 
+    public void markEdgeDirty(CassandraEdge edge) {
+        if (!newEdges.containsKey(edge.getIdString())) {
+            dirtyEdges.put(edge.getIdString(), edge);
+        }
+    }
+
     public void removeEdge(CassandraEdge edge) {
         String id = edge.getIdString();
         newEdges.remove(id);
+        dirtyEdges.remove(id);
         removedEdges.put(id, edge);
     }
 
@@ -62,6 +70,10 @@ public class TransactionBuffer {
 
     public List<CassandraEdge> getNewEdges() {
         return new ArrayList<>(newEdges.values());
+    }
+
+    public List<CassandraEdge> getDirtyEdges() {
+        return new ArrayList<>(dirtyEdges.values());
     }
 
     public List<CassandraEdge> getRemovedEdges() {
@@ -106,11 +118,12 @@ public class TransactionBuffer {
         dirtyVertices.clear();
         removedVertices.clear();
         newEdges.clear();
+        dirtyEdges.clear();
         removedEdges.clear();
     }
 
     public boolean isEmpty() {
         return newVertices.isEmpty() && dirtyVertices.isEmpty() && removedVertices.isEmpty()
-                && newEdges.isEmpty() && removedEdges.isEmpty();
+                && newEdges.isEmpty() && dirtyEdges.isEmpty() && removedEdges.isEmpty();
     }
 }

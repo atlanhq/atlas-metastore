@@ -187,8 +187,28 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
 
     @SuppressWarnings("unchecked")
     private Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> executeEdgeQuery(int offset, int limit) {
-        // Edges are not typically queried by property via graph query
-        // Return empty for now - edge queries go through vertex.getEdges()
+        // Try edge index lookup for known property keys (e.g., relationship GUID)
+        if (!predicates.isEmpty() && orQueries.isEmpty()) {
+            for (Predicate p : predicates) {
+                if (p instanceof HasPredicate) {
+                    HasPredicate hp = (HasPredicate) p;
+
+                    // Relationship GUID lookup via edge_index table
+                    if (Constants.RELATIONSHIP_GUID_PROPERTY_KEY.equals(hp.key) && hp.value != null) {
+                        String edgeId = graph.getIndexRepository().lookupEdge("_r__guid_idx", String.valueOf(hp.value));
+                        if (edgeId != null) {
+                            CassandraEdge edge = graph.getEdgeRepository().getEdge(edgeId, graph);
+                            if (edge != null) {
+                                return Collections.singletonList(edge);
+                            }
+                        }
+                        LOG.debug("executeEdgeQuery: no edge found for {} = {}", hp.key, hp.value);
+                        return Collections.emptyList();
+                    }
+                }
+            }
+        }
+
         return Collections.emptyList();
     }
 

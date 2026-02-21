@@ -219,14 +219,94 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     @Override
     public Iterator<Result<CassandraVertex, CassandraEdge>> vertices(int offset, int limit) {
-        if (esClient == null || sourceBuilder == null) {
+        if (sourceBuilder != null && esClient != null) {
+            sourceBuilder.from(offset);
+            sourceBuilder.size(limit);
+            SearchRequest searchRequest = new SearchRequest(index);
+            searchRequest.source(sourceBuilder);
+            return runQuery(searchRequest);
+        }
+
+        // Fallback: queryString-based search via low-level REST client
+        if (queryString != null && !queryString.isEmpty()) {
+            return runQueryStringSearch(offset, limit);
+        }
+
+        return Collections.emptyIterator();
+    }
+
+    /**
+     * Executes a Lucene query_string query via the low-level ES REST client.
+     * Used by EntitySearchProcessor / ClassificationSearchProcessor which pass
+     * a query string like "+__typeName:Table AND +__state:ACTIVE".
+     */
+    private Iterator<Result<CassandraVertex, CassandraEdge>> runQueryStringSearch(int offset, int limit) {
+        try {
+            // Strip JanusGraph's "$v$" field-name prefix and surrounding quotes.
+            // JanusGraph query strings use $v$"__typeName" format; the Cassandra backend
+            // indexes vertex properties without the prefix, so ES fields are e.g.
+            // "__typeName" not "$v$__typeName". The regex turns $v$"field" → field.
+            String cleanedQueryString = queryString.replaceAll("\\$v\\$\"([^\"]*)\"", "$1");
+
+            String esQuery = String.format(
+                "{\"query\":{\"query_string\":{\"query\":\"%s\"}},\"from\":%d,\"size\":%d,\"_source\":false}",
+                cleanedQueryString.replace("\"", "\\\""), offset, limit);
+
+            LOG.info("runQueryStringSearch: index='{}', queryString='{}', cleaned='{}', offset={}, limit={}",
+                    index, queryString, cleanedQueryString, offset, limit);
+
+            String responseString = performDirectIndexQuery(esQuery, false);
+            LOG.info("runQueryStringSearch: response length={}, preview='{}'",
+                    responseString != null ? responseString.length() : 0,
+                    responseString != null ? responseString.substring(0, Math.min(500, responseString.length())) : "null");
+
+            return parseSearchResponse(responseString);
+        } catch (Exception e) {
+            LOG.error("Failed to execute queryString search on index {}: {}", index, e.getMessage(), e);
             return Collections.emptyIterator();
         }
-        sourceBuilder.from(offset);
-        sourceBuilder.size(limit);
-        SearchRequest searchRequest = new SearchRequest(index);
-        searchRequest.source(sourceBuilder);
-        return runQuery(searchRequest);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Iterator<Result<CassandraVertex, CassandraEdge>> parseSearchResponse(String responseString) {
+        Map<String, Object> responseMap = AtlasType.fromJson(responseString, Map.class);
+        if (responseMap == null) {
+            return Collections.emptyIterator();
+        }
+
+        Map<String, Object> hitsWrapper = (Map<String, Object>) responseMap.get("hits");
+        if (hitsWrapper == null) {
+            return Collections.emptyIterator();
+        }
+
+        // Extract total count
+        Object totalObj = hitsWrapper.get("total");
+        if (totalObj instanceof Map) {
+            Object value = ((Map<String, Object>) totalObj).get("value");
+            if (value instanceof Number) {
+                vertexTotalsValue = ((Number) value).longValue();
+            }
+        } else if (totalObj instanceof Number) {
+            vertexTotalsValue = ((Number) totalObj).longValue();
+        }
+
+        List<Map<String, Object>> hits = (List<Map<String, Object>>) hitsWrapper.get("hits");
+        if (hits == null || hits.isEmpty()) {
+            return Collections.emptyIterator();
+        }
+
+        List<Result<CassandraVertex, CassandraEdge>> results = new ArrayList<>(hits.size());
+        for (Map<String, Object> hit : hits) {
+            String vertexId = (String) hit.get("_id");
+            if (vertexId != null) {
+                double score = hit.get("_score") instanceof Number ? ((Number) hit.get("_score")).doubleValue() : 0.0;
+                CassandraVertex vertex = (CassandraVertex) graph.getVertex(vertexId);
+                if (vertex != null) {
+                    results.add(new ResultImpl(vertex, score));
+                }
+            }
+        }
+        return results.iterator();
     }
 
     @Override
@@ -339,13 +419,21 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         } catch (ResponseException rex) {
             int statusCode = rex.getResponse().getStatusLine().getStatusCode();
             String responseBody = EntityUtils.toString(rex.getResponse().getEntity());
-            LOG.error("ES query failed: status={}, index={}, response={}", statusCode, index, responseBody);
             if (statusCode == 404) {
                 LOG.warn("ES index with name {} not found", index);
                 throw new AtlasBaseException(INDEX_NOT_FOUND, index);
-            } else {
-                throw new AtlasBaseException(String.format("Error in executing elastic query: %s", EntityUtils.toString(entity)), rex);
             }
+            // Handle "No mapping found for [field] in order to sort on" — this happens
+            // on a fresh Cassandra backend where ES fields are auto-mapped on first
+            // document. If no document with the sort field has been indexed yet, ES
+            // returns 400. Return an empty result instead of propagating the error.
+            if (statusCode == 400 && responseBody != null && responseBody.contains("No mapping found for")) {
+                LOG.warn("ES query returned 400 due to unmapped sort field (index={}). " +
+                         "Returning empty result. This is expected on a fresh backend.", index);
+                return "{\"hits\":{\"total\":{\"value\":0},\"hits\":[]}}";
+            }
+            LOG.error("ES query failed: status={}, index={}, response={}", statusCode, index, responseBody);
+            throw new AtlasBaseException(String.format("Error in executing elastic query: %s", EntityUtils.toString(entity)), rex);
         }
         return EntityUtils.toString(response.getEntity());
     }
@@ -654,13 +742,26 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
     public final class ResultImpl implements Result<CassandraVertex, CassandraEdge> {
         private final SearchHit hit;
+        private final AtlasVertex<CassandraVertex, CassandraEdge> resolvedVertex;
+        private final double resolvedScore;
 
         public ResultImpl(SearchHit hit) {
-            this.hit = hit;
+            this.hit            = hit;
+            this.resolvedVertex = null;
+            this.resolvedScore  = Double.NaN;
+        }
+
+        public ResultImpl(AtlasVertex<CassandraVertex, CassandraEdge> vertex, double score) {
+            this.hit            = null;
+            this.resolvedVertex = vertex;
+            this.resolvedScore  = score;
         }
 
         @Override
         public AtlasVertex<CassandraVertex, CassandraEdge> getVertex() {
+            if (resolvedVertex != null) {
+                return resolvedVertex;
+            }
             String docId = hit.getId();
             String vertexId = decodeDocId(docId);
             AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(vertexId);
@@ -680,7 +781,10 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
 
         @Override
         public double getScore() {
-            return hit.getScore();
+            if (hit != null) {
+                return hit.getScore();
+            }
+            return resolvedScore;
         }
 
         @Override

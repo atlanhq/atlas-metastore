@@ -25,6 +25,11 @@ public class IndexRepository {
     private PreparedStatement deletePropertyIndexStmt;
     private PreparedStatement deletePropertyIndexVertexStmt;
 
+    // 1:1 edge index (edge_index table)
+    private PreparedStatement insertEdgeIndexStmt;
+    private PreparedStatement selectEdgeIndexStmt;
+    private PreparedStatement deleteEdgeIndexStmt;
+
     public IndexRepository(CqlSession session) {
         this.session = session;
         prepareStatements();
@@ -59,6 +64,19 @@ public class IndexRepository {
 
         deletePropertyIndexVertexStmt = session.prepare(
             "DELETE FROM vertex_property_index WHERE index_name = ? AND index_value = ? AND vertex_id = ?"
+        );
+
+        // 1:1 edge index
+        insertEdgeIndexStmt = session.prepare(
+            "INSERT INTO edge_index (index_name, index_value, edge_id) VALUES (?, ?, ?)"
+        );
+
+        selectEdgeIndexStmt = session.prepare(
+            "SELECT edge_id FROM edge_index WHERE index_name = ? AND index_value = ?"
+        );
+
+        deleteEdgeIndexStmt = session.prepare(
+            "DELETE FROM edge_index WHERE index_name = ? AND index_value = ?"
         );
     }
 
@@ -128,6 +146,34 @@ public class IndexRepository {
         session.execute(batch.build());
     }
 
+    // ---- 1:1 edge index (edge_index) ----
+
+    public void addEdgeIndex(String indexName, String indexValue, String edgeId) {
+        session.execute(insertEdgeIndexStmt.bind(indexName, indexValue, edgeId));
+    }
+
+    public String lookupEdge(String indexName, String indexValue) {
+        ResultSet rs = session.execute(selectEdgeIndexStmt.bind(indexName, indexValue));
+        Row row = rs.one();
+        return row != null ? row.getString("edge_id") : null;
+    }
+
+    public void removeEdgeIndex(String indexName, String indexValue) {
+        session.execute(deleteEdgeIndexStmt.bind(indexName, indexValue));
+    }
+
+    public void batchAddEdgeIndexes(List<EdgeIndexEntry> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+
+        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+        for (EdgeIndexEntry entry : entries) {
+            batch.addStatement(insertEdgeIndexStmt.bind(entry.indexName, entry.indexValue, entry.edgeId));
+        }
+        session.execute(batch.build());
+    }
+
     // ---- Shared entry class ----
 
     public static class IndexEntry {
@@ -139,6 +185,18 @@ public class IndexRepository {
             this.indexName  = indexName;
             this.indexValue = indexValue;
             this.vertexId   = vertexId;
+        }
+    }
+
+    public static class EdgeIndexEntry {
+        public final String indexName;
+        public final String indexValue;
+        public final String edgeId;
+
+        public EdgeIndexEntry(String indexName, String indexValue, String edgeId) {
+            this.indexName  = indexName;
+            this.indexValue = indexValue;
+            this.edgeId     = edgeId;
         }
     }
 }

@@ -45,6 +45,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.type.AtlasEntityType;
@@ -94,6 +95,7 @@ public class EntityLineageService implements AtlasLineageService {
     private final EntityGraphRetriever entityRetriever;
     private final AtlasTypeRegistry atlasTypeRegistry;
     private final VertexEdgeCache vertexEdgeCache;
+    private final CassandraLineageService cassandraLineageService;
 
     private static final List<String> FETCH_ENTITY_ATTRIBUTES = Arrays.asList(ATTRIBUTE_NAME_GUID, QUALIFIED_NAME, NAME);
 
@@ -104,6 +106,15 @@ public class EntityLineageService implements AtlasLineageService {
         this.entityRetriever = entityRetriever;
         this.atlasTypeRegistry = typeRegistry;
         this.vertexEdgeCache = vertexEdgeCache;
+
+        // Wire CassandraLineageService for direct Cassandra lineage traversal
+        if (atlasGraph instanceof CassandraGraph) {
+            this.cassandraLineageService = new CassandraLineageService(
+                    ((CassandraGraph) atlasGraph).getSession(), typeRegistry);
+            LOG.info("CassandraLineageService initialized — lineage will use direct Cassandra queries");
+        } else {
+            this.cassandraLineageService = null;
+        }
     }
 
     @VisibleForTesting
@@ -113,6 +124,7 @@ public class EntityLineageService implements AtlasLineageService {
         this.entityRetriever = null;
         this.atlasTypeRegistry = null;
         this.vertexEdgeCache = null;
+        this.cassandraLineageService = null;
     }
 
     @Override
@@ -130,34 +142,37 @@ public class EntityLineageService implements AtlasLineageService {
         AtlasLineageContext lineageRequestContext = new AtlasLineageContext(lineageRequest, atlasTypeRegistry);
         RequestContext.get().setRelationAttrsForSearch(lineageRequest.getRelationAttributes());
 
-        AtlasVertex entity = AtlasGraphUtilsV2.findByGuid(guid);
-        String entityTypeName = entity.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
-
-
-        AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(entityTypeName);
-
-        if (entityType == null) {
-            throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, entityTypeName);
-        }
-
-        boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
-        if (isProcess) {
-            if (lineageRequest.isHideProcess()) {
-                throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE_HIDE_PROCESS, guid, entityTypeName);
-            }
-            lineageRequestContext.setProcess(true);
-        }else {
-            boolean isDataSet = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
-            if (!isDataSet) {
-                throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, entityTypeName);
-            }
-            lineageRequestContext.setDataset(true);
-        }
-
-        if (LINEAGE_USING_GREMLIN) {
-            ret = getLineageInfoV1(lineageRequestContext);
+        if (cassandraLineageService != null) {
+            ret = cassandraLineageService.getClassicLineageInfo(lineageRequestContext);
         } else {
-            ret = getLineageInfoV2(lineageRequestContext);
+            AtlasVertex entity = AtlasGraphUtilsV2.findByGuid(guid);
+            String entityTypeName = entity.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+
+            AtlasEntityType entityType = atlasTypeRegistry.getEntityTypeByName(entityTypeName);
+
+            if (entityType == null) {
+                throw new AtlasBaseException(AtlasErrorCode.TYPE_NAME_NOT_FOUND, entityTypeName);
+            }
+
+            boolean isProcess = entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
+            if (isProcess) {
+                if (lineageRequest.isHideProcess()) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE_HIDE_PROCESS, guid, entityTypeName);
+                }
+                lineageRequestContext.setProcess(true);
+            } else {
+                boolean isDataSet = entityType.getTypeAndAllSuperTypes().contains(DATA_SET_SUPER_TYPE);
+                if (!isDataSet) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_LINEAGE_ENTITY_TYPE, guid, entityTypeName);
+                }
+                lineageRequestContext.setDataset(true);
+            }
+
+            if (LINEAGE_USING_GREMLIN) {
+                ret = getLineageInfoV1(lineageRequestContext);
+            } else {
+                ret = getLineageInfoV2(lineageRequestContext);
+            }
         }
 
         scrubLineageEntities(ret.getGuidEntityMap().values());
@@ -178,8 +193,15 @@ public class EntityLineageService implements AtlasLineageService {
 
         RequestContext.get().setRelationAttrsForSearch(lineageOnDemandRequest.getRelationAttributes());
         AtlasLineageOnDemandContext atlasLineageOnDemandContext = new AtlasLineageOnDemandContext(lineageOnDemandRequest, atlasTypeRegistry);
-        boolean isDataSet = validateEntityTypeAndCheckIfDataSet(guid);
-        AtlasLineageOnDemandInfo ret = getLineageInfoOnDemand(guid, atlasLineageOnDemandContext, isDataSet);
+
+        AtlasLineageOnDemandInfo ret;
+        if (cassandraLineageService != null) {
+            ret = cassandraLineageService.getLineageInfoOnDemand(guid, atlasLineageOnDemandContext);
+        } else {
+            boolean isDataSet = validateEntityTypeAndCheckIfDataSet(guid);
+            ret = getLineageInfoOnDemand(guid, atlasLineageOnDemandContext, isDataSet);
+        }
+
         appendLineageOnDemandPayload(ret, lineageOnDemandRequest);
         // filtering out on-demand relations which has input & output nodes within the limit
         cleanupRelationsOnDemand(ret);
@@ -194,10 +216,17 @@ public class EntityLineageService implements AtlasLineageService {
     public AtlasLineageListInfo getLineageListInfoOnDemand(String guid, LineageListRequest lineageListRequest) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("getLineageListInfoOnDemand");
 
-        AtlasLineageListInfo ret = new AtlasLineageListInfo(new ArrayList<>());
+        AtlasLineageListInfo ret;
         RequestContext.get().setRelationAttrsForSearch(lineageListRequest.getRelationAttributes());
 
-        traverseEdgesUsingBFS(guid, new AtlasLineageListContext(lineageListRequest, atlasTypeRegistry), ret);
+        if (cassandraLineageService != null) {
+            AtlasLineageListContext listContext = new AtlasLineageListContext(lineageListRequest, atlasTypeRegistry);
+            ret = cassandraLineageService.getLineageListInfo(guid, listContext);
+        } else {
+            ret = new AtlasLineageListInfo(new ArrayList<>());
+            traverseEdgesUsingBFS(guid, new AtlasLineageListContext(lineageListRequest, atlasTypeRegistry), ret);
+        }
+
         ret.setSearchParameters(lineageListRequest);
 
         RequestContext.get().endMetricRecord(metricRecorder);
@@ -1073,28 +1102,55 @@ public class EntityLineageService implements AtlasLineageService {
     }
 
     private Long getTotalDownstreamVertexCount(String guid) {
-        return (Long) graph
-                .V()
-                .has("__guid", guid)
-                .inE("__Process.inputs").has("__state", "ACTIVE")
-                .outV().has("__state", "ACTIVE")
-                .outE("__Process.outputs").has("__state", "ACTIVE")
-                .inV()
-                .count()
-                .next();
+        long count = 0;
+        Iterator<AtlasVertex> vertices = graph.getVertices(GUID_PROPERTY_KEY, guid).iterator();
+        if (!vertices.hasNext()) return 0L;
+        AtlasVertex vertex = vertices.next();
 
+        // dataset ←(IN __Process.inputs)← Process →(OUT __Process.outputs)→ output datasets
+        Iterator<AtlasEdge> inputEdges = vertex.getEdges(IN, PROCESS_INPUTS_EDGE).iterator();
+        while (inputEdges.hasNext()) {
+            AtlasEdge edge = inputEdges.next();
+            if (getStatus(edge) != AtlasEntity.Status.ACTIVE) continue;
+
+            AtlasVertex processVertex = edge.getOutVertex();
+            if (getStatus(processVertex) != AtlasEntity.Status.ACTIVE) continue;
+
+            Iterator<AtlasEdge> outputEdges = processVertex.getEdges(OUT, PROCESS_OUTPUTS_EDGE).iterator();
+            while (outputEdges.hasNext()) {
+                AtlasEdge outEdge = outputEdges.next();
+                if (getStatus(outEdge) == AtlasEntity.Status.ACTIVE) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private Long getTotalUpstreamVertexCount(String guid) {
-        return (Long) graph
-                .V()
-                .has("__guid", guid)
-                .outE("__Process.outputs").has("__state", "ACTIVE")
-                .inV().has("__state", "ACTIVE")
-                .inE("__Process.inputs").has("__state", "ACTIVE")
-                .inV()
-                .count()
-                .next();
+        long count = 0;
+        Iterator<AtlasVertex> vertices = graph.getVertices(GUID_PROPERTY_KEY, guid).iterator();
+        if (!vertices.hasNext()) return 0L;
+        AtlasVertex vertex = vertices.next();
+
+        // dataset ←(IN __Process.outputs)← Process ←(OUT __Process.inputs)→ input datasets
+        Iterator<AtlasEdge> outputEdges = vertex.getEdges(IN, PROCESS_OUTPUTS_EDGE).iterator();
+        while (outputEdges.hasNext()) {
+            AtlasEdge edge = outputEdges.next();
+            if (getStatus(edge) != AtlasEntity.Status.ACTIVE) continue;
+
+            AtlasVertex processVertex = edge.getOutVertex();
+            if (getStatus(processVertex) != AtlasEntity.Status.ACTIVE) continue;
+
+            Iterator<AtlasEdge> inputEdges = processVertex.getEdges(OUT, PROCESS_INPUTS_EDGE).iterator();
+            while (inputEdges.hasNext()) {
+                AtlasEdge inEdge = inputEdges.next();
+                if (getStatus(inEdge) == AtlasEntity.Status.ACTIVE) {
+                    count++;
+                }
+            }
+        }
+        return count;
     }
 
     private void addPaginatedVerticesToResult(boolean isInput,

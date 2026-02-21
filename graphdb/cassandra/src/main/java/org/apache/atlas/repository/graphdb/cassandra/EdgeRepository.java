@@ -26,6 +26,9 @@ public class EdgeRepository {
     private PreparedStatement selectEdgesInByLabelStmt;
     private PreparedStatement selectEdgesOutByLabelLimitStmt;
     private PreparedStatement selectEdgesInByLabelLimitStmt;
+    private PreparedStatement updateEdgeByIdStmt;
+    private PreparedStatement updateEdgeOutStmt;
+    private PreparedStatement updateEdgeInStmt;
     private PreparedStatement deleteEdgeOutStmt;
     private PreparedStatement deleteEdgeInStmt;
     private PreparedStatement deleteEdgeByIdStmt;
@@ -87,6 +90,22 @@ public class EdgeRepository {
             "FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT ?"
         );
 
+        // Update edge properties/state in all three tables (uses INSERT which upserts in Cassandra)
+        updateEdgeByIdStmt = session.prepare(
+            "INSERT INTO edges_by_id (edge_id, out_vertex_id, in_vertex_id, edge_label, properties, state, modified_at) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        );
+
+        updateEdgeOutStmt = session.prepare(
+            "INSERT INTO edges_out (out_vertex_id, edge_label, edge_id, in_vertex_id, properties, state, modified_at) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        );
+
+        updateEdgeInStmt = session.prepare(
+            "INSERT INTO edges_in (in_vertex_id, edge_label, edge_id, out_vertex_id, properties, state, modified_at) " +
+            "VALUES (?, ?, ?, ?, ?, ?, ?)"
+        );
+
         deleteEdgeOutStmt = session.prepare(
             "DELETE FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? AND edge_id = ?"
         );
@@ -121,6 +140,32 @@ public class EdgeRepository {
         batch.addStatement(insertEdgeByIdStmt.bind(
             edge.getIdString(), edge.getOutVertexId(), edge.getInVertexId(),
             edge.getLabel(), propsJson, state, now, now
+        ));
+
+        session.execute(batch.build());
+    }
+
+    public void updateEdge(CassandraEdge edge) {
+        String propsJson = AtlasType.toJson(edge.getProperties());
+        Object stateObj  = edge.getProperties().get("__state");
+        String state     = stateObj != null ? String.valueOf(stateObj) : "ACTIVE";
+        Instant now      = Instant.now();
+
+        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+
+        batch.addStatement(updateEdgeByIdStmt.bind(
+            edge.getIdString(), edge.getOutVertexId(), edge.getInVertexId(),
+            edge.getLabel(), propsJson, state, now
+        ));
+
+        batch.addStatement(updateEdgeOutStmt.bind(
+            edge.getOutVertexId(), edge.getLabel(), edge.getIdString(),
+            edge.getInVertexId(), propsJson, state, now
+        ));
+
+        batch.addStatement(updateEdgeInStmt.bind(
+            edge.getInVertexId(), edge.getLabel(), edge.getIdString(),
+            edge.getOutVertexId(), propsJson, state, now
         ));
 
         session.execute(batch.build());

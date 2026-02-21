@@ -134,6 +134,16 @@ public class CassandraSessionProvider {
             ")"
         );
 
+        // Edge property index table (1:1 lookups, e.g., relationship GUID → edge_id)
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS edge_index (" +
+            "  index_name text," +
+            "  index_value text," +
+            "  edge_id text," +
+            "  PRIMARY KEY ((index_name, index_value))" +
+            ")"
+        );
+
         // Property index table (1:N lookups - multiple vertices per index key)
         session.execute(
             "CREATE TABLE IF NOT EXISTS vertex_property_index (" +

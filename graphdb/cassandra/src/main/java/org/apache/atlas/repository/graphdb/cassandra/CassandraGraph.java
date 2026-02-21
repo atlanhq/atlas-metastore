@@ -525,9 +525,30 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 edgeRepository.batchInsertEdges(newEdges);
             }
 
+            // Flush dirty edges (property updates on existing edges, e.g., soft-delete state change)
+            List<CassandraEdge> dirtyEdges = buffer.getDirtyEdges();
+            for (CassandraEdge e : dirtyEdges) {
+                edgeRepository.updateEdge(e);
+            }
+
+            // Build edge index entries (e.g., relationship GUID → edge_id)
+            List<IndexRepository.EdgeIndexEntry> edgeIndexEntries = new ArrayList<>();
+            for (CassandraEdge e : newEdges) {
+                buildEdgeIndexEntries(e, edgeIndexEntries);
+            }
+            if (!edgeIndexEntries.isEmpty()) {
+                indexRepository.batchAddEdgeIndexes(edgeIndexEntries);
+                LOG.info("commit: wrote {} edge index entries to Cassandra", edgeIndexEntries.size());
+            }
+
             // Process removals
             for (CassandraEdge edge : buffer.getRemovedEdges()) {
                 edgeRepository.deleteEdge(edge);
+                // Clean up edge index entries
+                Object relGuid = edge.getProperty(Constants.RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+                if (relGuid != null) {
+                    indexRepository.removeEdgeIndex("_r__guid_idx", String.valueOf(relGuid));
+                }
             }
             for (CassandraVertex vertex : buffer.getRemovedVertices()) {
                 edgeRepository.deleteEdgesForVertex(vertex.getIdString(), this);
@@ -567,6 +588,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 v.markPersisted();
             }
             for (CassandraEdge e : newEdges) {
+                e.markPersisted();
+            }
+            for (CassandraEdge e : dirtyEdges) {
                 e.markPersisted();
             }
 
@@ -628,6 +652,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         if (guid == null && qn == null && vertexType == null) {
             LOG.warn("buildIndexEntries: vertex [{}] has no indexable properties! Keys: {}",
                     vertex.getIdString(), vertex.getPropertyKeys());
+        }
+    }
+
+    private void buildEdgeIndexEntries(CassandraEdge edge, List<IndexRepository.EdgeIndexEntry> entries) {
+        // Index by relationship GUID (_r__guid) so edges can be looked up by relationship GUID
+        Object relGuid = edge.getProperty(Constants.RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+        if (relGuid != null) {
+            entries.add(new IndexRepository.EdgeIndexEntry("_r__guid_idx", String.valueOf(relGuid), edge.getIdString()));
         }
     }
 
@@ -718,19 +750,29 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
             if (bulkBody.length() > 0) {
+                LOG.info("syncVerticesToElasticsearch: sending bulk request to ES index '{}', body length={}",
+                        indexName, bulkBody.length());
                 Request bulkReq = new Request("POST", "/_bulk");
                 bulkReq.setEntity(new StringEntity(bulkBody.toString(), ContentType.APPLICATION_JSON));
                 Response resp = client.performRequest(bulkReq);
                 int status = resp.getStatusLine().getStatusCode();
+                String respBody = org.apache.http.util.EntityUtils.toString(resp.getEntity());
                 if (status >= 200 && status < 300) {
-                    LOG.debug("Synced {} new + {} updated vertices to ES index {}",
-                            newVertices.size(), dirtyVertices.size(), indexName);
+                    LOG.info("Synced {} new + {} dirty vertices to ES index '{}', response status={}",
+                            newVertices.size(), dirtyVertices.size(), indexName, status);
+                    // Check for individual item errors in the bulk response
+                    if (respBody != null && respBody.contains("\"errors\":true")) {
+                        LOG.warn("ES bulk sync had item-level errors: {}", respBody.substring(0, Math.min(2000, respBody.length())));
+                    }
                 } else {
-                    LOG.warn("ES bulk sync returned status {}", status);
+                    LOG.warn("ES bulk sync returned status {}, response: {}", status, respBody);
                 }
+            } else {
+                LOG.info("syncVerticesToElasticsearch: no entity vertices to sync ({} new, {} dirty skipped)",
+                        newVertices.size(), dirtyVertices.size());
             }
         } catch (Exception e) {
-            LOG.warn("Failed to sync vertices to ES: {}", e.getMessage());
+            LOG.warn("Failed to sync vertices to ES: {}", e.getMessage(), e);
         }
     }
 
@@ -919,6 +961,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     void notifyVertexDirty(CassandraVertex vertex) {
         txBuffer.get().markVertexDirty(vertex);
+    }
+
+    void notifyEdgeDirty(CassandraEdge edge) {
+        txBuffer.get().markEdgeDirty(edge);
     }
 
     void clearVertexCache() {
