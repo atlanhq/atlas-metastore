@@ -187,8 +187,6 @@ public class RedisServiceImpl extends AbstractRedisService {
         return LOG;
     }
 
-    // ========== Override Redis Operations with Availability Checks ==========
-
     @Override
     public boolean acquireDistributedLock(String key) throws Exception {
         if (!isAvailable()) {

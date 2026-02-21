@@ -90,9 +90,6 @@ jobs:
         env:
           MAVEN_OPTS: -Xmx2g
 
-      # Note: Common module unit tests (SimpleCacheTest, FeatureFlagCacheStoreTest)
-      # require surefire TestNG configuration fix - tracked separately
-
       - name: Run integration tests
         id: tests
         continue-on-error: true

@@ -560,16 +560,6 @@ public final class Constants {
         }
     }
 
-    /**
-     * Get the Elasticsearch index name.
-     *
-     * Note: Temp ES index suffix logic (for maintenance mode) is now handled by
-     * DynamicConfigStore.useTempEsIndex() in the repository module.
-     * Callers in the repository module should use that method if they need the temp suffix.
-     */
-    public static String getESIndex() {
-        return VERTEX_INDEX_NAME;
-    }
 
     public static String getStaticFileAsString(String fileName) throws IOException {
         String atlasHomeDir  = System.getProperty("atlas.home");
