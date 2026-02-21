@@ -59,6 +59,8 @@ public class EmbeddedServer {
 
     protected final Server server;
 
+    protected String atlasPath;
+
     public EmbeddedServer(String host, int port, String path) throws IOException {
         int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
         LinkedBlockingQueue<Runnable> queue         = new LinkedBlockingQueue<>(queueSize);
@@ -70,6 +72,7 @@ public class EmbeddedServer {
         ExecutorThreadPool            pool          = new ExecutorThreadPool(executor, reservedThreads);
 
         server = new Server(pool);
+        atlasPath = path;
 
         Connector connector = getConnector(host, port);
         connector.addBean(new JettyConnectionMetrics(getMeterRegistry()));
