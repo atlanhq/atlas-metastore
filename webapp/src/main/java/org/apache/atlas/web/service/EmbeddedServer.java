@@ -198,6 +198,12 @@ public class EmbeddedServer {
             //Share the same ClassLoader so the Fast-Lane can see Atlas classes
             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
+            fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
+            fastLaneContext.getServletContext().setAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
+                mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
+            );
+
             // Definition for the Lean Servlet
             org.eclipse.jetty.servlet.ServletHolder fastLaneServlet = new org.eclipse.jetty.servlet.ServletHolder(
                 new com.sun.jersey.spi.spring.container.servlet.SpringServlet()
