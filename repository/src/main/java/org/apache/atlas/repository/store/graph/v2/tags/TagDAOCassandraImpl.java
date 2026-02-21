@@ -760,7 +760,12 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
 
     public static int calculateBucket(String vertexId) {
         int numBuckets = 2 << BUCKET_POWER; // 2 * 2^5 = 64
-        return (int) (Long.parseLong(vertexId) % numBuckets);
+        try {
+            return (int) (Long.parseLong(vertexId) % numBuckets);
+        } catch (NumberFormatException e) {
+            // Non-numeric vertex IDs (e.g., UUID strings from CassandraGraph)
+            return Math.abs(vertexId.hashCode() % numBuckets);
+        }
     }
 
     public static AtlasClassification convertToAtlasClassification(String tagMetaJson) throws AtlasBaseException {

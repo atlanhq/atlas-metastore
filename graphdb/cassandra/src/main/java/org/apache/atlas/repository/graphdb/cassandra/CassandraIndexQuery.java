@@ -337,7 +337,10 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         try {
             response = getESClient().performRequest(request);
         } catch (ResponseException rex) {
-            if (rex.getResponse().getStatusLine().getStatusCode() == 404) {
+            int statusCode = rex.getResponse().getStatusLine().getStatusCode();
+            String responseBody = EntityUtils.toString(rex.getResponse().getEntity());
+            LOG.error("ES query failed: status={}, index={}, response={}", statusCode, index, responseBody);
+            if (statusCode == 404) {
                 LOG.warn("ES index with name {} not found", index);
                 throw new AtlasBaseException(INDEX_NOT_FOUND, index);
             } else {

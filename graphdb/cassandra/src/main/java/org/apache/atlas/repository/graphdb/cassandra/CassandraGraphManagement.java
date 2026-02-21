@@ -154,6 +154,11 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
         if (index != null) {
             index.addFieldKey(propertyKey);
         }
+        // Update ES mapping so queries (sort, filter) work even before any documents are indexed
+        String esIndexName = Constants.INDEX_PREFIX + vertexIndex;
+        Class<?> propClass = (propertyKey instanceof CassandraPropertyKey)
+                ? ((CassandraPropertyKey) propertyKey).getPropertyClass() : null;
+        addESFieldMapping(esIndexName, propertyKey.getName(), propClass, isStringField);
         // Return the property name directly (no JanusGraph field encoding)
         return propertyKey.getName();
     }
@@ -230,6 +235,57 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             }
         } catch (Exception e) {
             LOG.warn("Failed to check ES index {}: {}", indexName, e.getMessage());
+        }
+    }
+
+    /**
+     * Adds a field mapping to an existing ES index so that sort/filter queries work
+     * even before any documents containing the field are indexed.
+     */
+    private void addESFieldMapping(String indexName, String fieldName, Class<?> propertyClass, boolean isStringField) {
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                return;
+            }
+
+            String esType = mapPropertyClassToESType(propertyClass, isStringField);
+            String mappingBody;
+            if ("keyword".equals(esType)) {
+                mappingBody = String.format(
+                    "{\"properties\":{\"%s\":{\"type\":\"keyword\",\"ignore_above\":5120}}}", fieldName);
+            } else {
+                mappingBody = String.format(
+                    "{\"properties\":{\"%s\":{\"type\":\"%s\"}}}", fieldName, esType);
+            }
+
+            Request req = new Request("PUT", "/" + indexName + "/_mapping");
+            req.setEntity(new StringEntity(mappingBody, ContentType.APPLICATION_JSON));
+            Response resp = client.performRequest(req);
+
+            if (resp.getStatusLine().getStatusCode() >= 200 && resp.getStatusLine().getStatusCode() < 300) {
+                LOG.debug("Added ES field mapping: index={}, field={}, type={}", indexName, fieldName, esType);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to add ES field mapping for {}.{}: {}", indexName, fieldName, e.getMessage());
+        }
+    }
+
+    private static String mapPropertyClassToESType(Class<?> clazz, boolean isStringField) {
+        if (clazz == null || clazz == String.class) {
+            return "keyword";
+        } else if (clazz == Integer.class || clazz == int.class) {
+            return "integer";
+        } else if (clazz == Long.class || clazz == long.class) {
+            return "long";
+        } else if (clazz == Float.class || clazz == float.class) {
+            return "float";
+        } else if (clazz == Double.class || clazz == double.class) {
+            return "double";
+        } else if (clazz == Boolean.class || clazz == boolean.class) {
+            return "boolean";
+        } else {
+            return "keyword";
         }
     }
 
