@@ -201,7 +201,8 @@ public class EmbeddedServer {
             fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
             fastLaneContext.getServletContext().setAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
-                mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
+                //mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
+                new org.apache.atlas.web.setup.SpringContextContextAttributeExporter(mainAppContext)
             );
 
             // Definition for the Lean Servlet
