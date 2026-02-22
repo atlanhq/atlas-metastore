@@ -87,6 +87,10 @@ public class VertexEdgePropertiesCache {
             if (clazz.isInstance(value)) {
                 return clazz.cast(value);
             } else {
+                Tp coerced = coerceNumeric(value, clazz);
+                if (coerced != null) {
+                    return coerced;
+                }
                 throw new IllegalArgumentException("Property value is not of type " + clazz.getName());
             }
         } else {
@@ -97,9 +101,40 @@ public class VertexEdgePropertiesCache {
             if (clazz.isInstance(value)) {
                 return clazz.cast(value);
             } else {
+                Tp coerced = coerceNumeric(value, clazz);
+                if (coerced != null) {
+                    return coerced;
+                }
                 throw new IllegalArgumentException("Property value is not of type " + clazz.getName());
             }
         }
+    }
+
+    /**
+     * Coerce a Number value to the requested numeric type.
+     * JSON round-trip through Cassandra can turn Long into Integer (when the value fits in 32 bits),
+     * so we need to convert between numeric types rather than failing with a type mismatch.
+     */
+    @SuppressWarnings("unchecked")
+    private <Tp> Tp coerceNumeric(Object value, Class<Tp> clazz) {
+        if (!(value instanceof Number)) {
+            return null;
+        }
+        Number num = (Number) value;
+        if (clazz == Long.class || clazz == long.class) {
+            return (Tp) Long.valueOf(num.longValue());
+        } else if (clazz == Integer.class || clazz == int.class) {
+            return (Tp) Integer.valueOf(num.intValue());
+        } else if (clazz == Double.class || clazz == double.class) {
+            return (Tp) Double.valueOf(num.doubleValue());
+        } else if (clazz == Float.class || clazz == float.class) {
+            return (Tp) Float.valueOf(num.floatValue());
+        } else if (clazz == Short.class || clazz == short.class) {
+            return (Tp) Short.valueOf(num.shortValue());
+        } else if (clazz == Byte.class || clazz == byte.class) {
+            return (Tp) Byte.valueOf(num.byteValue());
+        }
+        return null;
     }
 
     public String getGuid(String vertexId) {
