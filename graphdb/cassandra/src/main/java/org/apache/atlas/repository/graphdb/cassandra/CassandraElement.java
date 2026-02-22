@@ -117,7 +117,21 @@ public abstract class CassandraElement implements AtlasElement {
         }
 
         if (value instanceof Collection) {
-            return new ArrayList<>((Collection<T>) value);
+            // After Cassandra JSON round-trip, Sets become ArrayLists and nested
+            // collections can appear if addProperty was called before the fix.
+            // Flatten any nested collections to ensure all elements are scalars.
+            Collection<?> coll = (Collection<?>) value;
+            List<T> result = new ArrayList<>();
+            for (Object elem : coll) {
+                if (elem instanceof Collection) {
+                    for (Object nested : (Collection<?>) elem) {
+                        result.add((T) nested);
+                    }
+                } else {
+                    result.add((T) elem);
+                }
+            }
+            return result;
         }
 
         return Collections.singletonList((T) value);

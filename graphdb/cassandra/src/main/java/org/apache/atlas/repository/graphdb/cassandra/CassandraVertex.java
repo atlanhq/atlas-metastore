@@ -92,6 +92,12 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
         Object existing = properties.get(propertyName);
         if (existing instanceof Set) {
             ((Set<Object>) existing).add(value);
+        } else if (existing instanceof Collection) {
+            // After Cassandra round-trip, Sets are deserialized as ArrayLists.
+            // Convert back to Set and append the new value.
+            Set<Object> set = new LinkedHashSet<>((Collection<?>) existing);
+            set.add(value);
+            properties.put(propertyName, set);
         } else if (existing != null) {
             Set<Object> set = new LinkedHashSet<>();
             set.add(existing);

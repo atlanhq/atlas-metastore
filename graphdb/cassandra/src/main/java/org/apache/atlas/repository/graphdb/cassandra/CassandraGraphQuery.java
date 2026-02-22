@@ -390,17 +390,16 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
                 }
             }
 
-            // Fall back to generic index for entries not yet in TypeDefCache
-            if (results.isEmpty()) {
-                List<String> vertexIds = graph.getIndexRepository().lookupVertices(
-                        "type_category_idx", vertexType + ":" + typeCategory);
-                for (String vertexId : vertexIds) {
-                    if (!seenIds.contains(vertexId)) {
-                        AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
-                        if (vertex != null && matchesAllPredicates(vertex)) {
-                            results.add(vertex);
-                            seenIds.add(vertexId);
-                        }
+            // Also check generic index to pick up entries not yet in TypeDefCache
+            // (e.g., typedefs created at runtime that the Caffeine cache may have evicted)
+            List<String> vertexIds = graph.getIndexRepository().lookupVertices(
+                    "type_category_idx", vertexType + ":" + typeCategory);
+            for (String vertexId : vertexIds) {
+                if (!seenIds.contains(vertexId)) {
+                    AtlasVertex<CassandraVertex, CassandraEdge> vertex = graph.getVertex(vertexId);
+                    if (vertex != null && matchesAllPredicates(vertex)) {
+                        results.add(vertex);
+                        seenIds.add(vertexId);
                     }
                 }
             }
