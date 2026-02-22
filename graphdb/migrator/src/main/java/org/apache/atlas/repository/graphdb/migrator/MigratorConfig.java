@@ -53,6 +53,16 @@ public class MigratorConfig {
     private final int queueCapacity;
     private final boolean resume;
 
+    // Write optimizations
+    private final int maxInflightPerThread;
+    private final boolean edgesOutOnly;
+    private final int maxEdgesPerBatch;
+
+    // Skip flags
+    private final boolean skipEsReindex;
+    private final boolean skipClassifications;
+    private final boolean skipTasks;
+
     public MigratorConfig(String configPath) throws IOException {
         this.props = new Properties();
         try (FileInputStream fis = new FileInputStream(configPath)) {
@@ -99,6 +109,16 @@ public class MigratorConfig {
         this.scanFetchSize   = getInt("migration.scan.fetch.size", 5000);
         this.queueCapacity   = getInt("migration.queue.capacity", 10000);
         this.resume          = getBoolean("migration.resume", true);
+
+        // Write optimizations
+        this.maxInflightPerThread = getInt("migration.writer.max.inflight.per.thread", 50);
+        this.edgesOutOnly         = getBoolean("migration.edges.out.only", true);
+        this.maxEdgesPerBatch     = getInt("migration.writer.max.edges.per.batch", 15);
+
+        // Skip flags
+        this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
+        this.skipClassifications = getBoolean("migration.skip.classifications", false);
+        this.skipTasks           = getBoolean("migration.skip.tasks", false);
     }
 
     private String get(String key, String defaultValue) {
@@ -149,4 +169,12 @@ public class MigratorConfig {
     public int     getScanFetchSize()    { return scanFetchSize; }
     public int     getQueueCapacity()    { return queueCapacity; }
     public boolean isResume()            { return resume; }
+
+    public int     getMaxInflightPerThread() { return maxInflightPerThread; }
+    public boolean isEdgesOutOnly()          { return edgesOutOnly; }
+    public int     getMaxEdgesPerBatch()     { return maxEdgesPerBatch; }
+
+    public boolean isSkipEsReindex()      { return skipEsReindex; }
+    public boolean isSkipClassifications() { return skipClassifications; }
+    public boolean isSkipTasks()           { return skipTasks; }
 }

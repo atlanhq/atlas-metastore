@@ -105,6 +105,13 @@
             <version>${tinkerpop.version}</version>
         </dependency>
 
+        <!-- Atlas JanusGraph module for AtlasJanusGraphDatabase config + custom serializers -->
+        <dependency>
+            <groupId>org.apache.atlas</groupId>
+            <artifactId>atlas-graphdb-janus</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
         <!-- Atlas intg for ApplicationProperties -->
         <dependency>
             <groupId>org.apache.atlas</groupId>
@@ -163,12 +170,11 @@
             <scope>test</scope>
         </dependency>
 
-        <!-- Logging impl for tests -->
+        <!-- Logging impl — included in fat jar for standalone execution -->
         <dependency>
             <groupId>org.slf4j</groupId>
             <artifactId>slf4j-simple</artifactId>
-            <version>1.7.36</version>
-            <scope>test</scope>
+            <version>2.0.9</version>
         </dependency>
     </dependencies>
 

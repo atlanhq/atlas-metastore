@@ -42,7 +42,8 @@ import java.util.function.Consumer;
  *   CQL token-range scan  →  JG EdgeSerializer.parseRelation()  →  DecodedVertex
  *
  * Each edge is stored in both vertices' adjacency lists in JanusGraph.
- * We only process OUT-direction edges to ensure exactly-once processing.
+ * When edgesOutOnly is enabled (default), we only process OUT-direction edges
+ * to ensure exactly-once processing and halve edge mutations.
  */
 public class JanusGraphScanner implements AutoCloseable {
 
@@ -90,10 +91,6 @@ public class JanusGraphScanner implements AutoCloseable {
         );
     }
 
-    /**
-     * Load atlas-application.properties file, strip the "atlas.graph." prefix,
-     * and add Atlas's custom serializers — matching AtlasJanusGraphDatabase.getConfiguration().
-     */
     /**
      * Load a config file and produce a JanusGraph-compatible Configuration.
      *
@@ -302,9 +299,13 @@ public class JanusGraphScanner implements AutoCloseable {
                 if (currentKey != null && !currentEntries.isEmpty()) {
                     DecodedVertex decoded = decodeVertex(currentVertexId, currentEntries);
                     if (decoded != null) {
-                        consumer.accept(decoded);
-                        rangeVertices++;
-                        rangeEdges += decoded.getOutEdges().size();
+                        if (shouldSkipVertex(decoded)) {
+                            metrics.incrVerticesSkipped();
+                        } else {
+                            consumer.accept(decoded);
+                            rangeVertices++;
+                            rangeEdges += decoded.getOutEdges().size();
+                        }
                     }
                 }
 
@@ -323,9 +324,13 @@ public class JanusGraphScanner implements AutoCloseable {
         if (currentKey != null && !currentEntries.isEmpty()) {
             DecodedVertex decoded = decodeVertex(currentVertexId, currentEntries);
             if (decoded != null) {
-                consumer.accept(decoded);
-                rangeVertices++;
-                rangeEdges += decoded.getOutEdges().size();
+                if (shouldSkipVertex(decoded)) {
+                    metrics.incrVerticesSkipped();
+                } else {
+                    consumer.accept(decoded);
+                    rangeVertices++;
+                    rangeEdges += decoded.getOutEdges().size();
+                }
             }
         }
 
@@ -379,14 +384,28 @@ public class JanusGraphScanner implements AutoCloseable {
     private static final int EDGE_SAMPLE_LOG_LIMIT = 20;
 
     /**
+     * Check if a decoded vertex should be skipped based on config flags.
+     * Classification vertices have __entityGuid (Constants.CLASSIFICATION_ENTITY_GUID).
+     * Task vertices have __task_guid (Constants.TASK_GUID).
+     */
+    private boolean shouldSkipVertex(DecodedVertex vertex) {
+        if (config.isSkipClassifications() && vertex.getProperties().containsKey("__entityGuid")) {
+            return true;
+        }
+        if (config.isSkipTasks() && vertex.getProperties().containsKey("__task_guid")) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
      * Decode a vertex's full adjacency list from JanusGraph's binary format.
-     * Extracts properties and edges (all directions).
+     * Extracts properties and edges.
      *
      * Each edge in JanusGraph is stored twice in the edgestore — once in each
-     * endpoint's adjacency list. We process ALL edges regardless of direction
-     * and correctly assign out/in vertex IDs based on rel.direction.
-     * Cassandra INSERT is an upsert, so duplicate writes from both endpoints
-     * produce the same final result (idempotent).
+     * endpoint's adjacency list. When edgesOutOnly is enabled (default), we skip
+     * IN-direction edges since the same edge will be processed from the other
+     * endpoint's OUT list. This halves edge mutations without losing data.
      */
     private DecodedVertex decodeVertex(long vertexId, List<Entry> entries) {
         // Skip invisible/internal JanusGraph system vertices
@@ -435,23 +454,24 @@ public class JanusGraphScanner implements AutoCloseable {
                         entryProps++;
                     }
                 } else {
-                    // Edge — process ALL directions. Each edge is stored twice in JG
-                    // (once per endpoint). We determine correct out/in assignment from
-                    // the direction, and Cassandra upserts handle deduplication.
+                    // Edge processing. Each edge is stored twice in JG (once per
+                    // endpoint). With OUT-only mode, skip IN edges — they'll be
+                    // written when we process the other endpoint's OUT list.
                     long otherVertexId = ((Number) rel.getOtherVertexId()).longValue();
                     long relationId    = rel.relationId;
                     Direction dir      = rel.direction;
+
+                    if (config.isEdgesOutOnly() && dir == Direction.IN) {
+                        continue;
+                    }
 
                     long outVertexId;
                     long inVertexId;
 
                     if (dir == Direction.IN) {
-                        // We're reading from the IN-vertex's adjacency list:
-                        // current vertex is the target, other vertex is the source
                         outVertexId = otherVertexId;
                         inVertexId  = vertexId;
                     } else {
-                        // OUT or BOTH: current vertex is the source
                         outVertexId = vertexId;
                         inVertexId  = otherVertexId;
                     }

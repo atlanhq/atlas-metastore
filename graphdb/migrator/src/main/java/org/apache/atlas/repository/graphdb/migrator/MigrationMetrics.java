@@ -14,6 +14,7 @@ public class MigrationMetrics {
     private static final Logger LOG = LoggerFactory.getLogger(MigrationMetrics.class);
 
     private final AtomicLong verticesScanned  = new AtomicLong(0);
+    private final AtomicLong verticesSkipped  = new AtomicLong(0);
     private final AtomicLong verticesWritten  = new AtomicLong(0);
     private final AtomicLong edgesWritten     = new AtomicLong(0);
     private final AtomicLong indexesWritten   = new AtomicLong(0);
@@ -42,6 +43,7 @@ public class MigrationMetrics {
     }
 
     public void incrVerticesScanned()           { verticesScanned.incrementAndGet(); }
+    public void incrVerticesSkipped()            { verticesSkipped.incrementAndGet(); }
     public void incrVerticesWritten()            { verticesWritten.incrementAndGet(); }
     public void incrEdgesWritten(long count)     { edgesWritten.addAndGet(count); }
     public void incrIndexesWritten(long count)   { indexesWritten.addAndGet(count); }
@@ -55,6 +57,7 @@ public class MigrationMetrics {
     public void setQueueCapacity(int capacity)   { this.queueCapacity = capacity; }
 
     public long getVerticesScanned()  { return verticesScanned.get(); }
+    public long getVerticesSkipped()  { return verticesSkipped.get(); }
     public long getVerticesWritten()  { return verticesWritten.get(); }
     public long getEdgesWritten()     { return edgesWritten.get(); }
     public long getIndexesWritten()   { return indexesWritten.get(); }
@@ -103,9 +106,16 @@ public class MigrationMetrics {
         LOG.info("  Token ranges: {}/{} ({})", rangesDone, rangesTotal, eta);
         LOG.info("  CQL rows read: {} (current: {}/s, avg: {}/s)",
                  format(curCqlRows), format((long) rowRate), format((long)(elapsed > 0 ? curCqlRows / elapsed : 0)));
-        LOG.info("  Vertices: scanned={}, written={} (current: {}/s, avg: {}/s)",
-                 format(verticesScanned.get()), format(curVerticesWritten),
-                 format((long) vertexRate), format((long) avgVertexRate));
+        long skipped = verticesSkipped.get();
+        if (skipped > 0) {
+            LOG.info("  Vertices: scanned={}, written={}, skipped={} (current: {}/s, avg: {}/s)",
+                     format(verticesScanned.get()), format(curVerticesWritten), format(skipped),
+                     format((long) vertexRate), format((long) avgVertexRate));
+        } else {
+            LOG.info("  Vertices: scanned={}, written={} (current: {}/s, avg: {}/s)",
+                     format(verticesScanned.get()), format(curVerticesWritten),
+                     format((long) vertexRate), format((long) avgVertexRate));
+        }
         LOG.info("  Edges written: {} (current: {}/s) | Indexes: {}",
                  format(curEdgesWritten), format((long) edgeRate), format(indexesWritten.get()));
         if (queueCapacity > 0) {
@@ -128,11 +138,13 @@ public class MigrationMetrics {
     public String summary() {
         double elapsed = getElapsedSeconds();
         double vertexRate = elapsed > 0 ? verticesWritten.get() / elapsed : 0;
+        long skipped = verticesSkipped.get();
+        String skipSuffix = skipped > 0 ? String.format(", Skipped: %s", format(skipped)) : "";
         return String.format(
-            "Migration complete in %s — Vertices: %s, Edges: %s, Indexes: %s, ES docs: %s | " +
+            "Migration complete in %s — Vertices: %s%s, Edges: %s, Indexes: %s, ES docs: %s | " +
             "Avg rate: %s vertices/s | Decode errors: %d, Write errors: %d | CQL rows: %s",
             formatDuration((long) elapsed),
-            format(verticesWritten.get()), format(edgesWritten.get()),
+            format(verticesWritten.get()), skipSuffix, format(edgesWritten.get()),
             format(indexesWritten.get()), format(esDocsIndexed.get()),
             format((long) vertexRate),
             decodeErrors.get(), writeErrors.get(),

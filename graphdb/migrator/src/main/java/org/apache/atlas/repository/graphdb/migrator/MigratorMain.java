@@ -2,11 +2,14 @@ package org.apache.atlas.repository.graphdb.migrator;
 
 import com.datastax.oss.driver.api.core.CqlSession;
 import com.datastax.oss.driver.api.core.CqlSessionBuilder;
+import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
+import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.time.Duration;
 import java.util.concurrent.*;
 
 /**
@@ -60,18 +63,24 @@ public class MigratorMain {
                  config.getTargetEsHostname(), config.getTargetEsPort(), config.getTargetEsIndex());
         LOG.info("Scanner threads: {}, Writer threads: {}, Batch size: {}",
                  config.getScannerThreads(), config.getWriterThreads(), config.getWriterBatchSize());
+        LOG.info("Async writes: maxInflight/thread={}, edgesOutOnly={}, maxEdges/batch={}",
+                 config.getMaxInflightPerThread(), config.isEdgesOutOnly(), config.getMaxEdgesPerBatch());
         LOG.info("Resume: {}", config.isResume());
+        LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
+                 config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
 
-        // Open Cassandra sessions
+        // Open Cassandra sessions (source gets long timeout for token-range scans)
         CqlSession sourceSession = buildCqlSession(
             config.getSourceCassandraHostname(), config.getSourceCassandraPort(),
             config.getSourceCassandraDatacenter(), config.getSourceCassandraKeyspace(),
-            config.getSourceCassandraUsername(), config.getSourceCassandraPassword());
+            config.getSourceCassandraUsername(), config.getSourceCassandraPassword(),
+            false, Duration.ofSeconds(120));
 
         CqlSession targetSession = buildCqlSession(
             config.getTargetCassandraHostname(), config.getTargetCassandraPort(),
             config.getTargetCassandraDatacenter(), config.getTargetCassandraKeyspace(),
-            config.getTargetCassandraUsername(), config.getTargetCassandraPassword());
+            config.getTargetCassandraUsername(), config.getTargetCassandraPassword(),
+            true);
 
         // Create target keyspace + tables first (must happen before stateStore.init()
         // since stateStore creates its table in the same keyspace)
@@ -142,18 +151,25 @@ public class MigratorMain {
             LOG.info("========================================");
 
             // ========== Phase 2: ES Re-index ==========
-            LOG.info("========================================");
-            LOG.info("=== Phase 2/3: Elasticsearch re-indexing ===");
-            LOG.info("  Source: {}.vertices", config.getTargetCassandraKeyspace());
-            LOG.info("  Target ES index: {}", config.getTargetEsIndex());
-            LOG.info("  Bulk size: {}", config.getEsBulkSize());
-            LOG.info("========================================");
+            if (!config.isSkipEsReindex()) {
+                LOG.info("========================================");
+                LOG.info("=== Phase 2/3: Elasticsearch re-indexing ===");
+                LOG.info("  Source: {}.vertices", config.getTargetCassandraKeyspace());
+                LOG.info("  Target ES index: {}", config.getTargetEsIndex());
+                LOG.info("  Bulk size: {}", config.getEsBulkSize());
+                LOG.info("========================================");
 
-            ElasticsearchReindexer esReindexer = new ElasticsearchReindexer(config, metrics, targetSession);
-            esReindexer.reindexAll();
-            esReindexer.close();
+                ElasticsearchReindexer esReindexer = new ElasticsearchReindexer(config, metrics, targetSession);
+                esReindexer.reindexAll();
+                esReindexer.close();
 
-            LOG.info("Phase 2 complete: {} ES docs indexed", String.format("%,d", metrics.getEsDocsIndexed()));
+                LOG.info("Phase 2 complete: {} ES docs indexed", String.format("%,d", metrics.getEsDocsIndexed()));
+            } else {
+                LOG.info("========================================");
+                LOG.info("=== Phase 2 SKIPPED (migration.skip.es.reindex=true) ===");
+                LOG.info("  Existing ES index will be reused by the new graph layer");
+                LOG.info("========================================");
+            }
 
             // ========== Phase 3: Validation ==========
             LOG.info("========================================");
@@ -204,15 +220,53 @@ public class MigratorMain {
     /**
      * Build a CqlSession. Does NOT specify keyspace at session level so we can
      * create keyspaces and query across them.
+     *
+     * @param tuneForWrites  if true, configure connection pool for high-throughput async writes:
+     *                       4 connections per local node, 1024 max concurrent requests per connection
      */
     private static CqlSession buildCqlSession(String hostname, int port, String datacenter,
                                                String keyspace, String username, String password) {
+        return buildCqlSession(hostname, port, datacenter, keyspace, username, password, false, null);
+    }
+
+    private static CqlSession buildCqlSession(String hostname, int port, String datacenter,
+                                               String keyspace, String username, String password,
+                                               boolean tuneForWrites) {
+        return buildCqlSession(hostname, port, datacenter, keyspace, username, password, tuneForWrites, null);
+    }
+
+    private static CqlSession buildCqlSession(String hostname, int port, String datacenter,
+                                               String keyspace, String username, String password,
+                                               boolean tuneForWrites, Duration requestTimeout) {
         CqlSessionBuilder builder = CqlSession.builder()
             .addContactPoint(new InetSocketAddress(hostname, port))
             .withLocalDatacenter(datacenter);
 
         if (username != null && !username.isEmpty()) {
             builder.withAuthCredentials(username, password);
+        }
+
+        // Apply driver config if any tuning is needed
+        if (tuneForWrites || requestTimeout != null) {
+            var configBuilder = DriverConfigLoader.programmaticBuilder();
+
+            if (tuneForWrites) {
+                // 3 nodes × 4 connections × 1024 requests = 12,288 max concurrent requests
+                configBuilder
+                    .withInt(DefaultDriverOption.CONNECTION_POOL_LOCAL_SIZE, 4)
+                    .withInt(DefaultDriverOption.CONNECTION_POOL_REMOTE_SIZE, 2)
+                    .withInt(DefaultDriverOption.CONNECTION_MAX_REQUESTS, 1024);
+                LOG.info("Session tuned for writes: 4 connections/node, 1024 max requests/connection");
+            }
+
+            if (requestTimeout != null) {
+                configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, requestTimeout);
+                LOG.info("Session request timeout: {}s", requestTimeout.getSeconds());
+            } else if (tuneForWrites) {
+                configBuilder.withDuration(DefaultDriverOption.REQUEST_TIMEOUT, Duration.ofSeconds(30));
+            }
+
+            builder.withConfigLoader(configBuilder.build());
         }
 
         CqlSession session = builder.build();
