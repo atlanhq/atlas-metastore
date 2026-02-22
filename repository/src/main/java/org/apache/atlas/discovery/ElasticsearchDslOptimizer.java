@@ -614,9 +614,8 @@ public class ElasticsearchDslOptimizer {
      */
     private boolean isOptimizationValid(String originalQuery, String optimizedQuery) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode original = mapper.readTree(originalQuery);
-            JsonNode optimized = mapper.readTree(optimizedQuery);
+            JsonNode original = this.objectMapper.readTree(originalQuery);
+            JsonNode optimized = this.objectMapper.readTree(optimizedQuery);
 
             // Lightweight validation checks (subset of test validations)
             return validateBasicStructure(original, optimized) &&

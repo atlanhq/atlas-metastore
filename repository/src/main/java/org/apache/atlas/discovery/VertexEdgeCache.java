@@ -16,6 +16,10 @@ public class VertexEdgeCache {
 
     private final ThreadLocal<Map<CachedVertexEdgesKey, List<AtlasEdge>>> edgeCache = ThreadLocal.withInitial(HashMap::new);
 
+    public void clear() {
+        edgeCache.get().clear();
+    }
+
     public List<AtlasEdge> getEdges(AtlasVertex vertex, AtlasEdgeDirection direction, String edgeLabel) {
         CachedVertexEdgesKey key = new CachedVertexEdgesKey(vertex.getId(), direction, edgeLabel);
         Map<CachedVertexEdgesKey, List<AtlasEdge>> cache = edgeCache.get();
