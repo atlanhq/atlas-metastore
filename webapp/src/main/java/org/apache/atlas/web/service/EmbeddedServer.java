@@ -215,8 +215,8 @@ public class EmbeddedServer {
             );
             v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                                     "com.sun.jersey.api.core.ClassNamesResourceConfig");
-            v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                    "org.apache.atlas.web.resources.AdminResource");  //EntityResouceV2 not needed at this stage
+            // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+            //                         "org.apache.atlas.web.resources.AdminResource");  //EntityResouceV2 not needed at this stage
             
             // SetInitorder to Load on first request)
             // This prevents the "ErrorMessagesException" or other stopping conditions from stopping server.start()
