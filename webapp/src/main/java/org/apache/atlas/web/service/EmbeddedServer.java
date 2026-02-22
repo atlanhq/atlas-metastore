@@ -52,7 +52,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 
-/**
+/**  
  * This class embeds a Jetty server and a connector.
  */
 public class EmbeddedServer {
@@ -187,7 +187,7 @@ public class EmbeddedServer {
         //     throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         // }
         try {
-            
+              
             // Get the deep stack Main App
             org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
 
@@ -216,13 +216,14 @@ public class EmbeddedServer {
             v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                                     "com.sun.jersey.api.core.ClassNamesResourceConfig");
             v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                    "org.apache.atlas.web.resources.EntityResourceV2");
+                                    "org.apache.atlas.web.resources.AdminResource");  //EntityResouceV2 not needed at this stage
             
             // SetInitorder to Load on first request)
             // This prevents the "ErrorMessagesException" or other stopping conditions from stopping server.start()
             v2Holder.setInitOrder(-1); 
 
-            fastLaneContext.addServlet(v2Holder, "/v2/*");
+            fastLaneContext.addServlet(v2Holder, "/v2/*");  
+
 
             //Routing 
             org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = 
