@@ -3,7 +3,6 @@ package org.apache.atlas.repository.graphdb.cassandra;
 import org.apache.atlas.repository.graphdb.*;
 
 import java.util.*;
-import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 public class CassandraVertex extends CassandraElement implements AtlasVertex<CassandraVertex, CassandraEdge> {
@@ -53,7 +52,6 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public Set<CassandraEdge> getInEdges(String[] edgeLabelsToExclude) {
         Set<String> excludeSet = edgeLabelsToExclude != null
                 ? new HashSet<>(Arrays.asList(edgeLabelsToExclude))

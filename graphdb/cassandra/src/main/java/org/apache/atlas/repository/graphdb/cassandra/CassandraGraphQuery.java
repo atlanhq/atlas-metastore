@@ -12,8 +12,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.*;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, CassandraEdge> {
 
@@ -135,7 +133,6 @@ public class CassandraGraphQuery implements AtlasGraphQuery<CassandraVertex, Cas
 
     // ---- Internal execution ----
 
-    @SuppressWarnings("unchecked")
     private Iterable<AtlasVertex<CassandraVertex, CassandraEdge>> executeVertexQuery(int offset, int limit) {
         // Try 1:1 index-based lookup for simple has predicates
         if (predicates.size() >= 1 && orQueries.isEmpty()) {

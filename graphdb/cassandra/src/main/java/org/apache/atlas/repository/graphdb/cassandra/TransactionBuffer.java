@@ -3,7 +3,6 @@ package org.apache.atlas.repository.graphdb.cassandra;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
  * Buffers graph mutations in memory until commit or rollback.
@@ -92,18 +91,11 @@ public class TransactionBuffer {
                 continue;
             }
 
-            boolean matches = false;
-            switch (direction) {
-                case OUT:
-                    matches = edge.getOutVertexId().equals(vertexId);
-                    break;
-                case IN:
-                    matches = edge.getInVertexId().equals(vertexId);
-                    break;
-                case BOTH:
-                    matches = edge.getOutVertexId().equals(vertexId) || edge.getInVertexId().equals(vertexId);
-                    break;
-            }
+            boolean matches = switch (direction) {
+                case OUT -> edge.getOutVertexId().equals(vertexId);
+                case IN -> edge.getInVertexId().equals(vertexId);
+                case BOTH -> edge.getOutVertexId().equals(vertexId) || edge.getInVertexId().equals(vertexId);
+            };
 
             if (matches) {
                 result.add(edge);

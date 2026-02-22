@@ -12,7 +12,6 @@ import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatab
 import org.apache.atlas.repository.graphdb.elasticsearch.SearchContextCache;
 import org.apache.atlas.type.AtlasType;
 import org.elasticsearch.search.aggregations.Aggregation;
-import org.apache.atlas.utils.AtlasMetricType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang.StringUtils;

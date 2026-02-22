@@ -96,7 +96,7 @@ public abstract class AbstractNotification implements NotificationInterface {
             createNotificationMessages(messages.get(index), strMessages, source);
         }
 
-        //sendInternal(type, strMessages);
+        sendInternal(type, strMessages);
     }
 
     @Override
@@ -234,6 +234,6 @@ public abstract class AbstractNotification implements NotificationInterface {
             msgIdSuffix = new AtomicInteger(0);
         }
 
-        return nextMsgIdPrefix + "_" + Integer.toString(nextMsgIdSuffix);
+        return nextMsgIdPrefix + "_" + nextMsgIdSuffix;
     }
 }
