@@ -191,30 +191,14 @@ public class EmbeddedServer {
             // Get the deep stack Main App
             org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
 
-
-            //  Creating an Independent Fast-Lane Context
-            // This context lives at /api/atlas but it is SEPARATE from the main app
             org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
                 new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
             fastLaneContext.setContextPath("/api/atlas");
-
-            //Share the same ClassLoader so the Fast-Lane can see Atlas classes
             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
-            // Definition for the Lean Servlet
-            org.eclipse.jetty.servlet.ServletHolder fastLaneServlet = new org.eclipse.jetty.servlet.ServletHolder(
-                new com.sun.jersey.spi.container.servlet.ServletContainer()
-            );
-
-           
-            // Using  the explicit ClassNames to avoid the earlier 500 error triggered scanner crash
-            fastLaneServlet.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                                            "com.sun.jersey.api.core.ClassNamesResourceConfig");
-            fastLaneServlet.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                            "org.apache.atlas.web.resources.AdminResource");
-
-            // Map the endpoints specifically to this lean handler
-            fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
+            // /admin/health servlet  ---
+            // We use a dedicated holder for health so it doesn't share flow  with Jersey
+            org.eclipse.jetty.servlet.ServletHolder healthHolder = new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
                 @Override
                 protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
                     throws javax.servlet.ServletException, java.io.IOException {
@@ -222,24 +206,33 @@ public class EmbeddedServer {
                     resp.setStatus(200);
                     resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
                 }
-            }), "/admin/health");
-                //fastLaneContext.addServlet(fastLaneServlet, "/admin/health");
-            fastLaneContext.addServlet(fastLaneServlet, "/admin/status");
-            fastLaneContext.addServlet(fastLaneServlet, "/api/atlas/v2/*");
+            });
+            fastLaneContext.addServlet(healthHolder, "/admin/health");
 
+            // V2 API Servlet reroute ---
+            org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
+                new com.sun.jersey.spi.container.servlet.ServletContainer()
+            );
+            v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
+            v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+                                    "org.apache.atlas.web.resources.EntityResourceV2");
             
-            // Combining all of them using a new ContextHandlerCollection
-            // Jetty will check the FastLaneContext FIRST because it's more specific than in web.xml?
-            //If not, we will not be able to override filters defined in web.xmk
+            // SetInitorder to Load on first request)
+            // This prevents the "ErrorMessagesException" or other stopping conditions from stopping server.start()
+            v2Holder.setInitOrder(-1); 
+
+            fastLaneContext.addServlet(v2Holder, "/v2/*");
+
+            //Routing 
             org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = 
                 new org.eclipse.jetty.server.handler.ContextHandlerCollection();
+            
+            // Fast-lane (Slim) comes first to intercept /admin/health and /v2/*
             contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
 
             server.setHandler(contexts);
-            
-            LOG.info("Starting Jetty with Dual-Context (Fast-Lane slim stack + Main App)");
             server.start();
-
         } catch(Exception e) {
             throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         }
