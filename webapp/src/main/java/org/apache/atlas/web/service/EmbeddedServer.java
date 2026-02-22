@@ -213,8 +213,8 @@ public class EmbeddedServer {
             org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
                 new com.sun.jersey.spi.container.servlet.ServletContainer()
             );
-            v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
+            // v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+            //                         "com.sun.jersey.api.core.ClassNamesResourceConfig");
             // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             //                         "org.apache.atlas.web.resources.AdminResource");  //EntityResouceV2 not needed at this stage
             
