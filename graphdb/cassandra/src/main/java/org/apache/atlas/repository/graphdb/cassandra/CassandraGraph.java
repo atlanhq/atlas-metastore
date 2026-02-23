@@ -541,18 +541,81 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 LOG.info("commit: wrote {} edge index entries to Cassandra", edgeIndexEntries.size());
             }
 
-            // Process removals
-            for (CassandraEdge edge : buffer.getRemovedEdges()) {
-                edgeRepository.deleteEdge(edge);
-                // Clean up edge index entries
-                Object relGuid = edge.getProperty(Constants.RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
-                if (relGuid != null) {
-                    indexRepository.removeEdgeIndex("_r__guid_idx", String.valueOf(relGuid));
+            // Process removals — batched for performance
+            List<CassandraEdge> removedEdges = buffer.getRemovedEdges();
+            List<CassandraVertex> removedVertices = buffer.getRemovedVertices();
+
+            // 1. Batch-delete explicitly removed edges + their index entries
+            if (!removedEdges.isEmpty()) {
+                edgeRepository.batchDeleteEdges(removedEdges);
+
+                List<IndexRepository.EdgeIndexEntry> edgeIndexRemovals = new ArrayList<>();
+                for (CassandraEdge edge : removedEdges) {
+                    Object relGuid = edge.getProperty(Constants.RELATIONSHIP_GUID_PROPERTY_KEY, String.class);
+                    if (relGuid != null) {
+                        edgeIndexRemovals.add(new IndexRepository.EdgeIndexEntry(
+                                "_r__guid_idx", String.valueOf(relGuid), edge.getIdString()));
+                    }
                 }
+                if (!edgeIndexRemovals.isEmpty()) {
+                    indexRepository.batchRemoveEdgeIndexes(edgeIndexRemovals);
+                }
+                LOG.info("commit: batch-deleted {} edges, {} edge index entries",
+                        removedEdges.size(), edgeIndexRemovals.size());
             }
-            for (CassandraVertex vertex : buffer.getRemovedVertices()) {
-                edgeRepository.deleteEdgesForVertex(vertex.getIdString(), this);
-                vertexRepository.deleteVertex(vertex.getIdString());
+
+            // 2. For removed vertices: cascade-delete their edges, then the vertex + its indexes
+            if (!removedVertices.isEmpty()) {
+                for (CassandraVertex vertex : removedVertices) {
+                    // Cascade-delete all edges (already uses batchDeleteEdges internally)
+                    edgeRepository.deleteEdgesForVertex(vertex.getIdString(), this);
+                    vertexRepository.deleteVertex(vertex.getIdString());
+                }
+
+                // Clean up vertex index entries (prevents orphaned indexes)
+                List<IndexRepository.IndexEntry> vertexIndexRemovals = new ArrayList<>();
+                List<IndexRepository.IndexEntry> vertexPropertyIndexRemovals = new ArrayList<>();
+                for (CassandraVertex vertex : removedVertices) {
+                    String vertexId = vertex.getIdString();
+
+                    // 1:1 unique indexes (vertex_index table)
+                    Object guid = vertex.getProperty("__guid", String.class);
+                    if (guid != null) {
+                        vertexIndexRemovals.add(new IndexRepository.IndexEntry(
+                                "__guid_idx", String.valueOf(guid), vertexId));
+                    }
+
+                    Object qn = vertex.getProperty("qualifiedName", String.class);
+                    Object typeName = vertex.getProperty("__typeName", String.class);
+                    if (qn != null && typeName != null) {
+                        vertexIndexRemovals.add(new IndexRepository.IndexEntry(
+                                "qn_type_idx", qn + ":" + typeName, vertexId));
+                    }
+
+                    Object vertexType = vertex.getProperty(Constants.VERTEX_TYPE_PROPERTY_KEY, String.class);
+                    Object typeDefName = vertex.getProperty(Constants.TYPENAME_PROPERTY_KEY, String.class);
+                    if (vertexType != null && typeDefName != null) {
+                        vertexIndexRemovals.add(new IndexRepository.IndexEntry(
+                                "type_typename_idx", vertexType + ":" + typeDefName, vertexId));
+                    }
+
+                    // 1:N property indexes (vertex_property_index table)
+                    Object typeCategory = vertex.getProperty(Constants.TYPE_CATEGORY_PROPERTY_KEY, String.class);
+                    if (vertexType != null && typeCategory != null) {
+                        vertexPropertyIndexRemovals.add(new IndexRepository.IndexEntry(
+                                "type_category_idx", vertexType + ":" + typeCategory, vertexId));
+                    }
+                }
+
+                if (!vertexIndexRemovals.isEmpty()) {
+                    indexRepository.batchRemoveIndexes(vertexIndexRemovals);
+                }
+                if (!vertexPropertyIndexRemovals.isEmpty()) {
+                    indexRepository.batchRemovePropertyIndexes(vertexPropertyIndexRemovals);
+                }
+
+                LOG.info("commit: removed {} vertices, {} unique index entries, {} property index entries",
+                        removedVertices.size(), vertexIndexRemovals.size(), vertexPropertyIndexRemovals.size());
             }
 
             // Update index entries for new and dirty vertices
@@ -575,10 +638,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
             // Sync TypeDef vertices to the dedicated type_definitions tables
-            syncTypeDefsToCache(newVertices, dirtyVertices, buffer.getRemovedVertices());
+            syncTypeDefsToCache(newVertices, dirtyVertices, removedVertices);
 
             // Sync vertices to Elasticsearch (replaces JanusGraph's mixed index sync)
-            syncVerticesToElasticsearch(newVertices, dirtyVertices, buffer.getRemovedVertices());
+            syncVerticesToElasticsearch(newVertices, dirtyVertices, removedVertices);
 
             // Mark all elements as persisted
             for (CassandraVertex v : newVertices) {

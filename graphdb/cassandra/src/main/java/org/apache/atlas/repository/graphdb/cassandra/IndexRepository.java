@@ -174,6 +174,41 @@ public class IndexRepository {
         session.execute(batch.build());
     }
 
+    // ---- Batch remove methods ----
+
+    public void batchRemoveIndexes(List<IndexEntry> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+        for (IndexEntry entry : entries) {
+            batch.addStatement(deleteIndexStmt.bind(entry.indexName, entry.indexValue));
+        }
+        session.execute(batch.build());
+    }
+
+    public void batchRemovePropertyIndexes(List<IndexEntry> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+        for (IndexEntry entry : entries) {
+            batch.addStatement(deletePropertyIndexVertexStmt.bind(entry.indexName, entry.indexValue, entry.vertexId));
+        }
+        session.execute(batch.build());
+    }
+
+    public void batchRemoveEdgeIndexes(List<EdgeIndexEntry> entries) {
+        if (entries.isEmpty()) {
+            return;
+        }
+        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+        for (EdgeIndexEntry entry : entries) {
+            batch.addStatement(deleteEdgeIndexStmt.bind(entry.indexName, entry.indexValue));
+        }
+        session.execute(batch.build());
+    }
+
     // ---- Shared entry class ----
 
     public static class IndexEntry {

@@ -504,11 +504,48 @@ public class EdgeRepository {
     }
 
     public void deleteEdgesForVertex(String vertexId, CassandraGraph graph) {
-        // Get all edges and delete them
         List<CassandraEdge> allEdges = getEdgesForVertex(vertexId, AtlasEdgeDirection.BOTH, null, graph);
-        for (CassandraEdge edge : allEdges) {
-            deleteEdge(edge);
+        if (!allEdges.isEmpty()) {
+            batchDeleteEdges(allEdges);
         }
+    }
+
+    /**
+     * Delete multiple edges in a single LOGGED BATCH.
+     * Each edge requires 3 DELETE statements (edges_out, edges_in, edges_by_id).
+     * Cassandra LOGGED batches are atomic per partition — for cross-partition
+     * deletes, the batch log guarantees all-or-nothing execution.
+     *
+     * For very large edge sets (>500), splits into sub-batches to stay within
+     * Cassandra's batch size warnings (default 5KB warn, 50KB fail threshold).
+     */
+    public void batchDeleteEdges(List<CassandraEdge> edges) {
+        if (edges.isEmpty()) {
+            return;
+        }
+
+        // 3 statements per edge; keep batches under ~150 edges (450 statements)
+        // to avoid Cassandra batch_size_warn_threshold
+        int BATCH_LIMIT = 150;
+
+        for (int i = 0; i < edges.size(); i += BATCH_LIMIT) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+            int end = Math.min(i + BATCH_LIMIT, edges.size());
+
+            for (int j = i; j < end; j++) {
+                CassandraEdge edge = edges.get(j);
+                batch.addStatement(deleteEdgeOutStmt.bind(
+                    edge.getOutVertexId(), edge.getLabel(), edge.getIdString()));
+                batch.addStatement(deleteEdgeInStmt.bind(
+                    edge.getInVertexId(), edge.getLabel(), edge.getIdString()));
+                batch.addStatement(deleteEdgeByIdStmt.bind(edge.getIdString()));
+            }
+
+            session.execute(batch.build());
+        }
+
+        LOG.debug("batchDeleteEdges: deleted {} edges in {} batch(es)",
+                  edges.size(), (edges.size() + BATCH_LIMIT - 1) / BATCH_LIMIT);
     }
 
     public void batchInsertEdges(List<CassandraEdge> edges) {
