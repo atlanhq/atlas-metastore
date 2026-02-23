@@ -180,6 +180,10 @@ public enum AtlasConfiguration {
     ES_MAX_RETRIES("atlas.es.max.retries", 5),
     ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
 
+    // Entity audit async DLQ: failed audit writes are enqueued for async retry so the main request does not fail
+    ENTITY_AUDIT_DLQ_ENABLED("atlas.entity.audit.dlq.enabled", true),
+    ENTITY_AUDIT_DLQ_QUEUE_CAPACITY("atlas.entity.audit.dlq.queue.capacity", 10000),
+    ENTITY_AUDIT_DLQ_MAX_RETRIES("atlas.entity.audit.dlq.max.retries", 3),
 
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100),
 
