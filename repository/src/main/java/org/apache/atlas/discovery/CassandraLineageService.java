@@ -5,6 +5,7 @@ import com.datastax.oss.driver.api.core.cql.*;
 
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
@@ -20,6 +21,7 @@ import org.apache.atlas.model.lineage.LineageOnDemandConstraints;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -54,6 +56,10 @@ public class CassandraLineageService {
     private static final String PROCESS_INPUTS_EDGE  = "__Process.inputs";
     private static final String PROCESS_OUTPUTS_EDGE = "__Process.outputs";
     private static final String PROCESS_SUPER_TYPE   = "Process";
+    private static final String DATA_SET_SUPER_TYPE  = "DataSet";
+    private static final String CONNECTION_ENTITY_TYPE         = "Connection";
+    private static final String CONNECTION_PROCESS_ENTITY_TYPE = "ConnectionProcess";
+    private static final String DATA_PRODUCT_ENTITY_TYPE       = "DataProduct";
     private static final String SEPARATOR            = "->";
     private static final int    DEFAULT_DEPTH        = 3;
 
@@ -117,8 +123,8 @@ public class CassandraLineageService {
             return v != null ? v.toString() : edgeId;   // fall back to edge id
         }
 
-        boolean isInputEdge() {
-            return PROCESS_INPUTS_EDGE.equalsIgnoreCase(label);
+        boolean isInputEdge(String inputLabel) {
+            return inputLabel.equalsIgnoreCase(label);
         }
     }
 
@@ -174,7 +180,11 @@ public class CassandraLineageService {
             if (baseVertex == null) {
                 throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
             }
-            boolean isDataSet = !isProcessType(baseVertex.typeName);
+
+            String lineageType = context.getLineageType();
+            String inputLabel  = getLineageInputLabel();
+            String outputLabel = getLineageOutputLabel();
+            boolean isConnector = isConnectorVertex(baseVertex.typeName, lineageType);
 
             // 3. Resolve per-GUID constraints (direction, depth, limits)
             LineageOnDemandConstraints constraints = getConstraints(guid, context);
@@ -195,7 +205,8 @@ public class CassandraLineageService {
             Set<String>   attributes       = context.getAttributes();
 
             // 5. Traverse
-            if (isDataSet) {
+            if (!isConnector) {
+                // Non-connector: Dataset, Connection, DataProduct — traverse via IN edges
                 if (direction == LineageDirection.INPUT || direction == LineageDirection.BOTH)
                     traverseFromDataset(vertexId, true, depth, 0, new HashSet<>(),
                             context, ret, guid, inputTraversed, traversalOrder, attributes);
@@ -203,21 +214,21 @@ public class CassandraLineageService {
                     traverseFromDataset(vertexId, false, depth, 0, new HashSet<>(),
                             context, ret, guid, outputTraversed, traversalOrder, attributes);
 
-                // Add the base dataset entity to the result
+                // Add the base entity to the result
                 AtlasEntityHeader header = buildEntityHeader(baseVertex, attributes);
                 header.setDepth(0);
                 header.setTraversalOrder(0);
                 header.setFinishTime(traversalOrder.get());
                 ret.getGuidEntityMap().put(guid, header);
             } else {
-                // Base entity is a Process — make one hop to connected datasets first
+                // Connector: Process, ConnectionProcess — make one hop via OUT edges first
                 if (direction == LineageDirection.INPUT || direction == LineageDirection.BOTH) {
-                    List<EdgeData> edges = getActiveEdgesOut(vertexId, PROCESS_INPUTS_EDGE);
+                    List<EdgeData> edges = getActiveEdgesOut(vertexId, inputLabel);
                     traverseFromProcess(edges, true, depth, 0, context, ret,
                             vertexId, guid, inputTraversed, traversalOrder, attributes);
                 }
                 if (direction == LineageDirection.OUTPUT || direction == LineageDirection.BOTH) {
-                    List<EdgeData> edges = getActiveEdgesOut(vertexId, PROCESS_OUTPUTS_EDGE);
+                    List<EdgeData> edges = getActiveEdgesOut(vertexId, outputLabel);
                     traverseFromProcess(edges, false, depth, 0, context, ret,
                             vertexId, guid, outputTraversed, traversalOrder, attributes);
                 }
@@ -254,6 +265,8 @@ public class CassandraLineageService {
             }
 
             boolean isProcess = isProcessType(baseVertex.typeName);
+            String inputLabel  = getLineageInputLabel();
+            String outputLabel = getLineageOutputLabel();
             Set<String> attributes = context.getAttributes();
 
             AtlasLineageInfo ret = new AtlasLineageInfo(guid, new HashMap<>(), new HashSet<>(),
@@ -271,7 +284,7 @@ public class CassandraLineageService {
             } else {
                 // Process path — one hop to connected datasets, then recurse
                 if (direction == AtlasLineageInfo.LineageDirection.INPUT || direction == AtlasLineageInfo.LineageDirection.BOTH) {
-                    List<EdgeData> edges = getActiveEdgesOut(vertexId, PROCESS_INPUTS_EDGE);
+                    List<EdgeData> edges = getActiveEdgesOut(vertexId, inputLabel);
                     edges = filterIgnoredProcesses(edges, context.getIgnoredProcesses(), true);
                     ret.setHasChildrenForDirection(guid,
                             new LineageChildrenInfo(AtlasLineageInfo.LineageDirection.INPUT, hasActiveEdge(edges)));
@@ -281,7 +294,7 @@ public class CassandraLineageService {
                     }
                 }
                 if (direction == AtlasLineageInfo.LineageDirection.OUTPUT || direction == AtlasLineageInfo.LineageDirection.BOTH) {
-                    List<EdgeData> edges = getActiveEdgesOut(vertexId, PROCESS_OUTPUTS_EDGE);
+                    List<EdgeData> edges = getActiveEdgesOut(vertexId, outputLabel);
                     edges = filterIgnoredProcesses(edges, context.getIgnoredProcesses(), true);
                     ret.setHasChildrenForDirection(guid,
                             new LineageChildrenInfo(AtlasLineageInfo.LineageDirection.OUTPUT, hasActiveEdge(edges)));
@@ -304,11 +317,14 @@ public class CassandraLineageService {
             Set<String> visitedVertices, AtlasLineageInfo ret,
             AtlasLineageContext context) throws AtlasBaseException {
 
+        String inputLabel  = getLineageInputLabel();
+        String outputLabel = getLineageOutputLabel();
+
         if (depth == 0) {
             // At depth limit — just check for children
             VertexData vertex = getVertexData(datasetVertexId);
             if (vertex == null) return;
-            String inLabel = isInput ? PROCESS_OUTPUTS_EDGE : PROCESS_INPUTS_EDGE;
+            String inLabel = isInput ? outputLabel : inputLabel;
             List<EdgeData> edges = getActiveEdgesIn(datasetVertexId, inLabel);
             edges = filterIgnoredProcesses(edges, context.getIgnoredProcesses(), false);
             AtlasLineageInfo.LineageDirection dir = isInput
@@ -322,7 +338,7 @@ public class CassandraLineageService {
         Set<String> attributes = context.getAttributes();
 
         // Step 1: dataset ← process (incoming edges)
-        String inLabel = isInput ? PROCESS_OUTPUTS_EDGE : PROCESS_INPUTS_EDGE;
+        String inLabel = isInput ? outputLabel : inputLabel;
         List<EdgeData> processEdges = getActiveEdgesIn(datasetVertexId, inLabel);
         processEdges = filterIgnoredProcesses(processEdges, context.getIgnoredProcesses(), false);
 
@@ -336,7 +352,7 @@ public class CassandraLineageService {
 
             if (context.isHideProcess()) {
                 // hideProcess: skip process node, make virtual dataset→dataset relations
-                String outLabel = isInput ? PROCESS_INPUTS_EDGE : PROCESS_OUTPUTS_EDGE;
+                String outLabel = isInput ? inputLabel : outputLabel;
                 List<EdgeData> nextEdges = getActiveEdgesOut(processVertexId, outLabel);
 
                 for (EdgeData outEdge : nextEdges) {
@@ -357,7 +373,7 @@ public class CassandraLineageService {
                 addClassicEdge(inEdge, ret, attributes);
 
                 // Step 2: process → next datasets (outgoing edges)
-                String outLabel = isInput ? PROCESS_INPUTS_EDGE : PROCESS_OUTPUTS_EDGE;
+                String outLabel = isInput ? inputLabel : outputLabel;
                 List<EdgeData> nextEdges = getActiveEdgesOut(processVertexId, outLabel);
 
                 for (EdgeData outEdge : nextEdges) {
@@ -391,7 +407,7 @@ public class CassandraLineageService {
             ret.getGuidEntityMap().put(outVertex.guid, buildEntityHeader(outVertex, attributes));
 
         // Add relation (same direction semantics as on-demand)
-        if (edge.isInputEdge()) {
+        if (edge.isInputEdge(getLineageInputLabel())) {
             ret.getRelations().add(new AtlasLineageInfo.LineageRelation(inVertex.guid, outVertex.guid, relationGuid));
         } else {
             ret.getRelations().add(new AtlasLineageInfo.LineageRelation(outVertex.guid, inVertex.guid, relationGuid));
@@ -437,28 +453,42 @@ public class CassandraLineageService {
                 throw new AtlasBaseException(AtlasErrorCode.INSTANCE_GUID_NOT_FOUND, guid);
             }
 
-            boolean isBaseDataset = !isProcessType(baseVertex.typeName);
+            String lineageType = context.getLineageType();
+            boolean isBaseNotConnector = !isConnectorVertex(baseVertex.typeName, lineageType);
             boolean isInputDir = context.getDirection() == LineageListRequest.LineageDirection.INPUT;
 
             Set<String> visitedVertices = new HashSet<>();
             visitedVertices.add(guid);
+            Set<String> skippedVertices = new HashSet<>();
             Queue<String> traversalQueue = new LinkedList<>();
 
+            // immediateNeighbours tracking maps
+            Map<String, List<String>> lineageParentsForEntityMap  = new HashMap<>();
+            Map<String, List<String>> lineageChildrenForEntityMap = new HashMap<>();
+
             // Seed the queue with immediate neighbours
-            bfsEnqueueNeighbours(baseVertex, isBaseDataset, isInputDir, traversalQueue, visitedVertices);
+            bfsEnqueueNeighbours(baseVertex, isBaseNotConnector, isInputDir,
+                    traversalQueue, visitedVertices, lineageParentsForEntityMap, lineageChildrenForEntityMap);
 
             int currentDepth = 0;
-            int maxDepth = context.getDepth();  // already 2*depth from context
-            int currentLevel = isBaseDataset ? 0 : 1;
+            int maxDepth = context.getDepth();
+            int currentLevel = isBaseNotConnector ? 0 : 1;
             int entityCount = 0;
             int fromCounter = 0;
+
+            if (Boolean.TRUE.equals(context.getImmediateNeighbours())) {
+                // Add the base vertex to the result
+                AtlasEntityHeader baseHeader = buildEntityHeader(baseVertex, context.getAttributes());
+                baseHeader.setDepth(currentLevel);
+                ret.getEntities().add(baseHeader);
+            }
 
             while (!traversalQueue.isEmpty() && entityCount < context.getSize() && currentDepth < maxDepth) {
                 currentDepth++;
 
                 // Level increments every other depth
-                if ((isBaseDataset && currentDepth % 2 != 0) ||
-                    (!isBaseDataset && currentDepth % 2 == 0)) {
+                if ((isBaseNotConnector && currentDepth % 2 != 0) ||
+                    (!isBaseNotConnector && currentDepth % 2 == 0)) {
                     currentLevel++;
                 }
 
@@ -474,19 +504,22 @@ public class CassandraLineageService {
                     VertexData currentVertex = getVertexData(curVertexId);
                     if (currentVertex == null) continue;
 
-                    boolean isDataset = !isProcessType(currentVertex.typeName);
+                    boolean isCurrentNotConnector = !isConnectorVertex(currentVertex.typeName, lineageType);
 
                     // Handle offset (skip first 'from' entities)
                     if (context.getFrom() > 0 && fromCounter < context.getFrom()) {
                         fromCounter++;
-                        bfsEnqueueNeighbours(currentVertex, isDataset, isInputDir, traversalQueue, visitedVertices);
+                        skippedVertices.add(currentGUID);
+                        bfsEnqueueNeighbours(currentVertex, isCurrentNotConnector, isInputDir,
+                                traversalQueue, visitedVertices, lineageParentsForEntityMap, lineageChildrenForEntityMap);
                         continue;
                     }
 
                     entityCount++;
 
                     // Enqueue neighbours for further traversal
-                    bfsEnqueueNeighbours(currentVertex, isDataset, isInputDir, traversalQueue, visitedVertices);
+                    bfsEnqueueNeighbours(currentVertex, isCurrentNotConnector, isInputDir,
+                            traversalQueue, visitedVertices, lineageParentsForEntityMap, lineageChildrenForEntityMap);
 
                     // Add to result
                     AtlasEntityHeader header = buildEntityHeader(currentVertex, context.getAttributes());
@@ -496,8 +529,14 @@ public class CassandraLineageService {
                     // Last entity at last depth
                     if (currentDepth == maxDepth && i == entitiesInDepth - 1) {
                         ret.setHasMore(false);
+                        context.setHasMoreUpdated(true);
                     }
                 }
+            }
+
+            // Update immediate neighbour info for each entity in result
+            if (Boolean.TRUE.equals(context.getImmediateNeighbours())) {
+                updateNeighbourNodesForEachEntity(context, ret, lineageParentsForEntityMap, lineageChildrenForEntityMap);
             }
 
             ret.setEntityCount(entityCount);
@@ -513,32 +552,133 @@ public class CassandraLineageService {
         }
     }
 
-    /** Enqueue BFS neighbours for a vertex. */
+    /** Enqueue BFS neighbours for a vertex (without tracking parent/children maps). */
     private void bfsEnqueueNeighbours(
-            VertexData vertex, boolean isDataset, boolean isInputDir,
+            VertexData vertex, boolean isNotConnector, boolean isInputDir,
             Queue<String> queue, Set<String> visited) {
+        bfsEnqueueNeighbours(vertex, isNotConnector, isInputDir, queue, visited, null, null);
+    }
 
-        if (isDataset) {
-            // Dataset → follow incoming process edges
-            String label = isInputDir ? PROCESS_OUTPUTS_EDGE : PROCESS_INPUTS_EDGE;
+    /** Enqueue BFS neighbours for a vertex, optionally tracking parent/children maps for immediateNeighbours. */
+    private void bfsEnqueueNeighbours(
+            VertexData vertex, boolean isNotConnector, boolean isInputDir,
+            Queue<String> queue, Set<String> visited,
+            Map<String, List<String>> lineageParentsMap,
+            Map<String, List<String>> lineageChildrenMap) {
+
+        String inputLabel  = getLineageInputLabel();
+        String outputLabel = getLineageOutputLabel();
+
+        if (isNotConnector) {
+            // Non-connector (Dataset, Connection, DataProduct) → follow incoming edges
+            String label = isInputDir ? outputLabel : inputLabel;
             List<EdgeData> edges = getActiveEdgesIn(vertex.vertexId, label);
             for (EdgeData e : edges) {
                 VertexData neighbour = getVertexData(e.outVertexId);
-                if (neighbour != null && !visited.contains(neighbour.guid)) {
-                    visited.add(neighbour.guid);
-                    queue.add(neighbour.guid);
+                if (neighbour != null) {
+                    if (!visited.contains(neighbour.guid)) {
+                        visited.add(neighbour.guid);
+                        queue.add(neighbour.guid);
+                    }
+                    if (lineageParentsMap != null) {
+                        lineageParentsMap
+                                .computeIfAbsent(neighbour.guid, k -> new ArrayList<>())
+                                .add(vertex.guid);
+                        lineageChildrenMap
+                                .computeIfAbsent(vertex.guid, k -> new ArrayList<>())
+                                .add(neighbour.guid);
+                    }
                 }
             }
         } else {
-            // Process → follow outgoing dataset edges
-            String label = isInputDir ? PROCESS_INPUTS_EDGE : PROCESS_OUTPUTS_EDGE;
+            // Connector (Process, ConnectionProcess) → follow outgoing edges
+            String label = isInputDir ? inputLabel : outputLabel;
             List<EdgeData> edges = getActiveEdgesOut(vertex.vertexId, label);
             for (EdgeData e : edges) {
                 VertexData neighbour = getVertexData(e.inVertexId);
-                if (neighbour != null && !visited.contains(neighbour.guid)) {
-                    visited.add(neighbour.guid);
-                    queue.add(neighbour.guid);
+                if (neighbour != null) {
+                    if (!visited.contains(neighbour.guid)) {
+                        visited.add(neighbour.guid);
+                        queue.add(neighbour.guid);
+                    }
+                    if (lineageParentsMap != null) {
+                        lineageParentsMap
+                                .computeIfAbsent(neighbour.guid, k -> new ArrayList<>())
+                                .add(vertex.guid);
+                        lineageChildrenMap
+                                .computeIfAbsent(vertex.guid, k -> new ArrayList<>())
+                                .add(neighbour.guid);
+                    }
                 }
+            }
+        }
+    }
+
+    /**
+     * Populate immediateUpstream/immediateDownstream on each entity header in the result.
+     * Mirrors EntityLineageService.updateNeighbourNodesForEachEntity().
+     */
+    private void updateNeighbourNodesForEachEntity(
+            AtlasLineageListContext context,
+            AtlasLineageListInfo ret,
+            Map<String, List<String>> lineageParentsMap,
+            Map<String, List<String>> lineageChildrenMap) {
+
+        List<AtlasEntityHeader> entityList = ret.getEntities();
+        if (entityList == null) return;
+
+        boolean isInputDir = context.getDirection() == LineageListRequest.LineageDirection.INPUT;
+
+        for (AtlasEntityHeader entity : entityList) {
+            if (entity == null || entity.getGuid() == null) continue;
+            updateLineageForEntity(entity, lineageParentsMap, true, isInputDir);
+            updateLineageForEntity(entity, lineageChildrenMap, false, isInputDir);
+        }
+    }
+
+    private void updateLineageForEntity(
+            AtlasEntityHeader entity,
+            Map<String, List<String>> lineageMap,
+            boolean isParentMap,
+            boolean isInputDir) {
+
+        List<String> relatedProcessNodes = lineageMap.get(entity.getGuid());
+        if (relatedProcessNodes == null) return;
+
+        Set<String> seenGuids = new HashSet<>();
+        List<Map<String, String>> relatedDatasetNodes = new ArrayList<>();
+
+        for (String nodeGuid : relatedProcessNodes) {
+            List<String> subNodes = lineageMap.get(nodeGuid);
+            if (subNodes == null) continue;
+
+            for (String subNodeGuid : subNodes) {
+                String subVertexId = findVertexIdByGuid(subNodeGuid);
+                if (subVertexId == null) continue;
+                VertexData subVertex = getVertexData(subVertexId);
+                if (subVertex != null && seenGuids.add(subNodeGuid)) {
+                    Map<String, String> details = new HashMap<>();
+                    details.put("guid", subVertex.guid);
+                    Object qn = subVertex.properties.get("qualifiedName");
+                    if (qn != null) details.put("qualifiedName", String.valueOf(qn));
+                    Object name = subVertex.properties.get("name");
+                    if (name != null) details.put("name", String.valueOf(name));
+                    relatedDatasetNodes.add(details);
+                }
+            }
+        }
+
+        if (isParentMap) {
+            if (isInputDir) {
+                entity.setImmediateDownstream(relatedDatasetNodes);
+            } else {
+                entity.setImmediateUpstream(relatedDatasetNodes);
+            }
+        } else {
+            if (isInputDir) {
+                entity.setImmediateUpstream(relatedDatasetNodes);
+            } else {
+                entity.setImmediateDownstream(relatedDatasetNodes);
             }
         }
     }
@@ -579,9 +719,11 @@ public class CassandraLineageService {
         LineageDirection direction = isInput ? LineageDirection.INPUT : LineageDirection.OUTPUT;
 
         // Step 1: find connected process vertices via incoming edges
-        //   Upstream  → edges with label __Process.outputs where this dataset is IN-vertex
-        //   Downstream→ edges with label __Process.inputs  where this dataset is IN-vertex
-        String incomingLabel = isInput ? PROCESS_OUTPUTS_EDGE : PROCESS_INPUTS_EDGE;
+        //   Upstream  → edges with label outputLabel where this dataset is IN-vertex
+        //   Downstream→ edges with label inputLabel  where this dataset is IN-vertex
+        String inputLabel    = getLineageInputLabel();
+        String outputLabel   = getLineageOutputLabel();
+        String incomingLabel = isInput ? outputLabel : inputLabel;
         List<EdgeData> incomingEdges = getActiveEdgesIn(datasetVertexId, incomingLabel);
 
         for (EdgeData incomingEdge : incomingEdges) {
@@ -608,9 +750,7 @@ public class CassandraLineageService {
             }
 
             // Step 2: from the process, find connected datasets via outgoing edges
-            //   Upstream  → edges with label __Process.inputs  (process's inputs)
-            //   Downstream→ edges with label __Process.outputs (process's outputs)
-            String outgoingLabel = isInput ? PROCESS_INPUTS_EDGE : PROCESS_OUTPUTS_EDGE;
+            String outgoingLabel = isInput ? inputLabel : outputLabel;
             List<EdgeData> outgoingEdges = getActiveEdgesOut(processVertexId, outgoingLabel);
 
             for (EdgeData outgoingEdge : outgoingEdges) {
@@ -688,7 +828,7 @@ public class CassandraLineageService {
             if (checkForOffset(processEdge, processVertex != null ? processVertex.guid : baseGuid, context, ret))
                 continue;
 
-            boolean isInputEdge = processEdge.isInputEdge();
+            boolean isInputEdge = processEdge.isInputEdge(getLineageInputLabel());
             if (incrementAndCheckIfRelationsLimitReached(
                     processEdge, isInputEdge, context, ret, depth,
                     entitiesTraversed, direction, new HashSet<>(), attributes)) {
@@ -740,7 +880,7 @@ public class CassandraLineageService {
         String  inGuid       = inVertex.guid;
         String  outGuid      = outVertex.guid;
         String  relationGuid = edge.getRelationshipGuid();
-        boolean isInputEdge  = edge.isInputEdge();
+        boolean isInputEdge  = edge.isInputEdge(getLineageInputLabel());
 
         // Determine which vertex is the Process (for depth/order assignment)
         boolean inIsProcess = isProcessType(inVertex.typeName);
@@ -868,7 +1008,7 @@ public class CassandraLineageService {
      * Check whether this dataset vertex has upstream edges beyond the traversal boundary.
      */
     private void setHasUpstream(VertexData vertex, LineageInfoOnDemand info) {
-        long count = countEdgesIn(vertex.vertexId, PROCESS_OUTPUTS_EDGE);
+        long count = countEdgesIn(vertex.vertexId, getLineageOutputLabel());
         info.setHasUpstream(count > 0);
     }
 
@@ -876,7 +1016,7 @@ public class CassandraLineageService {
      * Check whether this dataset vertex has downstream edges beyond the traversal boundary.
      */
     private void setHasDownstream(VertexData vertex, LineageInfoOnDemand info) {
-        long count = countEdgesIn(vertex.vertexId, PROCESS_INPUTS_EDGE);
+        long count = countEdgesIn(vertex.vertexId, getLineageInputLabel());
         info.setHasDownstream(count > 0);
     }
 
@@ -1024,6 +1164,48 @@ public class CassandraLineageService {
         return entityType.getTypeAndAllSuperTypes().contains(PROCESS_SUPER_TYPE);
     }
 
+    /**
+     * Determines if a vertex acts as a "connector" (Process-like) in the lineage graph.
+     * Connector vertices use OUT edges for traversal; non-connector use IN edges.
+     *
+     * For product-asset lineage: only DataProduct is non-connector.
+     * For dataset-process lineage: Process and ConnectionProcess are connectors;
+     * DataSet, Connection, and DataProduct are non-connectors.
+     */
+    private boolean isConnectorVertex(String typeName, String lineageType) {
+        if (typeName == null) return false;
+        AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+        if (entityType == null) return false;
+        Set<String> allTypes = entityType.getTypeAndAllSuperTypes();
+
+        if (LineageListRequest.LINEAGE_TYPE_PRODUCT_ASSET_LINEAGE.equals(lineageType)) {
+            return !DATA_PRODUCT_ENTITY_TYPE.equals(entityType.getTypeName());
+        }
+
+        // Dataset-process lineage: DataSet, Connection, DataProduct are NOT connectors
+        if (allTypes.contains(DATA_SET_SUPER_TYPE) || allTypes.contains(CONNECTION_ENTITY_TYPE)
+                || DATA_PRODUCT_ENTITY_TYPE.equals(entityType.getTypeName())) {
+            return false;
+        }
+        // Process, ConnectionProcess are connectors
+        return true;
+    }
+
+    /**
+     * Resolve the lineage input/output edge labels.
+     * EntityLineageService sets these on RequestContext BEFORE delegating to us.
+     * Falls back to PROCESS_INPUTS_EDGE/PROCESS_OUTPUTS_EDGE if not set.
+     */
+    private String getLineageInputLabel() {
+        String label = RequestContext.get().getLineageInputLabel();
+        return StringUtils.isNotEmpty(label) ? label : PROCESS_INPUTS_EDGE;
+    }
+
+    private String getLineageOutputLabel() {
+        String label = RequestContext.get().getLineageOutputLabel();
+        return StringUtils.isNotEmpty(label) ? label : PROCESS_OUTPUTS_EDGE;
+    }
+
     // ========================================================================
     // Constraint helpers
     // ========================================================================
@@ -1064,7 +1246,7 @@ public class CassandraLineageService {
 
         String inGuid  = inVertex.guid;
         String outGuid = outVertex.guid;
-        return edge.isInputEdge()
+        return edge.isInputEdge(getLineageInputLabel())
                 ? inGuid + SEPARATOR + outGuid
                 : outGuid + SEPARATOR + inGuid;
     }
