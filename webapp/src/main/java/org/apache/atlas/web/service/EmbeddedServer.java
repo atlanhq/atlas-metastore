@@ -307,7 +307,7 @@ public class EmbeddedServer {
                         );
                         v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
                         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
-                        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
+                        //v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
 
                         // Borrow Spring beans so V2 API can actually talk to the database
                         fastLaneContext.getServletContext().setAttribute(
@@ -324,7 +324,7 @@ public class EmbeddedServer {
                         LOG.info("V2 Optimization Active: Bypassing 150+ filter calls.");
                     } catch (Exception e) {
                         LOG.error("Critical Servlet error: Failed to start V2 optimization path", e);
-                    }
+                    } 
                 }
             });
 
