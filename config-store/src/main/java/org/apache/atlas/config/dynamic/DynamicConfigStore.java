@@ -445,6 +445,18 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
+     * Check if delete batch operations are enabled.
+     * Only enabled when DynamicConfigStore is activated and the flag is set to true.
+     *
+     * @return true if batch delete operations are enabled, false otherwise
+     */
+    public static boolean isDeleteBatchEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.DELETE_BATCH_ENABLED.getKey());
+        }
+        return false;
+    }
+    /*
      * Check if lean graph is enabled.
      * Falls back to AtlasConfiguration (atlas.graph.lean.graph.enabled) if DynamicConfigStore is not activated.
      *
@@ -718,6 +730,13 @@ public class DynamicConfigStore implements ApplicationContextAware {
                         this,
                         ref -> ConfigKey.values().length)
                 .description("Number of expected config keys defined in ConfigKey enum")
+                .register(meterRegistry);
+
+        Gauge.builder("atlas_delete_batch_enabled",
+                        this,
+                        ref -> isDeleteBatchEnabled() ? 1.0 : 0.0)
+                .description("Whether delete batch optimization is enabled (1=enabled, 0=disabled)")
+                .tag("component", "delete")
                 .register(meterRegistry);
 
         // Per-flag gauges — allows Grafana dashboards per tenant per flag

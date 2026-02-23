@@ -24,16 +24,15 @@ on:
       - beta
       - master
       - staging
-      - lite_master
-      - leangraph-dynamic
+
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
-      - '.github/**'
       - 'docs/**'
       - 'local-dev/**'
       - 'README.txt'
       - 'README.md'
+
 
 jobs:
   # Detect what changed to optimize workflow execution
@@ -674,8 +673,10 @@ jobs:
     # 1. Helm-lint passed (quality gate)
     # 2. Build succeeded AND smoke-test passed/skipped: publish (code/workflow changes)
     # 3. Build skipped AND helm changed: publish (helm-only changes)
+    # 4. NOT a ring-* branch (cohort releases patch ArgoCD directly, no chart publish needed)
     if: |
-      always() && 
+      always() &&
+      !startsWith(github.ref_name, 'ring-') &&
       needs.helm-lint.result == 'success' && (
         (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
         (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')

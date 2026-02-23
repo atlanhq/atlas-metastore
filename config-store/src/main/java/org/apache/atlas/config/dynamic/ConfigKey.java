@@ -37,6 +37,8 @@ public enum ConfigKey {
     // Temporary ES index usage flag
     USE_TEMP_ES_INDEX("use_temp_es_index", "false"),
 
+    // Delete batch operations flag
+    DELETE_BATCH_ENABLED("atlas.delete.batch.enabled", "false"),
     // Lean graph optimization flag
     LEAN_GRAPH_ENABLED("lean_graph_enabled", "false"),
 
