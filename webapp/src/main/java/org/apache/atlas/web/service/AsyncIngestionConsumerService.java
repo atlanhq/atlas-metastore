@@ -467,6 +467,10 @@ public class AsyncIngestionConsumerService {
 
         try {
             routeAndProcess(eventType, payload, operationMetadata);
+        } catch (Exception e) {
+            LOG.error("AsyncIngestion: failed to process eventType={}, eventId={}, error={}",
+                    eventType, eventId, e.getMessage(), e);
+            throw e;
         } finally {
             RequestContext.clear();
         }
@@ -585,8 +589,43 @@ public class AsyncIngestionConsumerService {
      */
     private void replayCreateOrUpdate(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
         AtlasEntitiesWithExtInfo entities = AtlasType.fromJson(payload.toString(), AtlasEntitiesWithExtInfo.class);
+        normalizeRelationshipAttributes(entities);
         BulkRequestContext ctx = BulkRequestContext.fromOperationMetadata(operationMetadata);
         entityMutationService.createOrUpdate(new AtlasEntityStream(entities), ctx);
+    }
+
+    /**
+     * After JSON deserialization, relationshipAttributes values are LinkedHashMap (not AtlasObjectId).
+     * Preprocessors like TermPreProcessor.setAnchor() cast them to AtlasObjectId, which fails.
+     * This method normalizes Map values to AtlasObjectId instances.
+     */
+    @SuppressWarnings("unchecked")
+    private void normalizeRelationshipAttributes(AtlasEntitiesWithExtInfo entities) {
+        if (entities == null || entities.getEntities() == null) {
+            return;
+        }
+        for (AtlasEntity entity : entities.getEntities()) {
+            Map<String, Object> relAttrs = entity.getRelationshipAttributes();
+            if (relAttrs == null) {
+                continue;
+            }
+            for (Map.Entry<String, Object> entry : relAttrs.entrySet()) {
+                Object value = entry.getValue();
+                if (value instanceof Map && !(value instanceof AtlasObjectId)) {
+                    entry.setValue(new AtlasObjectId((Map) value));
+                } else if (value instanceof List) {
+                    List<Object> normalized = new ArrayList<>();
+                    for (Object item : (List<?>) value) {
+                        if (item instanceof Map && !(item instanceof AtlasObjectId)) {
+                            normalized.add(new AtlasObjectId((Map) item));
+                        } else {
+                            normalized.add(item);
+                        }
+                    }
+                    entry.setValue(normalized);
+                }
+            }
+        }
     }
 
     /**
@@ -770,12 +809,17 @@ public class AsyncIngestionConsumerService {
     private void replayAddOrUpdateBusinessAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
         String guid = operationMetadata.get("guid").asText();
         boolean isOverwrite = operationMetadata.path("isOverwrite").asBoolean(false);
+
+        LOG.info("AsyncIngestion: ADD_OR_UPDATE_BM guid={}, isOverwrite={}", guid, isOverwrite);
+
         if (operationMetadata.has("bmName")) {
             String bmName = operationMetadata.get("bmName").asText();
             Map<String, Object> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Object>>() {});
+            LOG.info("AsyncIngestion: ADD_OR_UPDATE_BM single bmName={}", bmName);
             entitiesStore.addOrUpdateBusinessAttributes(guid, Collections.singletonMap(bmName, bmAttrs), isOverwrite);
         } else {
             Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Map<String, Object>>>() {});
+            LOG.info("AsyncIngestion: ADD_OR_UPDATE_BM calling entitiesStore with bmNames={}", bmAttrs.keySet());
             entitiesStore.addOrUpdateBusinessAttributes(guid, bmAttrs, isOverwrite);
         }
     }
@@ -788,6 +832,8 @@ public class AsyncIngestionConsumerService {
         String guid = operationMetadata.get("guid").asText();
         boolean isOverwrite = operationMetadata.path("isOverwrite").asBoolean(false);
         Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Map<String, Object>>>() {});
+        LOG.info("AsyncIngestion: ADD_OR_UPDATE_BM_BY_DISPLAY_NAME guid={}, isOverwrite={}, displayNames={}",
+                guid, isOverwrite, bmAttrs.keySet());
         entitiesStore.addOrUpdateBusinessAttributesByDisplayName(guid, bmAttrs, isOverwrite);
     }
 
