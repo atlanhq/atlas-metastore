@@ -368,7 +368,8 @@ public class EmbeddedServer {
         // v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
         // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
      
-        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
+        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources;org.apache.atlas.web.rest");
+        v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWADL", "true");
         v2Holder.setInitParameter("com.sun.jersey.api.json.POJOMappingFeature", "true");
         // Add /v2 calls to the context now, Jetty will handle the start sequence
         fastLaneContext.addServlet(v2Holder, "/*");
@@ -376,7 +377,7 @@ public class EmbeddedServer {
         // This Listener is **only** to inject the dependencies once Main App is ready
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
             @Override
-            public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
+            public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {"
                 try {
                     LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
                     
