@@ -119,10 +119,16 @@ jobs:
           TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
+          # Debug: Verify Docker is accessible
+          echo "Checking Docker connectivity..."
+          docker ps || echo "Warning: docker ps failed"
+
+          # Run tests with testcontainers properties passed to JVM
           mvn test -pl webapp \
             -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest" \
             -Drat.skip=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtestcontainers.ryuk.disabled=true \
             2>&1 | tee test-output.log
 
           # Capture exit code from mvn (not tee)
