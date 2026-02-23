@@ -456,6 +456,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
         }
         return false;
     }
+    /*
      * Check if lean graph is enabled.
      * Falls back to AtlasConfiguration (atlas.graph.lean.graph.enabled) if DynamicConfigStore is not activated.
      *
@@ -752,89 +753,6 @@ public class DynamicConfigStore implements ApplicationContextAware {
                     .description("Current value of config flag (1.0=true, 0.0=false, -1.0=non-boolean, -2.0=null)")
                     .tag("flag", flagKey)
                     .register(meterRegistry);
-        }
-
-        LOG.info("Registered {} config store Prometheus metrics ({} per-flag gauges + store state gauges)",
-                ConfigKey.values().length + 4, ConfigKey.values().length);
-    }
-
-    /**
-     * Log all flag values with their source on startup for debugging.
-     * Makes it immediately visible in pod logs what config state the tenant has.
-     */
-    private void logAllFlagValues() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("Config store flag values on startup (activated=").append(config.isActivated()).append("):\n");
-
-        for (ConfigKey configKey : ConfigKey.values()) {
-            String key = configKey.getKey();
-            ConfigEntry entry = cacheStore.get(key);
-            String value;
-            String source;
-
-            if (entry != null) {
-                value = entry.getValue();
-                source = "cassandra";
-            } else {
-                value = configKey.getDefaultValue();
-                source = "default";
-            }
-
-            sb.append("  ").append(key).append(" = ").append(value)
-                    .append(" [source=").append(source).append("]");
-
-            // For flags that also exist in FeatureFlag (Redis), show the Redis value for comparison
-            if (FeatureFlag.isValidFlag(key)) {
-                try {
-                    String redisValue = FeatureFlagStore.getFlag(key);
-                    sb.append(" [redis=").append(redisValue).append("]");
-                    if (!StringUtils.equals(value, redisValue)) {
-                        sb.append(" [MISMATCH]");
-                    }
-                } catch (Exception e) {
-                    sb.append(" [redis=ERROR]");
-                }
-            }
-            sb.append("\n");
-        }
-
-        LOG.info(sb.toString());
-    }
-
-    /**
-     * Record a metric when we fall back to defaults on an activated store.
-     * Non-zero values of this counter indicate Phase 1 sync was missed.
-     */
-    private void recordDefaultFallbackMetric(String key) {
-        try {
-            Counter.builder(METRIC_DEFAULT_FALLBACK)
-                    .description("Count of times a config read fell back to default on an activated store")
-                    .tag("flag", key)
-                    .register(org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry())
-                    .increment();
-        } catch (Exception e) {
-            LOG.debug("Failed to record default fallback metric for key: {}", key, e);
-        }
-    }
-
-    /**
-     * Record a metric when Redis recovery sync is triggered on an activated store.
-     */
-    private void recordRecoveryMetric() {
-        try {
-            Counter.builder(METRIC_REDIS_RECOVERY)
-                    .description("Count of times Redis recovery sync was triggered on an activated store with missing rows")
-                    .register(org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry())
-                    .increment();
-        } catch (Exception e) {
-            LOG.debug("Failed to record Redis recovery metric", e);
-        }
-    }
-
-    private static DynamicConfigStore getInstance() {
-        if (context == null) {
-            LOG.debug("ApplicationContext not available");
-            return null;
         }
 
         LOG.info("Registered {} config store Prometheus metrics ({} per-flag gauges + store state gauges)",
