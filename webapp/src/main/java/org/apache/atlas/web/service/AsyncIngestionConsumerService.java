@@ -551,6 +551,12 @@ public class AsyncIngestionConsumerService {
             case "RELATIONSHIP_CREATE":
                 replayRelationshipCreate(payload);
                 break;
+            case "RELATIONSHIP_BULK_CREATE_OR_UPDATE":
+                replayRelationshipBulkCreateOrUpdate(payload);
+                break;
+            case "RELATIONSHIP_UPDATE":
+                replayRelationshipUpdate(payload);
+                break;
 
             // ── Partial update mutations ─────────────────────────────
             case "PARTIAL_UPDATE_BY_GUID":
@@ -814,6 +820,22 @@ public class AsyncIngestionConsumerService {
     private void replayRelationshipCreate(JsonNode payload) throws AtlasBaseException {
         AtlasRelationship relationship = AtlasType.fromJson(payload.toString(), AtlasRelationship.class);
         relationshipStore.create(relationship);
+    }
+
+    /**
+     * RELATIONSHIP_BULK_CREATE_OR_UPDATE: payload = List of AtlasRelationship JSON
+     */
+    private void replayRelationshipBulkCreateOrUpdate(JsonNode payload) throws AtlasBaseException {
+        List<AtlasRelationship> relationships = MAPPER.convertValue(payload, new TypeReference<List<AtlasRelationship>>() {});
+        relationshipStore.createOrUpdate(relationships);
+    }
+
+    /**
+     * RELATIONSHIP_UPDATE: payload = AtlasRelationship JSON
+     */
+    private void replayRelationshipUpdate(JsonNode payload) throws AtlasBaseException {
+        AtlasRelationship relationship = AtlasType.fromJson(payload.toString(), AtlasRelationship.class);
+        relationshipStore.update(relationship);
     }
 
     // ── Partial Update & Attribute Replay Methods ─────────────────────────
