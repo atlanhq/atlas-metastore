@@ -94,7 +94,7 @@
             </exclusions>
             <type>pom</type>
         </dependency>
-
+        
         <dependency>
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-common</artifactId>
@@ -181,22 +181,6 @@
             <groupId>redis.clients</groupId>
             <artifactId>jedis</artifactId>
             <version>5.1.0</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-repository</artifactId>
-            <version>${project.version}</version>
-            <type>test-jar</type>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-intg</artifactId>
-            <version>${project.version}</version>
-            <type>test-jar</type>
             <scope>test</scope>
         </dependency>
 
@@ -495,22 +479,11 @@
             <artifactId>aspectjweaver</artifactId>
             <version>1.8.9</version>
         </dependency>
-<!--        <dependency>-->
-<!--            <groupId>org.apache.atlas</groupId>-->
-<!--            <artifactId>atlas-dashboardv2</artifactId>-->
-<!--            <type>war</type>-->
-<!--        </dependency>-->
+
         <dependency>
             <groupId>org.easymock</groupId>
             <artifactId>easymock</artifactId>
             <version>3.4</version>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-intg</artifactId>
-            <classifier>tests</classifier>
             <scope>test</scope>
         </dependency>
 
@@ -521,13 +494,7 @@
             <scope>test</scope>
         </dependency>
 
-        <dependency>
-            <groupId>org.apache.atlas</groupId>
-            <artifactId>atlas-repository</artifactId>
-            <classifier>tests</classifier>
-            <scope>test</scope>
-        </dependency>
-
+  
         <dependency>
             <groupId>org.elasticsearch.client</groupId>
             <artifactId>elasticsearch-rest-high-level-client</artifactId>

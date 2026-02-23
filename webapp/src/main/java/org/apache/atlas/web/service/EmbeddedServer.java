@@ -368,10 +368,21 @@ public class EmbeddedServer {
         // v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
         // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
      
-        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources;org.apache.atlas.web.rest");
-        v2Holder.setInitParameter("com.sun.jersey.core.util.scanning.uri.JarZipSchemeScanner", "false");
-        v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWADL", "true");
-        v2Holder.setInitParameter("com.sun.jersey.api.json.POJOMappingFeature", "true");
+        // v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources;org.apache.atlas.web.rest");
+        // v2Holder.setInitParameter("com.sun.jersey.core.util.scanning.uri.JarZipSchemeScanner", "false");
+        // v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWADL", "true");
+        // v2Holder.setInitParameter("com.sun.jersey.api.json.POJOMappingFeature", "true");
+
+        v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                          "com.sun.jersey.api.core.ClassNamesResourceConfig");
+
+        // Only register what exists in Atlas built JARs
+        v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+            "org.apache.atlas.web.resources.AdminResource;" +
+            "org.apache.atlas.web.filters.AtlasAuthenticationFilter;" +
+            "com.sun.jersey.api.core.PackagesResourceConfig"
+);
+
         // Add /v2 calls to the context now, Jetty will handle the start sequence
         fastLaneContext.addServlet(v2Holder, "/*");
 
