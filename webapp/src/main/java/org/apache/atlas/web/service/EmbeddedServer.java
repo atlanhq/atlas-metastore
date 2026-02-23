@@ -187,56 +187,59 @@ public class EmbeddedServer {
         //     throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         // }
         try {
-              
-            // Get the deep stack Main App
-            org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
+                 // Get the deep stack Main App
+                org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
 
-            org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
-                new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
-            fastLaneContext.setContextPath("/api/atlas");
-            fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
+                // CREATE THE slim stack context (The Fast-Lane)
+                org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
+                    new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
+                fastLaneContext.setContextPath("/api/atlas");
+                // Inherit classloader to access Atlas classes
+                fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
-            // /admin/health servlet  ---
-            // We use a dedicated holder for health so it doesn't share flow  with Jersey
-            org.eclipse.jetty.servlet.ServletHolder healthHolder = new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
-                @Override
-                protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
-                    throws javax.servlet.ServletException, java.io.IOException {
-                    resp.setContentType("application/json");
-                    resp.setStatus(200);
-                    resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
-                }
-            });
-            fastLaneContext.addServlet(healthHolder, "/api/atlas/admin/health");
+                // 2. ISOLATED HEALTH CHECK (Zero-Dependency)
+                // This ensures Kubernetes 'Ready' checks pass immediately.
+                org.eclipse.jetty.servlet.ServletHolder healthHolder = new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
+                    @Override
+                    protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
+                        throws javax.servlet.ServletException, java.io.IOException {
+                        resp.setContentType("application/json");
+                        resp.setStatus(200);
+                        resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
+                    }
+                });
+                fastLaneContext.addServlet(healthHolder, "/admin/health");
 
-            // V2 API Servlet reroute ---
-            org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
-                new com.sun.jersey.spi.container.servlet.ServletContainer()
-            );
-            v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
-            v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-                                    "org.apache.atlas.web.resources.EntityResouceV2");  //EntityResouceV2 not needed at this stage
-            
-            // SetInitorder to Load on first request)
-            // This prevents the "ErrorMessagesException" or other stopping conditions from stopping server.start()
-            v2Holder.setInitOrder(-1); 
+                // Lean V2 API Servlet reroute-(Jersey)
+                org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
+                    new com.sun.jersey.spi.container.servlet.ServletContainer()
+                );
+                v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                                        "com.sun.jersey.api.core.ClassNamesResourceConfig");
+                
+                v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+                                        "org.apache.atlas.web.resources.EntityResourceV2");
 
-            fastLaneContext.addServlet(v2Holder, "/api/atlas/v2/*");  
+                // This prevents the ClassNotFoundException from crashing the server at startup.
+                v2Holder.setInitOrder(-1); 
 
+                // Map to /v2/*. Total path: /api/atlas/v2/*
+                fastLaneContext.addServlet(v2Holder, "/api/atlas/v2/*");
 
-            //Routing 
-            org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = 
-                new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-            
-            // Fast-lane (Slim) comes first to intercept /admin/health and /v2/*
-            contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
+                //Routing 
+                org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = 
+                    new org.eclipse.jetty.server.handler.ContextHandlerCollection();
+                
+               // Fast-lane (Slim) comes first to intercept /admin/health and /v2/*
+                contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
 
-            server.setHandler(contexts);
-            server.start();
-        } catch(Exception e) {
-            throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
-        }
+                server.setHandler(contexts);
+                server.start();
+                server.join();
+
+            } catch(Exception e) {
+                throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
+            }
 
     }
 
