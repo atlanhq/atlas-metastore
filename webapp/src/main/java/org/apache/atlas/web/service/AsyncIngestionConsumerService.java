@@ -40,6 +40,7 @@ import javax.annotation.PreDestroy;
 import javax.inject.Inject;
 import java.time.Duration;
 import java.util.*;
+import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -589,6 +590,9 @@ public class AsyncIngestionConsumerService {
      */
     private void replayCreateOrUpdate(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
         AtlasEntitiesWithExtInfo entities = AtlasType.fromJson(payload.toString(), AtlasEntitiesWithExtInfo.class);
+        if (entities == null) {
+            throw new AtlasBaseException("Failed to deserialize AtlasEntitiesWithExtInfo from payload");
+        }
         normalizeRelationshipAttributes(entities);
         BulkRequestContext ctx = BulkRequestContext.fromOperationMetadata(operationMetadata);
         entityMutationService.createOrUpdate(new AtlasEntityStream(entities), ctx);
@@ -704,7 +708,16 @@ public class AsyncIngestionConsumerService {
         String guid = payload.get("guid").asText();
         List<AtlasClassification> classifications = MAPPER.convertValue(
                 payload.get("classifications"), new TypeReference<List<AtlasClassification>>() {});
+        LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS guid={}, classificationCount={}, types={}, entityGuids={}",
+                guid, classifications.size(),
+                classifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.toList()),
+                classifications.stream().map(AtlasClassification::getEntityGuid).collect(Collectors.toList()));
+        for (AtlasClassification c : classifications) {
+            LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS detail: typeName={}, entityGuid={}, attributes={}",
+                    c.getTypeName(), c.getEntityGuid(), c.getAttributes());
+        }
         entityMutationService.updateClassifications(guid, classifications);
+        LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS completed successfully for guid={}", guid);
     }
 
     /**
