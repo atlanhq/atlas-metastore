@@ -189,7 +189,7 @@ public class EmbeddedServer {
         try {
                  // Get the deep stack Main App
                 org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
-
+                mainAppContext.setServer(server);
                 //  Forcing  Jetty to scan the WAR and create the ClassLoader 
                 // Without this, the ClassLoader is null until the server actually starts.
                 mainAppContext.preConfigure();
