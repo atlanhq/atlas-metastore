@@ -178,97 +178,167 @@ public class EmbeddedServer {
         return connector;
     }
 
+    // public void start() throws AtlasBaseException {
+    //     // try {
+    //     //     server.start();
+
+    //     //    // server.join();
+    //     // } catch(Exception e) {
+    //     //     throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
+    //     // }
+    //     try {
+    //              // Get the deep stack Main App
+    //             org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
+    //             mainAppContext.setServer(server);
+    //             //  Forcing  Jetty to scan the WAR and create the ClassLoader 
+    //             // Without this, the ClassLoader is null until the server actually starts.
+    //             mainAppContext.preConfigure();
+
+    //             ClassLoader atlasClassLoader = mainAppContext.getClassLoader();
+
+    //             // CREATE THE slim stack context (The Fast-Lane)
+    //             org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
+    //                 new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
+    //             fastLaneContext.setContextPath("/api/atlas");
+    //             fastLaneContext.setClassLoader(atlasClassLoader);
+
+    //         //    // Use a Listener to "Hydrate" the Fast-Lane once the Main App is ready
+    //         //     mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
+    //         //         @Override
+    //         //         public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
+    //         //             // Now that the main app is started, the ClassLoader is ready!
+    //         //             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
+                        
+    //         //             // Lean V2 API Servlet reroute-(Jersey)
+    //         //             fastLaneContext.getServletContext().setAttribute(
+    //         //                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+    //         //                 mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
+    //         //             );
+
+    //         //             // Add Jersey to the Fast-Lane
+    //         //             org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
+    //         //                 new com.sun.jersey.spi.container.servlet.ServletContainer()
+    //         //             );
+    //         //             v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
+    //         //             v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
+                        
+    //         //             fastLaneContext.addServlet(v2Holder, "/v2/*");
+    //         //             try {
+    //         //                 fastLaneContext.start();
+    //         //                 LOG.info("Fast-Lane V2 Optimization Active (Bypassing 150+ filters)");
+    //         //             } catch (Exception e) {
+    //         //                 LOG.error("Failed to start Fast-Lane V2", e);
+    //         //             }
+    //         //         }
+    //         //     });
+    //             // Isolated Health check( with Zero dependency on current jetty servlet at this stage)
+    //             // This ensures Kubernetes 'Ready' checks pass immediately.
+    //             org.eclipse.jetty.servlet.ServletHolder healthHolder = new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
+    //                 @Override
+    //                 protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
+    //                     throws javax.servlet.ServletException, java.io.IOException {
+    //                     resp.setContentType("application/json");
+    //                     resp.setStatus(200);
+    //                     resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
+    //                 }
+    //             });
+    //             fastLaneContext.addServlet(healthHolder, "/admin/health");
+
+    //             org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
+    //                 new com.sun.jersey.spi.container.servlet.ServletContainer()
+    //             );
+    //             v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
+    //             v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
+                
+    //             // Use -1 to delay initialization until the first request hits
+    //             v2Holder.setInitOrder(-1); 
+    //             fastLaneContext.addServlet(v2Holder, "/v2/*");
+                
+    //             //Routing  
+    //             org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = 
+    //                 new org.eclipse.jetty.server.handler.ContextHandlerCollection();
+                
+    //            // Fast-lane (Slim) comes first to intercept /admin/health and /v2/*
+    //             contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
+
+    //             server.setHandler(contexts);
+    //             server.start();
+    //             server.join();
+
+    //         } catch(Exception e) {
+    //             throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
+    //         }
+
+    // }
+
+
     public void start() throws AtlasBaseException {
-        // try {
-        //     server.start();
-
-        //    // server.join();
-        // } catch(Exception e) {
-        //     throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
-        // }
         try {
-                 // Get the deep stack Main App
-                org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
-                mainAppContext.setServer(server);
-                //  Forcing  Jetty to scan the WAR and create the ClassLoader 
-                // Without this, the ClassLoader is null until the server actually starts.
-                mainAppContext.preConfigure();
+            final org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
 
-                ClassLoader atlasClassLoader = mainAppContext.getClassLoader();
+            // Setup the Fast-Lane (The Lean Optimization)
+            final org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
+                new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
+            fastLaneContext.setContextPath("/api/atlas");
 
-                // CREATE THE slim stack context (The Fast-Lane)
-                org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
-                    new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
-                fastLaneContext.setContextPath("/api/atlas");
-                fastLaneContext.setClassLoader(atlasClassLoader);
+            // Immediate Health Check (Bypass everything for K8s)
+            fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
+                @Override
+                protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
+                    throws java.io.IOException {
+                    resp.setContentType("application/json");
+                    resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
+                }
+            }), "/admin/health");
 
-            //    // Use a Listener to "Hydrate" the Fast-Lane once the Main App is ready
-            //     mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
-            //         @Override
-            //         public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
-            //             // Now that the main app is started, the ClassLoader is ready!
-            //             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
+            //  Listen for the Main App context to finish starting
+            mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
+                @Override
+                public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
+                    try {
+                        LOG.info("Main App started. Initializing Optimized V2 Fast-Lane...");
                         
-            //             // Lean V2 API Servlet reroute-(Jersey)
-            //             fastLaneContext.getServletContext().setAttribute(
-            //                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-            //                 mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
-            //             );
+                        // Now the ClassLoader is guaranteed to be fully hydrated with Atlas JARs
+                        fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
-            //             // Add Jersey to the Fast-Lane
-            //             org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
-            //                 new com.sun.jersey.spi.container.servlet.ServletContainer()
-            //             );
-            //             v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
-            //             v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
+                        // Add the Jersey V2 Servlet (The Performance Win)
+                        org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
+                            new com.sun.jersey.spi.container.servlet.ServletContainer()
+                        );
+                        v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
+                        v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
                         
-            //             fastLaneContext.addServlet(v2Holder, "/v2/*");
-            //             try {
-            //                 fastLaneContext.start();
-            //                 LOG.info("Fast-Lane V2 Optimization Active (Bypassing 150+ filters)");
-            //             } catch (Exception e) {
-            //                 LOG.error("Failed to start Fast-Lane V2", e);
-            //             }
-            //         }
-            //     });
-                // Isolated Health check( with Zero dependency on current jetty servlet at this stage)
-                // This ensures Kubernetes 'Ready' checks pass immediately.
-                org.eclipse.jetty.servlet.ServletHolder healthHolder = new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
-                    @Override
-                    protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
-                        throws javax.servlet.ServletException, java.io.IOException {
-                        resp.setContentType("application/json");
-                        resp.setStatus(200);
-                        resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
+                        // Borrow Spring beans so V2 API can actually talk to the database
+                        fastLaneContext.getServletContext().setAttribute(
+                            org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+                            mainAppContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE)
+                        );
+
+                        fastLaneContext.addServlet(v2Holder, "/v2/*");
+                        
+                        // Start the optimized context manually
+                        if (!fastLaneContext.isRunning()) {
+                            fastLaneContext.start();
+                        }
+                        LOG.info("V2 Optimization Active: Bypassing 150+ filter calls.");
+                    } catch (Exception e) {
+                        LOG.error("Critical: Failed to start V2 optimization path", e);
                     }
-                });
-                fastLaneContext.addServlet(healthHolder, "/admin/health");
+                }
+            });
 
-                org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
-                    new com.sun.jersey.spi.container.servlet.ServletContainer()
-                );
-                v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
-                v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
-                
-                // Use -1 to delay initialization until the first request hits
-                v2Holder.setInitOrder(-1); 
-                fastLaneContext.addServlet(v2Holder, "/v2/*");
-                
-                //Routing  
-                org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = 
-                    new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-                
-               // Fast-lane (Slim) comes first to intercept /admin/health and /v2/*
-                contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
+            // 4. ROUTING
+            org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
+            // fastLaneContext is FIRST so it intercepts /v2/ calls
+            contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
 
-                server.setHandler(contexts);
-                server.start();
-                server.join();
+            server.setHandler(contexts);
+            server.start();
+            server.join();
 
-            } catch(Exception e) {
-                throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
-            }
-
+        } catch(Exception e) {
+            throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
+        }
     }
 
     public Server getServer() {
