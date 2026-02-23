@@ -226,7 +226,7 @@ public class EntityREST {
      *
      * attr:<attrName>=<attrValue>
      *
-     * NOTE: The attrName and attrValue should be unique across entities, eg. qualifiedName
+     * NOTE: The attrName and attrValue should be unique across entities, eg. qualifiedNames
      *
      * The REST request would look something like this
      *
@@ -402,13 +402,15 @@ public class EntityREST {
     public EntityMutationResponse createOrUpdate(AtlasEntityWithExtInfo entity,
                                                  @QueryParam("replaceClassifications") @DefaultValue("false") boolean replaceClassifications,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
-                                                 @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes) throws AtlasBaseException {
+                                                 @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
+                                                 @QueryParam("allowCustomQualifiedName") @DefaultValue("false") boolean allowCustomQualifiedName) throws AtlasBaseException {
         AtlasPerfTracer perf = null;
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
                 perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.createOrUpdate()");
             }
+            RequestContext.get().setAllowCustomQualifiedName(allowCustomQualifiedName);
             validateAttributeLength(Lists.newArrayList(entity.getEntity()));
 
             BulkRequestContext context = new BulkRequestContext.Builder()
@@ -813,7 +815,9 @@ public class EntityREST {
                                                  @QueryParam("appendTags") @DefaultValue("false") boolean appendTags,
                                                  @QueryParam("replaceBusinessAttributes") @DefaultValue("false") boolean replaceBusinessAttributes,
                                                  @QueryParam("overwriteBusinessAttributes") @DefaultValue("false") boolean isOverwriteBusinessAttributes,
-                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration
+                                                 @QueryParam("skipProcessEdgeRestoration") @DefaultValue("false") boolean skipProcessEdgeRestoration,
+                                                 @QueryParam("allowCustomGuid") @DefaultValue("false") boolean allowCustomGuid,
+                                                 @QueryParam("allowCustomQualifiedName") @DefaultValue("false") boolean allowCustomQualifiedName
     ) throws AtlasBaseException {
 
         if (Stream.of(replaceClassifications, replaceTags, appendTags).filter(flag -> flag).count() > 1) {
@@ -822,6 +826,8 @@ public class EntityREST {
 
         AtlasPerfTracer perf = null;
         RequestContext.get().setSkipProcessEdgeRestoration(skipProcessEdgeRestoration);
+        RequestContext.get().setAllowCustomGuid(allowCustomGuid);
+        RequestContext.get().setAllowCustomQualifiedName(allowCustomQualifiedName);
         try {
 
             if (CollectionUtils.isEmpty(entities.getEntities())) {

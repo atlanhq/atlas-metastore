@@ -112,6 +112,16 @@ public class PreProcessorUtils {
         return NanoIdUtils.randomNanoId();
     }
 
+    public static String getUUID(AtlasEntity entity){
+        // Check if custom qualified name is allowed and entity has qualifiedNameUUID
+        if (RequestContext.get().isAllowCustomQualifiedName() && 
+            entity != null && 
+            StringUtils.isNotEmpty(entity.getQualifiedNameUUID())) {
+            return entity.getQualifiedNameUUID();
+        }
+        return NanoIdUtils.randomNanoId();
+    }
+
     public static String getUserName(){
         return NanoIdUtils.randomNanoId();
     }

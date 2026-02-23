@@ -17,6 +17,7 @@
  */
 package org.apache.atlas.repository.util;
 
+import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.discovery.IndexSearchParams;
 import org.apache.atlas.model.instance.AtlasEntity;
@@ -30,6 +31,7 @@ import org.apache.atlas.repository.graphdb.DirectIndexQueryResult;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.util.NanoIdUtils;
 import org.apache.commons.collections.CollectionUtils;
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -394,7 +396,13 @@ public final class AccessControlUtils {
         }
     }
 
-    public static String getUUID(){
+    public static String getUUID(AtlasEntity entity){
+        // Check if custom qualified name is allowed and entity has qualifiedNameUUID
+        if (RequestContext.get().isAllowCustomQualifiedName() &&
+                entity != null &&
+                StringUtils.isNotEmpty(entity.getQualifiedNameUUID())) {
+            return entity.getQualifiedNameUUID();
+        }
         return NanoIdUtils.randomNanoId(22);
     }
 
