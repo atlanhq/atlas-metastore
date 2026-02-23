@@ -52,6 +52,8 @@ import java.util.List;
 import java.util.Map;
 
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
+import static org.apache.atlas.repository.Constants.NAME;
+import static org.apache.atlas.repository.Constants.PERSONA_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.POLICY_ENTITY_TYPE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.apache.atlas.repository.util.AccessControlUtils.ATTR_ACCESS_CONTROL_ENABLED;
@@ -70,6 +72,7 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getPersonaUser
 import static org.apache.atlas.repository.util.AccessControlUtils.getTenantId;
 import static org.apache.atlas.repository.util.AccessControlUtils.getUUID;
 import static org.apache.atlas.repository.util.AccessControlUtils.validateNoPoliciesAttached;
+import static org.apache.atlas.repository.util.AccessControlUtils.validateUniquenessByName;
 
 public class PersonaPreProcessor extends AccessControlPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(PersonaPreProcessor.class);
@@ -144,6 +147,7 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePersona");
 
         validateNoPoliciesAttached((AtlasEntity) entity);
+        validateUniquenessByName(graph, getEntityName((AtlasEntity) entity), PERSONA_ENTITY_TYPE);
 
         String tenantId = getTenantId(entity);
 
@@ -177,6 +181,12 @@ public class PersonaPreProcessor extends AccessControlPreProcessor {
         String vertexQName = vertex.getProperty(QUALIFIED_NAME, String.class);
         entity.setAttribute(QUALIFIED_NAME, vertexQName);
         entity.setAttribute(ATTR_PERSONA_ROLE_ID, getPersonaRoleId(existingPersonaEntity));
+
+        String currentName = vertex.getProperty(NAME, String.class);
+        String newName = getEntityName(persona);
+        if (newName != null && !newName.equals(currentName)) {
+            validateUniquenessByName(graph, newName, PERSONA_ENTITY_TYPE);
+        }
 
         boolean isEnabled = getIsAccessControlEnabled(persona);
         if (getIsAccessControlEnabled(existingPersonaEntity) != isEnabled) {

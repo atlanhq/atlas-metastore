@@ -466,6 +466,25 @@ public final class AccessControlUtils {
         }
     }
 
+    public static void validatePolicyUniquenessbyNameForParent(AtlasGraph graph, String name, String parentQualifiedName) throws AtlasBaseException {
+        IndexSearchParams indexSearchParams = new IndexSearchParams();
+        Map<String, Object> dsl = mapOf("size", 1);
+
+        List mustClauseList = new ArrayList();
+        mustClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
+        mustClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
+        mustClauseList.add(mapOf("term", mapOf("name.keyword", name)));
+        mustClauseList.add(mapOf("prefix", mapOf("__qualifiedName", parentQualifiedName + "/")));
+
+        dsl.put("query", mapOf("bool", mapOf("must", mustClauseList)));
+
+        indexSearchParams.setDsl(dsl);
+
+        if (checkEntityExists(graph, indexSearchParams)){
+            throw new AtlasBaseException(ACCESS_CONTROL_ALREADY_EXISTS, POLICY_ENTITY_TYPE, name);
+        }
+    }
+
     private static boolean checkEntityExists(AtlasGraph graph, IndexSearchParams indexSearchParams) throws AtlasBaseException {
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(VERTEX_INDEX_NAME);
 
