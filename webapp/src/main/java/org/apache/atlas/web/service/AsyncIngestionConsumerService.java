@@ -481,6 +481,7 @@ public class AsyncIngestionConsumerService {
             ctx.setTraceId(requestMetadata.get("traceId").asText());
         }
         ctx.setSkipEntityChangeNotification(!entityNotificationsEnabled);
+        ctx.setImportInProgress(true);
     }
 
     private void routeAndProcess(String eventType, JsonNode payload, JsonNode operationMetadata) throws Exception {
