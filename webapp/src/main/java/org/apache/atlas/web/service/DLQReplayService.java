@@ -144,7 +144,7 @@ public class DLQReplayService {
     /**
      * Start replaying DLQ messages
      */
-    @PostConstruct
+    //@PostConstruct
     public synchronized void startReplay() {
         if (isRunning.get()) {
             log.warn("DLQ replay is already running");
