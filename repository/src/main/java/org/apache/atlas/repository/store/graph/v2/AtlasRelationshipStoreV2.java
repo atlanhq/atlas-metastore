@@ -436,9 +436,25 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     @Override
     public AtlasEdge getRelationship(AtlasVertex fromVertex, AtlasVertex toVertex, AtlasRelationship relationship) throws AtlasBaseException {
-        String relationshipLabel = getRelationshipEdgeLabel(fromVertex, toVertex, relationship.getTypeName());
+        AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("relationshipStore.getRelationship");
+        try {
+            String relationshipLabel;
+            AtlasPerfMetrics.MetricRecorder resolveLabelMetric = RequestContext.get().startMetricRecord("relationshipStore.getRelationship.resolveLabel");
+            try {
+                relationshipLabel = getRelationshipEdgeLabel(fromVertex, toVertex, relationship.getTypeName());
+            } finally {
+                RequestContext.get().endMetricRecord(resolveLabelMetric);
+            }
 
-        return getRelationshipEdge(fromVertex, toVertex, relationshipLabel);
+            AtlasPerfMetrics.MetricRecorder fetchEdgeMetric = RequestContext.get().startMetricRecord("relationshipStore.getRelationship.fetchEdge");
+            try {
+                return getRelationshipEdge(fromVertex, toVertex, relationshipLabel);
+            } finally {
+                RequestContext.get().endMetricRecord(fetchEdgeMetric);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(metric);
+        }
     }
 
     @Override
