@@ -321,7 +321,14 @@ public class TaskQueueWatcher implements Runnable {
     @PreDestroy
     public void cleanUp() {
         if (!Objects.isNull(this.executorService)) {
-            this.redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+            // Only release lock if Redis is available - avoid errors during shutdown
+            try {
+                if (this.redisService.isAvailable()) {
+                    this.redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
+                }
+            } catch (Exception e) {
+                LOG.warn("TaskQueueWatcher: Failed to release lock during cleanup", e);
+            }
             this.executorService.shutdownNow();
             try {
                 this.executorService.awaitTermination(1, TimeUnit.SECONDS);
