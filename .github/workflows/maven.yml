@@ -24,7 +24,6 @@ on:
       - beta
       - master
       - staging
-      - ms-635
 
     paths-ignore:
       - '.claude/**'

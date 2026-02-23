@@ -80,6 +80,18 @@ public interface AtlasGraphManagement {
     AtlasEdgeLabel getEdgeLabel(String label);
 
     /**
+     * @param label vertex label name to retrieve
+     * @return the vertex label, or null if it doesn't exist
+     */
+    AtlasVertexLabel getVertexLabel(String label);
+
+    /**
+     * @param label vertex label to be created
+     * @return the created vertex label
+     */
+    AtlasVertexLabel makeVertexLabel(String label);
+
+    /**
      * Creates a composite vertex index for the graph.
      *
      * @param propertyName

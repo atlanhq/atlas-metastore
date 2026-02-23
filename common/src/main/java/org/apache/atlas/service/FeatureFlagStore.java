@@ -42,6 +42,8 @@ public class FeatureFlagStore implements ApplicationContextAware {
 
     private volatile boolean initialized = false;
 
+    public static final String FEATURE_FLAG_ID_ONLY_GRAPH_ENABLED = "idOnlyGraphFeatureEnabled";
+
     @Inject
     public FeatureFlagStore(RedisService redisService, FeatureFlagConfig config, 
                            FeatureFlagCacheStore cacheStore) {

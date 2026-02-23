@@ -638,5 +638,15 @@ public class DataProductPreProcessorTest {
 
         @Override
         public Object getV() { return null; }
+
+        @Override
+        public String getDocId() {
+            return null;
+        }
+
+        @Override
+        public boolean isAssetVertex() {
+            return true;
+        }
     }
 }

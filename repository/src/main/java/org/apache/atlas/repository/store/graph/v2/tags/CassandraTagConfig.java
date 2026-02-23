@@ -11,7 +11,6 @@ public class CassandraTagConfig {
     public static final String CASSANDRA_PORT_PROPERTY = "atlas.graph.storage.cql.port";
     public static final int CASSANDRA_PORT;
     public static final String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
-    public static final String CASSANDRA_REPLICATION_FACTOR_PROPERTY = "atlas.graph.storage.cql.replication-factor";
     public static int BUCKET_POWER = 5;
     public static final String CASSANDRA_NEW_KEYSPACE_PROPERTY = "atlas.graph.new.keyspace";
 

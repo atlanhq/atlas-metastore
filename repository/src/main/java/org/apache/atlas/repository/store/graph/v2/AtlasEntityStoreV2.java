@@ -47,6 +47,9 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
+import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
+import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.observability.AtlasObservabilityData;
@@ -95,6 +98,7 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.janusgraph.core.JanusGraphException;
 
@@ -132,6 +136,7 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFacto
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
 import static org.apache.atlas.type.Constants.*;
 
+import org.apache.atlas.utils.AtlasJson;
 
 @Component
 public class AtlasEntityStoreV2 implements AtlasEntityStore {
@@ -164,6 +169,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
 
+    private DynamicVertexService dynamicVertexService;
 
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
@@ -187,9 +193,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
+        this.dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
         this.observabilityService = observabilityService;
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }
@@ -1524,19 +1531,19 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     @Override
-    public Set<Long> getVertexIdFromTags(int fetchSize) throws AtlasBaseException {
+    public Set<String> getVertexIdFromTags(int fetchSize) throws AtlasBaseException {
             String pagingState = null;
             boolean hasMorePages = true;
             int pageCount = 0;
 
-            Set<Long> allVertexIds = new LinkedHashSet<>();
+            Set<String> allVertexIds = new LinkedHashSet<>();
 
             while (hasMorePages) {
                 pageCount++;
                 PaginatedVertexIdResult result =
                         getVertexIdFromTagsByIdTableWithPagination(pagingState, fetchSize);
 
-                Set<Long> pageVertexIds = result.getVertexIds();
+                Set<String> pageVertexIds = result.getVertexIds();
                 LOG.info("Page {}: Found {} unique GUIDs", pageCount, pageVertexIds.size());
 
                 allVertexIds.addAll(pageVertexIds);
@@ -1553,7 +1560,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     @Override
-    public Set<AtlasVertex> getVertices(Set<Long> vertexIds) {
+    public Set<AtlasVertex> getVertices(Set<String> vertexIds) {
         return graphHelper.getVertices(vertexIds);
     }
 
@@ -1920,7 +1927,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     if (diffResult.hasDifference()) {
                         if (storeDifferentialAudits) {
                             diffResult.getDiffEntity().setGuid(entity.getGuid());
-                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity());
+                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity(), storedVertex);
                         }
 
                         if (diffResult.hasDifferenceOnlyInCustomAttributes()) {
@@ -1984,7 +1991,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
             for (AtlasEntity entity: context.getCreatedEntities()) {
-                RequestContext.get().cacheDifferentialEntity(entity);
+                RequestContext.get().cacheDifferentialEntity(entity, context.getVertex(entity.getGuid()));
             }
 
             long ingestionStart = System.currentTimeMillis();
@@ -2048,6 +2055,64 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             RequestContext.get().endMetricRecord(metric);
             AtlasPerfTracer.log(perf);
         }
+    }
+
+    private Map<String, Map<String, Object>> normalizeAttributes(List<AtlasVertex> vertices) {
+        Map<String, Map<String, Object>> rt = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
+            AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
+
+            Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
+
+            type.normalizeAttributeValuesForUpdate(allProperties);
+
+            rt.put(vertex.getIdForDisplay(), allProperties);
+        }
+
+        return rt;
+    }
+
+    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(List<AtlasVertex> vertices) {
+        MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices");
+        if (CollectionUtils.isEmpty(vertices)) {
+            return null;
+        }
+        Map<String, Map<String, Object>> ret = new HashMap<>();
+
+        for (AtlasVertex vertex : vertices) {
+            Map<String, Object> properties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
+            Map<String, Object> propertiesToUpdate = new HashMap<>();
+            AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
+
+            getEligibleProperties(properties, type).forEach(x -> propertiesToUpdate.put(x, properties.get(x)));
+            ret.put(vertex.getIdForDisplay(), propertiesToUpdate);
+        }
+
+        RequestContext.get().endMetricRecord(recorder);
+
+        return ret;
+    }
+
+    private List<String> getEligibleProperties(Map<String, Object> properties, AtlasEntityType type) {
+        return properties.keySet().stream().filter(x -> isEligibleForESSync(x, type.getAttribute(x))).toList();
+    }
+
+    private boolean isEligibleForESSync(String propertyName, AtlasAttribute attribute) {
+        return  ((attribute != null  && isPrimitiveAttribute(attribute.getAttributeType()))
+                || propertyName.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) ;
+    }
+
+    private boolean isPrimitiveAttribute (AtlasType attributeType) {
+        boolean ret = attributeType.getTypeCategory() == TypeCategory.PRIMITIVE || attributeType.getTypeCategory() == TypeCategory.ENUM;
+
+        if (!ret)
+            ret = attributeType.getTypeCategory() == TypeCategory.ARRAY && (
+                   ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.PRIMITIVE
+                || ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.ENUM);
+
+        return ret;
     }
 
     private void executePreProcessor(EntityMutationContext context) throws AtlasBaseException {
@@ -2157,9 +2222,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                         //Create vertices which do not exist in the repository
                         if (RequestContext.get().isImportInProgress() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
-                            vertex = entityGraphMapper.createVertexWithGuid(entity, entity.getGuid());
+                            vertex = entityGraphMapper.createAssetVertexWithGuid(entity, entity.getGuid());
                         } else {
-                            vertex = entityGraphMapper.createVertex(entity);
+                            vertex = entityGraphMapper.createAssetVertex(entity);
                         }
 
                         discoveryContext.addResolvedGuid(guid, vertex);
@@ -2372,23 +2437,23 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         switch (typeName) {
             case ATLAS_GLOSSARY_ENTITY_TYPE:
-                preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph));
+                preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph, dynamicVertexService));
                 break;
 
             case ATLAS_GLOSSARY_TERM_ENTITY_TYPE:
-                preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement));
+                preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, dynamicVertexService));
                 break;
 
             case ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE:
-                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper));
+                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper, dynamicVertexService));
                 break;
 
             case DATA_DOMAIN_ENTITY_TYPE:
-                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph));
+                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexService));
                 break;
 
             case DATA_PRODUCT_ENTITY_TYPE:
-                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this));
+                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this, this.dynamicVertexService));
                 break;
 
             case QUERY_ENTITY_TYPE:
@@ -2436,12 +2501,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
-                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
+                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever, dynamicVertexService));
                 break;
         }
 
         //  The default global pre-processor for all AssetTypes
-        preProcessors.add(new AssetPreProcessor(typeRegistry, entityRetriever, graph));
+        preProcessors.add(new AssetPreProcessor(typeRegistry, entityRetriever, graph, dynamicVertexService));
 
         return preProcessors;
     }

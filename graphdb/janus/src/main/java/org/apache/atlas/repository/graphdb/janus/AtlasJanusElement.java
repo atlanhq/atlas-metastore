@@ -19,13 +19,18 @@ package org.apache.atlas.repository.graphdb.janus;
 
 import java.util.*;
 
+
+
 import org.apache.atlas.RequestContext;
+
+import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasElement;
 import org.apache.atlas.repository.graphdb.AtlasSchemaViolationException;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONMode;
 import org.apache.atlas.repository.graphdb.janus.graphson.AtlasGraphSONUtility;
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.tinkerpop.gremlin.structure.Element;
 import org.apache.tinkerpop.gremlin.structure.Property;
@@ -36,7 +41,11 @@ import com.google.common.base.Function;
 import com.google.common.collect.Lists;
 import org.janusgraph.core.SchemaViolationException;
 import org.janusgraph.core.JanusGraphElement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
+import static org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService.VERTEX_CORE_PROPERTIES;
 import static org.apache.atlas.type.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.INTERNAL_PROPERTY_KEY_PREFIX;
 
@@ -47,10 +56,10 @@ import static org.apache.atlas.type.Constants.INTERNAL_PROPERTY_KEY_PREFIX;
  * that is stored.
  */
 public class AtlasJanusElement<T extends Element> implements AtlasElement {
+    private static final Logger LOG = LoggerFactory.getLogger(AtlasJanusElement.class);
 
     private T element;
     protected AtlasJanusGraph graph;
-
     //excludeProperties: Getting key related issue while Migration mode when fetching few attributes from graph
     //This is dirty fix to ignore getting such attributes value from graph & return null explicitly
     private static final Set<String> excludeProperties = new HashSet<>();
@@ -70,9 +79,20 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             return null;
         }
 
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+
+            if (vertex.getDynamicVertex().hasProperties() && vertex.getDynamicVertex().hasProperty(propertyName)) {
+                return (T) vertex.getDynamicVertex().getProperty(propertyName, clazz);
+            } else {
+                return null;
+            }
+        }
+
         //add explicit logic to return null if the property does not exist
         //This is the behavior Atlas expects.  Janus throws an exception
         //in this scenario.
+
         Property p = getWrappedElement().property(propertyName);
         if (p.isPresent()) {
             Object propertyValue= p.value();
@@ -80,18 +100,16 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
                 return null;
             }
             if (AtlasEdge.class == clazz) {
-                return (T)graph.getEdge(propertyValue.toString());
+                return (T) graph.getEdge(propertyValue.toString());
             }
             if (AtlasVertex.class == clazz) {
-                return (T)graph.getVertex(propertyValue.toString());
+                return (T) graph.getVertex(propertyValue.toString());
             }
-            return (T)propertyValue;
+            return (T) propertyValue;
 
         }
         return null;
     }
-
-
 
     /**
      * Gets all of the values of the given property.
@@ -105,34 +123,61 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public Set<String> getPropertyKeys() {
-        return getWrappedElement().keys();
-    }
-
-    @Override
-    public void removeProperty(String propertyName) {
-        Iterator<? extends Property<String>> it = getWrappedElement().properties(propertyName);
-        while(it.hasNext()) {
-            Property<String> property = it.next();
-            property.remove();
-            recordInternalAttribute(propertyName, null);
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            return vertex.getDynamicVertex().getPropertyKeys();
+        } else {
+            return getWrappedElement().keys();
         }
     }
 
     @Override
+    public void removeProperty(String propertyName) {
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            vertex.getDynamicVertex().removeProperty(propertyName);
+        }
+
+        Iterator<? extends Property<String>> it = getWrappedElement().properties(propertyName);
+        while(it.hasNext()) {
+            Property<String> property = it.next();
+            property.remove();
+        }
+        recordInternalAttribute(propertyName, null);
+    }
+
+    @Override
     public void removePropertyValue(String propertyName, Object propertyValue) {
-        Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
         List<Object> finalValues = new ArrayList<>();
+        boolean shouldAddToFinalValues = true;
+
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            if ( vertex.getDynamicVertex().hasProperty(propertyName)) {
+                Collection allValues = vertex.getDynamicVertex().getProperty(propertyName, Collection.class);
+                if (CollectionUtils.isNotEmpty(allValues)) {
+                    allValues.remove(propertyValue);
+                    finalValues = new ArrayList<>(allValues);
+                }
+            }
+            shouldAddToFinalValues = false; // avoid re adding in finalValues if it was already added here
+        }
+
+        Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
+
         boolean removedFirst = false;
 
         while (it.hasNext()) {
-            Property currentProperty      = it.next();
-            Object   currentPropertyValue = currentProperty.value();
+            Property currentProperty = it.next();
+            Object currentPropertyValue = currentProperty.value();
 
             if (!removedFirst && Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
                 removedFirst = true;
             } else {
-                finalValues.add(currentPropertyValue);
+                if (shouldAddToFinalValues) {
+                    finalValues.add(currentPropertyValue);
+                }
             }
         }
 
@@ -141,9 +186,22 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public void removeAllPropertyValue(String propertyName, Object propertyValue) {
-        Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
         List<Object> finalValues = new ArrayList<>();
+        boolean shouldAddToFinalValues = true;
 
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+            if ( vertex.getDynamicVertex().hasProperty(propertyName)) {
+                Collection allValues = vertex.getDynamicVertex().getProperty(propertyName, Collection.class);
+                if (CollectionUtils.isNotEmpty(allValues)) {
+                    allValues.removeIf(value -> Objects.equals(value, propertyValue));
+                    finalValues = new ArrayList<>(allValues);
+                }
+            }
+            shouldAddToFinalValues = false; // avoid re adding in finalValues if it was already added here
+        }
+
+        Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
         while (it.hasNext()) {
             Property currentProperty      = it.next();
@@ -152,7 +210,10 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
             if (Objects.equals(currentPropertyValue, propertyValue)) {
                 currentProperty.remove();
             } else {
-                finalValues.add(currentPropertyValue);
+                if (shouldAddToFinalValues) {
+                    // avoid re add in finalValues if it was already added in LEAN_GRAPH_ENABLED block
+                    finalValues.add(currentPropertyValue);
+                }
             }
         }
 
@@ -163,17 +224,30 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
     public void setProperty(String propertyName, Object value) {
         try {
             if (value == null) {
-                Object existingVal = getProperty(propertyName, Object.class);
-                if (existingVal != null) {
-                    removeProperty(propertyName);
-                }
+                removeProperty(propertyName);
             } else {
-                getWrappedElement().property(propertyName, value);
+                if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+                    AtlasJanusVertex vertex = (AtlasJanusVertex) this;
+                    vertex.getDynamicVertex().setProperty(propertyName, value);
+
+                    if (VERTEX_CORE_PROPERTIES.contains(propertyName)) {
+                        getWrappedElement().property(propertyName, value);
+                    }
+                } else {
+                    // Might be an edge
+                    getWrappedElement().property(propertyName, value);
+                }
                 recordInternalAttribute(propertyName, value);
             }
         } catch(SchemaViolationException e) {
             throw new AtlasSchemaViolationException(e);
         }
+    }
+
+    public boolean isAssetVertex() {
+        return this.exists()
+                && this instanceof AtlasVertex
+                && this.element.label().equals(Constants.ASSET_VERTEX_LABEL);
     }
 
     @Override
@@ -223,9 +297,18 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> List<V> getMultiValuedProperty(String propertyName, Class<V> elementType) {
-        List<V> value = new ArrayList<>();
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            Object val = getProperty(propertyName, elementType);
+            if (val == null) {
+                return new ArrayList<>(0);
+            } else {
+                return (List<V>) val;
+            }
+        }
+
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 
+        List<V> value = new ArrayList<>();
         while (it.hasNext()) {
             Property currentProperty      = it.next();
             Object   currentPropertyValue = currentProperty.value();
@@ -236,6 +319,19 @@ public class AtlasJanusElement<T extends Element> implements AtlasElement {
 
     @Override
     public <V> Set<V> getMultiValuedSetProperty(String propertyName, Class<V> elementType) {
+        if (LEAN_GRAPH_ENABLED && isAssetVertex()) {
+            Set<V> value = new HashSet<>();
+            Object prop = getProperty(propertyName, elementType);
+            if (prop == null) {
+                return value;
+            } else if (prop instanceof Collection) {
+                value.addAll((Collection<V>) prop);
+            } else {
+                value.add((V) prop);
+            }
+            return value;
+        }
+
         Set<V> value = new HashSet<>();
         Iterator<? extends Property<Object>> it = getWrappedElement().properties(propertyName);
 

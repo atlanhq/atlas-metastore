@@ -47,9 +47,9 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
+import org.janusgraph.util.encoding.LongEncoding;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.slf4j.MDC;
 
 import java.text.SimpleDateFormat;
 import java.util.*;
@@ -61,6 +61,7 @@ import static org.apache.atlas.repository.Constants.ENTITY_TYPE_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.GLOSSARY_TERMS_EDGE_LABEL;
 import static org.apache.atlas.repository.Constants.INDEX_SEARCH_VERTEX_PREFIX_DEFAULT;
 import static org.apache.atlas.repository.Constants.INDEX_SEARCH_VERTEX_PREFIX_PROPERTY;
+import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
 import static org.apache.atlas.repository.Constants.NAME;
 import static org.apache.atlas.repository.Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
@@ -73,6 +74,7 @@ import static org.apache.atlas.AtlasConfiguration.DELETE_UNIQUEATTR_BATCH_SIZE;
 import static org.apache.atlas.repository.graph.AtlasGraphProvider.getGraphInstance;
 import static org.apache.atlas.repository.graphdb.AtlasGraphQuery.SortOrder.ASC;
 import static org.apache.atlas.repository.graphdb.AtlasGraphQuery.SortOrder.DESC;
+import static org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector.JG_ES_DOC_ID_PREFIX;
 
 /**
  * Utility methods for Graph.
@@ -165,9 +167,15 @@ public class AtlasGraphUtilsV2 {
     }
 
     public static boolean isReference(TypeCategory typeCategory) {
-        return typeCategory == TypeCategory.STRUCT ||
-                typeCategory == TypeCategory.ENTITY ||
-                typeCategory == TypeCategory.OBJECT_ID_TYPE;
+
+        if (LEAN_GRAPH_ENABLED) {
+            return typeCategory == TypeCategory.ENTITY ||
+                    typeCategory == TypeCategory.OBJECT_ID_TYPE;
+        } else {
+            return typeCategory == TypeCategory.STRUCT ||
+                    typeCategory == TypeCategory.ENTITY ||
+                    typeCategory == TypeCategory.OBJECT_ID_TYPE;
+        }
     }
 
     public static String encodePropertyKey(String key) {
@@ -266,27 +274,21 @@ public class AtlasGraphUtilsV2 {
             propertyName = encodePropertyKey(propertyName);
         }
 
-        Object existingValue = element.getProperty(propertyName, Object.class);
-
         if (value == null) {
-            if (existingValue != null) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Removing property {} from {}", propertyName, toString(element));
-                }
-                element.removeProperty(propertyName);
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Removing property {} from {}", propertyName, toString(element));
             }
+            element.removeProperty(propertyName);
         } else {
-            if (!value.equals(existingValue)) {
-                if (LOG.isDebugEnabled()) {
-                    LOG.debug("Setting property {} in {}", propertyName, toString(element));
-                }
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Setting property {} in {}", propertyName, toString(element));
+            }
 
-                if (value instanceof Date) {
-                    Long encodedValue = ((Date) value).getTime();
-                    element.setProperty(propertyName, encodedValue);
-                } else {
-                    element.setProperty(propertyName, value);
-                }
+            if (value instanceof Date) {
+                Long encodedValue = ((Date) value).getTime();
+                element.setProperty(propertyName, encodedValue);
+            } else {
+                element.setProperty(propertyName, value);
             }
         }
     }
@@ -1321,6 +1323,13 @@ public class AtlasGraphUtilsV2 {
 
     public static void removeItemFromListPropertyValue(AtlasElement element, String property, String value) {
         element.removePropertyValue(property, value);
+    }
+
+    public static String getVertexIdForDocId(String docId) {
+        if (StringUtils.isNotEmpty(docId) && docId.startsWith(JG_ES_DOC_ID_PREFIX)) {
+            return docId.substring(1);
+        }
+        return docId;
     }
 
     private static List getListFromProperty(AtlasElement element, String property) {

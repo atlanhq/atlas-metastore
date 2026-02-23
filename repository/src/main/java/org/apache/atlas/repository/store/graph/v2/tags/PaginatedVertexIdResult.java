@@ -7,17 +7,17 @@ import java.util.Set;
  * Includes both the set of GUIDs and the pagination state for subsequent requests.
  */
 public class PaginatedVertexIdResult {
-    private final Set<Long> vertexIds;
+    private final Set<String> vertexIds;
     private final String pagingState;
     private final Boolean done;
 
-    public PaginatedVertexIdResult(Set<Long> vertexIds, String pagingState, Boolean done) {
+    public PaginatedVertexIdResult(Set<String> vertexIds, String pagingState, Boolean done) {
         this.vertexIds = vertexIds;
         this.pagingState = pagingState;
         this.done = done;
     }
 
-    public Set<Long> getVertexIds() {
+    public Set<String> getVertexIds() {
         return vertexIds;
     }
 

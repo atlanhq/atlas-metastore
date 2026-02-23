@@ -29,6 +29,8 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -39,6 +41,8 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Set;
 
+import static org.apache.atlas.AtlasConfiguration.ATLAS_GRAPH_INDEX_SEARCH_PREFIX;
+import static org.apache.atlas.AtlasConfiguration.ATLAS_GRAPH_LEAN_GRAPH_ENABLED;
 import static org.apache.atlas.service.FeatureFlag.USE_TEMP_ES_INDEX;
 import static org.apache.atlas.type.AtlasStructType.AtlasAttribute.encodePropertyKey;
 import static org.apache.atlas.type.AtlasStructType.UNIQUE_ATTRIBUTE_SHADE_PROPERTY_PREFIX;
@@ -63,6 +67,9 @@ public final class Constants {
     public static final String FREETEXT_REQUEST_HANDLER         = "/freetext";
     public static final String TERMS_REQUEST_HANDLER            = "/terms";
     public static final String ES_API_ALIASES                   = "/_aliases";
+
+    // To distinguish assets created with Leangraph feature enabled
+    public static final String LEANGRAPH_MODE                   = "leangraph";
 
     /**
      * Entity type name property key.
@@ -284,7 +291,8 @@ public final class Constants {
     /**
      * elasticsearch index prefix.
      */
-    public static final String INDEX_PREFIX = "janusgraph_";
+    public static final String INDEX_PREFIX = loadIndexPrefix();
+    public static final boolean LEAN_GRAPH_ENABLED = loadLeanGraphEnabled();
 
     public static final String VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
     public static final String EDGE_INDEX_NAME = INDEX_PREFIX + EDGE_INDEX;
@@ -331,6 +339,7 @@ public final class Constants {
     public static final String CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY = encodePropertyKey(INTERNAL_PROPERTY_KEY_PREFIX + "isPropagated");
     public static final String CLASSIFICATION_EDGE_STATE_PROPERTY_KEY         = STATE_PROPERTY_KEY;
     public static final String CLASSIFICATION_LABEL                           = "classifiedAs";
+    public static final String ASSET_VERTEX_LABEL                             = "asset";
     public static final String CLASSIFICATION_NAME_DELIMITER                  = "|";
     public static final String LABEL_NAME_DELIMITER                           = CLASSIFICATION_NAME_DELIMITER;
     public static final String TERM_ASSIGNMENT_LABEL                          = "r:AtlasGlossarySemanticAssignment";
@@ -545,6 +554,62 @@ public final class Constants {
     }};
 
     private Constants() {
+    }
+
+    private static String loadIndexPrefix() {
+        String indexName = null;
+
+        Object dynamicIndexName = tryInvokeDynamicConfigStore("getJanusIndexName");
+        if (dynamicIndexName instanceof String && StringUtils.isNotBlank((String) dynamicIndexName)) {
+            indexName = (String) dynamicIndexName;
+            LOG.info("Using dynamic index name from DynamicConfigStore: {}", indexName);
+            return indexName + "_";
+        }
+
+        if (StringUtils.isBlank(indexName)) {
+            indexName = ATLAS_GRAPH_INDEX_SEARCH_PREFIX.getString();
+        }
+
+        return indexName + "_";
+    }
+
+    private static boolean loadLeanGraphEnabled() {
+        Object dynamicLeanGraphEnabled = tryInvokeDynamicConfigStore("isLeanGraphEnabled");
+        if (dynamicLeanGraphEnabled instanceof Boolean) {
+            return (Boolean) dynamicLeanGraphEnabled;
+        }
+
+        return ATLAS_GRAPH_LEAN_GRAPH_ENABLED.getBoolean();
+    }
+
+    /**
+     * Invokes a no-arg static method on {@code org.apache.atlas.config.dynamic.DynamicConfigStore} via reflection,
+     * to avoid adding a Maven dependency from {@code atlas-common} -> {@code atlas-config-store}.
+     */
+    private static Object tryInvokeDynamicConfigStore(String methodName) {
+        try {
+            Class<?> storeClass = Class.forName("org.apache.atlas.config.dynamic.DynamicConfigStore");
+            Method method = storeClass.getMethod(methodName);
+
+            return method.invoke(null);
+        } catch (ClassNotFoundException | NoSuchMethodException e) {
+            // Dynamic config store is not on the classpath (or method not present)
+            return null;
+        } catch (InvocationTargetException e) {
+            // Preserve DynamicConfigStore's fail-fast behavior for RuntimeExceptions/Errors (e.g. Cassandra unavailable)
+            Throwable cause = e.getCause();
+            if (cause instanceof RuntimeException) {
+                throw (RuntimeException) cause;
+            } else if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+
+            LOG.warn("Failed to invoke DynamicConfigStore.{}()", methodName, cause);
+            return null;
+        } catch (Exception e) {
+            LOG.warn("Failed to invoke DynamicConfigStore.{}()", methodName, e);
+            return null;
+        }
     }
 
     private static String getEncodedTypePropertyKey(String defaultKey) {

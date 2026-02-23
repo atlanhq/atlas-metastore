@@ -6,7 +6,7 @@ import org.apache.atlas.authorize.AtlasAccessResult;
 import org.apache.atlas.authorizer.store.PoliciesStore;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.model.instance.AtlasStruct;
+
 import org.apache.atlas.plugin.model.RangerPolicy;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;

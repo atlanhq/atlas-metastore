@@ -33,6 +33,7 @@ import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.AtlasRelationshipHeader;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2;
 import org.apache.atlas.model.notification.EntityNotification.EntityNotificationV2.OperationType;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.util.AtlasEntityUtils;
 import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasEntityType;
@@ -322,19 +323,20 @@ public class EntityNotificationListenerV2 implements EntityChangeListenerV2 {
             Map<String, Object> allInternalAttributesMap = context.getAllInternalAttributesMap().get(entity.getGuid());
             if (MapUtils.isNotEmpty(allInternalAttributesMap)) {
                 ret.setInternalAttributes(allInternalAttributesMap);
+            }
+
+            if (CollectionUtils.isNotEmpty(context.getESDeferredOperations())) {
                 // fill all classifications related attrs. They are no longer part of vertex attributes
-                String docId = entity.getDocId();
-                if (docId == null) {
-                    LOG.warn("Skipping deferred ES merge for entity (guid={}, type={}) as docId is null",
-                            entity.getGuid(), entity.getTypeName());
-                } else if (CollectionUtils.isNotEmpty(context.getESDeferredOperations())) {
-                    List<ESDeferredOperation> esDefferredOperations = context.getESDeferredOperations();
-                    if (CollectionUtils.isNotEmpty(esDefferredOperations)) {
-                        Long vertexId = LongEncoding.decode(docId);
-                        for (ESDeferredOperation esDeferredOperation : esDefferredOperations) {
-                            if (Long.parseLong(esDeferredOperation.getEntityId()) == vertexId) {
-                                Map<String, Object> classificationInternalAttributes = esDeferredOperation.getPayload().get(String.valueOf(vertexId));
-                                if (MapUtils.isNotEmpty(classificationInternalAttributes)) {
+                List<ESDeferredOperation> esDefferredOperations = context.getESDeferredOperations();
+                if (CollectionUtils.isNotEmpty(esDefferredOperations)) {
+                    for (ESDeferredOperation esDeferredOperation : esDefferredOperations) {
+                        String vertexId = AtlasGraphUtilsV2.getVertexIdForDocId(entity.getDocId());
+                        if (esDeferredOperation.getEntityId().equals(vertexId)) {
+                            Map<String, Object> classificationInternalAttributes = esDeferredOperation.getPayload().get(vertexId);
+                            if (MapUtils.isNotEmpty(classificationInternalAttributes)) {
+                                if (ret.getInternalAttributes() == null) {
+                                    ret.setInternalAttributes(classificationInternalAttributes);
+                                } else {
                                     ret.getInternalAttributes().putAll(classificationInternalAttributes);
                                 }
                             }
