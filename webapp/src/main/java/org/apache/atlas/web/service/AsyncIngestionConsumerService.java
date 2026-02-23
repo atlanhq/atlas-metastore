@@ -11,8 +11,10 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.model.instance.AtlasObjectId;
+import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
+import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
@@ -132,6 +134,7 @@ public class AsyncIngestionConsumerService {
     // ── Dependencies ─────────────────────────────────────────────────────
     private final EntityMutationService entityMutationService;
     private final AtlasEntityStore entitiesStore;
+    private final AtlasRelationshipStore relationshipStore;
     private final AtlasTypeDefStore typeDefStore;
     private final AtlasTypeRegistry typeRegistry;
 
@@ -170,10 +173,12 @@ public class AsyncIngestionConsumerService {
     @Inject
     public AsyncIngestionConsumerService(EntityMutationService entityMutationService,
                                          AtlasEntityStore entitiesStore,
+                                         AtlasRelationshipStore relationshipStore,
                                          AtlasTypeDefStore typeDefStore,
                                          AtlasTypeRegistry typeRegistry) {
         this.entityMutationService = entityMutationService;
         this.entitiesStore = entitiesStore;
+        this.relationshipStore = relationshipStore;
         this.typeDefStore = typeDefStore;
         this.typeRegistry = typeRegistry;
     }
@@ -517,25 +522,39 @@ public class AsyncIngestionConsumerService {
                 replayAddClassificationBulk(payload);
                 break;
 
-            // ── Relationship mutations (to be added to fatgraph producer) ──
-            case "DELETE_RELATIONSHIP":
+            // ── Relationship mutations ────────────────────────────────
+            case "DELETE_RELATIONSHIP_BY_GUID":
                 replayDeleteRelationship(payload);
                 break;
-            case "DELETE_RELATIONSHIPS":
+            case "DELETE_RELATIONSHIPS_BY_GUIDS":
                 replayDeleteRelationships(payload);
+                break;
+            case "RELATIONSHIP_CREATE":
+                replayRelationshipCreate(payload);
                 break;
 
             // ── Partial update mutations ─────────────────────────────
             case "PARTIAL_UPDATE_BY_GUID":
                 replayPartialUpdateByGuid(payload, operationMetadata);
                 break;
-            case "UPDATE_BY_UNIQUE_ATTRIBUTES":
+            case "UPDATE_BY_UNIQUE_ATTRIBUTE":
                 replayUpdateByUniqueAttributes(payload, operationMetadata);
                 break;
 
             // ── Labels ─────────────────────────────────────────────────
             case "ADD_LABELS":
                 replayAddLabels(payload);
+                break;
+
+            // ── Business metadata mutations ───────────────────────────
+            case "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES":
+                replayAddOrUpdateBusinessAttributes(payload, operationMetadata);
+                break;
+            case "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME":
+                replayAddOrUpdateBusinessAttributesByDisplayName(payload, operationMetadata);
+                break;
+            case "REMOVE_BUSINESS_ATTRIBUTES":
+                replayRemoveBusinessAttributes(payload, operationMetadata);
                 break;
 
             // ── TypeDef mutations ────────────────────────────────────
@@ -650,13 +669,13 @@ public class AsyncIngestionConsumerService {
 
     /**
      * DELETE_CLASSIFICATION: payload = {"guid": "...", "classificationName": "..."}
-     * operationMetadata may contain {"associatedEntityGuid": "..."}
+     * or payload = {"guid": "...", "classificationName": "...", "associatedEntityGuid": "..."}
      */
     private void replayDeleteClassification(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
         String guid = payload.get("guid").asText();
         String classificationName = payload.get("classificationName").asText();
-        String associatedEntityGuid = operationMetadata.has("associatedEntityGuid")
-                ? operationMetadata.get("associatedEntityGuid").asText() : null;
+        String associatedEntityGuid = payload.has("associatedEntityGuid")
+                ? payload.get("associatedEntityGuid").asText() : null;
 
         if (associatedEntityGuid != null) {
             entityMutationService.deleteClassification(guid, classificationName, associatedEntityGuid);
@@ -675,10 +694,10 @@ public class AsyncIngestionConsumerService {
         entityMutationService.addClassification(guids, classification);
     }
 
-    // ── Relationship Replay Methods (stubs for future fatgraph producer events) ──
+    // ── Relationship Replay Methods ─────────────────────────────────────
 
     /**
-     * DELETE_RELATIONSHIP: payload = {"guid": "..."}
+     * DELETE_RELATIONSHIP_BY_GUID: payload = {"guid": "..."}
      */
     private void replayDeleteRelationship(JsonNode payload) throws AtlasBaseException {
         String guid = payload.get("guid").asText();
@@ -686,11 +705,19 @@ public class AsyncIngestionConsumerService {
     }
 
     /**
-     * DELETE_RELATIONSHIPS: payload = {"guids": [...]}
+     * DELETE_RELATIONSHIPS_BY_GUIDS: payload = {"guids": [...]}
      */
     private void replayDeleteRelationships(JsonNode payload) throws AtlasBaseException {
         List<String> guids = MAPPER.convertValue(payload.get("guids"), new TypeReference<List<String>>() {});
         entityMutationService.deleteRelationshipsByIds(guids);
+    }
+
+    /**
+     * RELATIONSHIP_CREATE: payload = AtlasRelationship JSON
+     */
+    private void replayRelationshipCreate(JsonNode payload) throws AtlasBaseException {
+        AtlasRelationship relationship = AtlasType.fromJson(payload.toString(), AtlasRelationship.class);
+        relationshipStore.create(relationship);
     }
 
     // ── Partial Update & Attribute Replay Methods ─────────────────────────
@@ -706,19 +733,19 @@ public class AsyncIngestionConsumerService {
     }
 
     /**
-     * UPDATE_BY_UNIQUE_ATTRIBUTES: payload = AtlasEntityWithExtInfo JSON
-     * operationMetadata = {"typeName": "Table", "uniqueAttributes": {"qualifiedName": "..."}}
+     * UPDATE_BY_UNIQUE_ATTRIBUTE: operationMetadata = {"typeName": "Table"}
+     * payload = {"uniqueAttributes": {"qualifiedName": "..."}, "entity": {AtlasEntityWithExtInfo}}
      */
     private void replayUpdateByUniqueAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
         String typeName = operationMetadata.get("typeName").asText();
         Map<String, Object> uniqAttrs = MAPPER.convertValue(
-                operationMetadata.get("uniqueAttributes"), new TypeReference<Map<String, Object>>() {});
+                payload.get("uniqueAttributes"), new TypeReference<Map<String, Object>>() {});
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
         if (entityType == null) {
             throw new AtlasBaseException("Unknown entity type: " + typeName);
         }
         AtlasEntity.AtlasEntityWithExtInfo entityInfo = AtlasType.fromJson(
-                payload.toString(), AtlasEntity.AtlasEntityWithExtInfo.class);
+                payload.get("entity").toString(), AtlasEntity.AtlasEntityWithExtInfo.class);
         entityMutationService.updateByUniqueAttributes(entityType, uniqAttrs, entityInfo);
     }
 
@@ -730,6 +757,54 @@ public class AsyncIngestionConsumerService {
         Set<String> labels = MAPPER.convertValue(
                 payload.get("labels"), new TypeReference<Set<String>>() {});
         entitiesStore.addLabels(guid, labels);
+    }
+
+    // ── Business Metadata Replay Methods ─────────────────────────────────
+
+    /**
+     * ADD_OR_UPDATE_BUSINESS_ATTRIBUTES: operationMetadata = {"guid": "...", "isOverwrite": false}
+     * optionally operationMetadata may contain {"bmName": "..."} for single BM operations.
+     * payload = business attributes map
+     */
+    private void replayAddOrUpdateBusinessAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        String guid = operationMetadata.get("guid").asText();
+        boolean isOverwrite = operationMetadata.path("isOverwrite").asBoolean(false);
+        if (operationMetadata.has("bmName")) {
+            String bmName = operationMetadata.get("bmName").asText();
+            Map<String, Object> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Object>>() {});
+            entitiesStore.addOrUpdateBusinessAttributes(guid, Collections.singletonMap(bmName, bmAttrs), isOverwrite);
+        } else {
+            Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Map<String, Object>>>() {});
+            entitiesStore.addOrUpdateBusinessAttributes(guid, bmAttrs, isOverwrite);
+        }
+    }
+
+    /**
+     * ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME: same format as ADD_OR_UPDATE_BUSINESS_ATTRIBUTES
+     * but calls addOrUpdateBusinessAttributesByDisplayName.
+     */
+    private void replayAddOrUpdateBusinessAttributesByDisplayName(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        String guid = operationMetadata.get("guid").asText();
+        boolean isOverwrite = operationMetadata.path("isOverwrite").asBoolean(false);
+        Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Map<String, Object>>>() {});
+        entitiesStore.addOrUpdateBusinessAttributesByDisplayName(guid, bmAttrs, isOverwrite);
+    }
+
+    /**
+     * REMOVE_BUSINESS_ATTRIBUTES: operationMetadata = {"guid": "..."}
+     * optionally operationMetadata may contain {"bmName": "..."} for single BM operations.
+     * payload = business attributes map
+     */
+    private void replayRemoveBusinessAttributes(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        String guid = operationMetadata.get("guid").asText();
+        if (operationMetadata.has("bmName")) {
+            String bmName = operationMetadata.get("bmName").asText();
+            Map<String, Object> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Object>>() {});
+            entitiesStore.removeBusinessAttributes(guid, Collections.singletonMap(bmName, bmAttrs));
+        } else {
+            Map<String, Map<String, Object>> bmAttrs = MAPPER.convertValue(payload, new TypeReference<Map<String, Map<String, Object>>>() {});
+            entitiesStore.removeBusinessAttributes(guid, bmAttrs);
+        }
     }
 
     // ── TypeDef Replay Methods ───────────────────────────────────────────

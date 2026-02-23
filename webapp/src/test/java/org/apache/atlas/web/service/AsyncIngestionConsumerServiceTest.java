@@ -9,8 +9,10 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntitiesWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeaders;
 import org.apache.atlas.model.instance.AtlasObjectId;
+import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
+import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
@@ -51,6 +53,8 @@ class AsyncIngestionConsumerServiceTest {
     @Mock
     private AtlasEntityStore entitiesStore;
     @Mock
+    private AtlasRelationshipStore relationshipStore;
+    @Mock
     private AtlasTypeDefStore typeDefStore;
     @Mock
     private AtlasTypeRegistry typeRegistry;
@@ -59,7 +63,7 @@ class AsyncIngestionConsumerServiceTest {
 
     @BeforeEach
     void setUp() {
-        consumerService = new AsyncIngestionConsumerService(entityMutationService, entitiesStore, typeDefStore, typeRegistry);
+        consumerService = new AsyncIngestionConsumerService(entityMutationService, entitiesStore, relationshipStore, typeDefStore, typeRegistry);
         ReflectionTestUtils.setField(consumerService, "topic", "ATLAS_ASYNC_ENTITIES");
         ReflectionTestUtils.setField(consumerService, "consumerGroupId", "test_group");
         ReflectionTestUtils.setField(consumerService, "maxRetries", 3);
@@ -280,19 +284,23 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
-    // Sample #13: UPDATE_BY_UNIQUE_ATTRIBUTES
-    private static final String UPDATE_BY_UNIQUE_ATTRIBUTES_EVENT = """
+    // Sample #13: UPDATE_BY_UNIQUE_ATTRIBUTE (singular — matches fatgraph event type)
+    // Note: "entity" value is AtlasEntityWithExtInfo format (wraps entity inside {"entity": {...}})
+    private static final String UPDATE_BY_UNIQUE_ATTRIBUTE_EVENT = """
             {
               "eventId": "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-              "eventType": "UPDATE_BY_UNIQUE_ATTRIBUTES",
+              "eventType": "UPDATE_BY_UNIQUE_ATTRIBUTE",
               "eventTime": 1770888880971,
               "requestMetadata": { "traceId": "trace-update-uniq", "user": "admin" },
-              "operationMetadata": { "typeName": "Table", "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table1" } },
+              "operationMetadata": { "typeName": "Table" },
               "payload": {
+                "uniqueAttributes": { "qualifiedName": "default/snowflake/db1/schema1/table1" },
                 "entity": {
-                  "typeName": "Table",
-                  "attributes": { "qualifiedName": "default/snowflake/db1/schema1/table1", "name": "table1", "description": "updated via unique attrs" },
-                  "guid": "guid-table-001"
+                  "entity": {
+                    "typeName": "Table",
+                    "attributes": { "qualifiedName": "default/snowflake/db1/schema1/table1", "name": "table1", "description": "updated via unique attrs" },
+                    "guid": "guid-table-001"
+                  }
                 }
               }
             }
@@ -360,17 +368,18 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
-    // Sample #18: DELETE_CLASSIFICATION (with associatedEntityGuid)
+    // Sample #18: DELETE_CLASSIFICATION (with associatedEntityGuid in payload)
     private static final String DELETE_CLASSIFICATION_WITH_ASSOCIATED_EVENT = """
             {
               "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567004",
               "eventType": "DELETE_CLASSIFICATION",
               "eventTime": 1770888880983,
               "requestMetadata": { "traceId": "trace-del-cls-assoc", "user": "admin" },
-              "operationMetadata": { "associatedEntityGuid": "guid-col-001" },
+              "operationMetadata": {},
               "payload": {
                 "guid": "guid-table-001",
-                "classificationName": "PII"
+                "classificationName": "PII",
+                "associatedEntityGuid": "guid-col-001"
               }
             }
             """;
@@ -390,11 +399,11 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
-    // Sample #20: DELETE_RELATIONSHIP
-    private static final String DELETE_RELATIONSHIP_EVENT = """
+    // Sample #20: DELETE_RELATIONSHIP_BY_GUID
+    private static final String DELETE_RELATIONSHIP_BY_GUID_EVENT = """
             {
               "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567006",
-              "eventType": "DELETE_RELATIONSHIP",
+              "eventType": "DELETE_RELATIONSHIP_BY_GUID",
               "eventTime": 1770888880985,
               "requestMetadata": { "traceId": "trace-del-rel", "user": "admin" },
               "operationMetadata": {},
@@ -404,17 +413,69 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
-    // Sample #21: DELETE_RELATIONSHIPS
-    private static final String DELETE_RELATIONSHIPS_EVENT = """
+    // Sample #21: DELETE_RELATIONSHIPS_BY_GUIDS
+    private static final String DELETE_RELATIONSHIPS_BY_GUIDS_EVENT = """
             {
               "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567007",
-              "eventType": "DELETE_RELATIONSHIPS",
+              "eventType": "DELETE_RELATIONSHIPS_BY_GUIDS",
               "eventTime": 1770888880986,
               "requestMetadata": { "traceId": "trace-del-rels", "user": "admin" },
               "operationMetadata": {},
               "payload": {
                 "guids": ["rel-guid-001", "rel-guid-002"]
               }
+            }
+            """;
+
+    // Sample #22: RELATIONSHIP_CREATE
+    private static final String RELATIONSHIP_CREATE_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567008",
+              "eventType": "RELATIONSHIP_CREATE",
+              "eventTime": 1770888880987,
+              "requestMetadata": { "traceId": "trace-rel-create", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "typeName": "AtlasGlossaryTermAnchor",
+                "end1": { "typeName": "AtlasGlossary", "guid": "guid-glossary-001" },
+                "end2": { "typeName": "AtlasGlossaryTerm", "guid": "guid-term-001" }
+              }
+            }
+            """;
+
+    // Sample #23: ADD_OR_UPDATE_BUSINESS_ATTRIBUTES
+    private static final String ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567009",
+              "eventType": "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES",
+              "eventTime": 1770888880988,
+              "requestMetadata": { "traceId": "trace-bm-update", "user": "admin" },
+              "operationMetadata": { "guid": "guid-table-001", "isOverwrite": false },
+              "payload": { "bmName": { "attr1": "val1", "attr2": "val2" } }
+            }
+            """;
+
+    // Sample #24: ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME
+    private static final String ADD_OR_UPDATE_BM_BY_DISPLAY_NAME_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567010",
+              "eventType": "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME",
+              "eventTime": 1770888880989,
+              "requestMetadata": { "traceId": "trace-bm-display", "user": "admin" },
+              "operationMetadata": { "guid": "guid-table-001", "isOverwrite": true },
+              "payload": { "bmDisplayName": { "attr1": "val1" } }
+            }
+            """;
+
+    // Sample #25: REMOVE_BUSINESS_ATTRIBUTES
+    private static final String REMOVE_BUSINESS_ATTRIBUTES_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567011",
+              "eventType": "REMOVE_BUSINESS_ATTRIBUTES",
+              "eventTime": 1770888880990,
+              "requestMetadata": { "traceId": "trace-bm-remove", "user": "admin" },
+              "operationMetadata": { "guid": "guid-table-001" },
+              "payload": { "bmName": { "attr1": "val1" } }
             }
             """;
 
@@ -547,7 +608,7 @@ class AsyncIngestionConsumerServiceTest {
         when(entityMutationService.updateByUniqueAttributes(
                 any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class))).thenReturn(null);
 
-        processEvent(UPDATE_BY_UNIQUE_ATTRIBUTES_EVENT);
+        processEvent(UPDATE_BY_UNIQUE_ATTRIBUTE_EVENT);
 
         ArgumentCaptor<AtlasEntityType> typeCaptor = ArgumentCaptor.forClass(AtlasEntityType.class);
         ArgumentCaptor<Map> attrsCaptor = ArgumentCaptor.forClass(Map.class);
@@ -565,7 +626,7 @@ class AsyncIngestionConsumerServiceTest {
     void testReplayUpdateByUniqueAttributes_UnknownType() throws Exception {
         when(typeRegistry.getEntityTypeByName("Table")).thenReturn(null);
 
-        assertThrows(Exception.class, () -> processEvent(UPDATE_BY_UNIQUE_ATTRIBUTES_EVENT));
+        assertThrows(Exception.class, () -> processEvent(UPDATE_BY_UNIQUE_ATTRIBUTE_EVENT));
         verify(entityMutationService, never()).updateByUniqueAttributes(
                 any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class));
     }
@@ -654,7 +715,7 @@ class AsyncIngestionConsumerServiceTest {
     void testReplayDeleteRelationship() throws Exception {
         doNothing().when(entityMutationService).deleteRelationshipById(anyString());
 
-        processEvent(DELETE_RELATIONSHIP_EVENT);
+        processEvent(DELETE_RELATIONSHIP_BY_GUID_EVENT);
 
         verify(entityMutationService).deleteRelationshipById("rel-guid-001");
     }
@@ -663,13 +724,69 @@ class AsyncIngestionConsumerServiceTest {
     void testReplayDeleteRelationships() throws Exception {
         doNothing().when(entityMutationService).deleteRelationshipsByIds(anyList());
 
-        processEvent(DELETE_RELATIONSHIPS_EVENT);
+        processEvent(DELETE_RELATIONSHIPS_BY_GUIDS_EVENT);
 
         ArgumentCaptor<List<String>> guidsCaptor = ArgumentCaptor.forClass(List.class);
         verify(entityMutationService).deleteRelationshipsByIds(guidsCaptor.capture());
         assertEquals(2, guidsCaptor.getValue().size());
         assertTrue(guidsCaptor.getValue().contains("rel-guid-001"));
         assertTrue(guidsCaptor.getValue().contains("rel-guid-002"));
+    }
+
+    @Test
+    void testReplayRelationshipCreate() throws Exception {
+        when(relationshipStore.create(any(AtlasRelationship.class))).thenReturn(null);
+
+        processEvent(RELATIONSHIP_CREATE_EVENT);
+
+        ArgumentCaptor<AtlasRelationship> captor = ArgumentCaptor.forClass(AtlasRelationship.class);
+        verify(relationshipStore).create(captor.capture());
+        assertEquals("AtlasGlossaryTermAnchor", captor.getValue().getTypeName());
+    }
+
+    @Test
+    void testReplayAddOrUpdateBusinessAttributes() throws Exception {
+        doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
+
+        processEvent(ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map> bmCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Boolean> overwriteCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(entitiesStore).addOrUpdateBusinessAttributes(
+                guidCaptor.capture(), bmCaptor.capture(), overwriteCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertTrue(bmCaptor.getValue().containsKey("bmName"));
+        assertFalse(overwriteCaptor.getValue());
+    }
+
+    @Test
+    void testReplayAddOrUpdateBusinessAttributesByDisplayName() throws Exception {
+        doNothing().when(entitiesStore).addOrUpdateBusinessAttributesByDisplayName(anyString(), anyMap(), anyBoolean());
+
+        processEvent(ADD_OR_UPDATE_BM_BY_DISPLAY_NAME_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map> bmCaptor = ArgumentCaptor.forClass(Map.class);
+        ArgumentCaptor<Boolean> overwriteCaptor = ArgumentCaptor.forClass(Boolean.class);
+        verify(entitiesStore).addOrUpdateBusinessAttributesByDisplayName(
+                guidCaptor.capture(), bmCaptor.capture(), overwriteCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertTrue(bmCaptor.getValue().containsKey("bmDisplayName"));
+        assertTrue(overwriteCaptor.getValue());
+    }
+
+    @Test
+    void testReplayRemoveBusinessAttributes() throws Exception {
+        doNothing().when(entitiesStore).removeBusinessAttributes(anyString(), anyMap());
+
+        processEvent(REMOVE_BUSINESS_ATTRIBUTES_EVENT);
+
+        ArgumentCaptor<String> guidCaptor = ArgumentCaptor.forClass(String.class);
+        ArgumentCaptor<Map> bmCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(entitiesStore).removeBusinessAttributes(guidCaptor.capture(), bmCaptor.capture());
+        assertEquals("guid-table-001", guidCaptor.getValue());
+        assertTrue(bmCaptor.getValue().containsKey("bmName"));
     }
 
     @Test
@@ -870,13 +987,13 @@ class AsyncIngestionConsumerServiceTest {
 
     @Test
     void testProcessAllEventTypes_EndToEnd() throws Exception {
-        // Read all 20 events from the payloads JSON fixture
+        // Read all 24 events from the payloads JSON fixture
         JsonNode events;
         try (java.io.InputStream is = getClass().getResourceAsStream("/async-ingestion-payloads.json")) {
             assertNotNull(is, "async-ingestion-payloads.json not found on classpath");
             events = MAPPER.readTree(is);
         }
-        assertEquals(20, events.size(), "Expected 20 events in payloads file");
+        assertEquals(24, events.size(), "Expected 24 events in payloads file");
 
         // Set up mocks for all event types
         when(entityMutationService.createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class)))
@@ -897,21 +1014,26 @@ class AsyncIngestionConsumerServiceTest {
         when(entityMutationService.updateByUniqueAttributes(
                 any(AtlasEntityType.class), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class))).thenReturn(null);
         doNothing().when(entitiesStore).addLabels(anyString(), anySet());
-        // Classification/relationship stub mocks
+        // Classification/relationship mocks
         doNothing().when(entityMutationService).addClassifications(anyString(), anyList());
         doNothing().when(entityMutationService).updateClassifications(anyString(), anyList());
         doNothing().when(entityMutationService).deleteClassification(anyString(), anyString());
         doNothing().when(entityMutationService).addClassification(anyList(), any(AtlasClassification.class));
         doNothing().when(entityMutationService).deleteRelationshipById(anyString());
         doNothing().when(entityMutationService).deleteRelationshipsByIds(anyList());
+        when(relationshipStore.create(any(AtlasRelationship.class))).thenReturn(null);
+        // Business metadata mocks
+        doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
+        doNothing().when(entitiesStore).addOrUpdateBusinessAttributesByDisplayName(anyString(), anyMap(), anyBoolean());
+        doNothing().when(entitiesStore).removeBusinessAttributes(anyString(), anyMap());
 
-        // Process all 20 events sequentially
+        // Process all 24 events sequentially
         for (JsonNode event : events) {
             processEvent(MAPPER.writeValueAsString(event));
         }
 
         // Verify all downstream calls in order
-        InOrder inOrder = inOrder(entityMutationService, entitiesStore, typeDefStore, typeRegistry);
+        InOrder inOrder = inOrder(entityMutationService, entitiesStore, relationshipStore, typeDefStore, typeRegistry);
 
         // 1. BULK_CREATE_OR_UPDATE → createOrUpdate
         inOrder.verify(entityMutationService).createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class));
@@ -970,7 +1092,7 @@ class AsyncIngestionConsumerServiceTest {
         // 12. PARTIAL_UPDATE_BY_GUID → updateEntityAttributeByGuid
         inOrder.verify(entitiesStore).updateEntityAttributeByGuid("guid-table-001", "description", "updated description");
 
-        // 13. UPDATE_BY_UNIQUE_ATTRIBUTES → typeRegistry lookup + updateByUniqueAttributes
+        // 13. UPDATE_BY_UNIQUE_ATTRIBUTE → typeRegistry lookup + updateByUniqueAttributes
         inOrder.verify(typeRegistry).getEntityTypeByName("Table");
         inOrder.verify(entityMutationService).updateByUniqueAttributes(
                 eq(mockTableType), anyMap(), any(AtlasEntity.AtlasEntityWithExtInfo.class));
@@ -990,11 +1112,23 @@ class AsyncIngestionConsumerServiceTest {
         // 18. ADD_CLASSIFICATION_BULK → addClassification(guids, classification)
         inOrder.verify(entityMutationService).addClassification(anyList(), any(AtlasClassification.class));
 
-        // 19. DELETE_RELATIONSHIP → deleteRelationshipById
+        // 19. DELETE_RELATIONSHIP_BY_GUID → deleteRelationshipById
         inOrder.verify(entityMutationService).deleteRelationshipById("rel-guid-001");
 
-        // 20. DELETE_RELATIONSHIPS → deleteRelationshipsByIds
+        // 20. DELETE_RELATIONSHIPS_BY_GUIDS → deleteRelationshipsByIds
         inOrder.verify(entityMutationService).deleteRelationshipsByIds(anyList());
+
+        // 21. RELATIONSHIP_CREATE → relationshipStore.create
+        inOrder.verify(relationshipStore).create(any(AtlasRelationship.class));
+
+        // 22. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES → addOrUpdateBusinessAttributes
+        inOrder.verify(entitiesStore).addOrUpdateBusinessAttributes(eq("guid-table-001"), anyMap(), eq(false));
+
+        // 23. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME → addOrUpdateBusinessAttributesByDisplayName
+        inOrder.verify(entitiesStore).addOrUpdateBusinessAttributesByDisplayName(eq("guid-table-001"), anyMap(), eq(true));
+
+        // 24. REMOVE_BUSINESS_ATTRIBUTES → removeBusinessAttributes
+        inOrder.verify(entitiesStore).removeBusinessAttributes(eq("guid-table-001"), anyMap());
 
         inOrder.verifyNoMoreInteractions();
     }

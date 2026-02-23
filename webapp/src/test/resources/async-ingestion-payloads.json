@@ -311,27 +311,29 @@
   }
 }, {
   "eventId" : "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-  "eventType" : "UPDATE_BY_UNIQUE_ATTRIBUTES",
+  "eventType" : "UPDATE_BY_UNIQUE_ATTRIBUTE",
   "eventTime" : 1770888880971,
   "requestMetadata" : {
     "traceId" : "trace-update-uniq",
     "user" : "admin"
   },
   "operationMetadata" : {
-    "typeName" : "Table",
-    "uniqueAttributes" : {
-      "qualifiedName" : "default/snowflake/db1/schema1/table1"
-    }
+    "typeName" : "Table"
   },
   "payload" : {
+    "uniqueAttributes" : {
+      "qualifiedName" : "default/snowflake/db1/schema1/table1"
+    },
     "entity" : {
-      "typeName" : "Table",
-      "attributes" : {
-        "qualifiedName" : "default/snowflake/db1/schema1/table1",
-        "name" : "table1",
-        "description" : "updated via unique attrs"
-      },
-      "guid" : "guid-table-001"
+      "entity" : {
+        "typeName" : "Table",
+        "attributes" : {
+          "qualifiedName" : "default/snowflake/db1/schema1/table1",
+          "name" : "table1",
+          "description" : "updated via unique attrs"
+        },
+        "guid" : "guid-table-001"
+      }
     }
   }
 }, {
@@ -415,7 +417,7 @@
   }
 }, {
   "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567006",
-  "eventType" : "DELETE_RELATIONSHIP",
+  "eventType" : "DELETE_RELATIONSHIP_BY_GUID",
   "eventTime" : 1770888880985,
   "requestMetadata" : {
     "traceId" : "trace-del-rel",
@@ -427,7 +429,7 @@
   }
 }, {
   "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567007",
-  "eventType" : "DELETE_RELATIONSHIPS",
+  "eventType" : "DELETE_RELATIONSHIPS_BY_GUIDS",
   "eventTime" : 1770888880986,
   "requestMetadata" : {
     "traceId" : "trace-del-rels",
@@ -436,5 +438,63 @@
   "operationMetadata" : { },
   "payload" : {
     "guids" : [ "rel-guid-001", "rel-guid-002" ]
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567008",
+  "eventType" : "RELATIONSHIP_CREATE",
+  "eventTime" : 1770888880987,
+  "requestMetadata" : {
+    "traceId" : "trace-rel-create",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "typeName" : "AtlasGlossaryTermAnchor",
+    "end1" : { "typeName" : "AtlasGlossary", "guid" : "guid-glossary-001" },
+    "end2" : { "typeName" : "AtlasGlossaryTerm", "guid" : "guid-term-001" }
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567009",
+  "eventType" : "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES",
+  "eventTime" : 1770888880988,
+  "requestMetadata" : {
+    "traceId" : "trace-bm-update",
+    "user" : "admin"
+  },
+  "operationMetadata" : {
+    "guid" : "guid-table-001",
+    "isOverwrite" : false
+  },
+  "payload" : {
+    "bmName" : { "attr1" : "val1", "attr2" : "val2" }
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567010",
+  "eventType" : "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME",
+  "eventTime" : 1770888880989,
+  "requestMetadata" : {
+    "traceId" : "trace-bm-display",
+    "user" : "admin"
+  },
+  "operationMetadata" : {
+    "guid" : "guid-table-001",
+    "isOverwrite" : true
+  },
+  "payload" : {
+    "bmDisplayName" : { "attr1" : "val1" }
+  }
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567011",
+  "eventType" : "REMOVE_BUSINESS_ATTRIBUTES",
+  "eventTime" : 1770888880990,
+  "requestMetadata" : {
+    "traceId" : "trace-bm-remove",
+    "user" : "admin"
+  },
+  "operationMetadata" : {
+    "guid" : "guid-table-001"
+  },
+  "payload" : {
+    "bmName" : { "attr1" : "val1" }
   }
 } ]
