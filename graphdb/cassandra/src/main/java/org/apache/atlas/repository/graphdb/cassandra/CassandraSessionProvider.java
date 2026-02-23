@@ -20,6 +20,13 @@ public class CassandraSessionProvider {
 
     private static volatile CqlSession session;
 
+    // Shared non-keyspace-bound session for use by TagDAO, ConfigDAO, etc.
+    // Avoids creating 3 separate Cassandra connections on startup.
+    private static volatile CqlSession sharedSession;
+    private static volatile String configuredHostname;
+    private static volatile int configuredPort;
+    private static volatile String configuredDc;
+
     public static CqlSession getSession(Configuration configuration) {
         if (session == null || session.isClosed()) {
             synchronized (CassandraSessionProvider.class) {
@@ -31,11 +38,44 @@ public class CassandraSessionProvider {
         return session;
     }
 
+    /**
+     * Returns a shared non-keyspace-bound CqlSession, reusing the same contact point
+     * and datacenter as the graph session. This avoids creating multiple Cassandra
+     * connection pools during startup (TagDAO, ConfigDAO, etc.).
+     *
+     * Falls back to creating its own session if the graph session hasn't been initialized yet.
+     */
+    public static CqlSession getSharedSession(String hostname, int port, String datacenter) {
+        if (sharedSession == null || sharedSession.isClosed()) {
+            synchronized (CassandraSessionProvider.class) {
+                if (sharedSession == null || sharedSession.isClosed()) {
+                    // Use configured values from graph session if available, otherwise use provided values
+                    String host = configuredHostname != null ? configuredHostname : hostname;
+                    int p = configuredPort > 0 ? configuredPort : port;
+                    String dc = configuredDc != null ? configuredDc : datacenter;
+
+                    LOG.info("Creating shared (non-keyspace) Cassandra session: host={}, port={}, dc={}", host, p, dc);
+                    sharedSession = CqlSession.builder()
+                            .addContactPoint(new InetSocketAddress(host, p))
+                            .withLocalDatacenter(dc)
+                            .build();
+                    LOG.info("Shared Cassandra session created successfully");
+                }
+            }
+        }
+        return sharedSession;
+    }
+
     private static CqlSession createSession(Configuration configuration) {
         String hostname = configuration.getString(CONFIG_PREFIX + "hostname", DEFAULT_HOSTNAME);
         int    port     = configuration.getInt(CONFIG_PREFIX + "port", DEFAULT_PORT);
         String keyspace = configuration.getString(CONFIG_PREFIX + "keyspace", DEFAULT_KEYSPACE);
         String dc       = configuration.getString(CONFIG_PREFIX + "datacenter", DEFAULT_DC);
+
+        // Store connection config for shared session reuse by TagDAO, ConfigDAO, etc.
+        configuredHostname = hostname;
+        configuredPort = port;
+        configuredDc = dc;
 
         LOG.info("Initializing Cassandra session: host={}, port={}, keyspace={}, dc={}", hostname, port, keyspace, dc);
 
@@ -189,6 +229,10 @@ public class CassandraSessionProvider {
     }
 
     public static void shutdown() {
+        if (sharedSession != null && !sharedSession.isClosed()) {
+            sharedSession.close();
+            sharedSession = null;
+        }
         if (session != null && !session.isClosed()) {
             session.close();
             session = null;

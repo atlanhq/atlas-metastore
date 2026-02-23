@@ -5,6 +5,7 @@ import org.apache.atlas.repository.graphdb.*;
 import org.apache.atlas.repository.graphdb.elasticsearch.AtlasElasticsearchDatabase;
 import org.apache.http.entity.ContentType;
 import org.apache.http.entity.StringEntity;
+import org.apache.http.util.EntityUtils;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
@@ -13,10 +14,16 @@ import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class CassandraGraphManagement implements AtlasGraphManagement {
 
     private static final Logger LOG = LoggerFactory.getLogger(CassandraGraphManagement.class);
+
+    // Cache of ES index -> set of field names already mapped, to avoid redundant PUT requests on restart
+    private static final Map<String, Set<String>> esMappingCache = new ConcurrentHashMap<>();
 
     private final CassandraGraph graph;
 
@@ -223,6 +230,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             Response headResp = client.performRequest(headReq);
             if (headResp.getStatusLine().getStatusCode() == 200) {
                 LOG.info("ES index {} already exists", indexName);
+                preloadESMappingCache(client, indexName);
                 return;
             }
         } catch (org.elasticsearch.client.ResponseException e) {
@@ -238,10 +246,69 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
     }
 
     /**
+     * Preloads the ES mapping cache with existing field names from an ES index.
+     * This avoids redundant PUT _mapping requests for fields that already exist.
+     */
+    private void preloadESMappingCache(RestClient client, String indexName) {
+        try {
+            Request req = new Request("GET", "/" + indexName + "/_mapping");
+            Response resp = client.performRequest(req);
+            if (resp.getStatusLine().getStatusCode() == 200) {
+                String body = EntityUtils.toString(resp.getEntity());
+                // Parse field names from the mapping response JSON
+                // Response format: {"indexName":{"mappings":{"properties":{"field1":{...},"field2":{...}}}}}
+                Set<String> cachedFields = esMappingCache.computeIfAbsent(indexName, k -> ConcurrentHashMap.newKeySet());
+                if (body != null && body.contains("\"properties\"")) {
+                    int propsIdx = body.indexOf("\"properties\"");
+                    if (propsIdx > 0) {
+                        // Simple extraction: find all quoted strings that are field names in properties
+                        String propsSection = body.substring(propsIdx);
+                        int braceStart = propsSection.indexOf('{');
+                        if (braceStart >= 0) {
+                            int depth = 0;
+                            int fieldStart = -1;
+                            boolean inQuote = false;
+                            for (int i = braceStart; i < propsSection.length(); i++) {
+                                char c = propsSection.charAt(i);
+                                if (c == '"' && (i == 0 || propsSection.charAt(i - 1) != '\\')) {
+                                    inQuote = !inQuote;
+                                    if (inQuote && depth == 1) {
+                                        fieldStart = i + 1;
+                                    } else if (!inQuote && depth == 1 && fieldStart > 0) {
+                                        String fieldName = propsSection.substring(fieldStart, i);
+                                        cachedFields.add(fieldName);
+                                        fieldStart = -1;
+                                    }
+                                } else if (!inQuote) {
+                                    if (c == '{') depth++;
+                                    else if (c == '}') {
+                                        depth--;
+                                        if (depth == 0) break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                LOG.info("Preloaded {} existing ES field mappings for index {}", cachedFields.size(), indexName);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to preload ES mapping cache for {}: {}", indexName, e.getMessage());
+        }
+    }
+
+    /**
      * Adds a field mapping to an existing ES index so that sort/filter queries work
      * even before any documents containing the field are indexed.
+     * Skips the PUT if the field is already known to exist (from cache or prior call).
      */
     private void addESFieldMapping(String indexName, String fieldName, Class<?> propertyClass, boolean isStringField) {
+        // Check cache first — avoid redundant PUT requests on restart
+        Set<String> cachedFields = esMappingCache.computeIfAbsent(indexName, k -> ConcurrentHashMap.newKeySet());
+        if (cachedFields.contains(fieldName)) {
+            return;
+        }
+
         try {
             RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
             if (client == null) {
@@ -263,10 +330,18 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             Response resp = client.performRequest(req);
 
             if (resp.getStatusLine().getStatusCode() >= 200 && resp.getStatusLine().getStatusCode() < 300) {
+                cachedFields.add(fieldName);
                 LOG.debug("Added ES field mapping: index={}, field={}, type={}", indexName, fieldName, esType);
             }
         } catch (Exception e) {
-            LOG.warn("Failed to add ES field mapping for {}.{}: {}", indexName, fieldName, e.getMessage());
+            // If it fails because the field already exists with a different type, cache it to avoid retrying
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("mapper_parsing_exception")) {
+                cachedFields.add(fieldName);
+                LOG.debug("ES field mapping already exists with different type for {}.{}, skipping", indexName, fieldName);
+            } else {
+                LOG.warn("Failed to add ES field mapping for {}.{}: {}", indexName, fieldName, msg);
+            }
         }
     }
 

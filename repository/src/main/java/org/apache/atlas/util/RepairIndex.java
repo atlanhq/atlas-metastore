@@ -19,6 +19,7 @@
 package org.apache.atlas.util;
 
 import io.micrometer.core.instrument.Timer;
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlanElasticSearchIndex;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -51,6 +52,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.atlas.ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA;
+import static org.apache.atlas.ApplicationProperties.GRAPHDB_BACKEND_CONF;
+import static org.apache.atlas.ApplicationProperties.DEFAULT_GRAPHDB_BACKEND;
 import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.type.Constants.INDEX_NAME_EDGE_INDEX;
 import static org.apache.atlas.type.Constants.INDEX_NAME_VERTEX_INDEX;
@@ -74,6 +78,19 @@ public class RepairIndex {
 
     @PostConstruct
     protected void setupGraph() {
+        String backend = DEFAULT_GRAPHDB_BACKEND;
+        try {
+            backend = ApplicationProperties.get().getString(GRAPHDB_BACKEND_CONF, DEFAULT_GRAPHDB_BACKEND);
+        } catch (AtlasException e) {
+            LOG.warn("Failed to read graphdb backend config, assuming default (janus)", e);
+        }
+
+        if (GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)) {
+            LOG.info("RepairIndex: Cassandra backend detected — skipping JanusGraph initialization (RepairIndex is JanusGraph-only)");
+            graph = null;
+            return;
+        }
+
         LOG.info("Initializing graph: ");
         Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
         try {
@@ -98,6 +115,9 @@ public class RepairIndex {
      * @throws Exception
      */
     public void reindexVerticesByIds(String indexName, Set<Long> vertexIds) throws Exception {
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.reindexVerticesByIds is not supported with Cassandra backend");
+        }
         Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
         StandardJanusGraphTx tx = null;
         try {
@@ -124,6 +144,9 @@ public class RepairIndex {
     }
 
     public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.restoreSelective is not supported with Cassandra backend");
+        }
         Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
         LOG.info("processing referencedGuids => " + referencedGUIDs);
 
@@ -143,6 +166,9 @@ public class RepairIndex {
     }
 
     public void restoreByIds(Set<String> guids) throws Exception {
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.restoreByIds is not supported with Cassandra backend");
+        }
 
         StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
         IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
