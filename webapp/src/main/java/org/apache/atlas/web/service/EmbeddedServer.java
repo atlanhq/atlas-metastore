@@ -305,10 +305,10 @@ public class EmbeddedServer {
                         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
                             new com.sun.jersey.spi.container.servlet.ServletContainer()
                         );
-                        //v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
-                        //v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
+                        v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
+                        v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
                         v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources");
-                        
+
                         // Borrow Spring beans so V2 API can actually talk to the database
                         fastLaneContext.getServletContext().setAttribute(
                             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
