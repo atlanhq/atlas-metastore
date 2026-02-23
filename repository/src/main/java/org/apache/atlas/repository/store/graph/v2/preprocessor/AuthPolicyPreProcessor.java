@@ -102,6 +102,16 @@ public class AuthPolicyPreProcessor implements PreProcessor {
 
     private void processCreatePolicy(AtlasStruct entity) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreatePolicy");
+
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip validation, ES alias creation, keycloak role extraction
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                entity.setAttribute(QUALIFIED_NAME, "import/" + getUUID());
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         AtlasEntity policy = (AtlasEntity) entity;
 
         AtlasEntityWithExtInfo parent = getAccessControlEntity(policy);

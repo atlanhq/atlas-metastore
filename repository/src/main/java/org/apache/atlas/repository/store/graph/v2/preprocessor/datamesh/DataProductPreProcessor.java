@@ -85,6 +85,22 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
 
     private void processCreateProduct(AtlasEntity entity,AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateProduct");
+
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations, existence checks, and authorization
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                AtlasObjectId parentDomainObject = (AtlasObjectId) entity.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE);
+                String parentDomainQualifiedName = "";
+                if (parentDomainObject != null) {
+                    AtlasVertex parentDomain = retrieverNoRelation.getEntityVertex(parentDomainObject);
+                    parentDomainQualifiedName = parentDomain.getProperty(QUALIFIED_NAME, String.class);
+                }
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName(parentDomainQualifiedName));
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         AtlasObjectId parentDomainObject = (AtlasObjectId) entity.getRelationshipAttribute(DATA_DOMAIN_REL_TYPE);
         String productName = (String) entity.getAttribute(NAME);
         String parentDomainQualifiedName = "";

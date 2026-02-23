@@ -96,6 +96,14 @@ public class StakeholderTitlePreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateStakeholderTitle");
 
         try {
+            if (RequestContext.get().isImportInProgress()) {
+                // During import/async-ingestion, skip ES-dependent operations, existence checks, and authorization
+                if (org.apache.commons.lang.StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                    entity.setAttribute(QUALIFIED_NAME, format(PATTERN_QUALIFIED_NAME_ALL_DOMAINS, getUUID()));
+                }
+                return;
+            }
+
             validateRelations(entity);
 
             if (RequestContext.get().isSkipAuthorizationCheck()) {

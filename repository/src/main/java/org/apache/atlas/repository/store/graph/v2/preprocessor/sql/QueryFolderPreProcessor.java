@@ -84,6 +84,14 @@ public class QueryFolderPreProcessor implements PreProcessor {
     }
 
     private void processCreate(AtlasStruct entity) throws AtlasBaseException {
+        if (RequestContext.get().isImportInProgress()) {
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                String collectionQualifiedName = (String) entity.getAttribute(COLLECTION_QUALIFIED_NAME);
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName(collectionQualifiedName));
+            }
+            return;
+        }
+
         String collectionQualifiedName = (String) entity.getAttribute(COLLECTION_QUALIFIED_NAME);
 
         if (StringUtils.isEmpty(collectionQualifiedName)) {

@@ -18,6 +18,8 @@ import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityStream;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
+import org.apache.atlas.repository.store.bootstrap.AtlasTypeDefStoreInitializer;
+import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasType;
@@ -40,6 +42,7 @@ import javax.annotation.PreDestroy;
 import javax.inject.Inject;
 import java.time.Duration;
 import java.util.*;
+import java.util.concurrent.locks.Lock;
 import java.util.stream.Collectors;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -138,6 +141,8 @@ public class AsyncIngestionConsumerService {
     private final AtlasRelationshipStore relationshipStore;
     private final AtlasTypeDefStore typeDefStore;
     private final AtlasTypeRegistry typeRegistry;
+    private final RedisService redisService;
+    private String typeDefLock;
 
     // ── State ────────────────────────────────────────────────────────────
     private volatile KafkaConsumer<String, String> consumer;
@@ -176,12 +181,20 @@ public class AsyncIngestionConsumerService {
                                          AtlasEntityStore entitiesStore,
                                          AtlasRelationshipStore relationshipStore,
                                          AtlasTypeDefStore typeDefStore,
-                                         AtlasTypeRegistry typeRegistry) {
+                                         AtlasTypeRegistry typeRegistry,
+                                         RedisService redisService) {
         this.entityMutationService = entityMutationService;
         this.entitiesStore = entitiesStore;
         this.relationshipStore = relationshipStore;
         this.typeDefStore = typeDefStore;
         this.typeRegistry = typeRegistry;
+        this.redisService = redisService;
+
+        try {
+            this.typeDefLock = ApplicationProperties.get().getString(ApplicationProperties.TYPEDEF_LOCK_NAME, "atlas:type-def:lock");
+        } catch (Exception e) {
+            this.typeDefLock = "atlas:type-def:lock";
+        }
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────
@@ -565,7 +578,7 @@ public class AsyncIngestionConsumerService {
 
             // ── TypeDef mutations ────────────────────────────────────
             case "TYPEDEF_CREATE":
-                replayTypeDefCreate(payload);
+                replayTypeDefCreate(payload, operationMetadata);
                 break;
             case "TYPEDEF_UPDATE":
                 replayTypeDefUpdate(payload, operationMetadata);
@@ -603,6 +616,11 @@ public class AsyncIngestionConsumerService {
         }
 
         BulkRequestContext ctx = BulkRequestContext.fromOperationMetadata(operationMetadata);
+
+        if (ctx.isSkipProcessEdgeRestoration()) {
+            RequestContext.get().setSkipProcessEdgeRestoration(true);
+        }
+
         entityMutationService.createOrUpdate(new AtlasEntityStream(entities), ctx);
         LOG.info("AsyncIngestion: BULK_CREATE_OR_UPDATE completed successfully");
     }
@@ -896,10 +914,34 @@ public class AsyncIngestionConsumerService {
 
     /**
      * TYPEDEF_CREATE: payload = AtlasTypesDef JSON
+     * operationMetadata may contain {"allowDuplicateDisplayName": false}
      */
-    private void replayTypeDefCreate(JsonNode payload) throws AtlasBaseException {
-        AtlasTypesDef typesDef = AtlasType.fromJson(payload.toString(), AtlasTypesDef.class);
-        typeDefStore.createTypesDef(typesDef);
+    private void replayTypeDefCreate(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
+        Lock lock = null;
+        try {
+            try {
+                lock = redisService.acquireDistributedLockV2(typeDefLock);
+            } catch (Exception e) {
+                throw new AtlasBaseException("AsyncIngestion: Error acquiring typedef lock for TYPEDEF_CREATE", e);
+            }
+            if (lock == null) {
+                throw new AtlasBaseException("AsyncIngestion: Failed to acquire typedef lock for TYPEDEF_CREATE");
+            }
+
+            if (operationMetadata != null && operationMetadata.has("allowDuplicateDisplayName")) {
+                RequestContext.get().setAllowDuplicateDisplayName(
+                        operationMetadata.get("allowDuplicateDisplayName").asBoolean(false));
+            }
+
+            AtlasTypesDef typesDef = AtlasType.fromJson(payload.toString(), AtlasTypesDef.class);
+            typeDefStore.createTypesDef(typesDef);
+
+            incrementTypeDefVersion();
+        } finally {
+            if (lock != null) {
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
+            }
+        }
     }
 
     /**
@@ -907,24 +949,100 @@ public class AsyncIngestionConsumerService {
      * operationMetadata may contain {"allowDuplicateDisplayName": false, "patch": true}
      */
     private void replayTypeDefUpdate(JsonNode payload, JsonNode operationMetadata) throws AtlasBaseException {
-        AtlasTypesDef typesDef = AtlasType.fromJson(payload.toString(), AtlasTypesDef.class);
-        typeDefStore.updateTypesDef(typesDef);
+        Lock lock = null;
+        try {
+            try {
+                lock = redisService.acquireDistributedLockV2(typeDefLock);
+            } catch (Exception e) {
+                throw new AtlasBaseException("AsyncIngestion: Error acquiring typedef lock for TYPEDEF_UPDATE", e);
+            }
+            if (lock == null) {
+                throw new AtlasBaseException("AsyncIngestion: Failed to acquire typedef lock for TYPEDEF_UPDATE");
+            }
+
+            if (operationMetadata != null && operationMetadata.has("allowDuplicateDisplayName")) {
+                RequestContext.get().setAllowDuplicateDisplayName(
+                        operationMetadata.get("allowDuplicateDisplayName").asBoolean(false));
+            }
+            if (operationMetadata != null && operationMetadata.has("patch")) {
+                RequestContext.get().setInTypePatching(
+                        operationMetadata.get("patch").asBoolean(false));
+            }
+
+            AtlasTypesDef typesDef = AtlasType.fromJson(payload.toString(), AtlasTypesDef.class);
+            typeDefStore.updateTypesDef(typesDef);
+
+            incrementTypeDefVersion();
+        } finally {
+            if (lock != null) {
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
+            }
+        }
     }
 
     /**
      * TYPEDEF_DELETE: payload = AtlasTypesDef JSON
      */
     private void replayTypeDefDelete(JsonNode payload) throws AtlasBaseException {
-        AtlasTypesDef typesDef = AtlasType.fromJson(payload.toString(), AtlasTypesDef.class);
-        typeDefStore.deleteTypesDef(typesDef);
+        Lock lock = null;
+        try {
+            try {
+                lock = redisService.acquireDistributedLockV2(typeDefLock);
+            } catch (Exception e) {
+                throw new AtlasBaseException("AsyncIngestion: Error acquiring typedef lock for TYPEDEF_DELETE", e);
+            }
+            if (lock == null) {
+                throw new AtlasBaseException("AsyncIngestion: Failed to acquire typedef lock for TYPEDEF_DELETE");
+            }
+
+            AtlasTypesDef typesDef = AtlasType.fromJson(payload.toString(), AtlasTypesDef.class);
+            typeDefStore.deleteTypesDef(typesDef);
+
+            incrementTypeDefVersion();
+        } finally {
+            if (lock != null) {
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
+            }
+        }
     }
 
     /**
      * TYPEDEF_DELETE_BY_NAME: payload = {"typeName": "CustomTable"}
      */
     private void replayTypeDefDeleteByName(JsonNode payload) throws AtlasBaseException {
-        String typeName = payload.get("typeName").asText();
-        typeDefStore.deleteTypeByName(typeName);
+        Lock lock = null;
+        try {
+            try {
+                lock = redisService.acquireDistributedLockV2(typeDefLock);
+            } catch (Exception e) {
+                throw new AtlasBaseException("AsyncIngestion: Error acquiring typedef lock for TYPEDEF_DELETE_BY_NAME", e);
+            }
+            if (lock == null) {
+                throw new AtlasBaseException("AsyncIngestion: Failed to acquire typedef lock for TYPEDEF_DELETE_BY_NAME");
+            }
+
+            String typeName = payload.get("typeName").asText();
+            typeDefStore.deleteTypeByName(typeName);
+
+            incrementTypeDefVersion();
+        } finally {
+            if (lock != null) {
+                redisService.releaseDistributedLockV2(lock, typeDefLock);
+            }
+        }
+    }
+
+    private void incrementTypeDefVersion() {
+        try {
+            long latestVersion = Long.parseLong(redisService.getValue(
+                    AtlasTypeDefStoreInitializer.TYPEDEF_LATEST_VERSION, "1")) + 1;
+            String latestVersionStr = String.valueOf(latestVersion);
+            redisService.putValue(AtlasTypeDefStoreInitializer.TYPEDEF_LATEST_VERSION, latestVersionStr);
+            AtlasTypeDefStoreInitializer.setCurrentTypedefInternalVersion(latestVersion);
+            LOG.info("AsyncIngestion: Incremented TYPEDEF_VERSION to {}", latestVersionStr);
+        } catch (Exception e) {
+            LOG.error("AsyncIngestion: Failed to increment typedef version in Redis", e);
+        }
     }
 
     // ── DLQ Publishing ─────────────────────────────────────────────────

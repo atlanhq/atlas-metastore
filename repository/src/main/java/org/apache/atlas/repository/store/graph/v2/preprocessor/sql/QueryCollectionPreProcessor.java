@@ -128,6 +128,14 @@ public class QueryCollectionPreProcessor implements PreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateCollection");
 
         try {
+            if (RequestContext.get().isImportInProgress()) {
+                // During import/async-ingestion, skip keycloak role creation, policy creation, and ES operations
+                if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                    entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+                }
+                return;
+            }
+
             entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
 
             AtlasEntity collection = (AtlasEntity) entity;

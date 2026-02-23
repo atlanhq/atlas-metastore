@@ -32,6 +32,7 @@ public class BulkRequestContext {
                 .setAppendTags(opMeta.path("appendTags").asBoolean(false))
                 .setReplaceBusinessAttributes(opMeta.path("replaceBusinessAttributes").asBoolean(false))
                 .setOverwriteBusinessAttributes(opMeta.path("overwriteBusinessAttributes").asBoolean(false))
+                .setSkipProcessEdgeRestoration(opMeta.path("skipProcessEdgeRestoration").asBoolean(false))
                 .build();
     }
     private boolean replaceClassifications;
@@ -40,6 +41,7 @@ public class BulkRequestContext {
 
     private boolean replaceBusinessAttributes;
     private boolean isOverwriteBusinessAttributes;
+    private boolean skipProcessEdgeRestoration;
 
     public boolean isReplaceClassifications() {
         return replaceClassifications;
@@ -61,6 +63,10 @@ public class BulkRequestContext {
         return isOverwriteBusinessAttributes;
     }
 
+    public boolean isSkipProcessEdgeRestoration() {
+        return skipProcessEdgeRestoration;
+    }
+
     public BulkRequestContext() {
         this.replaceClassifications = false;
         this.replaceTags = false;
@@ -68,6 +74,7 @@ public class BulkRequestContext {
 
         this.replaceBusinessAttributes = false;
         this.isOverwriteBusinessAttributes = false;
+        this.skipProcessEdgeRestoration = false;
     }
 
     private BulkRequestContext(Builder builder) {
@@ -77,6 +84,7 @@ public class BulkRequestContext {
 
         this.replaceBusinessAttributes = builder.replaceBusinessAttributes;
         this.isOverwriteBusinessAttributes = builder.isOverwriteBusinessAttributes;
+        this.skipProcessEdgeRestoration = builder.skipProcessEdgeRestoration;
     }
 
     public static class Builder {
@@ -86,6 +94,7 @@ public class BulkRequestContext {
 
         private boolean replaceBusinessAttributes = false;
         private boolean isOverwriteBusinessAttributes = false;
+        private boolean skipProcessEdgeRestoration = false;
 
         public Builder setReplaceClassifications(boolean replaceClassifications) {
             this.replaceClassifications = replaceClassifications;
@@ -124,6 +133,11 @@ public class BulkRequestContext {
 
         public Builder setOverwriteBusinessAttributes(boolean overwriteBusinessAttributes) {
             isOverwriteBusinessAttributes = overwriteBusinessAttributes;
+            return this;
+        }
+
+        public Builder setSkipProcessEdgeRestoration(boolean skipProcessEdgeRestoration) {
+            this.skipProcessEdgeRestoration = skipProcessEdgeRestoration;
             return this;
         }
 
