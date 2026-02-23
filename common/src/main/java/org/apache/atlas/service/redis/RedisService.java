@@ -26,4 +26,8 @@ public interface RedisService {
 
   Logger getLogger();
 
+  default boolean isAvailable() {
+    return false;
+  }
+
 }

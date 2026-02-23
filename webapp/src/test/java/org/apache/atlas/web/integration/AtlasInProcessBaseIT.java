@@ -73,13 +73,16 @@ public abstract class AtlasInProcessBaseIT {
     private static volatile boolean containersStarted = false;
 
     static {
+        // Must be set before any testcontainers Docker client initialization (Docker 29+ requires API >= 1.44)
+        System.setProperty("api.version", "1.44");
+
         cassandra = new CassandraContainer<>(DockerImageName.parse("cassandra:2.1"))
                 .withStartupTimeout(Duration.ofMinutes(3))
                 .withEnv("CASSANDRA_CLUSTER_NAME", "atlas-test-cluster")
                 .withEnv("CASSANDRA_DC", "datacenter1");
 
         elasticsearch = new ElasticsearchContainer(
-                DockerImageName.parse("elasticsearch:7.16.2"))
+                DockerImageName.parse("elasticsearch:7.17.27"))
                 .withEnv("discovery.type", "single-node")
                 .withEnv("xpack.security.enabled", "false")
                 .withEnv("ES_JAVA_OPTS", "-Xms512m -Xmx512m");
@@ -264,6 +267,7 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.storage.cql.replication-factor=1");
             w.println("atlas.graph.storage.clustername=atlas-test-cluster");
             w.println("atlas.graph.storage.port=" + cassandraPort);
+            w.println("atlas.graph.storage.cql.local-datacenter=datacenter1");
             w.println("atlas.graph.query.fast-property=true");
             w.println("atlas.graph.query.batch=true");
             w.println("query.batch.properties-mode=all-properties");
@@ -358,6 +362,10 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.config.store.cassandra.activated=true");
             w.println("atlas.config.store.cassandra.consistency.level=LOCAL_ONE");
             w.println("atlas.config.store.cassandra.replication.factor=1");
+
+            // Feature flag store - use LOCAL_ONE for single-node testcontainer
+            w.println("atlas.feature.flag.cassandra.consistency.level=LOCAL_ONE");
+            w.println("atlas.feature.flag.cassandra.replication.factor=1");
         }
     }
 
