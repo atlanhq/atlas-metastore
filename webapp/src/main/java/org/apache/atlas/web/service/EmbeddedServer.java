@@ -377,7 +377,7 @@ public class EmbeddedServer {
         // This Listener is **only** to inject the dependencies once Main App is ready
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
             @Override
-            public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {"
+            public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
                 try {
                     LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
                     
