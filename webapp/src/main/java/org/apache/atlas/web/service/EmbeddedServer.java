@@ -379,8 +379,16 @@ public class EmbeddedServer {
         // Only register what exists in Atlas built JARs
         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             "org.apache.atlas.web.resources.AdminResource;" +
-            "org.apache.atlas.web.filters.AtlasAuthenticationFilter;" +
-            "com.sun.jersey.api.core.PackagesResourceConfig"
+            // The JSON/Jackson providers (Required for AdminResource to work)
+            "org.apache.atlas.web.util.Servlets;" +
+            "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
+            "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
+            
+            // Exception mappers (Required to handle errors gracefully)
+            "org.apache.atlas.web.errors.AtlasBaseExceptionMapper;" +
+            "org.apache.atlas.web.errors.LoggingExceptionMapper;" +
+            
+            "org.apache.atlas.web.filters.AtlasAuthenticationFilter" 
 );
 
         // Add /v2 calls to the context now, Jetty will handle the start sequence
