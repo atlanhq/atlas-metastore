@@ -16,6 +16,7 @@ import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.BulkRequestContext;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.repository.store.graph.v2.EntityStream;
+import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.store.AtlasTypeDefStore;
 import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasTypeRegistry;
@@ -58,12 +59,14 @@ class AsyncIngestionConsumerServiceTest {
     private AtlasTypeDefStore typeDefStore;
     @Mock
     private AtlasTypeRegistry typeRegistry;
+    @Mock
+    private RedisService redisService;
 
     private AsyncIngestionConsumerService consumerService;
 
     @BeforeEach
     void setUp() {
-        consumerService = new AsyncIngestionConsumerService(entityMutationService, entitiesStore, relationshipStore, typeDefStore, typeRegistry);
+        consumerService = new AsyncIngestionConsumerService(entityMutationService, entitiesStore, relationshipStore, typeDefStore, typeRegistry, redisService);
         ReflectionTestUtils.setField(consumerService, "topic", "ATLAS_ASYNC_ENTITIES");
         ReflectionTestUtils.setField(consumerService, "consumerGroupId", "test_group");
         ReflectionTestUtils.setField(consumerService, "maxRetries", 3);
@@ -443,7 +446,47 @@ class AsyncIngestionConsumerServiceTest {
             }
             """;
 
-    // Sample #23: ADD_OR_UPDATE_BUSINESS_ATTRIBUTES
+    // Sample #23: RELATIONSHIP_BULK_CREATE_OR_UPDATE
+    private static final String RELATIONSHIP_BULK_CREATE_OR_UPDATE_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567012",
+              "eventType": "RELATIONSHIP_BULK_CREATE_OR_UPDATE",
+              "eventTime": 1770888880991,
+              "requestMetadata": { "traceId": "trace-rel-bulk", "user": "admin" },
+              "operationMetadata": {},
+              "payload": [
+                {
+                  "typeName": "AtlasGlossaryTermAnchor",
+                  "end1": { "typeName": "AtlasGlossary", "guid": "guid-glossary-001" },
+                  "end2": { "typeName": "AtlasGlossaryTerm", "guid": "guid-term-001" }
+                },
+                {
+                  "typeName": "AtlasGlossaryTermAnchor",
+                  "end1": { "typeName": "AtlasGlossary", "guid": "guid-glossary-001" },
+                  "end2": { "typeName": "AtlasGlossaryTerm", "guid": "guid-term-002" }
+                }
+              ]
+            }
+            """;
+
+    // Sample #24: RELATIONSHIP_UPDATE
+    private static final String RELATIONSHIP_UPDATE_EVENT = """
+            {
+              "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567013",
+              "eventType": "RELATIONSHIP_UPDATE",
+              "eventTime": 1770888880992,
+              "requestMetadata": { "traceId": "trace-rel-update", "user": "admin" },
+              "operationMetadata": {},
+              "payload": {
+                "typeName": "AtlasGlossaryTermAnchor",
+                "guid": "rel-guid-existing",
+                "end1": { "typeName": "AtlasGlossary", "guid": "guid-glossary-001" },
+                "end2": { "typeName": "AtlasGlossaryTerm", "guid": "guid-term-003" }
+              }
+            }
+            """;
+
+    // Sample #25: ADD_OR_UPDATE_BUSINESS_ATTRIBUTES
     private static final String ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_EVENT = """
             {
               "eventId": "e1f2a3b4-c5d6-7890-abcd-ef1234567009",
@@ -745,6 +788,31 @@ class AsyncIngestionConsumerServiceTest {
     }
 
     @Test
+    void testReplayRelationshipBulkCreateOrUpdate() throws Exception {
+        when(relationshipStore.createOrUpdate(anyList())).thenReturn(null);
+
+        processEvent(RELATIONSHIP_BULK_CREATE_OR_UPDATE_EVENT);
+
+        ArgumentCaptor<List<AtlasRelationship>> captor = ArgumentCaptor.forClass(List.class);
+        verify(relationshipStore).createOrUpdate(captor.capture());
+        assertEquals(2, captor.getValue().size());
+        assertEquals("AtlasGlossaryTermAnchor", captor.getValue().get(0).getTypeName());
+        assertEquals("AtlasGlossaryTermAnchor", captor.getValue().get(1).getTypeName());
+    }
+
+    @Test
+    void testReplayRelationshipUpdate() throws Exception {
+        when(relationshipStore.update(any(AtlasRelationship.class))).thenReturn(null);
+
+        processEvent(RELATIONSHIP_UPDATE_EVENT);
+
+        ArgumentCaptor<AtlasRelationship> captor = ArgumentCaptor.forClass(AtlasRelationship.class);
+        verify(relationshipStore).update(captor.capture());
+        assertEquals("AtlasGlossaryTermAnchor", captor.getValue().getTypeName());
+        assertEquals("rel-guid-existing", captor.getValue().getGuid());
+    }
+
+    @Test
     void testReplayAddOrUpdateBusinessAttributes() throws Exception {
         doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
 
@@ -987,13 +1055,13 @@ class AsyncIngestionConsumerServiceTest {
 
     @Test
     void testProcessAllEventTypes_EndToEnd() throws Exception {
-        // Read all 24 events from the payloads JSON fixture
+        // Read all 26 events from the payloads JSON fixture
         JsonNode events;
         try (java.io.InputStream is = getClass().getResourceAsStream("/async-ingestion-payloads.json")) {
             assertNotNull(is, "async-ingestion-payloads.json not found on classpath");
             events = MAPPER.readTree(is);
         }
-        assertEquals(24, events.size(), "Expected 24 events in payloads file");
+        assertEquals(26, events.size(), "Expected 26 events in payloads file");
 
         // Set up mocks for all event types
         when(entityMutationService.createOrUpdate(any(EntityStream.class), any(BulkRequestContext.class)))
@@ -1022,12 +1090,14 @@ class AsyncIngestionConsumerServiceTest {
         doNothing().when(entityMutationService).deleteRelationshipById(anyString());
         doNothing().when(entityMutationService).deleteRelationshipsByIds(anyList());
         when(relationshipStore.create(any(AtlasRelationship.class))).thenReturn(null);
+        when(relationshipStore.createOrUpdate(anyList())).thenReturn(null);
+        when(relationshipStore.update(any(AtlasRelationship.class))).thenReturn(null);
         // Business metadata mocks
         doNothing().when(entitiesStore).addOrUpdateBusinessAttributes(anyString(), anyMap(), anyBoolean());
         doNothing().when(entitiesStore).addOrUpdateBusinessAttributesByDisplayName(anyString(), anyMap(), anyBoolean());
         doNothing().when(entitiesStore).removeBusinessAttributes(anyString(), anyMap());
 
-        // Process all 24 events sequentially
+        // Process all 26 events sequentially
         for (JsonNode event : events) {
             processEvent(MAPPER.writeValueAsString(event));
         }
@@ -1121,13 +1191,19 @@ class AsyncIngestionConsumerServiceTest {
         // 21. RELATIONSHIP_CREATE → relationshipStore.create
         inOrder.verify(relationshipStore).create(any(AtlasRelationship.class));
 
-        // 22. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES → addOrUpdateBusinessAttributes
+        // 22. RELATIONSHIP_BULK_CREATE_OR_UPDATE → relationshipStore.createOrUpdate
+        inOrder.verify(relationshipStore).createOrUpdate(anyList());
+
+        // 23. RELATIONSHIP_UPDATE → relationshipStore.update
+        inOrder.verify(relationshipStore).update(any(AtlasRelationship.class));
+
+        // 24. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES → addOrUpdateBusinessAttributes
         inOrder.verify(entitiesStore).addOrUpdateBusinessAttributes(eq("guid-table-001"), anyMap(), eq(false));
 
-        // 23. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME → addOrUpdateBusinessAttributesByDisplayName
+        // 25. ADD_OR_UPDATE_BUSINESS_ATTRIBUTES_BY_DISPLAY_NAME → addOrUpdateBusinessAttributesByDisplayName
         inOrder.verify(entitiesStore).addOrUpdateBusinessAttributesByDisplayName(eq("guid-table-001"), anyMap(), eq(true));
 
-        // 24. REMOVE_BUSINESS_ATTRIBUTES → removeBusinessAttributes
+        // 26. REMOVE_BUSINESS_ATTRIBUTES → removeBusinessAttributes
         inOrder.verify(entitiesStore).removeBusinessAttributes(eq("guid-table-001"), anyMap());
 
         inOrder.verifyNoMoreInteractions();

@@ -454,6 +454,39 @@
     "end2" : { "typeName" : "AtlasGlossaryTerm", "guid" : "guid-term-001" }
   }
 }, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567012",
+  "eventType" : "RELATIONSHIP_BULK_CREATE_OR_UPDATE",
+  "eventTime" : 1770888880991,
+  "requestMetadata" : {
+    "traceId" : "trace-rel-bulk",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : [ {
+    "typeName" : "AtlasGlossaryTermAnchor",
+    "end1" : { "typeName" : "AtlasGlossary", "guid" : "guid-glossary-001" },
+    "end2" : { "typeName" : "AtlasGlossaryTerm", "guid" : "guid-term-001" }
+  }, {
+    "typeName" : "AtlasGlossaryTermAnchor",
+    "end1" : { "typeName" : "AtlasGlossary", "guid" : "guid-glossary-001" },
+    "end2" : { "typeName" : "AtlasGlossaryTerm", "guid" : "guid-term-002" }
+  } ]
+}, {
+  "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567013",
+  "eventType" : "RELATIONSHIP_UPDATE",
+  "eventTime" : 1770888880992,
+  "requestMetadata" : {
+    "traceId" : "trace-rel-update",
+    "user" : "admin"
+  },
+  "operationMetadata" : { },
+  "payload" : {
+    "typeName" : "AtlasGlossaryTermAnchor",
+    "guid" : "rel-guid-existing",
+    "end1" : { "typeName" : "AtlasGlossary", "guid" : "guid-glossary-001" },
+    "end2" : { "typeName" : "AtlasGlossaryTerm", "guid" : "guid-term-003" }
+  }
+}, {
   "eventId" : "e1f2a3b4-c5d6-7890-abcd-ef1234567009",
   "eventType" : "ADD_OR_UPDATE_BUSINESS_ATTRIBUTES",
   "eventTime" : 1770888880988,
