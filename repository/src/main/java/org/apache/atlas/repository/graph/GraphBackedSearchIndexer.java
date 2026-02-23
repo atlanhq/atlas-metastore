@@ -95,6 +95,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
     };
 
+    // Tracks property names for which we've already logged the "propertyKey is null" warning, to avoid log spam
+    private static final Set<String> loggedNullPropertyKeyWarnings = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     // Added for type lookup when indexing the new typedefs
     private final AtlasTypeRegistry typeRegistry;
     private final List<IndexChangeListener> indexChangeListeners = new ArrayList<>();
@@ -524,7 +527,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.debug("Property {} is mapped to index field name {}", attribute.getQualifiedName(), attribute.getIndexFieldName());
                         }
                     } else {
-                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        if (loggedNullPropertyKeyWarnings.add(attribute.getVertexPropertyName())) {
+                            LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        }
                     }
                 }
             }

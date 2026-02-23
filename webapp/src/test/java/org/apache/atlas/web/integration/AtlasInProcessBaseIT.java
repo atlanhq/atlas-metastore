@@ -107,6 +107,14 @@ public abstract class AtlasInProcessBaseIT {
     private static Path tempDir;
     private static volatile boolean serverStarted = false;
 
+    /**
+     * Returns true if the system property {@code atlas.graphdb.backend} is set to {@code cassandra}.
+     * Maven forwards this via {@code -Datlas.graphdb.backend=cassandra} and surefire's systemProperties.
+     */
+    protected static boolean isCassandraGraphBackend() {
+        return "cassandra".equalsIgnoreCase(System.getProperty("atlas.graphdb.backend"));
+    }
+
     @BeforeAll
     void startAtlas() throws Exception {
         startContainers();
@@ -281,6 +289,15 @@ public abstract class AtlasInProcessBaseIT {
             w.println("atlas.graph.index.search.elasticsearch.client-only=true");
             w.println("atlas.graph.index.search.elasticsearch.retry_on_conflict=5");
             w.println("atlas.rebuild.index=true");
+
+            // Cassandra graph backend (only active when atlas.graphdb.backend=cassandra)
+            if (isCassandraGraphBackend()) {
+                w.println("atlas.graphdb.backend=cassandra");
+                w.println("atlas.cassandra.graph.hostname=localhost");
+                w.println("atlas.cassandra.graph.port=" + cassandraPort);
+                w.println("atlas.cassandra.graph.keyspace=atlas_graph");
+                w.println("atlas.cassandra.graph.datacenter=datacenter1");
+            }
 
             // Notification - External Kafka container
             String kafkaBootstrap = kafka.getBootstrapServers();
