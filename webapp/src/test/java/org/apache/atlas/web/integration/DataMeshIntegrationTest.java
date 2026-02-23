@@ -111,12 +111,9 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         AtlasEntity subDomain = new AtlasEntity("DataDomain");
         subDomain.setAttribute("name", "test-subdomain-" + testId);
         subDomain.setAttribute("qualifiedName", domainQN + "/domain/sub-" + testId);
-
-        // Set parent domain via relationship attribute (required by preprocessor)
-        AtlasObjectId parentDomainRef = new AtlasObjectId();
-        parentDomainRef.setGuid(domainGuid);
-        parentDomainRef.setTypeName("DataDomain");
-        subDomain.setRelationshipAttribute("parentDomain", parentDomainRef);
+        subDomain.setAttribute("parentDomainQualifiedName", domainQN);
+        subDomain.setAttribute("superDomainQualifiedName", domainQN);
+        subDomain.setRelationshipAttribute("parentDomain", new AtlasObjectId(domainGuid, "DataDomain"));
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(subDomain));
         AtlasEntityHeader created = response.getFirstEntityCreated();
@@ -140,8 +137,13 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(domainGuid, true, false);
         AtlasEntity parent = result.getEntity();
 
-        // Parent domain should have childrenDomains relationship
-        Object children = parent.getRelationshipAttribute("childrenDomains");
+        // Parent domain should have subDomains relationship
+        Object children = parent.getRelationshipAttribute("subDomains");
+        assertNotNull(children, "Parent domain should have subDomains relationship");
+        assertTrue(children instanceof List);
+        @SuppressWarnings("unchecked")
+        List<Object> childList = (List<Object>) children;
+        assertFalse(childList.isEmpty(), "Parent should have at least one child domain");
 
         // Relationship attributes may not be populated in all fetch modes;
         // verify that the subdomain references the parent instead
@@ -169,14 +171,9 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         AtlasEntity product = new AtlasEntity("DataProduct");
         product.setAttribute("name", "test-product-" + testId);
         product.setAttribute("qualifiedName", domainQN + "/product/test-" + testId);
-        // dataProductAssetsDSL is mandatory - provide a valid JSON object
+        product.setAttribute("domainQualifiedName", domainQN);
         product.setAttribute("dataProductAssetsDSL", "{\"query\":{\"match_all\":{}}}");
-
-        // Set data domain via relationship attribute (required by preprocessor)
-        AtlasObjectId domainRef = new AtlasObjectId();
-        domainRef.setGuid(domainGuid);
-        domainRef.setTypeName("DataDomain");
-        product.setRelationshipAttribute("dataDomain", domainRef);
+        product.setRelationshipAttribute("dataDomain", new AtlasObjectId(domainGuid, "DataDomain"));
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(product));
         AtlasEntityHeader created = response.getFirstEntityCreated();
@@ -216,6 +213,8 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         entity.setRelationshipAttributes(null);
 
         entity.setAttribute("description", "Updated domain description");
+        // Clear relationship attributes to avoid "Cannot update Domain's subDomains or dataProducts relations"
+        entity.setRelationshipAttributes(null);
 
         EntityMutationResponse response = atlasClient.updateEntity(new AtlasEntityWithExtInfo(entity));
         assertNotNull(response);
