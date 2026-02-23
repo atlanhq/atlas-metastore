@@ -89,6 +89,15 @@ public class DataDomainPreProcessor extends AbstractDomainPreProcessor {
     private void processCreateDomain(AtlasEntity entity) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateDomain");
 
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations, existence checks, and authorization
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName(""));
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         validateStakeholderRelationship(entity);
 
         String domainName = (String) entity.getAttribute(NAME);

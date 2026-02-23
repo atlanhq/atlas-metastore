@@ -91,10 +91,18 @@ public class TermPreProcessor extends AbstractGlossaryPreProcessor {
     private void processCreateTerm(AtlasEntity entity, AtlasVertex vertex) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateTerm");
         String termName = (String) entity.getAttribute(NAME);
-        String termQName = vertex.getProperty(QUALIFIED_NAME, String.class);
 
         if (StringUtils.isEmpty(termName) || isNameInvalid(termName)) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_DISPLAY_NAME);
+        }
+
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations, existence checks, and authorization
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
         }
 
         String glossaryQName = (String) anchor.getAttribute(QUALIFIED_NAME);

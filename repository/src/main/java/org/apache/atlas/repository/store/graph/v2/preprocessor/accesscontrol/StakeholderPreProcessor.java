@@ -142,6 +142,16 @@ public class StakeholderPreProcessor extends PersonaPreProcessor {
     private void processCreateStakeholder(AtlasEntity entity) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateStakeholder");
 
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations, existence checks, keycloak, and authorization
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                String domainQualifiedName = getQualifiedNameFromRelationAttribute(entity, REL_ATTR_STAKEHOLDER_DOMAIN);
+                entity.setAttribute(QUALIFIED_NAME, format("default/%s/%s", getUUID(), domainQualifiedName));
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         validateNoPoliciesAttached(entity);
 
         if (!entity.hasRelationshipAttribute(REL_ATTR_STAKEHOLDER_TITLE) || !entity.hasRelationshipAttribute(REL_ATTR_STAKEHOLDER_DOMAIN)) {
