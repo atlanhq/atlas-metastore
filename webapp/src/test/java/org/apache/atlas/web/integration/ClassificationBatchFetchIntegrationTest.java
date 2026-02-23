@@ -209,7 +209,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     // =================== Test 2: Search with names-only returns classificationNames ===================
 
     @Test
-    @Order(5)
+    @Order(4)
     void testSearchNamesOnlyReturnsClassificationNames() throws Exception {
         Assumptions.assumeTrue(entityGuids.size() == 4, "Entities not created");
 

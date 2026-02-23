@@ -13,6 +13,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.atlas.ApplicationProperties;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.RequestContext;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.Tag;
@@ -391,7 +392,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             return names;
         } catch (Exception e) {
             LOG.error("Error fetching classification names for vertexId={}", vertexId, e);
-            throw new AtlasBaseException("Error fetching classification names", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
@@ -442,7 +443,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
             return result;
         } catch (Exception e) {
             LOG.error("Error in batch classification fetch", e);
-            throw new AtlasBaseException("Error fetching classifications in batch", e);
+            throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         } finally {
             RequestContext.get().endMetricRecord(recorder);
         }
