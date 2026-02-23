@@ -2199,7 +2199,9 @@ public class EntityGraphRetriever {
         if (!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()) {
             return tagDAO.getClassificationNamesForVertex(entityVertex.getIdForDisplay(), null);
         } else {
-            return getClassificationNamesFromVertex(entityVertex);
+            List<String> names = getClassificationNamesFromVertex(entityVertex);
+            names.addAll(getPropagatedClassificationNamesFromVertex(entityVertex));
+            return names;
         }
     }
 

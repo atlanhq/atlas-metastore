@@ -379,7 +379,7 @@ public class TagDAOCassandraImpl implements TagDAO, AutoCloseable {
         try {
             int bucket = calculateBucket(vertexId);
             BoundStatement bound = findTagNamesForAssetStmt.bind(bucket, vertexId);
-            ResultSet rs = cassSession.execute(bound);
+            ResultSet rs = executeWithRetry(bound);
 
             List<String> names = new ArrayList<>();
             for (Row row : rs) {
