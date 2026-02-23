@@ -87,6 +87,16 @@ public class GlossaryPreProcessor implements PreProcessor {
         if (StringUtils.isEmpty(glossaryName) || isNameInvalid(glossaryName)) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_DISPLAY_NAME);
         }
+
+        if (RequestContext.get().isImportInProgress()) {
+            // During import/async-ingestion, skip ES-dependent operations and existence checks
+            if (StringUtils.isEmpty((String) entity.getAttribute(QUALIFIED_NAME))) {
+                entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
+            }
+            RequestContext.get().endMetricRecord(metricRecorder);
+            return;
+        }
+
         String lexicographicalSortOrder = (String) entity.getAttribute(LEXICOGRAPHICAL_SORT_ORDER);
 
 
