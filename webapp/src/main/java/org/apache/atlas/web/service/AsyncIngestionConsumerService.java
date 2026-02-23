@@ -594,8 +594,17 @@ public class AsyncIngestionConsumerService {
             throw new AtlasBaseException("Failed to deserialize AtlasEntitiesWithExtInfo from payload");
         }
         normalizeRelationshipAttributes(entities);
+
+        if (entities.getEntities() != null) {
+            LOG.info("AsyncIngestion: BULK_CREATE_OR_UPDATE entityCount={}, types={}, guids={}",
+                    entities.getEntities().size(),
+                    entities.getEntities().stream().map(AtlasEntity::getTypeName).collect(Collectors.toList()),
+                    entities.getEntities().stream().map(AtlasEntity::getGuid).collect(Collectors.toList()));
+        }
+
         BulkRequestContext ctx = BulkRequestContext.fromOperationMetadata(operationMetadata);
         entityMutationService.createOrUpdate(new AtlasEntityStream(entities), ctx);
+        LOG.info("AsyncIngestion: BULK_CREATE_OR_UPDATE completed successfully");
     }
 
     /**
@@ -708,16 +717,32 @@ public class AsyncIngestionConsumerService {
         String guid = payload.get("guid").asText();
         List<AtlasClassification> classifications = MAPPER.convertValue(
                 payload.get("classifications"), new TypeReference<List<AtlasClassification>>() {});
-        LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS guid={}, classificationCount={}, types={}, entityGuids={}",
-                guid, classifications.size(),
-                classifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.toList()),
-                classifications.stream().map(AtlasClassification::getEntityGuid).collect(Collectors.toList()));
-        for (AtlasClassification c : classifications) {
-            LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS detail: typeName={}, entityGuid={}, attributes={}",
-                    c.getTypeName(), c.getEntityGuid(), c.getAttributes());
+
+        // Diagnostic: dump existing classifications BEFORE update
+        try {
+            List<AtlasClassification> existingCls = entitiesStore.getClassifications(guid);
+            LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS BEFORE guid={}, existingCount={}, existingTypes={}",
+                    guid, existingCls.size(),
+                    existingCls.stream().map(c -> c.getTypeName() + ":" + c.getAttributes()).collect(Collectors.toList()));
+        } catch (Exception e) {
+            LOG.warn("AsyncIngestion: UPDATE_CLASSIFICATIONS could not fetch existing classifications for guid={}: {}", guid, e.getMessage());
         }
+
+        LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS incoming guid={}, classificationCount={}, types={}",
+                guid, classifications.size(),
+                classifications.stream().map(c -> c.getTypeName() + ":" + c.getAttributes()).collect(Collectors.toList()));
+
         entityMutationService.updateClassifications(guid, classifications);
-        LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS completed successfully for guid={}", guid);
+
+        // Diagnostic: dump classifications AFTER update
+        try {
+            List<AtlasClassification> afterCls = entitiesStore.getClassifications(guid);
+            LOG.info("AsyncIngestion: UPDATE_CLASSIFICATIONS AFTER guid={}, count={}, types={}",
+                    guid, afterCls.size(),
+                    afterCls.stream().map(c -> c.getTypeName() + ":" + c.getAttributes()).collect(Collectors.toList()));
+        } catch (Exception e) {
+            LOG.warn("AsyncIngestion: UPDATE_CLASSIFICATIONS could not fetch post-update classifications for guid={}: {}", guid, e.getMessage());
+        }
     }
 
     /**
