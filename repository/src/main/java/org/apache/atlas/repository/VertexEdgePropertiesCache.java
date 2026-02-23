@@ -111,16 +111,49 @@ public class VertexEdgePropertiesCache {
     }
 
     /**
-     * Coerce a Number value to the requested numeric type.
-     * JSON round-trip through Cassandra can turn Long into Integer (when the value fits in 32 bits),
-     * so we need to convert between numeric types rather than failing with a type mismatch.
+     * Coerce a value to the requested numeric type.
+     * JSON round-trip through Cassandra can cause type mismatches:
+     * - Long ↔ Integer (when the value fits in 32 bits)
+     * - Float/Double stored as String (e.g., "0.5") after JSON text column round-trip
+     * - BigDecimal from Jackson's USE_BIG_DECIMAL_FOR_FLOATS deserialization
+     * - Boolean where Integer 0/1 is expected
      */
     @SuppressWarnings("unchecked")
     private <Tp> Tp coerceNumeric(Object value, Class<Tp> clazz) {
+        // Handle String values that represent numbers (from JSON text column round-trip)
+        if (value instanceof String) {
+            String str = (String) value;
+            if (str.isEmpty()) {
+                return null;
+            }
+            try {
+                // Parse as Double first (handles both integer and decimal strings)
+                Number num = Double.valueOf(str);
+                return coerceNumber(num, clazz);
+            } catch (NumberFormatException e) {
+                // Handle boolean strings for numeric types
+                if ("true".equalsIgnoreCase(str)) {
+                    return coerceNumber(1, clazz);
+                } else if ("false".equalsIgnoreCase(str)) {
+                    return coerceNumber(0, clazz);
+                }
+                return null;
+            }
+        }
+
+        // Handle Boolean where a numeric type is expected
+        if (value instanceof Boolean) {
+            return coerceNumber(((Boolean) value) ? 1 : 0, clazz);
+        }
+
         if (!(value instanceof Number)) {
             return null;
         }
-        Number num = (Number) value;
+        return coerceNumber((Number) value, clazz);
+    }
+
+    @SuppressWarnings("unchecked")
+    private <Tp> Tp coerceNumber(Number num, Class<Tp> clazz) {
         if (clazz == Long.class || clazz == long.class) {
             return (Tp) Long.valueOf(num.longValue());
         } else if (clazz == Integer.class || clazz == int.class) {
