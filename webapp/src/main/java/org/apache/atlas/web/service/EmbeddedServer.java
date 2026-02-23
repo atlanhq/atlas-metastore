@@ -207,22 +207,22 @@ public class EmbeddedServer {
                     resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
                 }
             });
-            fastLaneContext.addServlet(healthHolder, "/admin/health");
+            fastLaneContext.addServlet(healthHolder, "/api/atlas/admin/health");
 
             // V2 API Servlet reroute ---
             org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
                 new com.sun.jersey.spi.container.servlet.ServletContainer()
             );
-            // v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-            //                         "com.sun.jersey.api.core.ClassNamesResourceConfig");
-            // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-            //                         "org.apache.atlas.web.resources.AdminResource");  //EntityResouceV2 not needed at this stage
+            v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                                    "com.sun.jersey.api.core.ClassNamesResourceConfig");
+            v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
+                                    "org.apache.atlas.web.resources.EntityResouceV2");  //EntityResouceV2 not needed at this stage
             
             // SetInitorder to Load on first request)
             // This prevents the "ErrorMessagesException" or other stopping conditions from stopping server.start()
             v2Holder.setInitOrder(-1); 
 
-            fastLaneContext.addServlet(v2Holder, "/v2/*");  
+            fastLaneContext.addServlet(v2Holder, "/api/atlas/v2/*");  
 
 
             //Routing 
