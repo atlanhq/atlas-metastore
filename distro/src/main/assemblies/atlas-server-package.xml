@@ -136,5 +136,10 @@
             <outputDirectory>server/webapp</outputDirectory>
             <destName>atlas.war</destName>
         </file>
+        <file>
+            <source>../graphdb/migrator/target/atlas-graphdb-migrator-${project.version}.jar</source>
+            <outputDirectory>tools</outputDirectory>
+            <destName>atlas-graphdb-migrator.jar</destName>
+        </file>
     </files>
 </assembly>
