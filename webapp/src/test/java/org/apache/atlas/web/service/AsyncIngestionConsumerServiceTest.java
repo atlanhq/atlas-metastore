@@ -65,7 +65,12 @@ class AsyncIngestionConsumerServiceTest {
     private AsyncIngestionConsumerService consumerService;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
+        // Mock Redis lock acquisition for typedef operations
+        java.util.concurrent.locks.Lock mockLock = mock(java.util.concurrent.locks.Lock.class);
+        lenient().when(redisService.acquireDistributedLockV2(anyString())).thenReturn(mockLock);
+        lenient().when(redisService.getValue(anyString(), anyString())).thenReturn("1");
+
         consumerService = new AsyncIngestionConsumerService(entityMutationService, entitiesStore, relationshipStore, typeDefStore, typeRegistry, redisService);
         ReflectionTestUtils.setField(consumerService, "topic", "ATLAS_ASYNC_ENTITIES");
         ReflectionTestUtils.setField(consumerService, "consumerGroupId", "test_group");
