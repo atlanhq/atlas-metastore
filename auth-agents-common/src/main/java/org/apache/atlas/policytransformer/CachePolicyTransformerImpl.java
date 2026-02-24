@@ -720,6 +720,7 @@ public class CachePolicyTransformerImpl {
 
             indexSearchParams.setDsl(dsl);
             indexSearchParams.setAttributes(attributes);
+            indexSearchParams.setIncludeSourceInResults(true);
 
             int from = 0;
             int size = 100;
@@ -774,6 +775,7 @@ public class CachePolicyTransformerImpl {
 
         indexSearchParams.setDsl(dsl);
         indexSearchParams.setAttributes(attributes);
+        indexSearchParams.setIncludeSourceInResults(true);
 
         AtlasSearchResult searchResult = discoveryService.directIndexSearch(indexSearchParams);
 

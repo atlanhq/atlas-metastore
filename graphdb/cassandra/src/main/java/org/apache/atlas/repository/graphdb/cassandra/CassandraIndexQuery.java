@@ -342,7 +342,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
             if (searchParams.isCallAsync() || AtlasConfiguration.ENABLE_ASYNC_INDEXSEARCH.getBoolean()) {
                 return performAsyncDirectIndexQuery(searchParams);
             } else {
-                String responseString = performDirectIndexQuery(searchParams.getQuery(), false);
+                String responseString = performDirectIndexQuery(searchParams.getQuery(), searchParams.isIncludeSourceInResults());
                 return getResultFromResponse(responseString);
             }
         } catch (IOException e) {
@@ -605,7 +605,9 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
     private Future<AsyncQueryResult> submitAsyncSearch(SearchParams searchParams, String keepAliveTime) {
         CompletableFuture<AsyncQueryResult> future = new CompletableFuture<>();
         HttpEntity entity = new NStringEntity(searchParams.getQuery(), ContentType.APPLICATION_JSON);
-        String endPoint = index + "/_async_search?_source=false";
+        String endPoint = searchParams.isIncludeSourceInResults()
+                ? index + "/_async_search"
+                : index + "/_async_search?_source=false";
 
         Request request = new Request("POST", endPoint);
         request.setEntity(entity);
@@ -770,8 +772,16 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
                 v = graph.getVertex(docId);
             }
             if (v == null) {
-                LOG.warn("ResultImpl.getVertex: vertex not found. ES docId='{}', decodedVertexId='{}', index='{}'",
-                        docId, vertexId, index);
+                // Vertex not found in Cassandra — try constructing from ES _source data.
+                Map<String, Object> source = hit.getSourceAsMap();
+                if (source != null && !source.isEmpty()) {
+                    v = new CassandraVertex(vertexId, new LinkedHashMap<>(source), graph);
+                    LOG.info("ResultImpl.getVertex: constructed vertex from ES _source. ES docId='{}', vertexId='{}'",
+                            docId, vertexId);
+                } else {
+                    LOG.warn("ResultImpl.getVertex: vertex not found and no _source available. ES docId='{}', decodedVertexId='{}', index='{}'",
+                            docId, vertexId, index);
+                }
             } else if (LOG.isDebugEnabled()) {
                 LOG.debug("ResultImpl.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());
             }
@@ -822,6 +832,7 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         }
 
         @Override
+        @SuppressWarnings("unchecked")
         public AtlasVertex<CassandraVertex, CassandraEdge> getVertex() {
             String docId = String.valueOf(hit.get("_id"));
             String vertexId = decodeDocId(docId);
@@ -831,8 +842,18 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
                 v = graph.getVertex(docId);
             }
             if (v == null) {
-                LOG.warn("ResultImplDirect.getVertex: vertex not found. ES docId='{}', decodedVertexId='{}', index='{}'",
-                        docId, vertexId, index);
+                // Vertex not found in Cassandra — try constructing from ES _source data.
+                // This handles JanusGraph-era ES documents when sharing ES between backends:
+                // their vertex IDs reference JanusGraph storage, not Cassandra.
+                Map<String, Object> source = (Map<String, Object>) hit.get("_source");
+                if (source != null && !source.isEmpty()) {
+                    v = new CassandraVertex(vertexId, new LinkedHashMap<>(source), graph);
+                    LOG.info("ResultImplDirect.getVertex: constructed vertex from ES _source. ES docId='{}', vertexId='{}'",
+                            docId, vertexId);
+                } else {
+                    LOG.warn("ResultImplDirect.getVertex: vertex not found and no _source available. ES docId='{}', decodedVertexId='{}', index='{}'",
+                            docId, vertexId, index);
+                }
             } else if (LOG.isDebugEnabled()) {
                 LOG.debug("ResultImplDirect.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());
             }
