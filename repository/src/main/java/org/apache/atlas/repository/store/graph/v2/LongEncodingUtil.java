@@ -83,15 +83,16 @@ public final class LongEncodingUtil {
      *
      * 2. Cassandra backend (new tenants): vertex IDs are UUIDs
      *    (e.g., "550e8400-e29b-41d4-a716-446655440000"). The ES doc ID is the UUID
-     *    with hyphens stripped (e.g., "550e8400e29b41d4a716446655440000").
+     *    returned as-is, matching the _id that CassandraGraph.appendESIndexAction()
+     *    writes to Elasticsearch during commit.
      */
     public static String vertexIdToDocId(String vertexId) {
         try {
             return encode(Long.parseLong(vertexId));
         } catch (NumberFormatException e) {
             // Non-numeric vertex ID (e.g., UUID from Cassandra graph backend)
-            // Strip hyphens so the ES doc ID is a clean alphanumeric string
-            return vertexId.replace("-", "");
+            // Return as-is to match the _id used by CassandraGraph's ES sync
+            return vertexId;
         }
     }
 }
