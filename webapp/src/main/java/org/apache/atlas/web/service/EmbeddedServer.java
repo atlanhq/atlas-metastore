@@ -350,6 +350,13 @@ public class EmbeddedServer {
         // Setup the Fast-Lane Context immediately
         final org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
             new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
+        fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
+
+        //correct cast
+        if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
+            ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
+        }
+
         fastLaneContext.setContextPath("/api/atlas/v2");
         fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
         
@@ -369,9 +376,8 @@ public class EmbeddedServer {
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
         // Use the Spring-specific servlet implementation
-        org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
-            new com.sun.jersey.spi.spring.container.servlet.SpringServlet()
-        );
+        org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( );
+        v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
         v2Holder.setInitOrder(-1);
         //   v2Holder.setStartWithServer(false);
         // org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
