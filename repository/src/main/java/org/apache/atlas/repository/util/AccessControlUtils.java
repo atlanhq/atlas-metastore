@@ -474,7 +474,7 @@ public final class AccessControlUtils {
         mustClauseList.add(mapOf("term", mapOf("__typeName.keyword", POLICY_ENTITY_TYPE)));
         mustClauseList.add(mapOf("term", mapOf("__state", "ACTIVE")));
         mustClauseList.add(mapOf("term", mapOf("name.keyword", name)));
-        mustClauseList.add(mapOf("prefix", mapOf("__qualifiedName", parentQualifiedName + "/")));
+        mustClauseList.add(mapOf("prefix", mapOf("qualifiedName", parentQualifiedName + "/")));
 
         dsl.put("query", mapOf("bool", mapOf("must", mustClauseList)));
 
