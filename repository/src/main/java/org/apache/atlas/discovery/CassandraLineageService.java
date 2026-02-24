@@ -56,7 +56,7 @@ public class CassandraLineageService {
     private static final String PROCESS_INPUTS_EDGE  = "__Process.inputs";
     private static final String PROCESS_OUTPUTS_EDGE = "__Process.outputs";
     private static final String PROCESS_SUPER_TYPE   = "Process";
-    private static final String DATA_SET_SUPER_TYPE  = "DataSet";
+    private static final String DATA_SET_SUPER_TYPE  = "Catalog";  // Matches Constants.DATA_SET_SUPER_TYPE — Catalog replaced deprecated DataSet
     private static final String CONNECTION_ENTITY_TYPE         = "Connection";
     private static final String CONNECTION_PROCESS_ENTITY_TYPE = "ConnectionProcess";
     private static final String DATA_PRODUCT_ENTITY_TYPE       = "DataProduct";
@@ -1182,7 +1182,7 @@ public class CassandraLineageService {
             return !DATA_PRODUCT_ENTITY_TYPE.equals(entityType.getTypeName());
         }
 
-        // Dataset-process lineage: DataSet, Connection, DataProduct are NOT connectors
+        // Dataset-process lineage: Catalog, Connection, DataProduct are NOT connectors
         if (allTypes.contains(DATA_SET_SUPER_TYPE) || allTypes.contains(CONNECTION_ENTITY_TYPE)
                 || DATA_PRODUCT_ENTITY_TYPE.equals(entityType.getTypeName())) {
             return false;
