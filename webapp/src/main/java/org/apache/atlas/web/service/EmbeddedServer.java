@@ -344,11 +344,11 @@ public class EmbeddedServer {
     // }
 
 
-    private void syncFastLane(WebAppContext main, ServletContextHandler fastLaneContext, ServletHolder v2Holder) {
+    private void syncFastLane(org.eclipse.jetty.webapp.WebAppContext mainAppContext, ServletContextHandler fastLaneContext, , ServletHolder v2Holder) {
         try {
 
             LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
-            if (fastLaneContext.getServletContext().getAttribute(WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE) != null) {
+            if (fastLaneContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE) != null) {
                 LOG.info("Fast lane context started already, returning now...");
                 return; 
             }
