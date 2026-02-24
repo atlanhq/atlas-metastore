@@ -102,6 +102,19 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final String ENTITY_AUDITS_INDEX = "entity_audits";
     private static final int DLQ_POLL_TIMEOUT_SECONDS = 5;
 
+    /**
+     * ES error types that are non-retriable (mapping/parsing). Sending these to DLQ would create poison pills.
+     * Aligned with AtlanElasticSearchIndex.convert() permanent-error list and DLQReplayService poison-pill handling
+     * (do not enqueue / do not re-queue permanent failures).
+     */
+    private static final Set<String> MAPPING_OR_PERMANENT_ES_ERROR_TYPES = Set.of(
+            "mapper_parsing_exception",
+            "illegal_argument_exception",
+            "parsing_exception",
+            "strict_dynamic_mapping_exception",
+            "version_conflict"
+    );
+
     /*
     *    created   → event creation time
          timestamp → entity modified timestamp
@@ -110,6 +123,29 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
     /** Holder for failed audit events enqueued to async DLQ for retry. */
     private static record EntityAuditDLQEntry(List<EntityAuditEventV2> events, int retryCount) {}
+
+    /**
+     * Returns true if the exception indicates a mapping or other permanent ES error.
+     * Such errors must not be sent to the DLQ (poison pill: replay would fail every time).
+     * Walks the cause chain (same pattern as AtlanElasticSearchIndex and AtlasEntityStoreV2.isPermanentBackendException)
+     * so we detect permanent errors whether on the top-level exception or a wrapped cause.
+     */
+    private static boolean isMappingOrPermanentException(Throwable t) {
+        Throwable current = t;
+        while (current != null) {
+            String msg = current.getMessage();
+            if (msg != null) {
+                String msgLower = msg.toLowerCase();
+                for (String type : MAPPING_OR_PERMANENT_ES_ERROR_TYPES) {
+                    if (msgLower.contains(type)) {
+                        return true;
+                    }
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
 
     private RestClient lowLevelClient;
     private final Configuration configuration;
@@ -143,7 +179,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         } catch (Exception e) {
             // Do not fail the main request; pass failed request into async DLQ for retry (MS-642).
             int eventCount = (events != null) ? events.size() : 0;
-            if (ENTITY_AUDIT_DLQ_ENABLED.getBoolean() && auditDlqQueue != null && eventCount > 0) {
+            boolean isMappingOrPermanent = isMappingOrPermanentException(e);
+            if (isMappingOrPermanent) {
+                LOG.error("Entity audit write to ES failed with mapping/permanent error (will not enqueue to DLQ to avoid poison pill). eventCount={}, error={}",
+                        eventCount, e.getMessage(), e);
+            } else if (ENTITY_AUDIT_DLQ_ENABLED.getBoolean() && auditDlqQueue != null && eventCount > 0) {
                 boolean offered = auditDlqQueue.offer(new EntityAuditDLQEntry(new ArrayList<>(events), 0));
                 if (offered) {
                     LOG.warn("Entity audit write to ES failed; enqueued to async DLQ for retry. eventCount={}, error={}",
@@ -458,7 +498,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 try {
                     putEventsV2Internal(entry.events());
                 } catch (Exception e) {
-                    if (entry.retryCount() < maxRetries) {
+                    if (isMappingOrPermanentException(e)) {
+                        LOG.error("Entity audit DLQ replay failed with mapping/permanent error (dropping, will not re-queue). eventCount={}. error={}",
+                                entry.events().size(), e.getMessage(), e);
+                    } else if (entry.retryCount() < maxRetries) {
                         boolean reOffered = auditDlqQueue.offer(new EntityAuditDLQEntry(entry.events(), entry.retryCount() + 1));
                         if (reOffered) {
                             LOG.warn("Entity audit DLQ replay failed (retry {}/{}); re-queued. error={}",
@@ -498,7 +541,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             try {
                 putEventsV2Internal(entry.events());
             } catch (Exception e) {
-                if (entry.retryCount() < maxRetries) {
+                if (!isMappingOrPermanentException(e) && entry.retryCount() < maxRetries) {
                     auditDlqQueue.offer(new EntityAuditDLQEntry(entry.events(), entry.retryCount() + 1));
                 }
             }
