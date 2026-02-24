@@ -362,7 +362,7 @@ public class EmbeddedServer {
             }
         }), "/admin/health");
 
-        fastLaneContext.setInitParameter("contextConfigLocation", "classpath:applicationContext.xml");
+        fastLaneContext.setInitParameter("contextConfigLocation", "/WEB-INF/applicationContext.xml");
         fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
