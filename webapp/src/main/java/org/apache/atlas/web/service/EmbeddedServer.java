@@ -352,6 +352,7 @@ public class EmbeddedServer {
             new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
         fastLaneContext.setContextPath("/api/atlas/v2");
         fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
+        fastLaneContext.setThrowUnavailableOnStartupException(true);
 
         //  Add Health Check (Always available)
         fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
@@ -434,6 +435,9 @@ public class EmbeddedServer {
                         org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
                         springContext);
 
+                    if (!fastLaneContext.isStarted()) {
+                        fastLaneContext.start();
+                    }
                     LOG.info("V2 Optimization Path Linked and Synchronized.");
                 } catch (Exception e) {
                     LOG.error("Critical error linking V2 optimization path", e);
@@ -443,7 +447,7 @@ public class EmbeddedServer {
 
         // Routing with correct ordered  setup - first fastLaneContext
         org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { fastLaneContext, mainAppContext });
+        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { mainAppContext, fastLaneContext });
 
         server.setHandler(contexts);
         server.start(); // This will start both contexts in the correct order
