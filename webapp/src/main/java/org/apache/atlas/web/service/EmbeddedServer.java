@@ -363,8 +363,8 @@ public class EmbeddedServer {
             }
         }), "/admin/health");
 
-        fastLaneContext.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
-        fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
+        // fastLaneContext.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
+        // fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
         // Use the Spring-specific servlet implementation
