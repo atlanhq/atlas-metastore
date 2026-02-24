@@ -114,14 +114,6 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                 validateDatasetType(entity);
             }
 
-            if (entity.hasAttribute(ELEMENT_COUNT_ATTR) && entity.getAttribute(ELEMENT_COUNT_ATTR) != null) {
-                long elementCount = ((Number) entity.getAttribute(ELEMENT_COUNT_ATTR)).longValue();
-                if (elementCount < 0) {
-                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                            "elementCount must be non-negative");
-                }
-            }
-
             // TODO (V2): Calculate the elementCount based on dataElements linked to this dataset.
             // calculateElementCount(entity.getGuid());
 
@@ -138,11 +130,13 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                     "datasetType is mandatory for Dataset. Valid values: RAW, REFINED, AGGREGATED");
         }
 
-        String datasetType = (String) datasetTypeObj;
-        if (!VALID_DATASET_TYPES.contains(datasetType.toUpperCase())) {
+        String normalizedDatasetType = ((String) datasetTypeObj).toUpperCase();
+        if (!VALID_DATASET_TYPES.contains(normalizedDatasetType)) {
             throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                    "Invalid datasetType: " + datasetType + ". Valid values: RAW, REFINED, AGGREGATED");
+                    "Invalid datasetType: " + datasetTypeObj + ". Valid values: RAW, REFINED, AGGREGATED");
         }
+
+        entity.setAttribute(DATASET_TYPE_ATTR, normalizedDatasetType);
     }
 
     private static String createQualifiedName() {
