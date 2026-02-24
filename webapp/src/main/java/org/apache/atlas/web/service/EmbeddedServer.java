@@ -352,7 +352,7 @@ public class EmbeddedServer {
             new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
         fastLaneContext.setContextPath("/api/atlas/v2");
         fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
-        fastLaneContext.setThrowUnavailableOnStartupException(true);
+        v2Holder.setStartWithServer(false);
 
         //  Add Health Check (Always available)
         fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
@@ -437,6 +437,7 @@ public class EmbeddedServer {
 
                     if (!fastLaneContext.isStarted()) {
                         fastLaneContext.start();
+                        v2Holder.start();
                     }
                     LOG.info("V2 Optimization Path Linked and Synchronized.");
                 } catch (Exception e) {
