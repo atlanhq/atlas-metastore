@@ -36,6 +36,21 @@ hpa:
   memory:
     averageUtilization: 85
 
+vpa:
+  enabled: false
+  updateMode: "Off"
+  # minReplicas is always computed as (atlas.replicaCount - 1), floored at 1.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsAndLimits"
+  minAllowed:
+    cpu: "1000m"
+    memory: "8Gi"
+  maxAllowed:
+    cpu: "4000m"
+    memory: "10Gi"
+
 Namespace: atlas
 sentry_flag: disable
 albTenant: false
