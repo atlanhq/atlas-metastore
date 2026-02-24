@@ -351,6 +351,7 @@ public class EmbeddedServer {
         final org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
             new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
         fastLaneContext.setContextPath("/api/atlas/v2");
+        fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
 
         //  Add Health Check (Always available)
         fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
@@ -362,7 +363,7 @@ public class EmbeddedServer {
             }
         }), "/admin/health");
 
-        fastLaneContext.setInitParameter("contextConfigLocation", "/atlas/WEB-INF/applicationContext.xml");
+        fastLaneContext.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
         fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
