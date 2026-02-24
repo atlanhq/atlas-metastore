@@ -439,8 +439,14 @@ public class EmbeddedServer {
 
                     if (!fastLaneContext.isStarted()) {
                         fastLaneContext.start();
-                        v2Holder.start();
+                        //v2Holder.start();
+                        v2Holder.getServletHandler().initialize();
                     }
+                    else
+                    {
+                        LOG.info("Fast lane context hasn't started");
+                    }
+                    
                     LOG.info("V2 Optimization Path Linked and Synchronized.");
                 } catch (Exception e) {
                     LOG.error("Critical error linking V2 optimization path", e);
