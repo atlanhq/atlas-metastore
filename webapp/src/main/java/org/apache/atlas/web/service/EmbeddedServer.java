@@ -379,15 +379,22 @@ public class EmbeddedServer {
         // Only register what exists in Atlas built JARs
         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             "org.apache.atlas.web.resources.AdminResource;" +
+            "org.apache.atlas.web.rest.EntityREST;" +
+            "org.apache.atlas.web.rest.DiscoveryREST;" +
+            "org.apache.atlas.web.rest.TypesREST;" +
+            "org.apache.atlas.web.rest.GlossaryREST;" +
+            "org.apache.atlas.web.rest.LineageREST;" +
+            "org.apache.atlas.web.rest.RelationshipREST;" +
             // The JSON/Jackson providers (Required for AdminResource to work)
-            "org.apache.atlas.web.util.Servlets;" +
+            // "org.apache.atlas.web.util.Servlets;" +
             "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
             "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
             
             // Exception mappers (Required to handle errors gracefully)
             "org.apache.atlas.web.errors.AtlasBaseExceptionMapper;" +
-            "org.apache.atlas.web.errors.LoggingExceptionMapper;" +
-            
+            "org.apache.atlas.web.errors.AllExceptionMapper;" +
+            "org.apache.atlas.web.errors.NotFoundExceptionMapper;" +
+                    
             "org.apache.atlas.web.filters.AtlasAuthenticationFilter" 
 );
 
