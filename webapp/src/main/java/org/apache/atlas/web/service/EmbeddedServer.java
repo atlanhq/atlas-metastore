@@ -385,6 +385,7 @@ public class EmbeddedServer {
             "org.apache.atlas.web.rest.GlossaryREST;" +
             "org.apache.atlas.web.rest.LineageREST;" +
             "org.apache.atlas.web.rest.RelationshipREST;" +
+            "com.sun.jersey.spi.spring.container.servlet.SpringServlet;" +
             // The JSON/Jackson providers (Required for AdminResource to work)
             // "org.apache.atlas.web.util.Servlets;" +
             "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
