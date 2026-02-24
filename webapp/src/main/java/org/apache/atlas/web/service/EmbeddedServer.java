@@ -344,7 +344,7 @@ public class EmbeddedServer {
     // }
 
 
-    private void syncFastLane(org.eclipse.jetty.webapp.WebAppContext mainAppContext, ServletContextHandler fastLaneContext, , ServletHolder v2Holder) {
+    private void syncFastLane(WebAppContext mainAppContext, ServletContextHandler fastLaneContext, , ServletHolder v2Holder) {
         try {
 
             LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
