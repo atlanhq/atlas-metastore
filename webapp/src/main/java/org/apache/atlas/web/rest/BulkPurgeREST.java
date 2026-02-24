@@ -215,7 +215,7 @@ public class BulkPurgeREST {
             // Authorization check
             AtlasAuthorizationUtils.verifyAccess(
                     new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_PURGE),
-                    "Bulk purge cancel: " + requestId);
+                    "Bulk purge cancel : " + requestId);
 
             boolean cancelled = bulkPurgeService.cancelPurge(requestId);
 
