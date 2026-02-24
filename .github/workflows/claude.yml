@@ -60,7 +60,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "x-api-key: $LITELLM_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
+            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
           echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
           if [ "$HTTP_CODE" -eq 000 ]; then
             echo "::error::AI Gateway unreachable — request timed out after 30s"
@@ -119,7 +119,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "x-api-key: $LITELLM_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
+            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
           echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
           if [ "$HTTP_CODE" -eq 000 ]; then
             echo "::error::AI Gateway unreachable — request timed out after 30s"
@@ -233,7 +233,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "x-api-key: $LITELLM_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
+            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
           echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
           if [ "$HTTP_CODE" -eq 000 ]; then
             echo "::error::AI Gateway unreachable — request timed out after 30s"
@@ -489,7 +489,7 @@ jobs:
             -H "Content-Type: application/json" \
             -H "x-api-key: $LITELLM_API_KEY" \
             -H "anthropic-version: 2023-06-01" \
-            -d '{"model":"claude-sonnet-4-20250514","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
+            -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"ping"}]}')
           echo "[$(date -u '+%Y-%m-%dT%H:%M:%SZ')] AI Gateway responded with HTTP $HTTP_CODE"
           if [ "$HTTP_CODE" -eq 000 ]; then
             echo "::error::AI Gateway unreachable — request timed out after 30s"
