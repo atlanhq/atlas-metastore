@@ -367,9 +367,14 @@ public class EmbeddedServer {
         fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
+        // Use the Spring-specific servlet implementation
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
-            new com.sun.jersey.spi.container.servlet.ServletContainer()
+            new com.sun.jersey.spi.spring.container.servlet.SpringServlet()
         );
+        // org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
+        //     new com.sun.jersey.spi.container.servlet.ServletContainer()
+        // );
+
         // v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
         // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
      
@@ -402,7 +407,11 @@ public class EmbeddedServer {
             "org.apache.atlas.web.errors.NotFoundExceptionMapper;" +
                     
             "org.apache.atlas.web.filters.AtlasAuthenticationFilter" 
-);
+        );
+        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.rest;org.apache.atlas.web.resources");
+
+        // This tells Jersey to use Spring as the IoC factory for the classes added above
+        v2Holder.setInitParameter("com.sun.jersey.spi.spring.container.servlet.SpringServlet", "com.sun.jersey.spi.spring.container.servlet.SpringServlet");
 
         // Add /v2 calls to the context now, Jetty will handle the start sequence
         fastLaneContext.addServlet(v2Holder, "/*");
