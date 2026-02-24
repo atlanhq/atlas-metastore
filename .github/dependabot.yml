@@ -98,3 +98,4 @@ updates:
     allow:
       #  Allow direct and indirect  updates for all packages
       - dependency-type: "all"
+
