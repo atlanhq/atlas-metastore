@@ -170,6 +170,14 @@ public abstract class CassandraElement implements AtlasElement {
             return new ArrayList<>((List<V>) value);
         }
 
+        // addProperty() stores multi-valued attributes as LinkedHashSet.
+        // Before Cassandra round-trip (e.g. mutation response), the value
+        // is still a Set, not a List. Handle any Collection type to avoid
+        // wrapping the entire Set as a single element (double-nesting).
+        if (value instanceof Collection) {
+            return new ArrayList<>((Collection<V>) value);
+        }
+
         List<V> result = new ArrayList<>();
         result.add((V) value);
         return result;
