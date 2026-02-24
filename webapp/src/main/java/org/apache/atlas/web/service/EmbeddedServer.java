@@ -352,7 +352,7 @@ public class EmbeddedServer {
                 LOG.info("Fast lane context started already, returning now...");
                 return; 
             }
-            
+            LOG.info("No root web app context. Setting up sync");
             // Sync ClassLoaders
             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
@@ -476,9 +476,21 @@ public class EmbeddedServer {
         contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { mainAppContext, fastLaneContext });
 
         server.setHandler(contexts);
-        server.start(); // This will start both contexts in the correct order
+        // This will start both contexts in the correct order
+        try {
+            server.start(); 
+            LOG.info("Jetty Server start signal sent. Proceeding to manual sync...");
+        } catch (Exception e) {
+            LOG.error("Fatal: Jetty failed to start. Manual sync aborted.", e);
+            throw e;
+        }
         LOG.info("Server started. Triggering V2 Fast-Lane slim stack synchronization manually not waiting for lifeCycleStarted...");
-        syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+       try {
+            LOG.info("Manual fast lane Sync Trigger: Starting bridge between Main and V2...");
+            syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+        } catch (Exception e) {
+            LOG.error("Manual fast lane Sync failed: The bridge could not be established.", e);
+        }
         server.join();
 
     } catch(Exception e) {
