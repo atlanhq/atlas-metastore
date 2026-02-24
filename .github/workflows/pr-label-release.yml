@@ -277,16 +277,11 @@ jobs:
           $HOME/.temporalio/bin/temporal --version
 
       - name: Connect to VPN
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y openconnect
-          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
-            --protocol=gp \
-            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
-            --passwd-on-stdin \
-            --background \
-            "vpnsec.atlan.app"
-          sleep 5
+        uses: ./.github/actions/globalprotect-connect-action
+        with:
+          portal-url: vpn2.atlan.app
+          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
+          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
 
           # Verify VPN is running
           if ! pgrep -x openconnect > /dev/null; then
