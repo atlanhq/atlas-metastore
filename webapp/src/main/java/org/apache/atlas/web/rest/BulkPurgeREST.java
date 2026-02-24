@@ -127,7 +127,7 @@ public class BulkPurgeREST {
             }
 
             if (prefix.length() < 10) {
-                throw new AtlasBaseException("Query parameter 'prefix' must be at least 10 characters for safety");
+                throw new AtlasBaseException("Query parameter 'prefix' must be at least 10 characters for safety ");
             }
 
             // Authorization check
