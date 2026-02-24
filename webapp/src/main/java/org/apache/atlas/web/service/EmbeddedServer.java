@@ -36,6 +36,7 @@ import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
+import org.springframework.web.context.ContextLoaderListener;
 import com.sun.jersey.spi.container.servlet.ServletContainer;
 import com.sun.jersey.spi.spring.container.servlet.SpringServlet;
 import org.eclipse.jetty.util.thread.ExecutorThreadPool;
@@ -361,6 +362,9 @@ public class EmbeddedServer {
             }
         }), "/admin/health");
 
+        fastLaneContext.setInitParameter("contextConfigLocation", "classpath:applicationContext.xml");
+        fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
+
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
             new com.sun.jersey.spi.container.servlet.ServletContainer()
@@ -385,7 +389,7 @@ public class EmbeddedServer {
             "org.apache.atlas.web.rest.GlossaryREST;" +
             "org.apache.atlas.web.rest.LineageREST;" +
             "org.apache.atlas.web.rest.RelationshipREST;" +
-            "com.sun.jersey.spi.spring.container.servlet.SpringServlet;" +
+           // "com.sun.jersey.spi.spring.container.servlet.SpringServlet;" +
             // The JSON/Jackson providers (Required for AdminResource to work)
             // "org.apache.atlas.web.util.Servlets;" +
             "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
