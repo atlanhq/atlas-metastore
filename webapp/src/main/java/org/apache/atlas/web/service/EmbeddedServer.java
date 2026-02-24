@@ -372,7 +372,8 @@ public class EmbeddedServer {
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
             new com.sun.jersey.spi.spring.container.servlet.SpringServlet()
         );
-        v2Holder.setStartWithServer(false);
+        v2Holder.setInitOrder(-1);
+        //   v2Holder.setStartWithServer(false);
         // org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
         //     new com.sun.jersey.spi.container.servlet.ServletContainer()
         // );
