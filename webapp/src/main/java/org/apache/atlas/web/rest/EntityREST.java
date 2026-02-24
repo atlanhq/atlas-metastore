@@ -137,7 +137,7 @@ public class EntityREST {
 
         try {
             if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.getById(" + guid + ", " + minExtInfo + " )");
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, " EntityREST.getById(" + guid + ", " + minExtInfo + " )");
             }
 
             return entitiesStore.getById(guid, minExtInfo, ignoreRelationships);
