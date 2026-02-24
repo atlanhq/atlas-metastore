@@ -357,7 +357,7 @@ public class EmbeddedServer {
             ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
         }
 
-        fastLaneContext.setContextPath("/api/atlas/v2");
+        fastLaneContext.setContextPath("/api/atlas");
         fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
         
 
@@ -423,7 +423,7 @@ public class EmbeddedServer {
         v2Holder.setInitParameter("com.sun.jersey.spi.spring.container.servlet.SpringServlet", "com.sun.jersey.spi.spring.container.servlet.SpringServlet");
 
         // Add /v2 calls to the context now, Jetty will handle the start sequence
-        fastLaneContext.addServlet(v2Holder, "/*");
+        fastLaneContext.addServlet(v2Holder, "/v2/*");
 
         // This Listener is **only** to inject the dependencies once Main App is ready
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
