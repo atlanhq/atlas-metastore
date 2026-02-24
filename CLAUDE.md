@@ -431,9 +431,11 @@ gh pr create --repo atlanhq/atlas-metastore --title "..." --body "..."
 
 
 
+## Internal Documentation
+
+- [Adding ConfigMap Properties to Helm Charts](docs/helm/adding-configmap-properties.md) - Guide for adding new configuration properties to Atlas Helm charts
+
 ## External Resources
-
-
 
 - [Apache Atlas Documentation](https://atlas.apache.org/documentation.html)
 

@@ -192,7 +192,12 @@ public enum AtlasConfiguration {
     // Batch sizes for various delete operations
     DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
     DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
-    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100);
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100),
+
+    // Deterministic ID generation configuration
+    // When enabled, generates deterministic GUIDs and QualifiedNames based on entity attributes
+    // This enables consistent IDs across multiple Atlas instances for shadow/failover scenarios
+    DETERMINISTIC_ID_GENERATION_ENABLED("atlas.deterministic.id.generation.enabled", false);
 
     private static final Configuration APPLICATION_PROPERTIES;
 

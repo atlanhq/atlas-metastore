@@ -132,6 +132,9 @@ atlas:
     async_enable: true
     thread_count: 5
 
+  # Deterministic ID generation for entities
+  deterministicIdGeneration:
+    enabled: false
   # Cassandra Config Store - Dynamic configuration backed by Cassandra
   # Migration Strategy:
   # 1. Set enabled=true, activated=false: Enables Cassandra connectivity and data sync from Redis

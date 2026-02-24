@@ -36,6 +36,7 @@ import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.AtlasRelationshipType;
 import org.apache.atlas.type.AtlasTypeRegistry;
+import org.apache.atlas.util.DeterministicIdUtils;
 import org.apache.atlas.util.FileUtils;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -1030,13 +1031,16 @@ public class GlossaryTermUtils extends GlossaryUtils {
             //extract existing nanoid for term
             qName = term.getQualifiedName().split("@")[0];
         }
-        qName = StringUtils.isEmpty(qName) ? getUUID() : qName;
 
         String anchorGlossaryGuid = term.getAnchor().getGlossaryGuid();
         AtlasGlossary glossary = dataAccess.load(getGlossarySkeleton(anchorGlossaryGuid));
         if (glossary == null) {
             throw new AtlasBaseException("Glossary not found with guid: " + anchorGlossaryGuid);
         }
-        return qName + "@" + glossary.getQualifiedName();
+        String glossaryQN = glossary.getQualifiedName();
+        // Note: parentCategoryQN is null here as category QN is not readily available from AtlasGlossaryTerm
+        qName = StringUtils.isEmpty(qName) ? DeterministicIdUtils.getTermQN(term.getName(), null, glossaryQN) : qName;
+
+        return qName + "@" + glossaryQN;
     }
 }
