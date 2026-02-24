@@ -28,7 +28,7 @@ on:
       - ms-635
       - lg-async-producer
       - ms-428-delete-by-conn
-
+      - delete_by_qn_mas
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
