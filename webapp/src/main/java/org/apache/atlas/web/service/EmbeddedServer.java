@@ -343,6 +343,44 @@ public class EmbeddedServer {
     //     }
     // }
 
+
+    private void syncFastLane(WebAppContext main, ServletContextHandler fastLaneContext, ServletHolder v2Holder) {
+        try {
+
+            LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
+            if (fastLaneContext.getServletContext().getAttribute(WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE) != null) {
+                LOG.info("Fast lane context started already, returning now...");
+                return; 
+            }
+            
+            // Sync ClassLoaders
+            fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
+
+            // Sync Spring Context so @Inject works in EntityResourceV2
+            Object springContext = mainAppContext.getServletContext().getAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+            
+            fastLaneContext.getServletContext().setAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
+                springContext);
+
+            if (!fastLaneContext.isStarted()) {
+                fastLaneContext.start();
+                //v2Holder.start();
+                v2Holder.getServletHandler().initialize();
+                LOG.info("V2 Fast-Lane is now ONLINE.");
+            }
+            else
+            {
+                LOG.info("Fast lane context hasn't started");
+            }
+            
+            LOG.info("V2 Optimization Path Linked and Synchronized.");
+        } catch (Exception e) {
+            LOG.error("Critical error linking V2 optimization path", e);
+        }
+    }
+
     public void start() throws AtlasBaseException {
     try {
         final org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
@@ -429,34 +467,7 @@ public class EmbeddedServer {
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
             @Override
             public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
-                try {
-                    LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
-                    
-                    // Sync ClassLoaders
-                    fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
-
-                    // Sync Spring Context so @Inject works in EntityResourceV2
-                    Object springContext = mainAppContext.getServletContext().getAttribute(
-                        org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-                    
-                    fastLaneContext.getServletContext().setAttribute(
-                        org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
-                        springContext);
-
-                    if (!fastLaneContext.isStarted()) {
-                        fastLaneContext.start();
-                        //v2Holder.start();
-                        v2Holder.getServletHandler().initialize();
-                    }
-                    else
-                    {
-                        LOG.info("Fast lane context hasn't started");
-                    }
-                    
-                    LOG.info("V2 Optimization Path Linked and Synchronized.");
-                } catch (Exception e) {
-                    LOG.error("Critical error linking V2 optimization path", e);
-                } 
+               syncFastLane(mainAppContext, fastLaneContext, v2Holder);
             }
         });
 
@@ -466,6 +477,8 @@ public class EmbeddedServer {
 
         server.setHandler(contexts);
         server.start(); // This will start both contexts in the correct order
+        LOG.info("Server started. Triggering V2 Fast-Lane slim stack synchronization manually not waiting for lifeCycleStarted...");
+        syncFastLane(mainAppContext, fastLaneContext, v2Holder);
         server.join();
 
     } catch(Exception e) {
