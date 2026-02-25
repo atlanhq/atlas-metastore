@@ -435,6 +435,9 @@ public class EmbeddedServer {
             // The JSON/Jackson providers (Required for AdminResource to work)
             "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
             "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
+
+            // Jackson 2 provider for SearchLog classes
+            "com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;" +
             
             // Exception mappers (Required to handle errors gracefully)
             "org.apache.atlas.web.errors.AtlasBaseExceptionMapper;" +
