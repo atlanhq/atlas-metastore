@@ -544,3 +544,6 @@ data:
     ######### Kafka Metadata Consumer #########
     atlas.kafka.metadata.enabled={{ .Values.atlas.kafka.metadata.enabled }}
     atlas.kafka.metadata.topic={{ .Values.atlas.kafka.metadata.topic }}
+
+    ######### OpenLineage Kafka Consumer #########
+    atlas.kafka.openlineage.enabled={{ .Values.atlas.kafka.openlineage.enabled }}
