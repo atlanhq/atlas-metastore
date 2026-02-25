@@ -233,4 +233,9 @@ public class AtlasJanusVertex extends AtlasJanusElement<Vertex> implements Atlas
         }
         return docId;
     }
+    
+    public AtlasJanusGraph getAtlasJanusGraph() {
+        return graph;
+    }
+
 }
