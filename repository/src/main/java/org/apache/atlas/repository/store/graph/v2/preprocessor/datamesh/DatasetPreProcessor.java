@@ -144,7 +144,8 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processDatasetDelete");
 
         try {
-            if (RequestContext.get().getDeleteType() != DeleteType.SOFT) {
+            DeleteType deleteType = RequestContext.get().getDeleteType();
+            if (deleteType.equals(DeleteType.HARD) || deleteType.equals(DeleteType.PURGE)) {
                 String datasetGuid = vertex.getProperty("__guid", String.class);
                 cleanupLinkedAssets(datasetGuid);
             }
