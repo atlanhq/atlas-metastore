@@ -65,6 +65,24 @@ public class EmbeddedServer {
 
     protected String atlasPath;
 
+    private static class LazySpringContext extends org.springframework.web.context.support.GenericWebApplicationContext {
+        private final org.eclipse.jetty.webapp.WebAppContext mainContext;
+
+        public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane, org.eclipse.jetty.webapp.WebAppContext main) {
+            super(fastLane.getServletContext());
+            this.mainContext = main;
+        }
+
+        @Override
+        public Object getBean(String name) throws org.springframework.beans.BeansException {
+            Object root = mainContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+            if (root instanceof org.springframework.web.context.WebApplicationContext) {
+                return ((org.springframework.web.context.WebApplicationContext) root).getBean(name);
+            }
+            return super.getBean(name);
+        }
+    }
+
     public EmbeddedServer(String host, int port, String path) throws IOException {
         int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
         LinkedBlockingQueue<Runnable> queue         = new LinkedBlockingQueue<>(queueSize);
@@ -304,8 +322,8 @@ public class EmbeddedServer {
             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
             // Sync Spring Context so @Inject works in EntityResourceV2
-            Object springContext = mainAppContext.getServletContext().getAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+            // Object springContext = mainAppContext.getServletContext().getAttribute(
+            //     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
             
             fastLaneContext.getServletContext().setAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
@@ -351,9 +369,7 @@ public class EmbeddedServer {
             LOG.warn("Spring Context not ready during Fast-Lane creation. Let's link to FacesConfigWebApplicationContext.");
             fastLaneContext.getServletContext().setAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-                new org.springframework.web.context.support.WebApplicationContextUtils.FacesConfigWebApplicationContext(
-                    mainAppContext.getServletContext()
-                )
+                new LazySpringContext(fastLaneContext, mainAppContext)
             );
         }
         //correct cast
