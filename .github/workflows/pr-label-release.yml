@@ -103,6 +103,8 @@ jobs:
             }
 
             // Check if build workflow has completed successfully for the current HEAD SHA
+            // Important: We must check the actual 'build' job, not just the workflow.
+            // The workflow can succeed even if 'build' was skipped (e.g., only helm files changed).
             const buildWorkflowId = 'maven.yml';
             const headSha = pr.head.sha;
             console.log(`Checking build workflow: ${buildWorkflowId} for SHA: ${headSha}`);
@@ -115,15 +117,33 @@ jobs:
               per_page: 1
             });
 
-            if (workflows.workflow_runs.length > 0) {
-              console.log(`Build workflow run found for current SHA: ${workflows.workflow_runs[0].html_url}`);
+            if (workflows.workflow_runs.length === 0) {
+              console.log(`No completed workflow runs found for SHA ${headSha}`);
+              core.setOutput('should_proceed', 'false');
+              return;
             }
 
-            const hasSuccessfulBuild = workflows.workflow_runs.length > 0 &&
-                                      workflows.workflow_runs[0].conclusion === 'success';
+            const workflowRun = workflows.workflow_runs[0];
+            console.log(`Workflow run found: ${workflowRun.html_url}`);
 
-            if (!hasSuccessfulBuild) {
-              console.log(`Build workflow (${buildWorkflowId}) not completed successfully for SHA ${headSha}`);
+            // Check if the 'build' job specifically succeeded (not skipped)
+            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: workflowRun.id
+            });
+
+            const buildJob = jobs.jobs.find(job => job.name === 'build');
+            if (!buildJob) {
+              console.log('Build job not found in workflow run');
+              core.setOutput('should_proceed', 'false');
+              return;
+            }
+
+            console.log(`Build job status: ${buildJob.status}, conclusion: ${buildJob.conclusion}`);
+
+            if (buildJob.conclusion !== 'success') {
+              console.log(`Build job did not succeed (conclusion: ${buildJob.conclusion}). Docker image may not exist.`);
               core.setOutput('should_proceed', 'false');
               return;
             }
