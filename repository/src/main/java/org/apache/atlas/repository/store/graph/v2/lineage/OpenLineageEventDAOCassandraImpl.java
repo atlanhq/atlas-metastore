@@ -59,7 +59,7 @@ public class OpenLineageEventDAOCassandraImpl implements OpenLineageEventDAO, Au
     private static final int CASSANDRA_PORT = 9042;
     private static final String DEFAULT_HOST = "localhost";
     private static final String DATACENTER = "datacenter1";
-    private static final String CASSANDRA_HOSTNAME_PROPERTY = "atlas.cassandra.hostname";
+    private static final String CASSANDRA_HOSTNAME_PROPERTY = "atlas.graph.storage.hostname";
     private static final String CASSANDRA_REPLICATION_FACTOR_PROPERTY = "atlas.cassandra.replication.factor";
 
     // Retry and timeout configuration
