@@ -405,7 +405,7 @@ public class EmbeddedServer {
             protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
                 throws java.io.IOException {
                 resp.setContentType("application/json");
-                resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
+                resp.getWriter().println("{\"status\":\"FAST_LANE_READY\"}");
             }
         }), "/atlas/admin/health");
 
@@ -431,13 +431,15 @@ public class EmbeddedServer {
             "org.apache.atlas.web.rest.GlossaryREST;" +
             "org.apache.atlas.web.rest.LineageREST;" +
             "org.apache.atlas.web.rest.RelationshipREST;" +
- 
-            // The JSON/Jackson providers (Required for AdminResource to work)
-            "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
-            "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
+
+            "org.apache.atlas.web.util.Servlets;" +
             // Jackson 2 provider for SearchLog classes
             "com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;" +
             
+            // The JSON/Jackson providers (Required for AdminResource to work)
+            "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
+            "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
+        
             // Exception mappers (Required to handle errors gracefully)
             "org.apache.atlas.web.errors.AtlasBaseExceptionMapper;" +
             "org.apache.atlas.web.errors.AllExceptionMapper;" +
