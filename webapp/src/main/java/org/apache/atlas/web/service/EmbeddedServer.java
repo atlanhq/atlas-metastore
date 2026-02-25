@@ -390,10 +390,18 @@ public class EmbeddedServer {
             new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
         fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
-        //correct cast
-        if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
-            ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
-        }
+        Object springContext = mainAppContext.getServletContext().getAttribute(
+            org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+
+        fastLaneContext.getServletContext().setAttribute(
+            org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
+            springContext);
+                //correct cast
+                if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
+                    ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
+                }
+
+
 
         fastLaneContext.setContextPath("/api");
         fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
@@ -413,8 +421,8 @@ public class EmbeddedServer {
         // Use the Spring-specific servlet implementation
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( );
         v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
-        v2Holder.setInitOrder(1);
-        v2Holder.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
+        v2Holder.setInitOrder(-1);
+        //v2Holder.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
         v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                           "com.sun.jersey.api.core.ClassNamesResourceConfig");
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerRequestFilters", 
