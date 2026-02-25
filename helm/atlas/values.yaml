@@ -494,6 +494,8 @@ atlas:
     metadata:
       enabled: true
       topic: ATLAS_EVENTS
+    openlineage:
+      enabled: true
 
 cassandra:
 
