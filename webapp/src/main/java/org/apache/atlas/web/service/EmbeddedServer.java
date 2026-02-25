@@ -73,13 +73,45 @@ public class EmbeddedServer {
             this.mainContext = main;
         }
 
+        //hen Jersey calls this to see if the context is "ready", 
+        // trick it with true for aggresive loadinmg
+        @Override
+        public boolean isActive() {
+            return true; 
+        }
+
+        // @Override
+        // public Object getBean(String name) throws org.springframework.beans.BeansException {
+        //     Object root = mainContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+        //     if (root instanceof org.springframework.web.context.WebApplicationContext) {
+        //         return ((org.springframework.web.context.WebApplicationContext) root).getBean(name);
+        //     }
+        //     return super.getBean(name);
+        // }
+        @Override
+        public <T> T getBean(Class<T> requiredType) throws org.springframework.beans.BeansException {
+            org.springframework.web.context.WebApplicationContext actual = getActualContext();
+            if (actual == null) {
+                // Instead of throwing an exception, we return null or 
+                // let the superclass handle it. This keeps init() alive.
+                LOG.warn("Fast-Lane requested bean {} before Main App was ready.", requiredType.getSimpleName());
+                return super.getBean(requiredType); 
+            }
+            return actual.getBean(requiredType);
+        }
+
         @Override
         public Object getBean(String name) throws org.springframework.beans.BeansException {
-            Object root = mainContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-            if (root instanceof org.springframework.web.context.WebApplicationContext) {
-                return ((org.springframework.web.context.WebApplicationContext) root).getBean(name);
+            org.springframework.web.context.WebApplicationContext actual = getActualContext();
+            if (actual == null) {
+                return super.getBean(name);
             }
-            return super.getBean(name);
+            return actual.getBean(name);
+        }
+
+        private org.springframework.web.context.WebApplicationContext getActualContext() {
+            return org.springframework.web.context.support.WebApplicationContextUtils
+                    .getWebApplicationContext(mainContext.getServletContext());
         }
     }
 
