@@ -90,68 +90,6 @@ public class EmbeddedServer {
     protected WebAppContext getWebAppContext(String path) {
         LOG.info("Registering Atlas V2 API Fast-Lane shallow stack Servlet");
         WebAppContext application = new WebAppContext(path, "/");
-
-        // // Stage 1: Register the Lean Servlet early
-        // application.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
-        //     @Override
-        //     public void lifeCycleStarting(org.eclipse.jetty.util.component.LifeCycle event) {
-        //         try {
-        //             LOG.info("In lifeCycleStarting for shallow stack registration.");
-        //             org.eclipse.jetty.servlet.ServletHolder holder = new org.eclipse.jetty.servlet.ServletHolder();
-        //             holder.setName("atlas-v2-shallowstack");
-        //             holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
-
-        //             // FIX FOR 500: Use ClassNamesResourceConfig instead of PackagesResourceConfig
-        //             holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-        //                                     "com.sun.jersey.api.core.ClassNamesResourceConfig");
-
-        //             // Explicitly list the resources to avoid the bug related to classpath scanner crashing
-        //             holder.setInitParameter("com.sun.jersey.config.property.classnames", 
-        //                 "org.apache.atlas.web.resources.AdminResource;" + 
-        //                 "org.apache.atlas.web.resources.EntityResourceV2;" +
-        //                 "org.apache.atlas.web.providers.AtlasResourceContextBinder");
-
-        //             holder.setInitOrder(1);
-
-        //             // Map the lean servlet to our fast-lane paths
-        //             application.getServletHandler().addServletWithMapping(holder, "/api/atlas/v2/*");
-        //             application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/health");
-        //             application.getServletHandler().addServletWithMapping(holder, "/api/atlas/admin/status");
-
-        //             LOG.info("Shallow stack Servlet registered for /v2 and health endpoints.");
-        //         } catch (Exception e) {
-        //             LOG.error("Failed to register shallow servlet", e);
-        //         }
-        //     }
-
-        //     @Override
-        //     public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
-        //         try {
-        //             LOG.info("Jetty Started. Finalizing filter order for bypass.");
-                    
-        //             org.eclipse.jetty.servlet.FilterMapping securityMapping = new org.eclipse.jetty.servlet.FilterMapping();
-        //             securityMapping.setFilterName("springSecurityFilterChain");
-        //             securityMapping.setPathSpecs(new String[]{"/api/atlas/v2/*", "/api/atlas/admin/health", "/api/atlas/admin/status"});
-        //             securityMapping.setDispatcherTypes(java.util.EnumSet.of(javax.servlet.DispatcherType.REQUEST));
-
-        //             org.eclipse.jetty.servlet.ServletHandler handler = application.getServletHandler();
-        //             org.eclipse.jetty.servlet.FilterMapping[] currentMappings = handler.getFilterMappings();
-
-        //             if (currentMappings != null) {
-        //                 // Prepend the security filter so it is index 0, jumping over AuditFilter (503 source)
-        //                 org.eclipse.jetty.servlet.FilterMapping[] newMappings = new org.eclipse.jetty.servlet.FilterMapping[currentMappings.length + 1];
-        //                 newMappings[0] = securityMapping;
-        //                 System.arraycopy(currentMappings, 0, newMappings, 1, currentMappings.length);
-                        
-        //                 handler.setFilterMappings(newMappings);
-        //                 LOG.info("Security filter successfully prepended to the front of the final chain.");
-        //             }
-        //         } catch (Exception e) {
-        //             LOG.error("Failed to re-order filters", e);
-        //         }
-        //     }
-        // });
-
         application.setInitParameter("org.eclipse.jetty.servlet.Default.dirAllowed", "false");
         return application;
     }
@@ -348,6 +286,15 @@ public class EmbeddedServer {
         try {
 
             LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
+            Object springContext = mainAppContext.getServletContext().getAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+
+            if (springContext == null) {
+                // This is normal at early startup. Don't log it as "Critical".
+                LOG.info("Main App Spring context not yet initialized. Sync need a trigger on next lifecycle event.");
+                return; 
+            }
+
             if (fastLaneContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE) != null) {
                 LOG.info("Fast lane context started already, returning now...");
                 return; 
@@ -401,7 +348,13 @@ public class EmbeddedServer {
         } else {
             // This is the "Critical Error" path - it means Main App isn't ready.
             // We will let syncFastLane handle it later once the listener fires.
-            LOG.warn("Spring Context not ready during Fast-Lane creation. Deferring link to syncFastLane.");
+            LOG.warn("Spring Context not ready during Fast-Lane creation. Let's link to FacesConfigWebApplicationContext.");
+            fastLaneContext.getServletContext().setAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+                new org.springframework.web.context.support.WebApplicationContextUtils.FacesConfigWebApplicationContext(
+                    mainAppContext.getServletContext()
+                )
+            );
         }
         //correct cast
         if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
