@@ -345,11 +345,14 @@ public class EmbeddedServer {
                 return; 
             }
 
-            if (fastLaneContext.getServletContext().getAttribute(org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE) != null) {
+            Object existingAttr = fastLaneContext.getServletContext().getAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+            //if the temporary lazy context is replaced by spring context already return
+            if (existingAttr != null && existingAttr == springContext ) {
                 LOG.info("Fast lane context started already, returning now...");
                 return; 
             }
-            LOG.info("No root web app context. Setting up sync");
+            LOG.info("No root web app context. Replacing temporary proxy with the real Main App Spring Context. Setting up sync");
             // Sync ClassLoaders
             fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
