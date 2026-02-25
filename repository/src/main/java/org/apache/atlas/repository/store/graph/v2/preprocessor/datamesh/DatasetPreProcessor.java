@@ -90,6 +90,11 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
 
             entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
 
+            if (entity.hasAttribute(ELEMENT_COUNT_ATTR) && entity.getAttribute(ELEMENT_COUNT_ATTR) != null) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                        "elementCount cannot be set during Dataset creation. It is auto-calculated based on linked data elements.");
+            }
+
             if (!entity.hasAttribute(ELEMENT_COUNT_ATTR) || entity.getAttribute(ELEMENT_COUNT_ATTR) == null) {
                 entity.setAttribute(ELEMENT_COUNT_ATTR, 0L);
             }
@@ -114,6 +119,11 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                 if (!isBeingRestored) {
                     throw new AtlasBaseException(OPERATION_NOT_SUPPORTED, "Cannot update Dataset that is Archived!");
                 }
+            }
+
+            if (entity.hasAttribute(ELEMENT_COUNT_ATTR) && entity.getAttribute(ELEMENT_COUNT_ATTR) != null) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                        "elementCount cannot be set during Dataset update. It is auto-calculated based on linked data elements.");
             }
 
             if (entity.hasAttribute(DATASET_TYPE_ATTR) && entity.getAttribute(DATASET_TYPE_ATTR) != null) {
