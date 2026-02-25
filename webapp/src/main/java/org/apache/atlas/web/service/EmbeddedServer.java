@@ -421,6 +421,8 @@ public class EmbeddedServer {
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerResponseFilters", 
                                 "com.sun.jersey.api.container.filter.LoggingFilter");
 
+        //Register classloader for resource loalding from main
+        v2Holder.setInitParameter("com.sun.jersey.config.property.classloader", "true");
         // Only register what exists in Atlas built JARs
         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             "org.apache.atlas.web.resources.AdminResource;" +
@@ -466,7 +468,7 @@ public class EmbeddedServer {
 
         // Routing with correct ordered  setup - first fastLaneContext
         org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] { mainAppContext, fastLaneContext });
+        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {fastLaneContext, mainAppContext});
 
         server.setHandler(contexts);
         // This will start both contexts in the correct order
