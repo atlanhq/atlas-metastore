@@ -24,12 +24,14 @@ on:
       - beta
       - master
       - staging
+      - ring-*
       - ms-635
       - lg-async-producer
 
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
+      - '.github/**'
       - 'docs/**'
       - 'local-dev/**'
       - 'README.txt'

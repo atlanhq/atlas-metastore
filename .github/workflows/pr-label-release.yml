@@ -145,16 +145,30 @@ jobs:
           github-token: ${{ secrets.ORG_PAT_GITHUB }}
           script: |
             const prNumber = parseInt('${{ needs.get-pr-number.outputs.pr_number }}');
+            const eventName = context.eventName;
 
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
+            let labels = [];
 
-            const labels = pr.labels.map(label => label.name);
+            if (eventName === 'pull_request') {
+              // For 'labeled' event, only process the newly added label
+              const addedLabel = context.payload.label?.name;
+              if (addedLabel) {
+                console.log(`Labeled event: processing only newly added label: ${addedLabel}`);
+                labels = [addedLabel];
+              }
+            } else {
+              // For 'workflow_run' event, process all cohort labels on the PR
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              labels = pr.labels.map(label => label.name);
+              console.log(`Workflow run event: processing all labels`);
+            }
+
             core.setOutput('labels', JSON.stringify(labels));
-            console.log(`PR labels: ${JSON.stringify(labels)}`);
+            console.log(`Labels to process: ${JSON.stringify(labels)}`);
 
       - name: Parse labels
         id: parse
@@ -263,11 +277,23 @@ jobs:
           $HOME/.temporalio/bin/temporal --version
 
       - name: Connect to VPN
-        uses: ./.github/actions/globalprotect-connect-action
-        with:
-          portal-url: vpn2.atlan.app
-          username: ${{ secrets.GLOBALPROTECT_USERNAME }}
-          password: ${{ secrets.GLOBALPROTECT_PASSWORD }}
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openconnect
+          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+            --protocol=gp \
+            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+            --passwd-on-stdin \
+            --background \
+            "vpnsec.atlan.app"
+          sleep 5
+
+          # Verify VPN is running
+          if ! pgrep -x openconnect > /dev/null; then
+            echo "ERROR: OpenConnect exited unexpectedly"
+            exit 1
+          fi
+          echo "VPN connected successfully"
 
       - name: Trigger Temporal workflow
         id: trigger_temporal
