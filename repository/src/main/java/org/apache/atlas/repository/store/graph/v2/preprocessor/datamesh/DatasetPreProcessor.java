@@ -27,18 +27,23 @@ import org.apache.atlas.model.instance.AtlasStruct;
 import org.apache.atlas.model.instance.EntityMutations;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
-import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.repository.Constants.*;
-import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.VALID_DATASET_TYPES;
+import static org.apache.atlas.repository.store.graph.v2.preprocessor.PreProcessorUtils.*;
+import static org.apache.atlas.repository.util.AtlasEntityUtils.mapOf;
 import static org.apache.atlas.v1.model.instance.Id.EntityState.DELETED;
 
 public class DatasetPreProcessor extends AbstractDomainPreProcessor {
@@ -114,9 +119,49 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                 validateDatasetType(entity);
             }
 
+            entity.setAttribute(QUALIFIED_NAME, vertex.getProperty(QUALIFIED_NAME, String.class));
+
             // TODO (V2): Calculate the elementCount based on dataElements linked to this dataset.
             // calculateElementCount(entity.getGuid());
 
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    @Override
+    public void processDelete(AtlasVertex vertex) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processDatasetDelete");
+
+        try {
+            if (RequestContext.get().getDeleteType() != DeleteType.SOFT) {
+                String datasetGuid = vertex.getProperty("__guid", String.class);
+                cleanupLinkedAssets(datasetGuid);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(metricRecorder);
+        }
+    }
+
+    private void cleanupLinkedAssets(String datasetGuid) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("cleanupDatasetLinkedAssets");
+
+        try {
+            List<Map<String, Object>> mustClauses = new ArrayList<>();
+            mustClauses.add(mapOf("term", mapOf(CATALOG_DATASET_GUID_ATTR, datasetGuid)));
+
+            Map<String, Object> dsl = mapOf("query", mapOf("bool", mapOf("must", mustClauses)));
+
+            List<AtlasVertex> linkedAssets = retrieveVerticesFromIndexSearchPaginated(dsl, null, discovery);
+
+            for (AtlasVertex assetVertex : linkedAssets) {
+                AtlasGraphUtilsV2.setProperty(assetVertex, CATALOG_DATASET_GUID_ATTR, null);
+            }
+
+            if (!linkedAssets.isEmpty()) {
+                LOG.info("cleanupLinkedAssets: cleared catalogDatasetGuid from {} assets for deleted dataset {}",
+                        linkedAssets.size(), datasetGuid);
+            }
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
@@ -144,8 +189,8 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
     }
 
     /**
-     * TODO (V2): Auto-calculate elementCount from dataElements linked to this dataset
-     * Query assets with datasetGUIDs = datasetGuid and return the count
+     * TODO (V2): Auto-calculate elementCount from dataElements linked to this dataset.
+     * Query assets with catalogDatasetGuid = datasetGuid and return the count.
      */
     @SuppressWarnings("unused")
     private int calculateElementCount(String datasetGuid) {
