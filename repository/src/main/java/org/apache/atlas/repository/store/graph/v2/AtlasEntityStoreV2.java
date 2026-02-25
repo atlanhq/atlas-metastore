@@ -2458,7 +2458,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case DATASET_ENTITY_TYPE:
-                preProcessors.add(new DatasetPreProcessor(typeRegistry, entityRetriever, graph));
+                preProcessors.add(new DatasetPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexService));
                 break;
 
             case QUERY_ENTITY_TYPE:
