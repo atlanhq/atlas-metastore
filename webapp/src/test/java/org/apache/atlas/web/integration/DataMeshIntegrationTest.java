@@ -357,6 +357,9 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         entity.setAttribute("description", "Updated dataset description");
         entity.setAttribute("qualifiedName", "should-be-ignored"); // Try to change QN
 
+        // Remove elementCount to avoid validation error - it's auto-calculated
+        entity.removeAttribute("dataMeshDatasetElementCount");
+
         EntityMutationResponse response = atlasClient.updateEntity(new AtlasEntityWithExtInfo(entity));
         assertNotNull(response);
 
@@ -412,6 +415,7 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
                 // Create a fresh dataset
                 AtlasEntity newDataset = new AtlasEntity("Dataset");
                 newDataset.setAttribute("name", "test-dataset-for-linking-" + testId);
+                newDataset.setAttribute("qualifiedName", "temp-qn-for-linking-" + testId);
                 newDataset.setAttribute("dataMeshDatasetType", "RAW");
                 EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(newDataset));
                 datasetGuid = response.getFirstEntityCreated().getGuid();
@@ -431,7 +435,10 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
             assetGuid = response.getFirstEntityCreated().getGuid();
 
             AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(assetGuid);
-            assertEquals(datasetGuid, result.getEntity().getAttribute("catalogDatasetGuid"));
+            // Get the attribute - it may be stored with or without the catalog prefix
+            Object linkedDatasetGuid = result.getEntity().getAttribute("catalogDatasetGuid");
+            assertNotNull(linkedDatasetGuid, "catalogDatasetGuid should not be null");
+            assertEquals(datasetGuid, linkedDatasetGuid, "catalogDatasetGuid should match the dataset GUID");
 
             LOG.info("Linked asset to dataset: assetGuid={}, datasetGuid={}", assetGuid, datasetGuid);
         } catch (AtlasServiceException e) {
