@@ -48,7 +48,13 @@ public class AssetPreProcessor implements PreProcessor {
 
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
-    private static final Set<String> excludedTypesForDataset = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE, DATASET_ENTITY_TYPE));
+    private static final Set<String> excludedTypesForDataset = buildExcludedTypesForDataset();
+
+    private static Set<String> buildExcludedTypesForDataset() {
+        Set<String> types = new HashSet<>(excludedTypes);
+        types.add(DATASET_ENTITY_TYPE);
+        return types;
+    }
 
     public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph, DynamicVertexService dynamicVertexService) {
         this.typeRegistry = typeRegistry;
