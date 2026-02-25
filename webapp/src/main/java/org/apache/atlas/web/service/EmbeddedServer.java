@@ -395,7 +395,7 @@ public class EmbeddedServer {
             ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
         }
 
-        fastLaneContext.setContextPath("/api/atlas");
+        fastLaneContext.setContextPath("/api");
         fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
         
 
@@ -407,29 +407,13 @@ public class EmbeddedServer {
                 resp.setContentType("application/json");
                 resp.getWriter().println("{\"status\":\"PASSIVE_READY\"}");
             }
-        }), "/admin/health");
-
-        // fastLaneContext.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
-        // fastLaneContext.addEventListener(new org.springframework.web.context.ContextLoaderListener());
+        }), "/atlas/admin/health");
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
         // Use the Spring-specific servlet implementation
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( );
         v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
         v2Holder.setInitOrder(-1);
-        //   v2Holder.setStartWithServer(false);
-        // org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder(
-        //     new com.sun.jersey.spi.container.servlet.ServletContainer()
-        // );
-
-        // v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", "com.sun.jersey.api.core.ClassNamesResourceConfig");
-        // v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", "org.apache.atlas.web.resources.EntityResourceV2");
-     
-        // v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.resources;org.apache.atlas.web.rest");
-        // v2Holder.setInitParameter("com.sun.jersey.core.util.scanning.uri.JarZipSchemeScanner", "false");
-        // v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWADL", "true");
-        // v2Holder.setInitParameter("com.sun.jersey.api.json.POJOMappingFeature", "true");
-
         v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                           "com.sun.jersey.api.core.ClassNamesResourceConfig");
 
@@ -442,9 +426,8 @@ public class EmbeddedServer {
             "org.apache.atlas.web.rest.GlossaryREST;" +
             "org.apache.atlas.web.rest.LineageREST;" +
             "org.apache.atlas.web.rest.RelationshipREST;" +
-           // "com.sun.jersey.spi.spring.container.servlet.SpringServlet;" +
+ 
             // The JSON/Jackson providers (Required for AdminResource to work)
-            // "org.apache.atlas.web.util.Servlets;" +
             "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
             "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
             
@@ -455,13 +438,14 @@ public class EmbeddedServer {
                     
             "org.apache.atlas.web.filters.AtlasAuthenticationFilter" 
         );
-        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.rest;org.apache.atlas.web.resources");
+        //v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "org.apache.atlas.web.rest;org.apache.atlas.web.resources");
 
         // This tells Jersey to use Spring as the IoC factory for the classes added above
         v2Holder.setInitParameter("com.sun.jersey.spi.spring.container.servlet.SpringServlet", "com.sun.jersey.spi.spring.container.servlet.SpringServlet");
 
         // Add /v2 calls to the context now, Jetty will handle the start sequence
-        fastLaneContext.addServlet(v2Holder, "/v2/*");
+        fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
+        fastLaneContext.addServlet(v2Holder, "/meta/*");
 
         // This Listener is **only** to inject the dependencies once Main App is ready
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
@@ -485,7 +469,7 @@ public class EmbeddedServer {
             throw e;
         }
         LOG.info("Server started. Triggering V2 Fast-Lane slim stack synchronization manually not waiting for lifeCycleStarted...");
-       try {
+        try {
             LOG.info("Manual fast lane Sync Trigger: Starting bridge between Main and V2...");
             syncFastLane(mainAppContext, fastLaneContext, v2Holder);
         } catch (Exception e) {
