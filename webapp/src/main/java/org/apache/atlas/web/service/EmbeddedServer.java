@@ -393,13 +393,20 @@ public class EmbeddedServer {
         Object springContext = mainAppContext.getServletContext().getAttribute(
             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
 
-        fastLaneContext.getServletContext().setAttribute(
-            org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
-            springContext);
-                //correct cast
-                if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
-                    ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
-                }
+       if (springContext != null) {
+            fastLaneContext.getServletContext().setAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
+                springContext);
+            LOG.info("Spring context ready. Linking to fast lane, slim stack context.");
+        } else {
+            // This is the "Critical Error" path - it means Main App isn't ready.
+            // We will let syncFastLane handle it later once the listener fires.
+            LOG.warn("Spring Context not ready during Fast-Lane creation. Deferring link to syncFastLane.");
+        }
+        //correct cast
+        if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
+            ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
+        }
 
 
 
@@ -422,14 +429,15 @@ public class EmbeddedServer {
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( );
         v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
         v2Holder.setInitOrder(-1);
-        //v2Holder.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
-        v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
-                          "com.sun.jersey.api.core.ClassNamesResourceConfig");
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerRequestFilters", 
                           "com.sun.jersey.api.container.filter.LoggingFilter");
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerResponseFilters", 
                                 "com.sun.jersey.api.container.filter.LoggingFilter");
 
+        //v2Holder.setInitParameter("contextConfigLocation", "file:/opt/apache-atlas/server/webapp/atlas/WEB-INF/applicationContext.xml");
+        v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
+                          "com.sun.jersey.api.core.ClassNamesResourceConfig");
+        
         //Register classloader for resource loalding from main
         v2Holder.setInitParameter("com.sun.jersey.config.property.classloader", "true");
         // Only register what exists in Atlas built JARs
