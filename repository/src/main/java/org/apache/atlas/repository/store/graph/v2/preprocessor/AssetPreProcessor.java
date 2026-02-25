@@ -47,6 +47,7 @@ public class AssetPreProcessor implements PreProcessor {
 
 
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
+    private static final Set<String> excludedTypesForDataset = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_TERM_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_PRODUCT_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE, DATASET_ENTITY_TYPE));
 
     public AssetPreProcessor(AtlasTypeRegistry typeRegistry, EntityGraphRetriever entityRetriever, AtlasGraph graph) {
         this(typeRegistry, entityRetriever, graph, null);
@@ -161,9 +162,16 @@ public class AssetPreProcessor implements PreProcessor {
 
     private void validateLinkedEntity(AtlasEntity entity, String guid,
                                           String expectedEntityType, String label) throws AtlasBaseException {
-        if (excludedTypes.contains(entity.getTypeName())) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                    "This AssetType is not allowed to link with " + label, entity.getTypeName());
+        if(DATASET_ENTITY_TYPE.equals(expectedEntityType)) {
+            if (excludedTypesForDataset.contains(entity.getTypeName())) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                        entity.getTypeName() + " is not allowed to link with " + label, entity.getTypeName());
+            }
+        } else {
+            if (excludedTypes.contains(entity.getTypeName())) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                        entity.getTypeName() + " is not allowed to link with " + label, entity.getTypeName());
+            }
         }
 
         AtlasVertex linkedVertex = entityRetriever.getEntityVertex(guid);

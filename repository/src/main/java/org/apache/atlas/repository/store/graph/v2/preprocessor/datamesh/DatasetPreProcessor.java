@@ -85,7 +85,9 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("processCreateDataset");
 
         try {
-            validateDatasetType(entity);
+            if (entity.hasAttribute(DATASET_TYPE_ATTR)) {
+                validateDatasetType(entity);
+            }
 
             entity.setAttribute(QUALIFIED_NAME, createQualifiedName());
 
@@ -94,9 +96,7 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                         "elementCount cannot be set during Dataset creation. It is auto-calculated based on linked data elements.");
             }
 
-            if (!entity.hasAttribute(ELEMENT_COUNT_ATTR) || entity.getAttribute(ELEMENT_COUNT_ATTR) == null) {
-                entity.setAttribute(ELEMENT_COUNT_ATTR, 0L);
-            }
+            entity.setAttribute(ELEMENT_COUNT_ATTR, 0L);
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
@@ -125,7 +125,7 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                         "elementCount cannot be set during Dataset update. It is auto-calculated based on linked data elements.");
             }
 
-            if (entity.hasAttribute(DATASET_TYPE_ATTR) && entity.getAttribute(DATASET_TYPE_ATTR) != null) {
+            if (entity.hasAttribute(DATASET_TYPE_ATTR)) {
                 validateDatasetType(entity);
             }
 
@@ -180,9 +180,9 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
     private void validateDatasetType(AtlasEntity entity) throws AtlasBaseException {
         Object datasetTypeObj = entity.getAttribute(DATASET_TYPE_ATTR);
 
+        // For extensibility, we allow datasetType to be optional. If not provided, it can be defaulted to null.
         if (datasetTypeObj == null) {
-            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                    "datasetType is mandatory for Dataset. Valid values: RAW, REFINED, AGGREGATED");
+            return ;
         }
 
         String normalizedDatasetType = ((String) datasetTypeObj).toUpperCase();
