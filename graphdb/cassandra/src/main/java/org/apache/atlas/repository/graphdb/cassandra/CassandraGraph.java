@@ -785,9 +785,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             // Index new vertices (only entity vertices that have __typeName)
             int skipped = 0;
+            int synced  = 0;
             for (CassandraVertex v : newVertices) {
                 if (isEntityVertex(v)) {
                     appendESIndexAction(bulkBody, indexName, v);
+                    synced++;
+                    LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
+                            v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
+                            v.getProperties().size());
                 } else {
                     skipped++;
                 }
@@ -797,6 +802,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             for (CassandraVertex v : dirtyVertices) {
                 if (isEntityVertex(v)) {
                     appendESIndexAction(bulkBody, indexName, v);
+                    synced++;
+                    LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
+                            v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
+                            v.getProperties().size());
                 } else {
                     skipped++;
                 }
@@ -825,7 +834,27 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                             newVertices.size(), dirtyVertices.size(), indexName, status);
                     // Check for individual item errors in the bulk response
                     if (respBody != null && respBody.contains("\"errors\":true")) {
-                        LOG.warn("ES bulk sync had item-level errors: {}", respBody.substring(0, Math.min(2000, respBody.length())));
+                        LOG.warn("ES bulk sync had item-level errors. Parsing per-item details...");
+                        try {
+                            @SuppressWarnings("unchecked")
+                            Map<String, Object> bulkResp = AtlasType.fromJson(respBody, Map.class);
+                            @SuppressWarnings("unchecked")
+                            List<Map<String, Object>> items = (List<Map<String, Object>>) bulkResp.get("items");
+                            if (items != null) {
+                                for (Map<String, Object> item : items) {
+                                    @SuppressWarnings("unchecked")
+                                    Map<String, Object> action = (Map<String, Object>) item.values().iterator().next();
+                                    if (action != null && action.containsKey("error")) {
+                                        LOG.error("ES bulk item FAILED: _id='{}', status={}, error={}",
+                                                action.get("_id"), action.get("status"),
+                                                AtlasType.toJson(action.get("error")));
+                                    }
+                                }
+                            }
+                        } catch (Exception parseEx) {
+                            LOG.warn("Could not parse ES bulk response for item errors: {}. Raw (truncated): {}",
+                                    parseEx.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
+                        }
                     }
                 } else {
                     LOG.warn("ES bulk sync returned status {}, response: {}", status, respBody);
@@ -842,7 +871,79 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private void appendESIndexAction(StringBuilder bulkBody, String indexName, CassandraVertex v) {
         bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
                 .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
-        bulkBody.append(AtlasType.toJson(v.getProperties())).append("\n");
+        bulkBody.append(AtlasType.toJson(filterPropertiesForES(v.getProperties()))).append("\n");
+    }
+
+    /**
+     * Filters vertex properties before sending to Elasticsearch.
+     *
+     * Two issues are addressed:
+     * 1. TypeDef metadata properties create thousands of unique ES fields, exhausting the
+     *    mapping.total_fields.limit (5000). These are already stored in Cassandra's
+     *    type_definitions table and not needed for entity search.
+     *    Filtered patterns:
+     *      - __type_* (e.g., __type_category, __type_name, __type_ADF_adfFactoryName)
+     *      - __type.<TypeName> and __type.<TypeName>.<attrName> (attribute metadata)
+     *      - endDef1, endDef2, relationshipCategory, relationshipLabel, tagPropagation
+     *    Kept: __type (bare), __typeName
+     * 2. Properties stored via setJsonProperty() are pre-serialized JSON strings. When
+     *    AtlasType.toJson() serializes the map, these become double-encoded (e.g., an array
+     *    "[\"a\",\"b\"]" becomes a string in ES instead of an array). We detect and parse
+     *    these back to their structured form so ES receives correct types.
+     */
+    private Map<String, Object> filterPropertiesForES(Map<String, Object> props) {
+        Map<String, Object> filtered = new LinkedHashMap<>(props.size());
+
+        for (Map.Entry<String, Object> entry : props.entrySet()) {
+            String key = entry.getKey();
+
+            // Skip typedef attribute metadata — these create ~2500+ fields in ES
+            // __type_ covers: __type_category, __type_name, __type_version, __type_description,
+            //   __type_options, __type_servicetype, __type_<TypeName>_<attrName>
+            // Does NOT skip: __type (bare, length 6) or __typeName (starts with __typeN)
+            if (key.startsWith("__type_")) {
+                continue;
+            }
+
+            // Skip typedef attribute lists/metadata with dot notation
+            // __type.<TypeName> (e.g., __type.PartialField = list of attribute names)
+            // __type.<TypeName>.<attrName> (e.g., __type.PartialField.partialDataType = metadata JSON)
+            if (key.startsWith("__type.")) {
+                continue;
+            }
+
+            // Skip relationship typedef properties (only present on relationship typedef vertices)
+            if (key.equals("endDef1") || key.equals("endDef2") ||
+                key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
+                key.equals("tagPropagation")) {
+                continue;
+            }
+
+            Object value = entry.getValue();
+
+            // Fix double-encoded JSON strings from setJsonProperty().
+            // These are stored as String values containing JSON (e.g., "[\"a\",\"b\"]").
+            // Without this fix, ES would receive them as escaped strings instead of
+            // arrays/objects, causing type mapping conflicts.
+            if (value instanceof String) {
+                String strVal = (String) value;
+                if (strVal.length() > 1) {
+                    char first = strVal.charAt(0);
+                    char last = strVal.charAt(strVal.length() - 1);
+                    if ((first == '[' && last == ']') || (first == '{' && last == '}')) {
+                        try {
+                            value = AtlasType.fromJson(strVal, Object.class);
+                        } catch (Exception e) {
+                            // Not valid JSON — keep as plain string
+                        }
+                    }
+                }
+            }
+
+            filtered.put(key, value);
+        }
+
+        return filtered;
     }
 
     /**
