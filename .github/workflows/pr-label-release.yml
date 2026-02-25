@@ -145,16 +145,30 @@ jobs:
           github-token: ${{ secrets.ORG_PAT_GITHUB }}
           script: |
             const prNumber = parseInt('${{ needs.get-pr-number.outputs.pr_number }}');
+            const eventName = context.eventName;
 
-            const { data: pr } = await github.rest.pulls.get({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: prNumber
-            });
+            let labels = [];
 
-            const labels = pr.labels.map(label => label.name);
+            if (eventName === 'pull_request') {
+              // For 'labeled' event, only process the newly added label
+              const addedLabel = context.payload.label?.name;
+              if (addedLabel) {
+                console.log(`Labeled event: processing only newly added label: ${addedLabel}`);
+                labels = [addedLabel];
+              }
+            } else {
+              // For 'workflow_run' event, process all cohort labels on the PR
+              const { data: pr } = await github.rest.pulls.get({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber
+              });
+              labels = pr.labels.map(label => label.name);
+              console.log(`Workflow run event: processing all labels`);
+            }
+
             core.setOutput('labels', JSON.stringify(labels));
-            console.log(`PR labels: ${JSON.stringify(labels)}`);
+            console.log(`Labels to process: ${JSON.stringify(labels)}`);
 
       - name: Parse labels
         id: parse
@@ -262,6 +276,25 @@ jobs:
           echo "$HOME/.temporalio/bin" >> $GITHUB_PATH
           $HOME/.temporalio/bin/temporal --version
 
+      - name: Connect to VPN
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y openconnect
+          echo "${{ secrets.GLOBALPROTECT_PASSWORD }}" | sudo openconnect \
+            --protocol=gp \
+            --user="${{ secrets.GLOBALPROTECT_USERNAME }}" \
+            --passwd-on-stdin \
+            --background \
+            "vpnsec.atlan.app"
+          sleep 5
+
+          # Verify VPN is running
+          if ! pgrep -x openconnect > /dev/null; then
+            echo "ERROR: OpenConnect exited unexpectedly"
+            exit 1
+          fi
+          echo "VPN connected successfully"
+
       - name: Trigger Temporal workflow
         id: trigger_temporal
         run: |
@@ -313,43 +346,12 @@ jobs:
 
           echo "workflow_id=$WORKFLOW_ID" >> $GITHUB_OUTPUT
 
-      - name: Wait for Temporal workflow to complete
-        run: |
-          WORKFLOW_ID="${{ steps.trigger_temporal.outputs.workflow_id }}"
-          MAX_WAIT=3600  # 60 minutes
-          ELAPSED=0
-          POLL_INTERVAL=30
+      # NOTE: We do NOT wait for Temporal workflow to complete here.
+      # Waiting would be expensive (60-90+ minutes of GitHub Actions billing).
+      # Instead, Temporal handles the full release lifecycle and posts the final
+      # result comment to the PR via AddGitHubPRCommentActivity.
 
-          echo "Polling Temporal workflow: $WORKFLOW_ID"
-
-          while [ $ELAPSED -lt $MAX_WAIT ]; do
-            DESCRIBE=$(temporal workflow describe --tls \
-              --address "temporal-server.atlan.com" \
-              --namespace "default" \
-              --workflow-id "$WORKFLOW_ID" 2>&1)
-
-            STATUS_LINE=$(echo "$DESCRIBE" | grep -E "^\s*Status" | head -1)
-            echo "[$ELAPSED s] $STATUS_LINE"
-
-            if echo "$STATUS_LINE" | grep -qi "Completed"; then
-              echo "Temporal workflow completed successfully"
-              exit 0
-            fi
-
-            if echo "$STATUS_LINE" | grep -qiE "FAILED|TERMINATED|TIMED_OUT|CANCELED"; then
-              echo "Temporal workflow ended with non-success status"
-              echo "$DESCRIBE"
-              exit 1
-            fi
-
-            sleep $POLL_INTERVAL
-            ELAPSED=$((ELAPSED + POLL_INTERVAL))
-          done
-
-          echo "Timed out waiting for Temporal workflow after ${MAX_WAIT}s"
-          exit 1
-
-      - name: Post release status to PR
+      - name: Post release triggered to PR
         if: always()
         uses: actions/github-script@v7
         with:
@@ -363,20 +365,22 @@ jobs:
             const cohortPath = '${{ matrix.cohort.value }}';
             const jobStatus = '${{ job.status }}';
 
-            const statusEmoji = jobStatus === 'success' ? '✅' : '❌';
+            const statusEmoji = jobStatus === 'success' ? '🚀' : '❌';
             const statusText  = jobStatus === 'success'
-              ? 'Release completed successfully'
-              : 'Release failed';
+              ? 'Release triggered - Temporal workflow started'
+              : 'Failed to trigger release';
 
             const body = [
-              `## 🚀 Ring Release Status`,
+              `## ${statusEmoji} Ring Release Triggered`,
               ``,
-              `**Status:** ${statusEmoji} ${statusText}`,
+              `**Status:** ${statusText}`,
               `**Ring:** \`${ring}\`  **Image Tag:** \`${imageTag}\``,
               `**Cohort:** \`${cohortPath}\``,
               `**Tenants:** ${tenants || '_none resolved_'}`,
               ``,
               `**Temporal Workflow:** [${workflowId}](https://temporal.atlan.com/namespaces/default/workflows/${workflowId})`,
+              ``,
+              `> ℹ️ Temporal will post the final release status once complete.`,
               ``,
               `[View GitHub Actions run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})`
             ].join('\n');
