@@ -39,6 +39,7 @@ import org.slf4j.LoggerFactory;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.atlas.AtlasErrorCode.OPERATION_NOT_SUPPORTED;
 import static org.apache.atlas.repository.Constants.*;
@@ -120,9 +121,18 @@ public class DatasetPreProcessor extends AbstractDomainPreProcessor {
                 }
             }
 
+            // Only block if elementCount is being *changed*
             if (entity.hasAttribute(ELEMENT_COUNT_ATTR) && entity.getAttribute(ELEMENT_COUNT_ATTR) != null) {
-                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
-                        "elementCount cannot be set during Dataset update. It is auto-calculated based on linked data elements.");
+                Long storedCount = AtlasGraphUtilsV2.getProperty(vertex, ELEMENT_COUNT_ATTR, Long.class);
+                Long incomingCount = (Long) entity.getAttribute(ELEMENT_COUNT_ATTR);
+
+                if (!Objects.equals(storedCount, incomingCount)) {
+                    throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                            "elementCount cannot be set during Dataset update. It is auto-calculated based on linked data elements.");
+                }
+
+                // Strip system-managed attribute to avoid unnecessary processing
+                entity.getAttributes().remove(ELEMENT_COUNT_ATTR);
             }
 
             if (entity.hasAttribute(DATASET_TYPE_ATTR)) {
