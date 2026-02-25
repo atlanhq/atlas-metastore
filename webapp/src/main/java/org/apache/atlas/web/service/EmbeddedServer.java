@@ -416,11 +416,16 @@ public class EmbeddedServer {
         v2Holder.setInitOrder(-1);
         v2Holder.setInitParameter("com.sun.jersey.config.property.resourceConfigClass", 
                           "com.sun.jersey.api.core.ClassNamesResourceConfig");
+        v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerRequestFilters", 
+                          "com.sun.jersey.api.container.filter.LoggingFilter");
+        v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerResponseFilters", 
+                                "com.sun.jersey.api.container.filter.LoggingFilter");
 
         // Only register what exists in Atlas built JARs
         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             "org.apache.atlas.web.resources.AdminResource;" +
             "org.apache.atlas.web.rest.EntityREST;" +
+            "org.apache.atlas.web.rest.DirectSearchREST"
             "org.apache.atlas.web.rest.DiscoveryREST;" +
             "org.apache.atlas.web.rest.TypesREST;" +
             "org.apache.atlas.web.rest.GlossaryREST;" +
