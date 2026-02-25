@@ -478,7 +478,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 "  \"settings\": {\n" +
                 "    \"number_of_shards\": 1,\n" +
                 "    \"number_of_replicas\": 0,\n" +
-                "    \"index.mapping.total_fields.limit\": 2000\n" +
+                "    \"index.mapping.total_fields.limit\": 10000\n" +
                 "  },\n" +
                 "  \"mappings\": {\n" +
                 "    \"dynamic\": true\n" +
