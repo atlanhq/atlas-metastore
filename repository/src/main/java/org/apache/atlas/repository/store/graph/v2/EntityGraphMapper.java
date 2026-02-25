@@ -405,12 +405,21 @@ public class EntityGraphMapper {
                     setSystemAttributesToEntity(vertex, createdEntity);
                     resp.addEntity(CREATE, constructHeader(createdEntity, vertex, entityType));
 
-                    if (bulkRequestContext.isAppendTags()) {
-                        if (CollectionUtils.isNotEmpty(createdEntity.getAddOrUpdateClassifications())) {
-                            createdEntity.setClassifications(createdEntity.getAddOrUpdateClassifications());
-                            createdEntity.setAddOrUpdateClassifications(null);
+                    // Handle classifications in entity-aware mode:
+                    // If entity has addOrUpdateClassifications, use those (append mode)
+                    // Otherwise use classifications field (replace mode, or append if appendTags query param is set)
+                    if (CollectionUtils.isNotEmpty(createdEntity.getAddOrUpdateClassifications())) {
+                        // Entity explicitly uses append mode via addOrUpdateClassifications
+                        createdEntity.setClassifications(createdEntity.getAddOrUpdateClassifications());
+                        createdEntity.setAddOrUpdateClassifications(null);
+                        
+                        // For new entities, removeClassifications doesn't make sense, so clear it
+                        if (CollectionUtils.isNotEmpty(createdEntity.getRemoveClassifications())) {
+                            createdEntity.setRemoveClassifications(null);
                         }
-
+                    } else if (bulkRequestContext.isAppendTags()) {
+                        // Backward compatibility: if appendTags query param is set but entity doesn't have
+                        // addOrUpdateClassifications, still clear removeClassifications
                         if (CollectionUtils.isNotEmpty(createdEntity.getRemoveClassifications())) {
                             createdEntity.setRemoveClassifications(null);
                         }
