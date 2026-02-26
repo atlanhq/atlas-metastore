@@ -73,6 +73,9 @@ public class EmbeddedServer {
 
         public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane) {
             super(fastLane.getServletContext());
+            setDisplayName("FastLane-Slimstack-Bridge-Context");
+            refresh();
+
         }
 
         public void setDelegate(Object delegate) {
@@ -82,6 +85,7 @@ public class EmbeddedServer {
                 //this.getBeanMethod = delegate.getClass().getMethod("getBean", String.class);
                 this.getBeanByNameMethod = delegate.getClass().getMethod("getBean", String.class);
                 this.getBeanByTypeMethod = delegate.getClass().getMethod("getBean", Class.class);
+                LOG.info("Reflection Bridge - Successfully mapped getBean methods.");
             } catch (Exception e) {
                 LOG.error("Failed to map getBean method via reflection", e);
             }
@@ -164,7 +168,10 @@ public class EmbeddedServer {
         }
 
         @Override
-        public boolean isActive() { return true; }
+        public boolean isActive() { 
+            LOG.info(" LazySpringContext isActive called. Returning true ");
+            return true;
+         }
     }
 
     public EmbeddedServer(String host, int port, String path) throws IOException {
