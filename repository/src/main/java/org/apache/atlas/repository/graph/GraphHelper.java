@@ -1036,7 +1036,7 @@ public final class GraphHelper {
             String[] names = StringUtils.split(delimitedNames, CLASSIFICATION_NAME_DELIMITER);
             for (String name : names) {
                 if (StringUtils.isNotBlank(name)) {
-                    ret.add(name);
+                    ret.add(name.trim());
                 }
             }
         }

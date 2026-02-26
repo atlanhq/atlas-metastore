@@ -2196,7 +2196,7 @@ public class EntityGraphRetriever {
      * to reading denormalized vertex properties.
      */
     public List<String> getClassificationNames(AtlasVertex entityVertex) throws AtlasBaseException {
-        if (!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()) {
+        if (DynamicConfigStore.isTagV2Enabled()) {
             return tagDAO.getClassificationNamesForVertex(entityVertex.getIdForDisplay(), null);
         } else {
             List<String> names = getClassificationNamesFromVertex(entityVertex);
@@ -2206,7 +2206,7 @@ public class EntityGraphRetriever {
     }
 
     public List<AtlasClassification> handleGetAllClassifications(AtlasVertex entityVertex) throws AtlasBaseException {
-        if(!RequestContext.get().isSkipAuthorizationCheck() && DynamicConfigStore.isTagV2Enabled()) {
+        if(DynamicConfigStore.isTagV2Enabled()) {
             return getAllClassifications_V2(entityVertex);
         } else {
             return getAllClassifications_V1(entityVertex);
