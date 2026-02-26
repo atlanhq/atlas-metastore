@@ -219,7 +219,7 @@ public class EmbeddedServer {
             LOG.warn("Spring Context not ready during Fast-Lane creation. Let's link to a LazySpringContext.");
             fastLaneContext.getServletContext().setAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-                new LazySpringContext(fastLaneContext, mainAppContext)
+                new LazySpringContext(fastLaneContext)
             );
         }
         //correct cast
