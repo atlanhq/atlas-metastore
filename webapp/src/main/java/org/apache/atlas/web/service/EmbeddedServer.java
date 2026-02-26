@@ -66,26 +66,33 @@ public class EmbeddedServer {
     protected String atlasPath;
 
     private static class LazySpringContext extends org.springframework.web.context.support.GenericWebApplicationContext {
-        private final org.eclipse.jetty.webapp.WebAppContext mainContext;
-        private org.springframework.web.context.WebApplicationContext delegate;
+        private Object delegate; // Store as Object to avoid ClassCastException
+        private java.lang.reflect.Method getBeanMethod;
 
-        public LazySpringContext(ServletContextHandler fastLane, WebAppContext main) {
+        public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane) {
             super(fastLane.getServletContext());
-            this.mainContext = main;
         }
 
-        public void setDelegate(org.springframework.web.context.WebApplicationContext delegate) {
+        public void setDelegate(Object delegate) {
             this.delegate = delegate;
-        }
-
-        @Override
-        public <T> T getBean(Class<T> requiredType) throws org.springframework.beans.BeansException {
-            return (delegate != null) ? delegate.getBean(requiredType) : super.getBean(requiredType);
+            try {
+                // Find the getBean(String) method on whatever class the delegate is
+                this.getBeanMethod = delegate.getClass().getMethod("getBean", String.class);
+            } catch (Exception e) {
+                LOG.error("Failed to map getBean method via reflection", e);
+            }
         }
 
         @Override
         public Object getBean(String name) throws org.springframework.beans.BeansException {
-            return (delegate != null) ? delegate.getBean(name) : super.getBean(name);
+            if (delegate != null && getBeanMethod != null) {
+                try {
+                    return getBeanMethod.invoke(delegate, name);
+                } catch (Exception e) {
+                    LOG.error("Reflection bridge failed for bean: " + name, e);
+                }
+            }
+            return super.getBean(name);
         }
 
         @Override
@@ -162,7 +169,7 @@ public class EmbeddedServer {
             //if the temporary lazy context is replaced by spring context already return
            if (existingAttr instanceof LazySpringContext) {
                 LOG.info("Filling Fast-Lane bridge with real Spring Context.");
-                ((LazySpringContext) existingAttr).setDelegate((org.springframework.web.context.WebApplicationContext) springContext);
+                ((LazySpringContext) existingAttr).setDelegate( springContext);
                 
                 // FIX: Initialize the servlet even if the context is already started
                 try {
