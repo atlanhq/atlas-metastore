@@ -144,23 +144,7 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         @SuppressWarnings("unchecked")
         List<Object> childList = (List<Object>) children;
         assertFalse(childList.isEmpty(), "Parent should have at least one child domain");
-
-        // Relationship attributes may not be populated in all fetch modes;
-        // verify that the subdomain references the parent instead
-        if (children == null) {
-            // Verify parent-child relationship from child's perspective
-            AtlasEntityWithExtInfo subDomainResult = atlasClient.getEntityByGuid(subDomainGuid, true, false);
-            AtlasEntity subDomain = subDomainResult.getEntity();
-            String parentQN = (String) subDomain.getAttribute("parentDomainQualifiedName");
-            assertEquals(domainQN, parentQN, "Sub-domain should reference parent domain");
-            LOG.info("Verified parent-child relationship via parentDomainQualifiedName");
-        } else {
-            assertTrue(children instanceof List);
-            @SuppressWarnings("unchecked")
-            List<Object> childList = (List<Object>) children;
-            assertFalse(childList.isEmpty(), "Parent should have at least one child domain");
-            LOG.info("Parent domain has {} children", childList.size());
-        }
+        LOG.info("Parent domain has {} children", childList.size());
     }
 
     @Test
