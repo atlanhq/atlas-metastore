@@ -251,7 +251,7 @@ public class EmbeddedServer {
         public boolean isActive() {
             boolean active = super.isActive();
             LOG.info("Diagnostic: isActive() check: {}", active);
-            return active;
+            return true;
         }
 
         @Override
@@ -473,7 +473,8 @@ public class EmbeddedServer {
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
             @Override
             public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
-               syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+               //syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+               LOG.info("Diagnostics: Jetty Server called lifeCycleStarted. Is it too early? Before the springContext is ready?...");
             }
         });
 
@@ -484,7 +485,22 @@ public class EmbeddedServer {
         server.setHandler(contexts);
         // This will start both contexts in the correct order
         try {
+
             server.start(); 
+            Object mainSpringContext = null;
+            int attempts = 0;
+            while (mainSpringContext == null && attempts < 10) {
+                mainSpringContext = mainAppContext.getServletContext().getAttribute(
+                    org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+                if (mainSpringContext == null) {
+                    LOG.info("Waiting for Main App Spring Context to initialize , sleeping for 2s(Attempt {}/10)...", attempts++);
+                    Thread.sleep(2000); 
+                }
+                else
+                {
+                     LOG.info(" Main App Spring Context ready after {} attempts...", attempts++);
+                }
+            }
             LOG.info("Jetty Server start signal sent. Proceeding to manual sync...");
         } catch (Exception e) {
             LOG.error("Fatal: Jetty failed to start. Manual sync aborted.", e);
