@@ -67,7 +67,9 @@ public class EmbeddedServer {
 
     private static class LazySpringContext extends org.springframework.web.context.support.GenericWebApplicationContext {
         private Object delegate; // Store as Object to avoid ClassCastException
-        private java.lang.reflect.Method getBeanMethod;
+        private java.lang.reflect.Method getBeanByNameMethod;
+        private java.lang.reflect.Method getBeanByTypeMethod;
+        private boolean synchronizedDone = false;
 
         public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane) {
             super(fastLane.getServletContext());
@@ -77,17 +79,53 @@ public class EmbeddedServer {
             this.delegate = delegate;
             try {
                 // Find the getBean(String) method on whatever class the delegate is
-                this.getBeanMethod = delegate.getClass().getMethod("getBean", String.class);
+                //this.getBeanMethod = delegate.getClass().getMethod("getBean", String.class);
+                this.getBeanByNameMethod = delegate.getClass().getMethod("getBean", String.class);
+                this.getBeanByTypeMethod = delegate.getClass().getMethod("getBean", Class.class);
             } catch (Exception e) {
                 LOG.error("Failed to map getBean method via reflection", e);
             }
         }
 
+        public synchronized boolean isSynchronized() {
+            return synchronizedDone;
+        }
+
+        public synchronized void markSynchronized() {
+            this.synchronizedDone = true;
+        }
+
+        @Override
+        public <T> T getBean(Class<T> requiredType) throws org.springframework.beans.BeansException {
+            if (delegate != null && getBeanByTypeMethod != null) {
+                try {
+                    // Use reflection to call getBean(Class) on the delegate
+                   // java.lang.reflect.Method m = delegate.getClass().getMethod("getBean", Class.class);
+                    Object bean = getBeanByTypeMethod.invoke(delegate, requiredType);
+                    if (bean != null) {
+                        LOG.info("Reflection Bridge (Type) - Found: '{}', Type: {}, Loader: {}", 
+                            requiredType.getSimpleName(), bean.getClass().getName(), bean.getClass().getClassLoader());
+                    }
+                    return (T) bean;
+                } catch (Exception e) {
+                    LOG.error("Reflection bridge (type) failed for: " + requiredType.getName());
+                }
+            }
+            else
+            {
+                LOG.info("getBean called with type for name {} isn't processed as either delegate {} or getBeanByNameMethod {} is null",
+                 name, 
+                 delegate,
+                 getBeanByTypeMethod );
+            }
+            return super.getBean(requiredType);
+        }
+
         @Override
         public Object getBean(String name) throws org.springframework.beans.BeansException {
-            if (delegate != null && getBeanMethod != null) {
+            if (delegate != null && getBeanByNameMethod != null) {
                 try {
-                    Object bean =  getBeanMethod.invoke(delegate, name);
+                    Object bean =  getBeanByNameMethod.invoke(delegate, name);
                     //diagnostic block
                     Object parentBean = super.getBean(name);
                     if (bean != null) {
@@ -114,6 +152,13 @@ public class EmbeddedServer {
                 } catch (Exception e) {
                     LOG.error("Reflection bridge failed for bean: " + name, e);
                 }
+            }
+            else
+            {
+                LOG.info("getBean called with name {} isn't processed as either delegate {} or getBeanByNameMethod {} is null",
+                 name, 
+                 delegate,
+                 getBeanByNameMethod );
             }
             return super.getBean(name);
         }
@@ -190,14 +235,24 @@ public class EmbeddedServer {
             Object existingAttr = fastLaneContext.getServletContext().getAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
             //if the temporary lazy context is replaced by spring context already return
-           if (existingAttr instanceof LazySpringContext) {
+            if (existingAttr instanceof LazySpringContext) {
                 LOG.info("Filling Fast-Lane bridge with real Spring Context.");
-                ((LazySpringContext) existingAttr).setDelegate( springContext);
-                
+                LazySpringContext bridge = (LazySpringContext) attr;
+
+                // Protection against double-invocation
+                if (bridge.isSynchronized()) {
+                    LOG.info("Fast-Lane already synchronized. Skipping redundant init.");
+                    return;
+                }
+                LOG.info("Plugging real Spring Context  from main into Reflection Bridge...");
+                bridge.setDelegate(springContext);
+
                 // FIX: Initialize the servlet even if the context is already started
                 try {
                     v2Holder.getServletHandler().initialize();
+                    bridge.markSynchronized();
                     LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
+
                 } catch (Exception e) {
                     LOG.error("Failed to initialize V2 Jersey Servlet", e);
                 }
