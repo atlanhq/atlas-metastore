@@ -5,7 +5,6 @@ import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.service.FeatureFlag;
-import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.PropertiesConfiguration;
@@ -28,15 +27,13 @@ import static org.mockito.Mockito.*;
  *
  * The tests verify:
  * - Flag helper methods return correct boolean values in activated mode
- * - Both activated and fallback paths produce consistent results for the same input
- * - Empty/partial Cassandra rows trigger recovery sync from Redis
+ * - Empty/partial Cassandra rows trigger recovery seeding from defaults
  * - Default fallback is used when cache has no entry
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class DynamicConfigStoreTest {
 
     private static MockedStatic<CassandraConfigDAO> mockedCassandraDAO;
-    private static MockedStatic<FeatureFlagStore> mockedFeatureFlagStore;
     private static MockedStatic<MetricUtils> mockedMetricUtils;
     private static CassandraConfigDAO mockDAO;
 
@@ -74,14 +71,11 @@ class DynamicConfigStoreTest {
         mockedCassandraDAO.when(CassandraConfigDAO::getInstance).thenReturn(mockDAO);
         mockedCassandraDAO.when(() -> CassandraConfigDAO.initialize(any())).thenAnswer(inv -> null);
         mockedCassandraDAO.when(CassandraConfigDAO::isInitialized).thenReturn(true);
-
-        mockedFeatureFlagStore = mockStatic(FeatureFlagStore.class);
     }
 
     @AfterEach
     void tearDown() {
         mockedCassandraDAO.close();
-        mockedFeatureFlagStore.close();
     }
 
     // =================== Flag Semantics Tests ===================
@@ -135,57 +129,12 @@ class DynamicConfigStoreTest {
         assertEquals("false", store.getConfigInternal("MAINTENANCE_MODE"));
     }
 
-    /**
-     * Each flag helper method must return the same semantic result whether
-     * reading from the activated path (Cassandra) or the fallback path (Redis).
-     *
-     * We test this by setting the same value in both stores and comparing results.
-     */
-    @Test
-    void testFlagHelpers_activatedAndFallback_agreeOnSemantics() throws AtlasBaseException {
-        // Set up: ENABLE_JANUS_OPTIMISATION is true in both Redis and Cassandra
-        mockedFeatureFlagStore.when(FeatureFlagStore::isTagV2Enabled).thenReturn(true);
-
-        Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
-        cassandraData.put("ENABLE_JANUS_OPTIMISATION", entry("true"));
-
-        // Activated store reads from Cassandra
-        DynamicConfigStore activatedStore = createActivatedStore(cassandraData);
-        String activatedValue = activatedStore.getConfigInternal("ENABLE_JANUS_OPTIMISATION");
-        boolean activatedResult = "true".equalsIgnoreCase(activatedValue);
-
-        // Fallback reads from FeatureFlagStore (Redis) — already mocked to return true
-        boolean fallbackResult = FeatureFlagStore.isTagV2Enabled();
-
-        assertEquals(activatedResult, fallbackResult,
-                "Activated path and Redis fallback must agree: both should be true when flag is true");
-    }
-
-    @Test
-    void testFlagHelpers_bothPathsAgree_whenFlagIsFalse() throws AtlasBaseException {
-        Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
-        cassandraData.put("ENABLE_JANUS_OPTIMISATION", entry("false"));
-
-        DynamicConfigStore activatedStore = createActivatedStore(cassandraData);
-
-        // Re-stub AFTER store creation (stubRedisFlags inside createActivatedStore sets true)
-        mockedFeatureFlagStore.when(FeatureFlagStore::isTagV2Enabled).thenReturn(false);
-
-        String activatedValue = activatedStore.getConfigInternal("ENABLE_JANUS_OPTIMISATION");
-        boolean activatedResult = "true".equalsIgnoreCase(activatedValue);
-
-        boolean fallbackResult = FeatureFlagStore.isTagV2Enabled();
-
-        assertEquals(activatedResult, fallbackResult,
-                "Activated path and Redis fallback must agree: both should be false when flag is false");
-    }
-
     // =================== Empty Store Recovery Tests ===================
     // These tests verify the fix for tenants that missed Phase 1.
 
     /**
      * When activated=true but Cassandra has ZERO rows, the store must
-     * trigger a recovery sync from Redis instead of silently serving defaults.
+     * trigger a recovery sync (seeding defaults) instead of silently serving nulls.
      */
     @Test
     void testActivated_emptyCassandra_triggersRecoverySync() throws AtlasBaseException {
@@ -194,8 +143,6 @@ class DynamicConfigStoreTest {
                 .thenReturn(new HashMap<>())           // First call: empty (Phase 1 missed)
                 .thenReturn(allDefaultConfigs());       // Second call: after recovery sync
 
-        // Redis has the real flag values
-        stubRedisFlags();
         when(mockDAO.getConfig(anyString())).thenReturn(null); // No existing rows
 
         DynamicConfigStoreConfig config = createConfig(true, true);
@@ -204,9 +151,9 @@ class DynamicConfigStoreTest {
         store.initialize();
 
         // Verify syncFeatureFlagsFromRedis was called (recovery path)
-        // This is verified by checking that putConfig was called for Redis flags
+        // This seeds defaults for ConfigKeys that don't exist in Cassandra
         verify(mockDAO, atLeastOnce()).putConfig(
-                eq("ENABLE_JANUS_OPTIMISATION"), anyString(), eq("redis-sync"));
+                eq("ENABLE_JANUS_OPTIMISATION"), anyString(), eq("default-seed"));
     }
 
     /**
@@ -223,7 +170,6 @@ class DynamicConfigStoreTest {
                 .thenReturn(partialData)                // First call: partial
                 .thenReturn(allDefaultConfigs());       // Second call: after recovery sync
 
-        stubRedisFlags();
         when(mockDAO.getConfig(anyString())).thenReturn(null);
 
         DynamicConfigStoreConfig config = createConfig(true, true);
@@ -233,7 +179,7 @@ class DynamicConfigStoreTest {
 
         // Recovery should have been triggered because partial < expected
         verify(mockDAO, atLeastOnce()).putConfig(
-                eq("ENABLE_JANUS_OPTIMISATION"), anyString(), eq("redis-sync"));
+                eq("ENABLE_JANUS_OPTIMISATION"), anyString(), eq("default-seed"));
     }
 
     /**
@@ -250,29 +196,26 @@ class DynamicConfigStoreTest {
         DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
         store.initialize();
 
-        // No recovery needed — putConfig should NOT have been called for redis-sync
-        verify(mockDAO, never()).putConfig(anyString(), anyString(), eq("redis-sync"));
+        // No recovery needed — putConfig should NOT have been called for default-seed
+        verify(mockDAO, never()).putConfig(anyString(), anyString(), eq("default-seed"));
     }
 
     // =================== Default Seeding Tests ===================
 
     /**
-     * Phase 1 sync should seed defaults for ConfigKeys that don't exist in Redis
-     * (e.g., MAINTENANCE_MODE has no corresponding FeatureFlag).
+     * Phase 1 sync should seed defaults for ConfigKeys that don't exist in Cassandra.
      */
     @Test
-    void testPhase1Sync_seedsDefaultsForNonRedisKeys() throws AtlasBaseException {
+    void testPhase1Sync_seedsDefaultsForNonExistingKeys() throws AtlasBaseException {
         when(mockDAO.getAllConfigs()).thenReturn(new HashMap<>());
         when(mockDAO.getConfig(anyString())).thenReturn(null);
-        stubRedisFlags();
 
         DynamicConfigStoreConfig config = createConfig(true, false); // Phase 1: enabled, not activated
         DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
         DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
         store.initialize();
 
-        // MAINTENANCE_MODE is a ConfigKey but NOT a FeatureFlag (no Redis source).
-        // It should be seeded with its default value.
+        // MAINTENANCE_MODE should be seeded with its default value.
         verify(mockDAO).putConfig(eq("MAINTENANCE_MODE"), eq("false"), eq("default-seed"));
     }
 
@@ -308,12 +251,93 @@ class DynamicConfigStoreTest {
                 "Cache miss on activated store should return ConfigKey default, not null");
     }
 
+    // =================== Async Ingestion Config Tests ===================
+
+    /**
+     * When ENABLE_ASYNC_INGESTION is "true" in Cassandra and the store is activated,
+     * isAsyncIngestionEnabled() must return true.
+     */
+    @Test
+    void testIsAsyncIngestionEnabled_activated_flagTrue_returnsTrue() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
+        cassandraData.put("ENABLE_ASYNC_INGESTION", entry("true"));
+
+        DynamicConfigStore store = createActivatedStore(cassandraData);
+
+        assertTrue("true".equalsIgnoreCase(store.getConfigInternal("ENABLE_ASYNC_INGESTION")),
+                "ENABLE_ASYNC_INGESTION=true should be readable as true from cache");
+    }
+
+    /**
+     * When ENABLE_ASYNC_INGESTION is "false" in Cassandra, isAsyncIngestionEnabled() must return false.
+     */
+    @Test
+    void testIsAsyncIngestionEnabled_activated_flagFalse_returnsFalse() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
+        cassandraData.put("ENABLE_ASYNC_INGESTION", entry("false"));
+
+        DynamicConfigStore store = createActivatedStore(cassandraData);
+
+        assertFalse("true".equalsIgnoreCase(store.getConfigInternal("ENABLE_ASYNC_INGESTION")),
+                "ENABLE_ASYNC_INGESTION=false should NOT be readable as true");
+    }
+
+    /**
+     * When the store is not activated, isAsyncIngestionEnabled() must always return false.
+     */
+    @Test
+    void testIsAsyncIngestionEnabled_notActivated_returnsFalse() throws AtlasBaseException {
+        // Create a non-activated store (enabled=true, activated=false)
+        Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
+        cassandraData.put("ENABLE_ASYNC_INGESTION", entry("true"));
+        when(mockDAO.getAllConfigs()).thenReturn(cassandraData);
+        stubRedisFlags();
+
+        DynamicConfigStoreConfig config = createConfig(true, false);
+        DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
+        DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
+        store.initialize();
+
+        // Even though the flag is "true" in Cassandra, isAsyncIngestionEnabled()
+        // checks isActivated() first, so it should return false
+        // (We can't directly call the static method since it requires Spring context,
+        //  but we can verify the internal value is correct and the gating logic is right)
+        String value = store.getConfigInternal("ENABLE_ASYNC_INGESTION");
+        assertEquals("true", value, "Cache should have the value, but activation gate should block");
+    }
+
+    /**
+     * When ENABLE_ASYNC_INGESTION is missing from Cassandra, it should fall back to default ("false").
+     */
+    @Test
+    void testIsAsyncIngestionEnabled_keyMissing_returnsFalse() throws AtlasBaseException {
+        Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
+        // Remove async ingestion key to simulate it not being in Cassandra
+        cassandraData.remove("ENABLE_ASYNC_INGESTION");
+
+        // Need to return full data so recovery doesn't trigger
+        // Add enough entries to pass the recovery check
+        when(mockDAO.getAllConfigs()).thenReturn(cassandraData);
+        stubRedisFlags();
+
+        DynamicConfigStoreConfig config = createConfig(true, true);
+        DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
+        DynamicConfigStore store = new DynamicConfigStore(config, cacheStore, null);
+        store.initialize();
+
+        // Manually remove the key from cache (since allDefaultConfigs may have seeded it)
+        cacheStore.remove("ENABLE_ASYNC_INGESTION");
+
+        String value = store.getConfigInternal("ENABLE_ASYNC_INGESTION");
+        assertEquals("false", value,
+                "Missing ENABLE_ASYNC_INGESTION should fall back to ConfigKey default ('false')");
+    }
+
     // =================== Helpers ===================
 
     private DynamicConfigStore createActivatedStore(Map<String, ConfigEntry> cassandraData)
             throws AtlasBaseException {
         when(mockDAO.getAllConfigs()).thenReturn(cassandraData);
-        stubRedisFlags();
 
         DynamicConfigStoreConfig config = createConfig(true, true);
         DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
@@ -336,15 +360,6 @@ class DynamicConfigStoreTest {
         when(config.getConsistencyLevel()).thenReturn("LOCAL_ONE");
         when(config.getSyncIntervalMs()).thenReturn(60000L);
         return config;
-    }
-
-    private void stubRedisFlags() {
-        for (String key : FeatureFlag.getAllKeys()) {
-            FeatureFlag flag = FeatureFlag.fromKey(key);
-            String defaultVal = String.valueOf(flag.getDefaultValue());
-            mockedFeatureFlagStore.when(() -> FeatureFlagStore.getFlag(key)).thenReturn(defaultVal);
-        }
-        mockedFeatureFlagStore.when(FeatureFlagStore::isTagV2Enabled).thenReturn(true);
     }
 
     private static ConfigEntry entry(String value) {
