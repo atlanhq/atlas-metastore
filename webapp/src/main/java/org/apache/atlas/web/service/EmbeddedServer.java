@@ -105,7 +105,7 @@ public class EmbeddedServer {
                             name, 
                             bean.getClass().getName(), 
                             bean.getClass().getClassLoader(), 
-                            
+                            parentBean
                             );
                     } else {
                         LOG.warn("Reflection Bridge - Bean '{}' returned null from delegate", name);
