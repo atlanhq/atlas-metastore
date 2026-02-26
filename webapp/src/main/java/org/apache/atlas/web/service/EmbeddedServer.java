@@ -418,9 +418,31 @@ public class EmbeddedServer {
 
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
         // Use the Spring-specific servlet implementation
-        org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( );
+        org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( ){
+            @Override
+            public void doStart() throws Exception {
+                LOG.info("V2Holder: Intercepting doStart to ensure Spring Context Bridge is present.");
+                
+                // Final safety check: if main context is ready but bridge isn't delegated, fix it now
+                Object mainSpring = mainAppContext.getServletContext().getAttribute(
+                    org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+                
+                if (mainSpring != null && curContext instanceof LazySpringContext) {
+                     LOG.info("V2Holder: set delegate to main.");
+                    ((LazySpringContext)curContext).setDelegate(mainSpring);
+                }
+
+                // RE-ASSERT the attribute in the fastLane context right before Jersey initializes
+                getServletHandler().getServletContext().setAttribute(
+                    org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+                    curContext
+                );
+                
+                super.doStart();
+            }
+        };
         v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
-        v2Holder.setInitOrder(-1);
+        v2Holder.setInitOrder(1);
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerRequestFilters", 
                           "com.sun.jersey.api.container.filter.LoggingFilter");
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerResponseFilters", 
