@@ -88,14 +88,25 @@ public class EmbeddedServer {
             if (delegate != null && getBeanMethod != null) {
                 try {
                     Object bean =  getBeanMethod.invoke(delegate, name);
+                    //diagnostic block
                     Object parentBean = super.getBean(name);
                     if (bean != null) {
+                        String parentBeanName ;
+                        if( parentBean != null)
+                        {
+                            parentBeanName = parentBean.getClass().getName();
+                        }
+                        else
+                        {
+                            parentBeanName = "<none>";
+                        }
                         // Diagnostic Logging: See what the "real" bean looks like
                         LOG.info("Reflection Bridge - Found bean: '{}', Type: {}, Loader: {}, Parent Type: {}", 
                             name, 
                             bean.getClass().getName(), 
                             bean.getClass().getClassLoader(), 
-                            parentBean.getClass().getName());
+                            
+                            );
                     } else {
                         LOG.warn("Reflection Bridge - Bean '{}' returned null from delegate", name);
                     }
