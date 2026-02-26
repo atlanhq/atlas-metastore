@@ -388,7 +388,7 @@ public class EmbeddedServer {
         
         Object springContext = mainAppContext.getServletContext().getAttribute(
             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-        Object curContext = null;
+        final Object curContext = null;
         if (springContext != null) {
             curContext = springContext;
             LOG.info("Spring context ready. Linking to fast lane, slim stack context.");
