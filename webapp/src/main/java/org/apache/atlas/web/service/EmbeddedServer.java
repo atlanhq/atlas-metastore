@@ -350,7 +350,8 @@ public class EmbeddedServer {
 
                 // FIX: Initialize the servlet even if the context is already started
                 try {
-                    v2Holder.getServletHandler().initialize();
+                    //v2Holder.getServletHandler().initialize();
+                    v2Holder.start();
                     bridge.markSynchronized();
                     LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
 
@@ -378,39 +379,32 @@ public class EmbeddedServer {
     public void start() throws AtlasBaseException {
     try {
         final org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
-
         // Setup the Fast-Lane Context immediately
         final org.eclipse.jetty.servlet.ServletContextHandler fastLaneContext = 
             new org.eclipse.jetty.servlet.ServletContextHandler(org.eclipse.jetty.servlet.ServletContextHandler.SESSIONS);
         fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
-
+        fastLaneContext.setContextPath("/api");
+        fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
+        
         Object springContext = mainAppContext.getServletContext().getAttribute(
             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-
-       if (springContext != null) {
-            fastLaneContext.getServletContext().setAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
-                springContext);
+        Object curContext = null;
+        if (springContext != null) {
+            curContext = springContext;
             LOG.info("Spring context ready. Linking to fast lane, slim stack context.");
         } else {
             // This is the "Critical Error" path - it means Main App isn't ready.
             // We will let syncFastLane handle it later once the listener fires.
             LOG.warn("Spring Context not ready during Fast-Lane creation. Let's link to a LazySpringContext.");
-            fastLaneContext.getServletContext().setAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-                new LazySpringContext(fastLaneContext)
-            );
+            curContext = new LazySpringContext(fastLaneContext);     
         }
+        fastLaneContext.getServletContext().setAttribute(
+                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+                curContext);
         //correct cast
         if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
             ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
         }
-
-
-
-        fastLaneContext.setContextPath("/api");
-        fastLaneContext.setResourceBase("/opt/apache-atlas/server/webapp/atlas"); //TODO : remove this hard code
-        
 
         //  Add Health Check (Always available)
         fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
@@ -470,6 +464,7 @@ public class EmbeddedServer {
         fastLaneContext.addServlet(v2Holder, "/meta/*");
 
         // This Listener is **only** to inject the dependencies once Main App is ready
+        // TODO UPDATE : This is only for logging rifht now. Remove after flow check
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
             @Override
             public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
@@ -481,7 +476,6 @@ public class EmbeddedServer {
         // Routing with correct ordered  setup - first fastLaneContext
         org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
         contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {fastLaneContext, mainAppContext});
-
         server.setHandler(contexts);
         // This will start both contexts in the correct order
         try {
@@ -509,9 +503,42 @@ public class EmbeddedServer {
         LOG.info("Server started. Triggering V2 Fast-Lane slim stack synchronization manually not waiting for lifeCycleStarted...");
         try {
             LOG.info("Manual fast lane Sync Trigger: Starting bridge between Main and V2...");
-            syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+            //syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+            if (curContext instanceof LazySpringContext) {
+                LOG.info("Filling Fast-Lane bridge with real Spring Context.");
+                LazySpringContext bridge = (LazySpringContext) curContext;
+                // Protection against double-invocation
+                if (bridge.isSynchronized()) {
+                    LOG.info("Fast-Lane already synchronized. Skipping redundant init.");
+                    
+                }
+                else {
+                    LOG.info("Plugging real Spring Context  from main into Reflection Bridge...");
+                    bridge.setDelegate(mainSpringContext);
+                    LOG.info("Delegate set to main spring context...");
+                    // FIX: Initialize the servlet even if the context is already started
+                    try {
+                        //v2Holder.getServletHandler().initialize();
+                        v2Holder.start();
+                        bridge.markSynchronized();
+                        LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
+
+                    } catch (Exception e) {
+                        LOG.error("Failed to initialize V2 Jersey Servlet", e);
+                    }
+                }   
+                LOG.info("V2 Optimization Path Linked and Synchronized.");
+
+            }
+            else
+            {
+                LOG.info("Fast lane context can't start as delegated spring context does not exist");
+            }
+
+
+
         } catch (Exception e) {
-            LOG.error("Manual fast lane Sync failed: The bridge could not be established.", e);
+            LOG.error("Critical error linking V2 optimization path. Manual fast lane Sync failed: The bridge could not be established.", e);
         }
         server.join();
 
