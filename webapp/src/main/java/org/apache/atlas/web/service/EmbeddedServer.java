@@ -87,7 +87,16 @@ public class EmbeddedServer {
         public Object getBean(String name) throws org.springframework.beans.BeansException {
             if (delegate != null && getBeanMethod != null) {
                 try {
-                    return getBeanMethod.invoke(delegate, name);
+                    Object bean =  getBeanMethod.invoke(delegate, name);
+                    if (bean != null) {
+                        // Diagnostic Logging: See what the "real" bean looks like
+                        LOG.info("Reflection Bridge - Found bean: '{}', Type: {}, Loader: {}", 
+                            name, 
+                            bean.getClass().getName(), 
+                            bean.getClass().getClassLoader());
+                    } else {
+                        LOG.warn("Reflection Bridge - Bean '{}' returned null from delegate", name);
+                    }
                 } catch (Exception e) {
                     LOG.error("Reflection bridge failed for bean: " + name, e);
                 }
