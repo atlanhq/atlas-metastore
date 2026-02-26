@@ -477,11 +477,11 @@ public class EmbeddedServer {
         org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
         contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {fastLaneContext, mainAppContext});
         server.setHandler(contexts);
+        Object mainSpringContext = null;
         // This will start both contexts in the correct order
         try {
 
             server.start(); 
-            Object mainSpringContext = null;
             int attempts = 0;
             while (mainSpringContext == null && attempts < 10) {
                 mainSpringContext = mainAppContext.getServletContext().getAttribute(
