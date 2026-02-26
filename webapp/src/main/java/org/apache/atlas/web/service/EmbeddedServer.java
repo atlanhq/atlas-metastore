@@ -74,8 +74,8 @@ public class EmbeddedServer {
         public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane) {
             super(fastLane.getServletContext());
             setDisplayName("FastLane-Slimstack-Bridge-Context");
-            refresh();
-
+            this.refresh();
+            LOG.info("LazySpringContext: Refresh complete, diagnostic calls active.");
         }
 
         public void setDelegate(Object delegate) {
@@ -100,7 +100,73 @@ public class EmbeddedServer {
         }
 
         @Override
+        public long getStartupDate() {
+            LOG.info("Diagnostic: getStartupDate was probed by Jersey.");
+            return System.currentTimeMillis();
+        }
+
+        @Override
+        public String getId() {
+             LOG.info("Diagnostic: getId was probed by Jersey.");
+            return "fast-lane-bridge";
+        }
+
+        @Override
+        public org.springframework.beans.factory.config.ConfigurableListableBeanFactory getBeanFactory() {
+            // Jersey often calls this to see if the context is 'real'
+            LOG.info("Diagnostic: getBeanFactory() was probed by Jersey.");
+            return super.getBeanFactory();
+        }
+
+        @Override
+        public Map<String, Object> getBeansWithAnnotation(Class<? extends Annotation> annotationType) {
+            LOG.info("getBeansWithAnnotation called.");
+            if (delegate != null) {
+                try {
+                    java.lang.reflect.Method m = delegate.getClass().getMethod("getBeansWithAnnotation", Class.class);
+                    Map<String, Object> beans = (Map<String, Object>) m.invoke(delegate, annotationType);
+                    LOG.info("Reflection Bridge - Found {} beans for annotation: {}", 
+                        (beans != null ? beans.size() : 0), annotationType.getSimpleName());
+                    return beans;
+                } catch (Exception e) {
+                    LOG.error("Reflection bridge (Annotation) failed for: " + annotationType.getName());
+                }
+            }
+            return super.getBeansWithAnnotation(annotationType);
+        }
+
+        @Override
+        public <T> T getBean(String name, Class<T> requiredType) throws org.springframework.beans.BeansException {
+            LOG.info("Diagnostic: getBean(String, Class) called for: {} ({})", name, requiredType.getSimpleName());
+            if (delegate != null) {
+                try {
+                    java.lang.reflect.Method m = delegate.getClass().getMethod("getBean", String.class, Class.class);
+                    return (T) m.invoke(delegate, name, requiredType);
+                } catch (Exception e) {
+                    LOG.error("Reflection bridge failed for: " + name);
+                }
+            }
+            return super.getBean(name, requiredType);
+        }
+
+        //Type-only discovery (Returns all beans of a type)
+        @Override
+        public <T> Map<String, T> getBeansOfType(Class<T> type) throws org.springframework.beans.BeansException {
+            LOG.info("Diagnostic: getBeansOfType called for: {}", type.getSimpleName());
+            if (delegate != null) {
+                try {
+                    java.lang.reflect.Method m = delegate.getClass().getMethod("getBeansOfType", Class.class);
+                    return (Map<String, T>) m.invoke(delegate, type);
+                } catch (Exception e) {
+                    LOG.error("Reflection bridge (TypeMap) failed");
+                }
+            }
+            return super.getBeansOfType(type);
+        }
+
+        @Override
         public <T> T getBean(Class<T> requiredType) throws org.springframework.beans.BeansException {
+            LOG.info("getBean( requiredType) called");
             if (delegate != null && getBeanByTypeMethod != null) {
                 try {
                     // Use reflection to call getBean(Class) on the delegate
@@ -127,6 +193,7 @@ public class EmbeddedServer {
 
         @Override
         public Object getBean(String name) throws org.springframework.beans.BeansException {
+            LOG.info("getBean( name) called");
             if (delegate != null && getBeanByNameMethod != null) {
                 try {
                     Object bean =  getBeanByNameMethod.invoke(delegate, name);
@@ -167,11 +234,38 @@ public class EmbeddedServer {
             return super.getBean(name);
         }
 
+        //lifecylce events
         @Override
-        public boolean isActive() { 
-            LOG.info(" LazySpringContext isActive called. Returning true ");
-            return true;
-         }
+        public void start() {
+            LOG.info("Diagnostic: start() called on LazySpringContext");
+            super.start();
+        }
+
+        @Override
+        public void stop() {
+            LOG.info("Diagnostic: stop() called on LazySpringContext");
+            super.stop();
+        }
+
+        @Override
+        public boolean isActive() {
+            boolean active = super.isActive();
+            LOG.info("Diagnostic: isActive() check: {}", active);
+            return active;
+        }
+
+        @Override
+        public boolean isRunning() {
+            boolean running = super.isRunning();
+            LOG.info("Diagnostic: isRunning() check: {}", running);
+            return running;
+        }
+
+        // @Override
+        // public boolean isActive() { 
+        //     LOG.info(" LazySpringContext isActive called. Returning true ");
+        //     return true;
+        //  }
     }
 
     public EmbeddedServer(String host, int port, String path) throws IOException {
