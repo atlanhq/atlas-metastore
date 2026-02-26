@@ -349,7 +349,7 @@ atlas:
 
   env:
     - name: ATLAS_SERVER_OPTS
-      value: '-Xmx4g -Xms4g'
+      value: '-Xmx4g -Xms4g -XX:+UseZGC -XX:SoftMaxHeapSize=3g -XX:ZUncommitDelay=60 -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/tmp/heapdump.hprof -Xlog:gc*:file=/atlas/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=100m'
     - name: MAVEN_OPTS
       value: '-Xmx4g -Xms4g'
     - name: ATLAS_CLIENT_OPTS

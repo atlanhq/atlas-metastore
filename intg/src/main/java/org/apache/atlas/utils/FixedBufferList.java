@@ -53,10 +53,16 @@ public class FixedBufferList<T extends Clearable> {
     }
 
     public void reset() {
+        // Shrink if buffer grew too large (more than 4x default capacity)
+        int shrinkThreshold = Math.max(incrementCapacityBy * 4, 40);
+        if (buffer.size() > shrinkThreshold) {
+            buffer.subList(shrinkThreshold, buffer.size()).clear();
+            buffer.trimToSize();
+        }
+
         for (int i = 0; i < buffer.size(); i++) {
             buffer.get(i).clear();
         }
-
         this.length = 0;
     }
 
