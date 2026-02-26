@@ -4,7 +4,6 @@ import io.micrometer.prometheus.PrometheusConfig;
 import io.micrometer.prometheus.PrometheusMeterRegistry;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.exception.AtlasBaseException;
-import org.apache.atlas.service.FeatureFlag;
 import org.apache.atlas.service.config.DynamicConfigCacheStore.ConfigEntry;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.commons.configuration.PropertiesConfiguration;
@@ -291,7 +290,7 @@ class DynamicConfigStoreTest {
         Map<String, ConfigEntry> cassandraData = allDefaultConfigs();
         cassandraData.put("ENABLE_ASYNC_INGESTION", entry("true"));
         when(mockDAO.getAllConfigs()).thenReturn(cassandraData);
-        stubRedisFlags();
+        when(mockDAO.getConfig(anyString())).thenReturn(null);
 
         DynamicConfigStoreConfig config = createConfig(true, false);
         DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
@@ -318,7 +317,7 @@ class DynamicConfigStoreTest {
         // Need to return full data so recovery doesn't trigger
         // Add enough entries to pass the recovery check
         when(mockDAO.getAllConfigs()).thenReturn(cassandraData);
-        stubRedisFlags();
+        when(mockDAO.getConfig(anyString())).thenReturn(null);
 
         DynamicConfigStoreConfig config = createConfig(true, true);
         DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();
