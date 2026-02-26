@@ -764,23 +764,29 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
                 return resolvedVertex;
             }
             String docId = hit.getId();
-            String vertexId = decodeDocId(docId);
-            AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(vertexId);
-            if (v == null && !vertexId.equals(docId)) {
-                // Decoded value didn't match; try original doc ID as vertex ID
-                // (handles re-indexed ES data where _id = vertex_id directly)
-                v = graph.getVertex(docId);
+
+            // Try raw doc ID first — works for Cassandra-native ES indices (atlas_graph_*)
+            // where _id is the numeric vertex ID directly.
+            AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(docId);
+
+            if (v == null) {
+                // Raw doc ID not found; try base-36 decode for JanusGraph-era ES indices
+                // (janusgraph_*) where _id is LongEncoding-encoded.
+                String decodedId = decodeDocId(docId);
+                if (!decodedId.equals(docId)) {
+                    v = graph.getVertex(decodedId);
+                }
             }
+
             if (v == null) {
                 // Vertex not found in Cassandra — try constructing from ES _source data.
                 Map<String, Object> source = hit.getSourceAsMap();
                 if (source != null && !source.isEmpty()) {
-                    v = new CassandraVertex(vertexId, new LinkedHashMap<>(source), graph);
-                    LOG.info("ResultImpl.getVertex: constructed vertex from ES _source. ES docId='{}', vertexId='{}'",
-                            docId, vertexId);
+                    v = new CassandraVertex(docId, new LinkedHashMap<>(source), graph);
+                    LOG.info("ResultImpl.getVertex: constructed vertex from ES _source. ES docId='{}'", docId);
                 } else {
-                    LOG.warn("ResultImpl.getVertex: vertex not found and no _source available. ES docId='{}', decodedVertexId='{}', index='{}'",
-                            docId, vertexId, index);
+                    LOG.warn("ResultImpl.getVertex: vertex not found and no _source available. ES docId='{}', index='{}'",
+                            docId, index);
                 }
             } else if (LOG.isDebugEnabled()) {
                 LOG.debug("ResultImpl.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());
@@ -835,24 +841,31 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
         @SuppressWarnings("unchecked")
         public AtlasVertex<CassandraVertex, CassandraEdge> getVertex() {
             String docId = String.valueOf(hit.get("_id"));
-            String vertexId = decodeDocId(docId);
-            AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(vertexId);
-            if (v == null && !vertexId.equals(docId)) {
-                // Decoded value didn't match; try original doc ID as vertex ID
-                v = graph.getVertex(docId);
+
+            // Try raw doc ID first — works for Cassandra-native ES indices (atlas_graph_*)
+            // where _id is the numeric vertex ID directly.
+            AtlasVertex<CassandraVertex, CassandraEdge> v = graph.getVertex(docId);
+
+            if (v == null) {
+                // Raw doc ID not found; try base-36 decode for JanusGraph-era ES indices
+                // (janusgraph_*) where _id is LongEncoding-encoded.
+                String decodedId = decodeDocId(docId);
+                if (!decodedId.equals(docId)) {
+                    v = graph.getVertex(decodedId);
+                }
             }
+
             if (v == null) {
                 // Vertex not found in Cassandra — try constructing from ES _source data.
                 // This handles JanusGraph-era ES documents when sharing ES between backends:
                 // their vertex IDs reference JanusGraph storage, not Cassandra.
                 Map<String, Object> source = (Map<String, Object>) hit.get("_source");
                 if (source != null && !source.isEmpty()) {
-                    v = new CassandraVertex(vertexId, new LinkedHashMap<>(source), graph);
-                    LOG.info("ResultImplDirect.getVertex: constructed vertex from ES _source. ES docId='{}', vertexId='{}'",
-                            docId, vertexId);
+                    v = new CassandraVertex(docId, new LinkedHashMap<>(source), graph);
+                    LOG.info("ResultImplDirect.getVertex: constructed vertex from ES _source. ES docId='{}'", docId);
                 } else {
-                    LOG.warn("ResultImplDirect.getVertex: vertex not found and no _source available. ES docId='{}', decodedVertexId='{}', index='{}'",
-                            docId, vertexId, index);
+                    LOG.warn("ResultImplDirect.getVertex: vertex not found and no _source available. ES docId='{}', index='{}'",
+                            docId, index);
                 }
             } else if (LOG.isDebugEnabled()) {
                 LOG.debug("ResultImplDirect.getVertex: found vertex. ES docId='{}' → vertexId='{}'", docId, v.getId());

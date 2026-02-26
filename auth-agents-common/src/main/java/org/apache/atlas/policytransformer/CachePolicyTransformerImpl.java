@@ -514,6 +514,11 @@ public class CachePolicyTransformerImpl {
     private Map<String, RangerPolicyResource> getFinalResources(AtlasEntityHeader atlasPolicy) {
         List<String> atlasResources = (List<String>) atlasPolicy.getAttribute("policyResources");
 
+        if (atlasResources == null) {
+            LOG.warn("getFinalResources: policyResources is null for policy: {}", atlasPolicy.getGuid());
+            return new HashMap<>();
+        }
+
         Map<String, List<String>> resourceValuesMap = new HashMap<>();
 
         for (String atlasResource : atlasResources) {
