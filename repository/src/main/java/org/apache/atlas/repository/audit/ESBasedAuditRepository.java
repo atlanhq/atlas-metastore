@@ -44,6 +44,9 @@ import org.apache.http.HttpHost;
 import org.apache.http.entity.ContentType;
 import org.apache.http.nio.entity.NStringEntity;
 import org.apache.http.util.EntityUtils;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.elasticsearch.client.Request;
 import org.elasticsearch.client.Response;
 import org.elasticsearch.client.RestClient;
@@ -68,9 +71,13 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static java.nio.charset.Charset.defaultCharset;
+import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_BACKOFF_BASE_MS;
+import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_BACKOFF_MAX_MS;
 import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_ENABLED;
 import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_MAX_RETRIES;
+import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_PUBLISH_TO_KAFKA_ENABLED;
 import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_QUEUE_CAPACITY;
+import static org.apache.atlas.AtlasConfiguration.ENTITY_AUDIT_DLQ_TOPIC;
 import static org.apache.atlas.repository.Constants.DOMAIN_GUIDS;
 import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase.INDEX_BACKEND_CONF;
 import static org.springframework.util.StreamUtils.copyToString;
@@ -102,6 +109,19 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final String ENTITY_AUDITS_INDEX = "entity_audits";
     private static final int DLQ_POLL_TIMEOUT_SECONDS = 5;
 
+    /**
+     * ES error types that are non-retriable (mapping/parsing). Sending these to DLQ would create poison pills.
+     * Aligned with AtlanElasticSearchIndex.convert() permanent-error list and DLQReplayService poison-pill handling
+     * (do not enqueue / do not re-queue permanent failures).
+     */
+    private static final Set<String> MAPPING_OR_PERMANENT_ES_ERROR_TYPES = Set.of(
+            "mapper_parsing_exception",
+            "illegal_argument_exception",
+            "parsing_exception",
+            "strict_dynamic_mapping_exception",
+            "version_conflict"
+    );
+
     /*
     *    created   → event creation time
          timestamp → entity modified timestamp
@@ -111,12 +131,37 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     /** Holder for failed audit events enqueued to async DLQ for retry. */
     private static record EntityAuditDLQEntry(List<EntityAuditEventV2> events, int retryCount) {}
 
+    /**
+     * Returns true if the exception indicates a mapping or other permanent ES error.
+     * Such errors must not be sent to the DLQ (poison pill: replay would fail every time).
+     * Walks the cause chain (same pattern as AtlanElasticSearchIndex and AtlasEntityStoreV2.isPermanentBackendException)
+     * so we detect permanent errors whether on the top-level exception or a wrapped cause.
+     * Package-private for testability (ESBasedAuditRepositoryDLQTest verifies poison-pill detection).
+     */
+    static boolean isMappingOrPermanentException(Throwable t) {
+        Throwable current = t;
+        while (current != null) {
+            String msg = current.getMessage();
+            if (msg != null) {
+                String msgLower = msg.toLowerCase();
+                for (String type : MAPPING_OR_PERMANENT_ES_ERROR_TYPES) {
+                    if (msgLower.contains(type)) {
+                        return true;
+                    }
+                }
+            }
+            current = current.getCause();
+        }
+        return false;
+    }
+
     private RestClient lowLevelClient;
     private final Configuration configuration;
     private EntityGraphRetriever entityGraphRetriever;
     private BlockingQueue<EntityAuditDLQEntry> auditDlqQueue;
     private Thread auditDlqReplayThread;
     private volatile boolean auditDlqReplayRunning;
+    private volatile KafkaProducer<String, String> auditDlqKafkaProducer;
 
     @Inject
     public ESBasedAuditRepository(Configuration configuration, EntityGraphRetriever entityGraphRetriever) {
@@ -143,7 +188,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
         } catch (Exception e) {
             // Do not fail the main request; pass failed request into async DLQ for retry (MS-642).
             int eventCount = (events != null) ? events.size() : 0;
-            if (ENTITY_AUDIT_DLQ_ENABLED.getBoolean() && auditDlqQueue != null && eventCount > 0) {
+            boolean isMappingOrPermanent = isMappingOrPermanentException(e);
+            if (isMappingOrPermanent) {
+                LOG.error("Entity audit write to ES failed with mapping/permanent error (will not enqueue to DLQ to avoid poison pill). eventCount={}, error={}",
+                        eventCount, e.getMessage(), e);
+            } else if (ENTITY_AUDIT_DLQ_ENABLED.getBoolean() && auditDlqQueue != null && eventCount > 0) {
                 boolean offered = auditDlqQueue.offer(new EntityAuditDLQEntry(new ArrayList<>(events), 0));
                 if (offered) {
                     LOG.warn("Entity audit write to ES failed; enqueued to async DLQ for retry. eventCount={}, error={}",
@@ -444,11 +493,12 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     }
 
     /**
-     * Background loop: drain failed audit events from DLQ and retry push to ES.
-     * Does not block the request thread; failures are enqueued in putEventsV2.
+     * Background loop: drain retry queue, retry push to ES with backoff. After max retries, publish to Kafka DLQ (inspect later).
      */
     private void runAuditDlqReplayLoop() {
         int maxRetries = ENTITY_AUDIT_DLQ_MAX_RETRIES.getInt();
+        long backoffBaseMs = ENTITY_AUDIT_DLQ_BACKOFF_BASE_MS.getLong();
+        long backoffMaxMs = ENTITY_AUDIT_DLQ_BACKOFF_MAX_MS.getLong();
         while (auditDlqReplayRunning && auditDlqQueue != null) {
             try {
                 EntityAuditDLQEntry entry = auditDlqQueue.poll(DLQ_POLL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
@@ -458,24 +508,91 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 try {
                     putEventsV2Internal(entry.events());
                 } catch (Exception e) {
-                    if (entry.retryCount() < maxRetries) {
+                    if (isMappingOrPermanentException(e)) {
+                        LOG.error("Entity audit retry failed with mapping/permanent error (dropping, will not re-queue). eventCount={}. error={}",
+                                entry.events().size(), e.getMessage(), e);
+                    } else if (entry.retryCount() < maxRetries) {
+                        long backoffMs = Math.min(backoffMaxMs, backoffBaseMs * (long) Math.pow(2, entry.retryCount()));
+                        try {
+                            Thread.sleep(backoffMs);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            break;
+                        }
                         boolean reOffered = auditDlqQueue.offer(new EntityAuditDLQEntry(entry.events(), entry.retryCount() + 1));
                         if (reOffered) {
-                            LOG.warn("Entity audit DLQ replay failed (retry {}/{}); re-queued. error={}",
-                                    entry.retryCount() + 1, maxRetries, e.getMessage());
+                            LOG.warn("Entity audit retry failed (retry {}/{}); backoff {}ms, re-queued. error={}",
+                                    entry.retryCount() + 1, maxRetries, backoffMs, e.getMessage());
                         } else {
-                            LOG.error("Entity audit DLQ replay failed and queue full; dropping {} events after {} retries",
+                            LOG.error("Entity audit retry queue full; dropping {} events after {} retries",
                                     entry.events().size(), entry.retryCount() + 1, e);
                         }
                     } else {
-                        LOG.error("Entity audit DLQ replay failed after {} retries; dropping {} events. error={}",
-                                maxRetries, entry.events().size(), e.getMessage(), e);
+                        if (ENTITY_AUDIT_DLQ_PUBLISH_TO_KAFKA_ENABLED.getBoolean()) {
+                            publishToKafkaDLQ(entry.events(), e.getMessage());
+                        } else {
+                            LOG.error("Entity audit retry failed after {} retries; dropping {} events (Kafka DLQ publish disabled). error={}",
+                                    maxRetries, entry.events().size(), e.getMessage(), e);
+                        }
                     }
                 }
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
-                LOG.info("Entity audit DLQ replay thread interrupted");
+                LOG.info("Entity audit retry thread interrupted");
                 break;
+            }
+        }
+    }
+
+    /**
+     * Publish failed audit events to Kafka DLQ topic so they can be inspected/replayed later. Does not throw.
+     */
+    private void publishToKafkaDLQ(List<EntityAuditEventV2> events, String failureReason) {
+        try {
+            KafkaProducer<String, String> producer = getOrCreateAuditDlqKafkaProducer();
+            if (producer == null) {
+                LOG.error("Entity audit retry failed after max retries; cannot publish to DLQ (producer not available). eventCount={}. error={}",
+                        events.size(), failureReason);
+                return;
+            }
+            String topic = ENTITY_AUDIT_DLQ_TOPIC.getString();
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("failureReason", failureReason);
+            payload.put("eventCount", events.size());
+            payload.put("timestamp", System.currentTimeMillis());
+            payload.put("events", events);
+            String json = AtlasType.toJson(payload);
+            producer.send(new ProducerRecord<>(topic, null, json));
+            LOG.warn("Entity audit retry failed after max retries; published {} events to DLQ topic {} for inspection. error={}",
+                    events.size(), topic, failureReason);
+        } catch (Exception ex) {
+            LOG.error("Entity audit: failed to publish {} events to Kafka DLQ; events will be lost. error={}", events.size(), ex.getMessage(), ex);
+        }
+    }
+
+    private KafkaProducer<String, String> getOrCreateAuditDlqKafkaProducer() {
+        if (auditDlqKafkaProducer != null) {
+            return auditDlqKafkaProducer;
+        }
+        synchronized (this) {
+            if (auditDlqKafkaProducer != null) {
+                return auditDlqKafkaProducer;
+            }
+            try {
+                String bootstrapServers = ApplicationProperties.get().getString("atlas.kafka.bootstrap.servers", "").trim();
+                if (bootstrapServers.isEmpty()) {
+                    LOG.warn("Entity audit DLQ Kafka publish enabled but atlas.kafka.bootstrap.servers not set; DLQ publish disabled");
+                    return null;
+                }
+                Properties props = new Properties();
+                props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG, bootstrapServers);
+                props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+                props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, "org.apache.kafka.common.serialization.StringSerializer");
+                auditDlqKafkaProducer = new KafkaProducer<>(props);
+                return auditDlqKafkaProducer;
+            } catch (Exception e) {
+                LOG.error("Entity audit: failed to create Kafka producer for DLQ", e);
+                return null;
             }
         }
     }
@@ -498,7 +615,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             try {
                 putEventsV2Internal(entry.events());
             } catch (Exception e) {
-                if (entry.retryCount() < maxRetries) {
+                if (!isMappingOrPermanentException(e) && entry.retryCount() < maxRetries) {
                     auditDlqQueue.offer(new EntityAuditDLQEntry(entry.events(), entry.retryCount() + 1));
                 }
             }
@@ -670,6 +787,14 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                 auditDlqReplayThread = null;
             }
             auditDlqQueue = null;
+            if (auditDlqKafkaProducer != null) {
+                try {
+                    auditDlqKafkaProducer.close();
+                } catch (Exception e) {
+                    LOG.warn("Error closing entity audit DLQ Kafka producer", e);
+                }
+                auditDlqKafkaProducer = null;
+            }
             if (lowLevelClient != null) {
                 lowLevelClient.close();
                 lowLevelClient = null;

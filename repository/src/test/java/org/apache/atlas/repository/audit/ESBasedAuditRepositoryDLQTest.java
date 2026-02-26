@@ -39,22 +39,35 @@ import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 
 import static org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2.ENTITY_CREATE;
+import org.apache.atlas.exception.AtlasBaseException;
+
+import java.lang.reflect.Constructor;
+import java.util.concurrent.BlockingQueue;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.spy;
 
 /**
- * Unit tests for ESBasedAuditRepository entity audit DLQ behaviour (MS-642).
+ * Unit tests for ESBasedAuditRepository entity audit retry + DLQ behaviour (MS-642).
  *
- * Edge cases covered:
+ * Flow covered:
+ * - Request thread: on audit failure, enqueue to in-memory queue only (no DLQ); request does not fail.
+ * - Background thread: poll queue, retry with backoff; after max retries, publish to Kafka DLQ (or drop).
+ *
+ * Scenarios:
  * - null / empty events: no enqueue, no throw
- * - DLQ disabled: log only, no enqueue
- * - DLQ enabled, write fails: enqueue (request does not fail)
- * - Queue full: drop and log, request does not fail
- * - Replay re-offer on failure, max retries then drop
- * - Defensive: details null or shorter than prefix, all entities null (empty bulk)
+ * - Retry disabled (DLQ disabled): log only, no enqueue
+ * - Write fails with retry enabled: enqueue (request succeeds)
+ * - Queue full: request still succeeds, events dropped with log
+ * - Replay: entry re-queued on failure when retries left; after max retries entry not re-queued (drop/DLQ path)
+ * - All-null-entity: empty bulk, no ES call, no enqueue
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class ESBasedAuditRepositoryDLQTest {
@@ -140,16 +153,16 @@ class ESBasedAuditRepositoryDLQTest {
         }
 
         @Test
-        @DisplayName("write fails with DLQ enabled: request succeeds, events enqueued")
-        void failureEnqueuedWhenDlqEnabled() {
+        @DisplayName("write fails with retry enabled: request succeeds, events enqueued to retry queue")
+        void failureEnqueuedWhenRetryEnabled() {
             assertDoesNotThrow(() -> repo.putEventsV2(oneEvent()));
 
             assertEquals(1, repo.getAuditDlqQueueSize());
         }
 
         @Test
-        @DisplayName("write fails with DLQ disabled: request succeeds, no enqueue")
-        void failureNotEnqueuedWhenDlqDisabled() {
+        @DisplayName("write fails with retry disabled: request succeeds, no enqueue")
+        void failureNotEnqueuedWhenRetryDisabled() {
             config.setProperty(ENTITY_AUDIT_DLQ_ENABLED_PROP, false);
             ReflectionTestUtils.setField(repo, "auditDlqQueue", new LinkedBlockingQueue<>(10));
 
@@ -170,11 +183,22 @@ class ESBasedAuditRepositoryDLQTest {
             assertDoesNotThrow(() -> repo.putEventsV2(oneEvent()));
             assertEquals(1, smallQueue.size());
         }
+
+        @Test
+        @DisplayName("mapping/permanent ES error: detector returns true so events are NOT enqueued (poison-pill guard)")
+        void permanentErrorNotEnqueued() {
+            assertTrue(ESBasedAuditRepository.isMappingOrPermanentException(
+                    new AtlasBaseException("mapper_parsing_exception: failed to parse field [type]")));
+            assertTrue(ESBasedAuditRepository.isMappingOrPermanentException(
+                    new RuntimeException("illegal_argument_exception: ...")));
+            assertFalse(ESBasedAuditRepository.isMappingOrPermanentException(
+                    new AtlasBaseException("circuit_breaking_exception: data too large")));
+        }
     }
 
     @Nested
-    @DisplayName("DLQ replay behaviour")
-    class DlqReplay {
+    @DisplayName("Retry queue / replay behaviour (background thread behaviour simulated)")
+    class RetryReplay {
 
         @Test
         @DisplayName("processOneDlqEntryForTest: entry re-queued on failure when retries left")
@@ -193,6 +217,46 @@ class ESBasedAuditRepositoryDLQTest {
             boolean processed = repo.processOneDlqEntryForTest();
             assertFalse(processed);
         }
+
+        @Test
+        @DisplayName("after max retries entry is not re-queued (drop or DLQ path)")
+        void afterMaxRetriesEntryNotRequeued() {
+            config.setProperty(ENTITY_AUDIT_DLQ_MAX_RETRIES_PROP, 1);
+            assertDoesNotThrow(() -> repo.putEventsV2(oneEvent()));
+            assertEquals(1, repo.getAuditDlqQueueSize());
+
+            repo.processOneDlqEntryForTest();
+            assertEquals(1, repo.getAuditDlqQueueSize());
+
+            repo.processOneDlqEntryForTest();
+            assertEquals(0, repo.getAuditDlqQueueSize());
+        }
+
+        @Test
+        @DisplayName("replay: events dropped after max retries exhausted (injected entry at retryCount == maxRetries)")
+        void replayDropsAfterMaxRetries() throws Exception {
+            config.setProperty(ENTITY_AUDIT_DLQ_MAX_RETRIES_PROP, 2);
+            @SuppressWarnings("unchecked")
+            BlockingQueue<Object> queue = (BlockingQueue<Object>) ReflectionTestUtils.getField(repo, "auditDlqQueue");
+            queue.clear();
+
+            Class<?> entryClass = null;
+            for (Class<?> c : ESBasedAuditRepository.class.getDeclaredClasses()) {
+                if ("EntityAuditDLQEntry".equals(c.getSimpleName())) {
+                    entryClass = c;
+                    break;
+                }
+            }
+            assertNotNull(entryClass);
+            Constructor<?> ctor = entryClass.getDeclaredConstructor(List.class, int.class);
+            ctor.setAccessible(true);
+            Object entry = ctor.newInstance(oneEvent(), 2);
+            queue.offer(entry);
+
+            boolean processed = repo.processOneDlqEntryForTest();
+            assertTrue(processed);
+            assertEquals(0, repo.getAuditDlqQueueSize());
+        }
     }
 
     @Nested
@@ -205,6 +269,47 @@ class ESBasedAuditRepositoryDLQTest {
             assertDoesNotThrow(() -> repo.putEventsV2(eventWithNullEntity()));
             assertEquals(0, repo.getAuditDlqQueueSize());
         }
+
+        @Test
+        @DisplayName("details string shorter than prefix: no StringIndexOutOfBoundsException")
+        void detailsShorterThanPrefixNoException() {
+            assertDoesNotThrow(() -> repo.putEventsV2(eventWithShortDetails()));
+        }
+    }
+
+    @Nested
+    @DisplayName("DLQ thread lifecycle (start / stop)")
+    class DlqThreadLifecycle {
+
+        @Test
+        @DisplayName("start() creates DLQ queue; stop() shuts down cleanly and nulls queue")
+        void dlqThreadLifecycle() throws Exception {
+            ESBasedAuditRepository lifecycleRepo = new ESBasedAuditRepository(config, entityGraphRetriever);
+            ESBasedAuditRepository spyRepo = spy(lifecycleRepo);
+            doNothing().when(spyRepo).startInternal();
+
+            spyRepo.start();
+            assertNotNull(ReflectionTestUtils.getField(spyRepo, "auditDlqQueue"));
+            assertDoesNotThrow(() -> assertEquals(0, spyRepo.getAuditDlqQueueSize()));
+
+            spyRepo.stop();
+            assertNull(ReflectionTestUtils.getField(spyRepo, "auditDlqQueue"));
+        }
+    }
+
+    private List<EntityAuditEventV2> eventWithShortDetails() {
+        EntityAuditEventV2 event = new EntityAuditEventV2();
+        event.setEntityId("guid-1");
+        event.setAction(ENTITY_CREATE);
+        event.setDetails("");
+        event.setUser("test-user");
+        event.setTimestamp(System.currentTimeMillis());
+        event.setEntityQualifiedName("\"qn1\"");
+        AtlasEntity entity = new AtlasEntity("Table");
+        entity.setAttribute("qualifiedName", "qn1");
+        entity.setAttribute("updateTime", new Date());
+        event.setEntity(entity);
+        return List.of(event);
     }
 
 }
