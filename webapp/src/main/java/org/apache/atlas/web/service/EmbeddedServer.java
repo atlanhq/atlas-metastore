@@ -119,12 +119,12 @@ public class EmbeddedServer {
         }
 
         @Override
-        public Map<String, Object> getBeansWithAnnotation(Class<? extends Annotation> annotationType) {
+        public java.util.Map<String, Object> getBeansWithAnnotation(Class<? extends java.lang.annotation.Annotation> annotationType) {
             LOG.info("getBeansWithAnnotation called.");
             if (delegate != null) {
                 try {
                     java.lang.reflect.Method m = delegate.getClass().getMethod("getBeansWithAnnotation", Class.class);
-                    Map<String, Object> beans = (Map<String, Object>) m.invoke(delegate, annotationType);
+                    java.util.Map<String, Object> beans = (java.util.Map<String, Object>) m.invoke(delegate, annotationType);
                     LOG.info("Reflection Bridge - Found {} beans for annotation: {}", 
                         (beans != null ? beans.size() : 0), annotationType.getSimpleName());
                     return beans;
@@ -151,12 +151,12 @@ public class EmbeddedServer {
 
         //Type-only discovery (Returns all beans of a type)
         @Override
-        public <T> Map<String, T> getBeansOfType(Class<T> type) throws org.springframework.beans.BeansException {
+        public <T> java.util.Map<String, T> getBeansOfType(Class<T> type) throws org.springframework.beans.BeansException {
             LOG.info("Diagnostic: getBeansOfType called for: {}", type.getSimpleName());
             if (delegate != null) {
                 try {
                     java.lang.reflect.Method m = delegate.getClass().getMethod("getBeansOfType", Class.class);
-                    return (Map<String, T>) m.invoke(delegate, type);
+                    return (java.util.Map<String, T>) m.invoke(delegate, type);
                 } catch (Exception e) {
                     LOG.error("Reflection bridge (TypeMap) failed");
                 }
