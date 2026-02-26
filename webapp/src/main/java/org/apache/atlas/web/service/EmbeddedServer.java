@@ -113,8 +113,8 @@ public class EmbeddedServer {
             }
             else
             {
-                LOG.info("getBean called with type for name {} isn't processed as either delegate {} or getBeanByNameMethod {} is null",
-                 name, 
+                LOG.info("getBean called with requiredType {} isn't processed as either delegate {} or getBeanByTypeMethod {} is null",
+                 requiredType, 
                  delegate,
                  getBeanByTypeMethod );
             }
@@ -237,7 +237,7 @@ public class EmbeddedServer {
             //if the temporary lazy context is replaced by spring context already return
             if (existingAttr instanceof LazySpringContext) {
                 LOG.info("Filling Fast-Lane bridge with real Spring Context.");
-                LazySpringContext bridge = (LazySpringContext) attr;
+                LazySpringContext bridge = (LazySpringContext) existingAttr;
 
                 // Protection against double-invocation
                 if (bridge.isSynchronized()) {
