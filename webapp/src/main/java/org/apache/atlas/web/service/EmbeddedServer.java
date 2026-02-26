@@ -111,12 +111,12 @@ public class EmbeddedServer {
             return "fast-lane-bridge";
         }
 
-        @Override
-        public org.springframework.beans.factory.config.ConfigurableListableBeanFactory getBeanFactory() {
-            // Jersey often calls this to see if the context is 'real'
-            LOG.info("Diagnostic: getBeanFactory() was probed by Jersey.");
-            return super.getBeanFactory();
-        }
+        // @Override
+        // public org.springframework.beans.factory.config.ConfigurableListableBeanFactory getBeanFactory() {
+        //     // Jersey often calls this to see if the context is 'real'
+        //     LOG.info("Diagnostic: getBeanFactory() was probed by Jersey.");
+        //     return super.getBeanFactory();
+        // }
 
         @Override
         public java.util.Map<String, Object> getBeansWithAnnotation(Class<? extends java.lang.annotation.Annotation> annotationType) {
