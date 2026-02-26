@@ -67,44 +67,29 @@ public class EmbeddedServer {
 
     private static class LazySpringContext extends org.springframework.web.context.support.GenericWebApplicationContext {
         private final org.eclipse.jetty.webapp.WebAppContext mainContext;
+        private org.springframework.web.context.WebApplicationContext delegate;
 
-        public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane, org.eclipse.jetty.webapp.WebAppContext main) {
+        public LazySpringContext(ServletContextHandler fastLane, WebAppContext main) {
             super(fastLane.getServletContext());
             this.mainContext = main;
         }
 
-        //hen Jersey calls this to see if the context is "ready", 
-        // trick it with true for aggresive loadinmg
-        @Override
-        public boolean isActive() {
-            return true; 
+        public void setDelegate(org.springframework.web.context.WebApplicationContext delegate) {
+            this.delegate = delegate;
         }
 
         @Override
         public <T> T getBean(Class<T> requiredType) throws org.springframework.beans.BeansException {
-            org.springframework.web.context.WebApplicationContext actual = getActualContext();
-            if (actual == null) {
-                // Instead of throwing an exception, we return null or 
-                // let the superclass handle it. This keeps init() alive.
-                LOG.warn("Fast-Lane requested bean {} before Main App was ready.", requiredType.getSimpleName());
-                return super.getBean(requiredType); 
-            }
-            return actual.getBean(requiredType);
+            return (delegate != null) ? delegate.getBean(requiredType) : super.getBean(requiredType);
         }
 
         @Override
         public Object getBean(String name) throws org.springframework.beans.BeansException {
-            org.springframework.web.context.WebApplicationContext actual = getActualContext();
-            if (actual == null) {
-                return super.getBean(name);
-            }
-            return actual.getBean(name);
+            return (delegate != null) ? delegate.getBean(name) : super.getBean(name);
         }
 
-        private org.springframework.web.context.WebApplicationContext getActualContext() {
-            return org.springframework.web.context.support.WebApplicationContextUtils
-                    .getWebApplicationContext(mainContext.getServletContext());
-        }
+        @Override
+        public boolean isActive() { return true; }
     }
 
     public EmbeddedServer(String host, int port, String path) throws IOException {
@@ -175,29 +160,28 @@ public class EmbeddedServer {
             Object existingAttr = fastLaneContext.getServletContext().getAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
             //if the temporary lazy context is replaced by spring context already return
-            if (existingAttr != null && existingAttr == springContext ) {
-                LOG.info("Fast lane context started already, returning now...");
-                return; 
+           if (existingAttr instanceof LazySpringContext) {
+                LOG.info("Filling Fast-Lane bridge with real Spring Context.");
+                ((LazySpringContext) existingAttr).setDelegate((org.springframework.web.context.WebApplicationContext) springContext);
+                
+                // FIX: Initialize the servlet even if the context is already started
+                try {
+                    v2Holder.getServletHandler().initialize();
+                    LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
+                } catch (Exception e) {
+                    LOG.error("Failed to initialize V2 Jersey Servlet", e);
+                }
             }
-            LOG.info("No root web app context. Replacing temporary proxy with the real Main App Spring Context. Setting up sync");
+            else
+            {
+                LOG.info("Fast lane context can't start as delegated spring context does not exist");
+            }
+            
+            //LOG.info("No root web app context. Replacing temporary proxy with the real Main App Spring Context. Setting up sync");
             // Sync ClassLoaders
            // fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
 
             // Sync Spring Context so @Inject works in EntityResourceV2       
-            fastLaneContext.getServletContext().setAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE, 
-                springContext);
-
-            if (!fastLaneContext.isStarted()) {
-                fastLaneContext.start();
-                //v2Holder.start();
-                v2Holder.getServletHandler().initialize();
-                LOG.info("V2 Fast-Lane is now ONLINE.");
-            }
-            else
-            {
-                LOG.info("Fast lane context hasn't started");
-            }
             
             LOG.info("V2 Optimization Path Linked and Synchronized.");
         } catch (Exception e) {
