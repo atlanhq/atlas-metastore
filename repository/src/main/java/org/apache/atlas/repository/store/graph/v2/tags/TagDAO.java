@@ -5,7 +5,6 @@ import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -57,6 +56,17 @@ public interface TagDAO {
     PaginatedVertexIdResult getVertexIdFromTagsByIdTableWithPagination(String pagingStateStr, int pageSize) throws AtlasBaseException;
 
     /**
+     * Returns only the classification type names for a vertex, without deserializing full classification JSON.
+     * This is a lightweight alternative to getAllClassificationsForVertex() when only names are needed.
+     *
+     * @param vertexId   The vertex ID to fetch classification names for
+     * @param propagated {@code null} for all, {@code true} for propagated only, {@code false} for direct only
+     * @return List of classification type names (excluding deleted)
+     * @throws AtlasBaseException If an error occurs during retrieval
+     */
+    List<String> getClassificationNamesForVertex(String vertexId, Boolean propagated) throws AtlasBaseException;
+
+    /**
      * Batch-fetches classifications for multiple vertices in parallel.
      * Returns a map of vertex ID to its classifications list.
      * Vertices with no tags will have an empty list in the result.
@@ -66,14 +76,6 @@ public interface TagDAO {
      * @return Map of vertex ID to list of classifications
      * @throws AtlasBaseException If an error occurs during retrieval
      */
-    default Map<String, List<AtlasClassification>> getAllClassificationsForVertices(Collection<String> vertexIds) throws AtlasBaseException {
-        Map<String, List<AtlasClassification>> result = new HashMap<>();
-        if (vertexIds != null) {
-            for (String vertexId : vertexIds) {
-                result.put(vertexId, getAllClassificationsForVertex(vertexId));
-            }
-        }
-        return result;
-    }
+    Map<String, List<AtlasClassification>> getAllClassificationsForVertices(Collection<String> vertexIds) throws AtlasBaseException;
 }
 
