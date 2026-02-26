@@ -4919,7 +4919,24 @@ public class EntityGraphMapper {
                     getTypeName(entityVertex), entityGuid, CLASSIFICATION_LABEL);
         }
 
+        // READ first - Get current tags BEFORE delete to avoid stale read after write
+        List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+        int preDeleteTagCount = currentTags.size();
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Read-before-write pattern: Retrieved {} tags before delete for entity: {}, classification: {}", 
+                    preDeleteTagCount, entityGuid, classificationName);
+        }
+
+        currentTags.removeIf(t -> t.getTypeName().equals(classificationName) && 
+                                                                  Objects.equals(t.getEntityGuid(), entityGuid));
+
+
         tagDAO.deleteDirectTag(entityVertex.getIdForDisplay(), currentClassification);
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("Deleted classification {} from Cassandra for entity: {}", classificationName, entityGuid);
+        }
 
         RequestContext reqContext = RequestContext.get();
         // Record cassandra tag operation in RequestContext
@@ -4932,10 +4949,21 @@ public class EntityGraphMapper {
                         currentTag.getAssetMetadata())
         );
 
-        List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
-
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
+        Map<String, Object> deNormAttrs = TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2);
+        deNormMap.put(entityVertex.getIdForDisplay(), deNormAttrs);
+        
+        if (LOG.isDebugEnabled()) {
+            List<String> remainingTraitNames = (List<String>) deNormAttrs.get(TRAIT_NAMES_PROPERTY_KEY);
+            LOG.debug("ES denormalization computed from in-memory tags: remaining direct tags={} for entity: {}", 
+                    remainingTraitNames != null ? remainingTraitNames.size() : 0, entityGuid);
+            
+            // Verify deleted tag is not in ES denorm attributes
+            if (remainingTraitNames != null && remainingTraitNames.contains(classificationName)) {
+                LOG.error("CONSISTENCY ERROR: Deleted tag {} still present in ES denorm attributes for entity {}. " +
+                        "This should not happen with read-before-write pattern.", classificationName, entityGuid);
+            }
+        }
 
         // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
@@ -4945,6 +4973,10 @@ public class EntityGraphMapper {
                         deNormMap
                 )
         );
+        
+        if (LOG.isDebugEnabled()) {
+            LOG.debug("ES deferred operation queued for tag delete: entity={}, classification={}", entityGuid, classificationName);
+        }
 
         updateModificationMetadata(entityVertex);
 
@@ -5695,12 +5727,19 @@ public class EntityGraphMapper {
 
                 List<AtlasEntity> entities = batchToDelete.stream().map(x->getEntityForNotification(x.getAssetMetadata())).toList();
 
+                Map<String, List<Tag>> vertexIdToTagsMap = new HashMap<>();
+                for (Tag tagToDelete : batchToDelete) {
+                    List<Tag> tags = tagDAO.getAllTagsByVertexId(tagToDelete.getVertexId());
+                    List<Tag> remainingTags = tags.stream().filter(x->!Objects.equals(x.getTagTypeName(), tagToDelete.getTagTypeName())).toList();
+                    vertexIdToTagsMap.put(tagToDelete.getVertexId(), remainingTags);
+                }
+
                 // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
 
                 // compute fresh classification‑text de‑norm attributes for this batch
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap);
+                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, vertexIdToTagsMap, deNormMap);
                 // push them to ES
                 if (MapUtils.isNotEmpty(deNormMap)) {
                     ESConnector.writeTagProperties(deNormMap);
@@ -6289,6 +6328,36 @@ public class EntityGraphMapper {
             for(Tag tagAttachment : propagatedTags) {
                 //get current associated tags to asset ONLY from Cassandra namespace
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
+
+                List<AtlasClassification> finalClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
+
+                tags = tags.stream().filter(Tag::isPropagated).toList();
+                List<AtlasClassification> propagatedClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
+
+                Map<String, Object> deNormAttributes;
+                if (CollectionUtils.isEmpty(finalClassifications)) {
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
+                } else {
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2);
+                }
+
+                deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
+            }
+        }
+        RequestContext.get().endMetricRecord(metricRecorder);
+    }
+
+    void updateClassificationTextV2(AtlasClassification currentTag,
+                                                 List<String> propagatedVertexIds,
+                                                 List<Tag> propagatedTags,
+                                                 Map<String, List<Tag>> preComputedTagsMap,
+                                                 Map<String, Map<String, Object>> deNormAttributesMap) throws AtlasBaseException {
+        AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
+
+        if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
+            for(Tag tagAttachment : propagatedTags) {
+                //use pre-computed tags instead of reading from Cassandra
+                List<Tag> tags = preComputedTagsMap.getOrDefault(tagAttachment.getVertexId(), Collections.emptyList());
 
                 List<AtlasClassification> finalClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
 
@@ -7009,14 +7078,24 @@ public class EntityGraphMapper {
 
     private void processDeletions_new(List<Tag> tagsToDelete, AtlasClassification sourceTag) throws AtlasBaseException {
         LOG.debug("Processing deletion of {} tags.", tagsToDelete.size());
-        tagDAO.deleteTags(tagsToDelete);
-
+        
         List<String> vertexIdsToDelete = tagsToDelete.stream()
                 .map(Tag::getVertexId)
                 .toList();
 
+        Map<String, List<Tag>> preComputedTagsMap = new HashMap<>();
+
+        Map<String, List<Tag>> vertexIdToTagsMap = new HashMap<>();
+        for (Tag tagToDelete : tagsToDelete) {
+            List<Tag> tags = tagDAO.getAllTagsByVertexId(tagToDelete.getVertexId());
+            List<Tag> remainingTags = tags.stream().filter(x->!Objects.equals(x.getTagTypeName(), tagToDelete.getTagTypeName())).toList();
+            vertexIdToTagsMap.put(tagToDelete.getVertexId(), remainingTags);
+        }
+
+        tagDAO.deleteTags(tagsToDelete);
+
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap);
+        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, preComputedTagsMap, deNormMap);
         if (MapUtils.isNotEmpty(deNormMap)) {
             ESConnector.writeTagProperties(deNormMap);
         }
