@@ -32,6 +32,9 @@ public class MigratorConfig {
     private final String targetCassandraUsername;
     private final String targetCassandraPassword;
 
+    // Source Elasticsearch (for copying mappings from JanusGraph index during migration)
+    private final String sourceEsIndex;
+
     // Target Elasticsearch
     private final String targetEsHostname;
     private final int    targetEsPort;
@@ -80,6 +83,9 @@ public class MigratorConfig {
         this.sourceCassandraUsername   = get("source.cassandra.username", "");
         this.sourceCassandraPassword   = get("source.cassandra.password", "");
         this.sourceEdgestoreTable      = get("source.cassandra.edgestore.table", "edgestore");
+
+        // Source ES (same cluster as target, just a different index name)
+        this.sourceEsIndex = get("source.elasticsearch.index", "janusgraph_vertex_index");
 
         // Target Cassandra
         this.targetCassandraHostname   = get("target.cassandra.hostname", "localhost");
@@ -144,6 +150,7 @@ public class MigratorConfig {
     public String getSourceCassandraUsername()    { return sourceCassandraUsername; }
     public String getSourceCassandraPassword()   { return sourceCassandraPassword; }
     public String getSourceEdgestoreTable()      { return sourceEdgestoreTable; }
+    public String getSourceEsIndex()             { return sourceEsIndex; }
 
     public String getTargetCassandraHostname()   { return targetCassandraHostname; }
     public int    getTargetCassandraPort()        { return targetCassandraPort; }

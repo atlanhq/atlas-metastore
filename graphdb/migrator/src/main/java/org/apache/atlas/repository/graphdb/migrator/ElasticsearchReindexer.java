@@ -174,20 +174,112 @@ public class ElasticsearchReindexer implements AutoCloseable {
                 return;
             }
         } catch (IOException e) {
-            // Index doesn't exist, create it
+            // Index doesn't exist, create it below
         }
 
-        // Create with empty body so the ES index template (atlan-template) applies
-        // its analyzers, normalizers, mappings, and settings automatically.
-        // IMPORTANT: The atlan-template must be applied BEFORE running the migrator.
-        // If no matching template exists, ES will create the index with defaults.
+        // Try to copy mappings + settings from the source JanusGraph index (migrated tenant).
+        // If the source index doesn't exist (fresh tenant), fall back to empty body
+        // so the ES index template (atlan-template) applies its defaults.
+        String sourceIndex = config.getSourceEsIndex();
+        String createBody = getCreateBodyFromSourceIndex(sourceIndex);
+
         try {
             Request createReq = new Request("PUT", "/" + esIndex);
-            createReq.setJsonEntity("{}");
+            createReq.setJsonEntity(createBody);
             esClient.performRequest(createReq);
-            LOG.info("Created ES index '{}' (settings from matching index template if available)", esIndex);
+
+            if ("{}".equals(createBody)) {
+                LOG.info("Created ES index '{}' (fresh tenant — settings from ES index template)", esIndex);
+            } else {
+                LOG.info("Created ES index '{}' with mappings+settings copied from source index '{}'",
+                         esIndex, sourceIndex);
+            }
         } catch (IOException e) {
             LOG.warn("Failed to create ES index '{}' (may already exist): {}", esIndex, e.getMessage());
+        }
+    }
+
+    /**
+     * Reads mappings and settings from the source JanusGraph ES index and returns
+     * a JSON body suitable for PUT /{index} to create the target index with
+     * identical field mappings and analyzer settings.
+     *
+     * Returns "{}" if the source index doesn't exist or can't be read.
+     */
+    private String getCreateBodyFromSourceIndex(String sourceIndex) {
+        if (sourceIndex == null || sourceIndex.isEmpty()) {
+            return "{}";
+        }
+
+        try {
+            // Check if source index exists
+            Response headResp = esClient.performRequest(new Request("HEAD", "/" + sourceIndex));
+            if (headResp.getStatusLine().getStatusCode() != 200) {
+                LOG.info("Source ES index '{}' does not exist (fresh tenant), using template defaults", sourceIndex);
+                return "{}";
+            }
+        } catch (IOException e) {
+            LOG.info("Source ES index '{}' not found (fresh tenant), using template defaults", sourceIndex);
+            return "{}";
+        }
+
+        try {
+            // Read mappings from source index
+            String mappingsJson = "{}";
+            Response mappingResp = esClient.performRequest(new Request("GET", "/" + sourceIndex + "/_mapping"));
+            if (mappingResp.getStatusLine().getStatusCode() == 200) {
+                String body = EntityUtils.toString(mappingResp.getEntity());
+                Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+                // Response: { "indexName": { "mappings": { ... } } }
+                Map<String, Object> indexData = (Map<String, Object>) parsed.values().iterator().next();
+                Object mappings = indexData.get("mappings");
+                if (mappings != null) {
+                    mappingsJson = MAPPER.writeValueAsString(mappings);
+                }
+            }
+
+            // Read settings from source index (only the user-defined settings, not ES internals)
+            String settingsJson = null;
+            Response settingsResp = esClient.performRequest(new Request("GET", "/" + sourceIndex + "/_settings"));
+            if (settingsResp.getStatusLine().getStatusCode() == 200) {
+                String body = EntityUtils.toString(settingsResp.getEntity());
+                Map<String, Object> parsed = MAPPER.readValue(body, Map.class);
+                // Response: { "indexName": { "settings": { "index": { ... } } } }
+                Map<String, Object> indexData = (Map<String, Object>) parsed.values().iterator().next();
+                Map<String, Object> settings = (Map<String, Object>) indexData.get("settings");
+                if (settings != null) {
+                    Map<String, Object> indexSettings = (Map<String, Object>) settings.get("index");
+                    if (indexSettings != null) {
+                        // Remove read-only / auto-generated settings that can't be set on creation
+                        indexSettings.remove("creation_date");
+                        indexSettings.remove("provided_name");
+                        indexSettings.remove("uuid");
+                        indexSettings.remove("version");
+                        indexSettings.remove("routing");
+                        indexSettings.remove("history");
+                        settingsJson = MAPPER.writeValueAsString(Map.of("index", indexSettings));
+                    }
+                }
+            }
+
+            // Build the create index body with both mappings and settings
+            StringBuilder createBody = new StringBuilder("{");
+            if (settingsJson != null) {
+                createBody.append("\"settings\":").append(settingsJson);
+            }
+            if (!"{}".equals(mappingsJson)) {
+                if (settingsJson != null) createBody.append(",");
+                createBody.append("\"mappings\":").append(mappingsJson);
+            }
+            createBody.append("}");
+
+            LOG.info("Copied mappings+settings from source index '{}' for target index creation", sourceIndex);
+            return createBody.toString();
+
+        } catch (Exception e) {
+            LOG.warn("Failed to read mappings/settings from source index '{}', falling back to template defaults: {}",
+                     sourceIndex, e.getMessage());
+            return "{}";
         }
     }
 
