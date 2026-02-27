@@ -194,8 +194,15 @@ public class TagDeNormAttributesUtil {
 
             deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, finalTagNames.toString());
         } else {
-            deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.singletonList(propagatedTag.getTypeName()));
-            deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER + propagatedTag.getTypeName());
+            // MS-655: The else branch is only reachable from the DELETE propagation path
+            // (EntityGraphMapper.updateClassificationTextV2). In the ADD path, the newly added
+            // tag is always appended to finalPropagatedTags before this call (EntityGraphMapper:6248),
+            // so propTraits is never empty there. Writing propagatedTag here is wrong for DELETE
+            // because it writes the deleted tag name back into ES.
+            // TODO: Refactor this method to remove the propagatedTag parameter entirely and
+            //  always derive output from finalPropagatedTags alone.
+            deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, Collections.emptyList());
+            deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, CLASSIFICATION_NAME_DELIMITER);
         }
     }
 
