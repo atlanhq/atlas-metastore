@@ -464,7 +464,11 @@ public class EmbeddedServer {
                           "com.sun.jersey.api.core.ClassNamesResourceConfig");
         
         //Register classloader for resource loalding from main
-        v2Holder.setInitParameter("com.sun.jersey.config.property.classloader", "true");
+        // v2Holder.setInitParameter("com.sun.jersey.config.property.classloader", "true");
+        // Explicitly tell Jersey NOT to scan any packages
+        v2Holder.setInitParameter("com.sun.jersey.config.property.packages", "");
+        // Disable WADL generation (which often triggers an internal scan)
+        v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWadl", "true");
         // Only register what exists in Atlas built JARs
         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             "org.apache.atlas.web.resources.AdminResource;" +
@@ -513,6 +517,15 @@ public class EmbeddedServer {
         Object mainSpringContext = null;
         // This will start both contexts in the correct order
         try {
+
+            // Iterate through the main app's servlets and disable scanning for its Jersey instances
+            for (org.eclipse.jetty.servlet.ServletHolder holder : mainAppContext.getServletHandler().getServlets()) {
+                if (holder.getClassName() != null && holder.getClassName().contains("SpringServlet")) {
+                    LOG.info("Applying Java 17 compatibility fix to Main App Servlet: " + holder.getName());
+                    holder.setInitParameter("com.sun.jersey.config.feature.DisableWadl", "true");
+                    // This is to prevent any "IllegalArgumentException" during main app startup
+                }
+            }
 
             server.start(); 
             LOG.info("Server started. Main initialization and Context handlers sync block ");
