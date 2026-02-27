@@ -563,7 +563,7 @@ public class EmbeddedServer {
                             }
                             if (fastLaneContext instanceof LazySpringContext) {
                                 ((LazySpringContext) fastLaneContext).setDelegate((org.springframework.context.ApplicationContext) realMainSpringContext);
-                                LOG.info("setDelegate called with correct main spring context\."); 
+                                LOG.info("setDelegate called with correct main spring context."); 
                             }
                             else
                             {
