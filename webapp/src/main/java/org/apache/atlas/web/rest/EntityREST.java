@@ -1146,20 +1146,20 @@ public class EntityREST {
     private void scrubAndSetEntityAudits(EntityAuditSearchResult result, boolean suppressLogs, Set<String> attributes, boolean isCsaExportAgent) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("scrubEntityAudits");
         if (!isCsaExportAgent) { // avoid enriching asset attributes for csa adoption export workloads
-            Map<String, AtlasEntityWithExtInfo> entityCache = new HashMap<>();
+            Map<String, AtlasEntityHeader> entityHeaderCache = new HashMap<>();
 
             for (EntityAuditEventV2 event : result.getEntityAudits()) {
                 try {
                     String entityId = event.getEntityId();
-                    AtlasEntityWithExtInfo entityWithExtInfo = entityCache.get(entityId);
+                    AtlasEntityHeader cachedHeader = entityHeaderCache.get(entityId);
 
-                    if (entityWithExtInfo == null) {
-                        entityWithExtInfo = entitiesStore.getByIdWithoutAuthorization(entityId);
-                        entityCache.put(entityId, entityWithExtInfo);
+                    if (cachedHeader == null) {
+                        cachedHeader = entitiesStore.getAtlasEntityHeaderWithoutAuthorization(entityId, null, null);
+                        entityHeaderCache.put(entityId, cachedHeader);
                     }
 
                     AtlasSearchResult ret = new AtlasSearchResult();
-                    AtlasEntityHeader entityHeader = new AtlasEntityHeader(entityWithExtInfo.getEntity());
+                    AtlasEntityHeader entityHeader = new AtlasEntityHeader(cachedHeader);
                     ret.addEntity(entityHeader);
                     AtlasSearchResultScrubRequest request = new AtlasSearchResultScrubRequest(typeRegistry, ret);
                     AtlasAuthorizationUtils.scrubSearchResults(request, suppressLogs);
