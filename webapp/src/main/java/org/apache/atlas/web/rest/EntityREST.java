@@ -1159,7 +1159,7 @@ public class EntityREST {
 
             for (int i = 0; i < uniqueEntityIds.size(); i += AUDIT_ENTITY_HEADER_BATCH_SIZE) {
                 List<String> batch = uniqueEntityIds.subList(i, Math.min(i + AUDIT_ENTITY_HEADER_BATCH_SIZE, uniqueEntityIds.size()));
-                entityHeaderCache.putAll(entitiesStore.getEntityHeadersByIdsWithoutAuthorization(batch));
+                entityHeaderCache.putAll(entitiesStore.getEntityHeadersByIdsWithoutAuthorization(batch, attributes));
             }
 
             // Phase 2: Batch-scrub all found entity headers in a single authorization call

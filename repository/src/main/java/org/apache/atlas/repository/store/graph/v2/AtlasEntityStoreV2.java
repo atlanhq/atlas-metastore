@@ -409,12 +409,14 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     @Override
     @GraphTransaction
-    public Map<String, AtlasEntityHeader> getEntityHeadersByIdsWithoutAuthorization(List<String> guids) throws AtlasBaseException {
+    public Map<String, AtlasEntityHeader> getEntityHeadersByIdsWithoutAuthorization(List<String> guids, Set<String> attributes) throws AtlasBaseException {
         Map<String, AtlasEntityHeader> ret = new HashMap<>();
+        Set<String> fetchAttributes = attributes != null ? attributes : Collections.emptySet();
 
         for (String guid : guids) {
             try {
-                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(guid);
+                AtlasVertex vertex = entityRetriever.getEntityVertex(guid);
+                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, fetchAttributes);
                 if (header != null) {
                     ret.put(guid, header);
                 }
