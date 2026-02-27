@@ -159,8 +159,12 @@ public class VertexRepository {
                 // or "Referenceable.qualifiedName" — Atlas expects just "certificateUpdatedAt"
                 // and "qualifiedName".
                 for (Map.Entry<String, Object> entry : rawProps.entrySet()) {
-                    String key = normalizePropertyName(entry.getKey());
-                    props.put(key, entry.getValue());
+                    String key = entry.getKey();
+                    if (key == null) {
+                        LOG.warn("rowToVertex: null property key in vertex_id={}, skipping", vertexId);
+                        continue;
+                    }
+                    props.put(normalizePropertyName(key), entry.getValue());
                 }
             } else {
                 LOG.warn("rowToVertex: AtlasType.fromJson returned null for vertex_id={}. propsJson length={}",
@@ -179,6 +183,9 @@ public class VertexRepository {
         return vertex;
     }
 
+    /** Cache for normalized property names — same input always gives same output. */
+    private static final ConcurrentHashMap<String, String> PROPERTY_NAME_CACHE = new ConcurrentHashMap<>();
+
     /**
      * Normalize JanusGraph property key names to Atlas attribute names.
      * JanusGraph stores some properties with type-qualified names:
@@ -189,13 +196,17 @@ public class VertexRepository {
      * properties (e.g., "__guid", "__typeName", "__type.atlas_operation").
      * The "__type." prefix is used by Atlas's TypeDef system (PROPERTY_PREFIX = "__type.")
      * and must be preserved.
+     *
+     * Results are cached because this pure function is called for every property on
+     * every vertex read (100 vertices × 50 properties = 5000 calls with identical inputs).
      */
     static String normalizePropertyName(String name) {
         if (name == null) return null;
+        return PROPERTY_NAME_CACHE.computeIfAbsent(name, VertexRepository::doNormalizePropertyName);
+    }
 
+    private static String doNormalizePropertyName(String name) {
         // Properties starting with "__" are Atlas internal — never normalize.
-        // This includes: __guid, __typeName, __state, __type, __type_name,
-        // __type.atlas_operation, __type.atlas_operation.CREATE, etc.
         if (name.startsWith("__")) {
             return name;
         }
@@ -204,7 +215,7 @@ public class VertexRepository {
         // strip the type prefix to get just the attribute name.
         int dotIndex = name.indexOf('.');
         if (dotIndex > 0 && dotIndex < name.length() - 1) {
-            name = name.substring(dotIndex + 1);
+            return name.substring(dotIndex + 1);
         }
 
         return name;

@@ -443,40 +443,38 @@ public class EdgeRepository {
 
     private void collectOutEdgePages(AsyncResultSet rs, String vertexId,
                                       List<CassandraEdge> edges, CassandraGraph graph) {
-        while (rs != null) {
-            for (Row row : rs.currentPage()) {
-                String state = row.getString("state");
-                if (!"DELETED".equals(state)) {
-                    String edgeId     = row.getString("edge_id");
-                    String label      = row.getString("edge_label");
-                    String inVertexId = row.getString("in_vertex_id");
-                    String propsJson  = row.getString("properties");
-                    Map<String, Object> props = parseProperties(propsJson);
-                    props.put("__state", state != null ? state : "ACTIVE");
-                    edges.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
-                }
-            }
-            if (rs.hasMorePages()) {
-                rs = rs.fetchNextPage().toCompletableFuture().join();
-            } else {
-                break;
-            }
-        }
+        collectEdgePages(rs, vertexId, true, edges, graph);
     }
 
     private void collectInEdgePages(AsyncResultSet rs, String vertexId,
                                      List<CassandraEdge> edges, CassandraGraph graph) {
+        collectEdgePages(rs, vertexId, false, edges, graph);
+    }
+
+    /**
+     * Collects edge rows from a paginated async result set.
+     *
+     * @param isOutEdge true for OUT edges (reads in_vertex_id), false for IN edges (reads out_vertex_id)
+     */
+    private void collectEdgePages(AsyncResultSet rs, String vertexId, boolean isOutEdge,
+                                   List<CassandraEdge> edges, CassandraGraph graph) {
+        // OUT edge rows have in_vertex_id; IN edge rows have out_vertex_id
+        String remoteVertexColumn = isOutEdge ? "in_vertex_id" : "out_vertex_id";
+
         while (rs != null) {
             for (Row row : rs.currentPage()) {
                 String state = row.getString("state");
                 if (!"DELETED".equals(state)) {
-                    String edgeId      = row.getString("edge_id");
-                    String label       = row.getString("edge_label");
-                    String outVertexId = row.getString("out_vertex_id");
-                    String propsJson   = row.getString("properties");
+                    String edgeId         = row.getString("edge_id");
+                    String label          = row.getString("edge_label");
+                    String remoteVertexId = row.getString(remoteVertexColumn);
+                    String propsJson      = row.getString("properties");
                     Map<String, Object> props = parseProperties(propsJson);
                     props.put("__state", state != null ? state : "ACTIVE");
-                    edges.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
+
+                    String outVertexId = isOutEdge ? vertexId : remoteVertexId;
+                    String inVertexId  = isOutEdge ? remoteVertexId : vertexId;
+                    edges.add(new CassandraEdge(edgeId, outVertexId, inVertexId, label, props, graph));
                 }
             }
             if (rs.hasMorePages()) {

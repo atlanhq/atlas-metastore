@@ -295,6 +295,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     public AtlasEdge<CassandraVertex, CassandraEdge> addEdge(AtlasVertex<CassandraVertex, CassandraEdge> outVertex,
                                                                AtlasVertex<CassandraVertex, CassandraEdge> inVertex,
                                                                String label) {
+        if (label == null || label.isEmpty()) {
+            throw new IllegalArgumentException("Edge label cannot be null or empty");
+        }
         String edgeId = UUID.randomUUID().toString();
         CassandraEdge edge = new CassandraEdge(edgeId,
                 ((CassandraVertex) outVertex).getIdString(),
