@@ -1002,19 +1002,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     /**
      * Filters vertex properties before sending to Elasticsearch.
      *
-     * Three layers of filtering are applied to match JanusGraph's mixed index behavior:
+     * Two layers of filtering:
      *
-     * 1. Property name eligibility (whitelist):
-     *    If the vertex mixed index has been initialized (via GraphBackedSearchIndexer →
-     *    CassandraGraphManagement.addMixedIndex()), only properties registered in that
-     *    index are included. This mirrors JanusGraph's mixed index behavior.
-     *
-     * 2. Property name exclusion (blacklist, fallback when whitelist unavailable):
+     * 1. Property name blacklist:
      *    - __type_* (typedef metadata — ~2500+ unique fields)
      *    - __type.* (typedef attribute metadata with dot notation)
      *    - endDef1, endDef2, relationshipCategory, relationshipLabel, tagPropagation
      *
-     * 3. Value type exclusion (matches JanusGraph's isIndexApplicable):
+     * 2. Value type exclusion (matches JanusGraph's isIndexApplicable):
      *    - Map values: map-type attributes stored via setProperty(key, HashMap) —
      *      JanusGraph deliberately does NOT register these in the mixed index
      *    - BigDecimal/BigInteger: excluded by JanusGraph's INDEX_EXCLUSION_CLASSES
@@ -1025,34 +1020,26 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      */
     private Map<String, Object> filterPropertiesForES(Map<String, Object> props) {
         Map<String, Object> filtered = new LinkedHashMap<>(props.size());
-        Set<String> eligible = getESEligiblePropertyNames(); // from in-memory graph index registry
 
         for (Map.Entry<String, Object> entry : props.entrySet()) {
             String key = entry.getKey();
             Object value = entry.getValue();
 
-            // --- Layer 1: Property name whitelist (if available) ---
-            if (eligible != null) {
-                if (!eligible.contains(key)) {
-                    continue;
-                }
-            } else {
-                // --- Layer 2: Property name blacklist (fallback) ---
+            // --- Property name blacklist ---
 
-                // Skip typedef attribute metadata — these create ~2500+ fields in ES
-                if (key.startsWith("__type_") || key.startsWith("__type.")) {
-                    continue;
-                }
-
-                // Skip relationship typedef properties
-                if (key.equals("endDef1") || key.equals("endDef2") ||
-                    key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
-                    key.equals("tagPropagation")) {
-                    continue;
-                }
+            // Skip typedef attribute metadata — these create ~2500+ fields in ES
+            if (key.startsWith("__type_") || key.startsWith("__type.")) {
+                continue;
             }
 
-            // --- Layer 3: Value type exclusion (always applied) ---
+            // Skip relationship typedef properties
+            if (key.equals("endDef1") || key.equals("endDef2") ||
+                key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
+                key.equals("tagPropagation")) {
+                continue;
+            }
+
+            // --- Value type exclusion ---
 
             // Skip Map values — map-type attributes that JanusGraph doesn't index.
             // These are stored via setProperty(key, new HashMap<>(..)) in EntityGraphMapper.mapMapValue().
@@ -1332,6 +1319,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     Set<String> getESEligiblePropertyNames() {
         CassandraGraphIndex vertexIndex = graphIndexes.get(Constants.VERTEX_INDEX);
         if (vertexIndex == null) {
+            LOG.info("getESEligiblePropertyNames: vertex index not found in graphIndexes map (keys={})", graphIndexes.keySet());
             return null;
         }
 
@@ -1347,10 +1335,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             cachedESEligibleProperties = Collections.unmodifiableSet(names);
             cachedESEligibleFieldCount = currentCount;
 
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Rebuilt ES eligible properties cache: {} properties registered in vertex index",
-                        currentCount);
-            }
+            LOG.info("Rebuilt ES eligible properties cache: {} properties registered in vertex index. Contains qualifiedName={}, name={}, sample={}",
+                    currentCount, names.contains("qualifiedName"), names.contains("name"),
+                    names.stream().limit(20).collect(Collectors.joining(", ")));
         }
 
         return cachedESEligibleProperties;
