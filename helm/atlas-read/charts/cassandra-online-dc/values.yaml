@@ -171,6 +171,21 @@ resources:
     memory: 5Gi
     cpu: 3000m
 
+vpa:
+  enabled: false
+  updateMode: "Off"
+  # minReplicas is always computed as (config.cluster_size - 1), floored at 2.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsOnly"
+  minAllowed:
+    cpu: "800m"
+    memory: "5Gi"
+  maxAllowed:
+    cpu: "3000m"
+    memory: "10Gi"
+
 # Persistence changes for cassandra
 persistence:
   enabled: true
