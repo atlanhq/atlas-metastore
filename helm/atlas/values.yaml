@@ -49,7 +49,54 @@ vpa:
   enabled: true
   updateMode: "Off"
   recommender:
-    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+    # name: identifier used both by VPA objects (spec.recommenders[].name) and the recommender's
+    # --recommender-name flag. Must be non-empty when enabled: true.
+    name: ""  # e.g. "atlas-metastore-recommender"
+
+    # enabled: deploy the custom recommender Deployment + RBAC into this namespace.
+    # Requires vpa.recommender.name to be set.
+    enabled: false
+
+    replicaCount: 1
+
+    image:
+      repository: registry.k8s.io/autoscaling/vpa-recommender
+      tag: "1.2.0"
+      pullPolicy: IfNotPresent
+
+    resources:
+      requests:
+        cpu: 50m
+        memory: 500Mi
+      limits:
+        cpu: 200m
+        memory: 1000Mi
+
+    # Extra CLI flags passed to the recommender binary (key: value).
+    # Example:
+    #   recommender-interval: "1m"
+    #   memory-saver: "true"
+    extraArgs: {}
+
+    podAnnotations: {}
+    annotations: {}
+    priorityClassName: ""
+
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+      readOnlyRootFilesystem: true
+
+    nodeSelector: {}
+    tolerations: []
+    affinity: {}
+
   # minReplicas is always computed as (atlas.replicaCount - 1), floored at 1.
   controlledResources:
     - cpu
