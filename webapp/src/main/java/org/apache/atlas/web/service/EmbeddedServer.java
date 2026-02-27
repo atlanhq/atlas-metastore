@@ -503,9 +503,10 @@ public class EmbeddedServer {
         try {
 
             server.start(); 
+            LOG.info("Server started. Main initialization and Context handlers sync block ");
             int attempts = 0;
             //Explicitly sleep for full initialization main
-            Thread.sleep(2000); 
+            //Thread.sleep(2000); 
             while (mainSpringContext == null && attempts < 10) {
                 mainSpringContext = mainAppContext.getServletContext().getAttribute(
                     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
@@ -562,11 +563,12 @@ public class EmbeddedServer {
                                     fastLaneContext.getClass().getName());
                             }
 
-                            LOG.warn("Fast lane context parent priority set. fastLaneContext type is: {} . Ready to call start on v2Holder", 
+                            LOG.info("Fast lane context parent priority set. fastLaneContext type is: {} . Ready to call start on v2Holder", 
                                     fastLaneContext.getClass().getName());
                          
                                             
                             v2Holder.start();
+
                             bridge.markSynchronized();
                             LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
                         }
