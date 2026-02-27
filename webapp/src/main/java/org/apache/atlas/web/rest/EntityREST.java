@@ -97,7 +97,7 @@ public class EntityREST {
     public static final String PREFIX_ATTR_ = "attr_";
     private static final int HUNDRED_THOUSAND = 100000;
     private static final int TWO_MILLION = HUNDRED_THOUSAND * 10 * 2;
-    private static final int AUDIT_ENTITY_HEADER_BATCH_SIZE = 50;
+    private static final int AUDIT_ENTITY_HEADER_BATCH_SIZE = 500;
     private static  final int  ENTITIES_ALLOWED_IN_BULK = AtlasConfiguration.ATLAS_BULK_API_MAX_ENTITIES_ALLOWED.getInt();
     private static final Set<String> ATTRS_WITH_TWO_MILLION_LIMIT = Arrays.stream(AtlasConfiguration.ATLAS_ENTITIES_ATTRIBUTE_ALLOWED_LARGE_ATTRIBUTES
             .getStringArray())
