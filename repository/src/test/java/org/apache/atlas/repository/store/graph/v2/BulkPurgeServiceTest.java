@@ -37,6 +37,8 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.service.redis.RedisService;
+import org.apache.atlas.tasks.TaskManagement;
+import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.apache.http.HttpEntity;
 import org.elasticsearch.client.Request;
@@ -79,6 +81,7 @@ class BulkPurgeServiceTest {
     @Mock private RedisService     mockRedisService;
     @Mock private EntityAuditRepository mockAuditRepository;
     @Mock private AtlasDistributedTaskNotificationSender mockTaskNotificationSender;
+    @Mock private TaskManagement   mockTaskManagement;
     @Mock private AtlasVertex      mockConnectionVertex;
     @Mock private RestClient       mockEsClient;
 
@@ -95,7 +98,7 @@ class BulkPurgeServiceTest {
         when(mockGraphProvider.getBulkLoading()).thenReturn(mockBulkLoadingGraph);
 
         bulkPurgeService = new BulkPurgeService(
-                mockGraph, mockGraphProvider, mockRedisService, Set.of(mockAuditRepository), mockTaskNotificationSender);
+                mockGraph, mockGraphProvider, mockRedisService, Set.of(mockAuditRepository), mockTaskNotificationSender, mockTaskManagement);
 
         // Inject the mock ES client directly — avoids thread-scoped MockedStatic issues
         bulkPurgeService.setEsClient(mockEsClient);
@@ -959,6 +962,279 @@ class BulkPurgeServiceTest {
                 .setProperty(eq(org.apache.atlas.type.Constants.HAS_LINEAGE), eq(false));
 
         bulkPurgeService.setTagV2Override(null);
+    }
+
+    // ======================== Relay Propagation + classificationText Tests ========================
+
+    @Test
+    void testTriggerRelayPropagationRefresh_skippedWhenNoExternalVertices() throws Exception {
+        BulkPurgeService.PurgeContext ctx = new BulkPurgeService.PurgeContext(
+                "req-norelay", "key", "CONNECTION", "admin", "{}", false, 0);
+        ctx.isTagV2 = true;
+
+        // No external lineage vertices — method should do nothing
+        assertTrue(ctx.externalLineageVertexIds.isEmpty());
+        // No exception = success
+    }
+
+    @Test
+    void testTriggerRelayPropagationRefresh_V2_createsTasksForAliveSource() throws Exception {
+        mockedGraphUtils.when(() -> AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(
+                eq(mockGraph), eq(Constants.CONNECTION_ENTITY_TYPE),
+                eq(Constants.QUALIFIED_NAME), eq(TEST_CONNECTION_QN)))
+                .thenReturn(mockConnectionVertex);
+
+        when(mockRedisService.getValue(anyString())).thenReturn(null);
+        when(mockRedisService.putValue(anyString(), anyString(), anyInt())).thenReturn("OK");
+        when(mockRedisService.acquireDistributedLock(anyString())).thenReturn(true);
+
+        bulkPurgeService.setTagV2Override(true);
+
+        // Inject mock TagDAO via override (avoids MockedStatic thread-scope issue)
+        TagDAO mockTagDAO = mock(TagDAO.class);
+        bulkPurgeService.setTagDAOOverride(mockTagDAO);
+
+        String esId = LongEncoding.encode(5001L);
+        setupFullEsMock(1, Arrays.asList(esId));
+
+        AtlasVertex processVertex = mock(AtlasVertex.class);
+        AtlasVertex externalVertex = mock(AtlasVertex.class);
+        AtlasVertex sourceVertex = mock(AtlasVertex.class);
+        AtlasEdge lineageEdge = mock(AtlasEdge.class);
+
+        when(processVertex.getId()).thenReturn("5001");
+        when(processVertex.getProperty(org.apache.atlas.type.Constants.HAS_LINEAGE, Boolean.class)).thenReturn(true);
+        when(processVertex.getMultiValuedProperty(eq(Constants.TRAIT_NAMES_PROPERTY_KEY), eq(String.class)))
+                .thenReturn(Collections.emptyList());
+
+        when(mockBulkLoadingGraph.getVertices(any(String[].class)))
+                .thenReturn(new HashSet<>(Collections.singletonList(processVertex)));
+
+        // Lineage edge to external vertex
+        when(processVertex.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.singletonList(lineageEdge));
+        when(lineageEdge.getInVertex()).thenReturn(processVertex);
+        when(lineageEdge.getOutVertex()).thenReturn(externalVertex);
+        when(externalVertex.getId()).thenReturn("ext-relay-v2");
+        when(externalVertex.getProperty(Constants.CONNECTION_QUALIFIED_NAME, String.class))
+                .thenReturn("other/connection/relay");
+
+        when(mockGraph.getVertex("ext-relay-v2")).thenReturn(externalVertex);
+
+        // External vertex has a propagated tag from alive source
+        Tag relayTag = mock(Tag.class);
+        when(relayTag.isPropagated()).thenReturn(true);
+        when(relayTag.getSourceVertexId()).thenReturn("source-vertex-100");
+        when(relayTag.getTagTypeName()).thenReturn("PII");
+
+        when(mockTagDAO.getAllTagsByVertexId("ext-relay-v2"))
+                .thenReturn(Collections.singletonList(relayTag));
+
+        // Source vertex still exists (relay case) and has a GUID
+        when(mockGraph.getVertex("source-vertex-100")).thenReturn(sourceVertex);
+        when(sourceVertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class))
+                .thenReturn("source-guid-100");
+
+        AtlasTask mockTask = mock(AtlasTask.class);
+        when(mockTaskManagement.createTaskV2(anyString(), anyString(), anyMap(), anyString(), anyString()))
+                .thenReturn(mockTask);
+
+        // hasLineage repair
+        when(externalVertex.getProperty(org.apache.atlas.type.Constants.HAS_LINEAGE, Boolean.class))
+                .thenReturn(true);
+        when(externalVertex.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.emptyList());
+
+        // V1 classification edges (not used in V2 path)
+        when(externalVertex.getEdges(eq(AtlasEdgeDirection.OUT), eq(Constants.CLASSIFICATION_LABEL)))
+                .thenReturn(Collections.emptyList());
+
+        String requestId = bulkPurgeService.bulkPurgeByConnection(TEST_CONNECTION_QN, "admin", false);
+
+        // Verify CLASSIFICATION_REFRESH_PROPAGATION task was created
+        verify(mockTaskManagement, timeout(5000).atLeastOnce()).createTaskV2(
+                eq("CLASSIFICATION_REFRESH_PROPAGATION"),
+                eq("admin"),
+                argThat(params -> "source-guid-100".equals(params.get("entityGuid"))
+                        && "PII".equals(params.get("classificationName"))),
+                eq("PII"),
+                eq("source-guid-100")
+        );
+
+        bulkPurgeService.setTagV2Override(null);
+        bulkPurgeService.setTagDAOOverride(null);
+    }
+
+    @Test
+    void testTriggerRelayPropagationRefresh_V2_deduplicatesSameSource() throws Exception {
+        mockedGraphUtils.when(() -> AtlasGraphUtilsV2.findByTypeAndUniquePropertyName(
+                eq(mockGraph), eq(Constants.CONNECTION_ENTITY_TYPE),
+                eq(Constants.QUALIFIED_NAME), eq(TEST_CONNECTION_QN)))
+                .thenReturn(mockConnectionVertex);
+
+        when(mockRedisService.getValue(anyString())).thenReturn(null);
+        when(mockRedisService.putValue(anyString(), anyString(), anyInt())).thenReturn("OK");
+        when(mockRedisService.acquireDistributedLock(anyString())).thenReturn(true);
+
+        bulkPurgeService.setTagV2Override(true);
+
+        TagDAO mockTagDAO = mock(TagDAO.class);
+        bulkPurgeService.setTagDAOOverride(mockTagDAO);
+
+        String esId1 = LongEncoding.encode(6001L);
+        String esId2 = LongEncoding.encode(6002L);
+        setupFullEsMock(2, Arrays.asList(esId1, esId2));
+
+        AtlasVertex process1 = mock(AtlasVertex.class);
+        AtlasVertex process2 = mock(AtlasVertex.class);
+        AtlasVertex extVertex1 = mock(AtlasVertex.class);
+        AtlasVertex extVertex2 = mock(AtlasVertex.class);
+        AtlasVertex sourceVertex = mock(AtlasVertex.class);
+        AtlasEdge edge1 = mock(AtlasEdge.class);
+        AtlasEdge edge2 = mock(AtlasEdge.class);
+
+        when(process1.getId()).thenReturn("6001");
+        when(process2.getId()).thenReturn("6002");
+        when(process1.getProperty(org.apache.atlas.type.Constants.HAS_LINEAGE, Boolean.class)).thenReturn(true);
+        when(process2.getProperty(org.apache.atlas.type.Constants.HAS_LINEAGE, Boolean.class)).thenReturn(true);
+        when(process1.getMultiValuedProperty(eq(Constants.TRAIT_NAMES_PROPERTY_KEY), eq(String.class)))
+                .thenReturn(Collections.emptyList());
+        when(process2.getMultiValuedProperty(eq(Constants.TRAIT_NAMES_PROPERTY_KEY), eq(String.class)))
+                .thenReturn(Collections.emptyList());
+
+        when(mockBulkLoadingGraph.getVertices(any(String[].class)))
+                .thenReturn(new HashSet<>(Arrays.asList(process1, process2)));
+
+        when(process1.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.singletonList(edge1));
+        when(process2.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class)))
+                .thenReturn(Collections.singletonList(edge2));
+
+        when(edge1.getInVertex()).thenReturn(process1);
+        when(edge1.getOutVertex()).thenReturn(extVertex1);
+        when(edge2.getInVertex()).thenReturn(process2);
+        when(edge2.getOutVertex()).thenReturn(extVertex2);
+
+        when(extVertex1.getId()).thenReturn("ext-dedup-1");
+        when(extVertex2.getId()).thenReturn("ext-dedup-2");
+        when(extVertex1.getProperty(Constants.CONNECTION_QUALIFIED_NAME, String.class)).thenReturn("other/conn/dedup");
+        when(extVertex2.getProperty(Constants.CONNECTION_QUALIFIED_NAME, String.class)).thenReturn("other/conn/dedup");
+
+        when(mockGraph.getVertex("ext-dedup-1")).thenReturn(extVertex1);
+        when(mockGraph.getVertex("ext-dedup-2")).thenReturn(extVertex2);
+
+        // hasLineage repair
+        when(extVertex1.getProperty(org.apache.atlas.type.Constants.HAS_LINEAGE, Boolean.class)).thenReturn(true);
+        when(extVertex2.getProperty(org.apache.atlas.type.Constants.HAS_LINEAGE, Boolean.class)).thenReturn(true);
+        when(extVertex1.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class))).thenReturn(Collections.emptyList());
+        when(extVertex2.getEdges(eq(AtlasEdgeDirection.BOTH), any(String[].class))).thenReturn(Collections.emptyList());
+
+        // Both vertices have propagated tag from SAME source
+        Tag tag1 = mock(Tag.class);
+        when(tag1.isPropagated()).thenReturn(true);
+        when(tag1.getSourceVertexId()).thenReturn("same-source-vertex");
+        when(tag1.getTagTypeName()).thenReturn("Confidential");
+
+        Tag tag2 = mock(Tag.class);
+        when(tag2.isPropagated()).thenReturn(true);
+        when(tag2.getSourceVertexId()).thenReturn("same-source-vertex");
+        when(tag2.getTagTypeName()).thenReturn("Confidential");
+
+        when(mockTagDAO.getAllTagsByVertexId("ext-dedup-1")).thenReturn(Collections.singletonList(tag1));
+        when(mockTagDAO.getAllTagsByVertexId("ext-dedup-2")).thenReturn(Collections.singletonList(tag2));
+
+        when(mockGraph.getVertex("same-source-vertex")).thenReturn(sourceVertex);
+        when(sourceVertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class)).thenReturn("same-source-guid");
+
+        AtlasTask mockTask = mock(AtlasTask.class);
+        when(mockTaskManagement.createTaskV2(anyString(), anyString(), anyMap(), anyString(), anyString()))
+                .thenReturn(mockTask);
+
+        // V1 classification edges (not used in V2 path)
+        when(extVertex1.getEdges(eq(AtlasEdgeDirection.OUT), eq(Constants.CLASSIFICATION_LABEL)))
+                .thenReturn(Collections.emptyList());
+        when(extVertex2.getEdges(eq(AtlasEdgeDirection.OUT), eq(Constants.CLASSIFICATION_LABEL)))
+                .thenReturn(Collections.emptyList());
+
+        bulkPurgeService.bulkPurgeByConnection(TEST_CONNECTION_QN, "admin", false);
+
+        // Despite TWO external vertices with same source, only ONE task should be created
+        verify(mockTaskManagement, timeout(5000).times(1)).createTaskV2(
+                eq("CLASSIFICATION_REFRESH_PROPAGATION"),
+                anyString(),
+                anyMap(),
+                eq("Confidential"),
+                eq("same-source-guid")
+        );
+
+        bulkPurgeService.setTagV2Override(null);
+        bulkPurgeService.setTagDAOOverride(null);
+    }
+
+    @Test
+    void testRemovePropagatedTraitFromVertex_clearsClassificationText() throws Exception {
+        AtlasVertex vertex = mock(AtlasVertex.class);
+
+        when(vertex.getMultiValuedProperty(eq(Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY), eq(String.class)))
+                .thenReturn(new ArrayList<>(Arrays.asList("PII")));
+
+        mockedGraphUtils.when(() -> AtlasGraphUtilsV2.setEncodedProperty(any(AtlasVertex.class), anyString(), any()))
+                .thenAnswer(inv -> null);
+
+        java.lang.reflect.Method method = BulkPurgeService.class.getDeclaredMethod(
+                "removePropagatedTraitFromVertex", AtlasVertex.class, String.class);
+        method.setAccessible(true);
+        method.invoke(bulkPurgeService, vertex, "PII");
+
+        // Verify __propagatedTraitNames was cleared
+        verify(vertex).removeProperty(Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
+        // Verify __propagatedClassificationNames was cleared (empty after removing last tag)
+        verify(vertex).removeProperty(Constants.PROPAGATED_CLASSIFICATION_NAMES_KEY);
+        // Verify __classificationsText was cleared
+        verify(vertex).removeProperty(Constants.CLASSIFICATION_TEXT_KEY);
+    }
+
+    @Test
+    void testCollectRelaySourcesV1_findsAliveSource() throws Exception {
+        // Test V1 relay source collection directly via reflection (avoids coordinator thread issues)
+        AtlasVertex externalVertex = mock(AtlasVertex.class);
+        AtlasVertex classificationVertex = mock(AtlasVertex.class);
+        AtlasVertex sourceEntityVertex = mock(AtlasVertex.class);
+        AtlasEdge classEdge = mock(AtlasEdge.class);
+
+        when(mockGraph.getVertex("ext-v1-direct")).thenReturn(externalVertex);
+
+        // V1 classification edge: propagated from alive source
+        when(classEdge.getProperty(Constants.CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class))
+                .thenReturn(true);
+        when(classEdge.getInVertex()).thenReturn(classificationVertex);
+        when(classificationVertex.getProperty(Constants.CLASSIFICATION_ENTITY_GUID, String.class))
+                .thenReturn("alive-source-guid");
+        when(classEdge.getProperty(Constants.CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class))
+                .thenReturn("Sensitive");
+
+        when(externalVertex.getEdges(eq(AtlasEdgeDirection.OUT), eq(Constants.CLASSIFICATION_LABEL)))
+                .thenReturn(Collections.singletonList(classEdge));
+
+        // Source entity still exists
+        mockedGraphUtils.when(() -> AtlasGraphUtilsV2.findByGuid(eq(mockGraph), eq("alive-source-guid")))
+                .thenReturn(sourceEntityVertex);
+
+        // Invoke collectRelaySourcesV1 via reflection
+        java.lang.reflect.Method method = BulkPurgeService.class.getDeclaredMethod(
+                "collectRelaySourcesV1", String.class, Set.class, List.class);
+        method.setAccessible(true);
+
+        Set<String> refreshKeys = new HashSet<>();
+        List<String[]> tasksToCreate = new ArrayList<>();
+
+        method.invoke(bulkPurgeService, "ext-v1-direct", refreshKeys, tasksToCreate);
+
+        // Verify one task pair was collected
+        assertEquals(1, tasksToCreate.size());
+        assertEquals("alive-source-guid", tasksToCreate.get(0)[0]);
+        assertEquals("Sensitive", tasksToCreate.get(0)[1]);
+        assertTrue(refreshKeys.contains("alive-source-guid|Sensitive"));
     }
 
     // ======================== ES Query Builder Tests ========================

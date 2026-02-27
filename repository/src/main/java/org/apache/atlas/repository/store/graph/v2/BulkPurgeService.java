@@ -41,6 +41,7 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
 import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.service.redis.RedisService;
+import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.AtlasType;
 import org.janusgraph.util.encoding.LongEncoding;
 import org.apache.http.entity.ContentType;
@@ -63,6 +64,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.apache.atlas.repository.Constants.*;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationPropagateTaskFactory.CLASSIFICATION_REFRESH_PROPAGATION;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_ENTITY_GUID;
+import static org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask.PARAM_CLASSIFICATION_NAME;
 import static org.apache.atlas.type.Constants.HAS_LINEAGE;
 
 @Component
@@ -82,12 +86,14 @@ public class BulkPurgeService {
     private final RedisService redisService;
     private final Set<EntityAuditRepository> auditRepositories;
     private final AtlasDistributedTaskNotificationSender taskNotificationSender;
+    private final TaskManagement taskManagement;
 
     private final ExecutorService coordinatorExecutor;
 
     // Lazily initialized ES client (cached for reuse across calls)
     private volatile RestClient esClient;
     private volatile Boolean tagV2Override; // @VisibleForTesting: override DynamicConfigStore in tests
+    private volatile TagDAO tagDAOOverride;  // @VisibleForTesting: override TagDAOCassandraImpl in tests
 
     // Active purge tracking for cancel support
     private final ConcurrentHashMap<String, PurgeContext> activePurges = new ConcurrentHashMap<>();
@@ -100,12 +106,14 @@ public class BulkPurgeService {
                             IAtlasGraphProvider graphProvider,
                             RedisService redisService,
                             Set<EntityAuditRepository> auditRepositories,
-                            AtlasDistributedTaskNotificationSender taskNotificationSender) {
+                            AtlasDistributedTaskNotificationSender taskNotificationSender,
+                            TaskManagement taskManagement) {
         this.graph = graph;
         this.graphProvider = graphProvider;
         this.redisService = redisService;
         this.auditRepositories = auditRepositories;
         this.taskNotificationSender = taskNotificationSender;
+        this.taskManagement = taskManagement;
 
         this.coordinatorExecutor = Executors.newFixedThreadPool(2,
                 new ThreadFactoryBuilder()
@@ -156,6 +164,15 @@ public class BulkPurgeService {
     @VisibleForTesting
     void setTagV2Override(Boolean tagV2Enabled) {
         this.tagV2Override = tagV2Enabled;
+    }
+
+    @VisibleForTesting
+    void setTagDAOOverride(TagDAO tagDAO) {
+        this.tagDAOOverride = tagDAO;
+    }
+
+    private TagDAO getTagDAO() {
+        return tagDAOOverride != null ? tagDAOOverride : getTagDAO();
     }
 
     /**
@@ -385,6 +402,8 @@ public class BulkPurgeService {
                 cleanPropagatedTagsFromDeletedSources(ctx);
 
                 repairExternalPropagatedClassifications(ctx);
+
+                triggerRelayPropagationRefresh(ctx);
 
                 if (ctx.deleteConnection && PURGE_MODE_CONNECTION.equals(ctx.purgeMode)) {
                     deleteConnectionVertex(ctx);
@@ -908,7 +927,7 @@ public class BulkPurgeService {
         LOG.info("BulkPurge: Checking {} external vertices for stale propagated classifications for purgeKey={}",
                 ctx.externalLineageVertexIds.size(), ctx.purgeKey);
 
-        TagDAO tagDAO = ctx.isTagV2 ? TagDAOCassandraImpl.getInstance() : null;
+        TagDAO tagDAO = ctx.isTagV2 ? getTagDAO() : null;
         int cleaned = 0;
         int errors = 0;
 
@@ -1028,6 +1047,147 @@ public class BulkPurgeService {
     }
 
     /**
+     * Phase 3c-3: Trigger CLASSIFICATION_REFRESH_PROPAGATION tasks for the relay propagation case.
+     *
+     * Scenario: E(external) → A(purged) → B(external). E has direct tag "PII" that propagated
+     * through A to B. After A is deleted, B retains a stale propagated tag from source E.
+     * Neither cleanPropagatedTagsFromDeletedSources (source=A, but B's tag has source=E) nor
+     * repairPropagatedClassificationsV2 (checks if source exists — E exists) catches this.
+     *
+     * Fix: For each external vertex, collect propagated tags whose source is still alive.
+     * Create CLASSIFICATION_REFRESH_PROPAGATION tasks for each unique (sourceGuid, tagTypeName).
+     * The task handler runs full BFS from source, detects broken lineage, and cleans stale tags.
+     */
+    private void triggerRelayPropagationRefresh(PurgeContext ctx) {
+        if (ctx.externalLineageVertexIds.isEmpty()) {
+            return;
+        }
+
+        TagDAO tagDAO = ctx.isTagV2 ? getTagDAO() : null;
+
+        Set<String> refreshKeys = new HashSet<>();
+        List<String[]> tasksToCreate = new ArrayList<>();
+
+        for (String extVertexId : ctx.externalLineageVertexIds) {
+            try {
+                if (ctx.isTagV2) {
+                    collectRelaySourcesV2(extVertexId, tagDAO, refreshKeys, tasksToCreate);
+                } else {
+                    collectRelaySourcesV1(extVertexId, refreshKeys, tasksToCreate);
+                }
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Failed to collect relay sources for vertex {}", extVertexId, e);
+            }
+        }
+
+        int created = 0;
+        for (String[] pair : tasksToCreate) {
+            try {
+                String entityGuid = pair[0];
+                String tagTypeName = pair[1];
+                Map<String, Object> taskParams = new HashMap<>();
+                taskParams.put(PARAM_ENTITY_GUID, entityGuid);
+                taskParams.put(PARAM_CLASSIFICATION_NAME, tagTypeName);
+
+                taskManagement.createTaskV2(
+                        CLASSIFICATION_REFRESH_PROPAGATION,
+                        ctx.submittedBy,
+                        taskParams,
+                        tagTypeName,
+                        entityGuid
+                );
+                created++;
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Failed to create refresh task for [{}, {}]", pair[0], pair[1], e);
+            }
+        }
+
+        if (created > 0) {
+            LOG.info("BulkPurge: Created {} CLASSIFICATION_REFRESH_PROPAGATION tasks for relay cleanup, purgeKey={}",
+                    created, ctx.purgeKey);
+        }
+    }
+
+    /**
+     * V2: Collect (sourceGuid, tagTypeName) pairs from propagated tags on an external vertex
+     * where the source entity still exists (relay case).
+     */
+    private void collectRelaySourcesV2(String extVertexId, TagDAO tagDAO,
+                                        Set<String> refreshKeys, List<String[]> tasksToCreate) throws Exception {
+        List<Tag> allTags = tagDAO.getAllTagsByVertexId(extVertexId);
+        if (allTags == null || allTags.isEmpty()) {
+            return;
+        }
+
+        for (Tag tag : allTags) {
+            if (!tag.isPropagated()) {
+                continue;
+            }
+
+            String sourceVertexId = tag.getSourceVertexId();
+            if (sourceVertexId == null) {
+                continue;
+            }
+
+            AtlasVertex sourceVertex = graph.getVertex(sourceVertexId);
+            if (sourceVertex == null) {
+                continue; // Source deleted — already handled by repairPropagatedClassificationsV2
+            }
+
+            String sourceGuid = sourceVertex.getProperty(GUID_PROPERTY_KEY, String.class);
+            if (sourceGuid == null) {
+                continue;
+            }
+
+            String key = sourceGuid + "|" + tag.getTagTypeName();
+            if (refreshKeys.add(key)) {
+                tasksToCreate.add(new String[]{sourceGuid, tag.getTagTypeName()});
+            }
+        }
+    }
+
+    /**
+     * V1: Collect (sourceGuid, tagTypeName) pairs from propagated classification edges on an external vertex
+     * where the source entity still exists (relay case).
+     */
+    private void collectRelaySourcesV1(String extVertexId,
+                                        Set<String> refreshKeys, List<String[]> tasksToCreate) {
+        AtlasVertex vertex = graph.getVertex(extVertexId);
+        if (vertex == null) {
+            return;
+        }
+
+        Iterable<AtlasEdge> classEdges = vertex.getEdges(AtlasEdgeDirection.OUT, CLASSIFICATION_LABEL);
+        for (AtlasEdge edge : classEdges) {
+            Boolean isPropagated = edge.getProperty(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
+            if (!Boolean.TRUE.equals(isPropagated)) {
+                continue;
+            }
+
+            AtlasVertex classificationVertex = edge.getInVertex();
+            String sourceEntityGuid = classificationVertex.getProperty(CLASSIFICATION_ENTITY_GUID, String.class);
+            if (sourceEntityGuid == null) {
+                continue;
+            }
+
+            AtlasVertex sourceEntity = AtlasGraphUtilsV2.findByGuid(graph, sourceEntityGuid);
+            if (sourceEntity == null) {
+                continue; // Source deleted — already handled by repairPropagatedClassificationsV1
+            }
+
+            String classificationName = edge.getProperty(CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class);
+            if (classificationName == null) {
+                continue;
+            }
+
+            String key = sourceEntityGuid + "|" + classificationName;
+            if (refreshKeys.add(key)) {
+                tasksToCreate.add(new String[]{sourceEntityGuid, classificationName});
+            }
+        }
+    }
+
+    /**
      * Phase 3c-1 (V2 only): Clean propagated tags from deleted source entities using Cassandra.
      *
      * When entity A (in purged connection) has direct tag "PII" that propagated via lineage
@@ -1045,7 +1205,7 @@ public class BulkPurgeService {
             return;
         }
 
-        TagDAO tagDAO = TagDAOCassandraImpl.getInstance();
+        TagDAO tagDAO = getTagDAO();
         int totalCleaned = 0;
         int totalErrors = 0;
 
@@ -1163,6 +1323,9 @@ public class BulkPurgeService {
         }
 
         AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, System.currentTimeMillis());
+
+        // Clear stale classificationText — will be rebuilt on next read/reindex
+        vertex.removeProperty(CLASSIFICATION_TEXT_KEY);
     }
 
     /**
