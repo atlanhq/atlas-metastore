@@ -22,8 +22,11 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.OutputStream;
+import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.Collectors;
 
 public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge> {
 
@@ -31,6 +34,18 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     /** Tracks ES indexes that have been verified/created during this JVM session. */
     private static final Set<String> VERIFIED_ES_INDEXES = ConcurrentHashMap.newKeySet();
+
+    /**
+     * Cached set of property names eligible for ES indexing, built from the in-memory
+     * vertex mixed index registry. Mirrors JanusGraph's mixed index — only properties
+     * explicitly registered via addMixedIndex() during GraphBackedSearchIndexer initialization
+     * and typedef processing are included.
+     *
+     * Rebuilt lazily when the graph index changes (new typedefs added).
+     * Falls back to blacklist + value-type filtering if the index hasn't been initialized yet.
+     */
+    private volatile Set<String> cachedESEligibleProperties = null;
+    private volatile int         cachedESEligibleFieldCount = -1;
 
     private final CqlSession        session;
     private final VertexRepository  vertexRepository;
@@ -770,26 +785,30 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * This replaces JanusGraph's automatic mixed-index sync.
      * Uses the ES bulk API for efficiency.
      */
+    private static final int    ES_SYNC_MAX_RETRIES  = 3;
+    private static final long[] ES_SYNC_RETRY_DELAYS = {100, 300, 1000}; // ms
+
     private void syncVerticesToElasticsearch(List<CassandraVertex> newVertices,
                                              List<CassandraVertex> dirtyVertices,
                                              List<CassandraVertex> removedVertices) {
         try {
             RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
             if (client == null) {
-                LOG.debug("ES client not available, skipping ES sync");
+                LOG.warn("ES client not available, skipping ES sync for {} new + {} dirty + {} removed vertices. "
+                        + "These entities will be missing from search until a reindex is run.",
+                        newVertices.size(), dirtyVertices.size(), removedVertices.size());
                 return;
             }
 
             String indexName = Constants.VERTEX_INDEX_NAME;
-            StringBuilder bulkBody = new StringBuilder();
 
-            // Index new vertices (only entity vertices that have __typeName)
+            // Collect entity vertices to sync, keyed by vertex ID for retry tracking
+            Map<String, CassandraVertex> vertexMap = new LinkedHashMap<>();
+
             int skipped = 0;
-            int synced  = 0;
             for (CassandraVertex v : newVertices) {
                 if (isEntityVertex(v)) {
-                    appendESIndexAction(bulkBody, indexName, v);
-                    synced++;
+                    vertexMap.put(v.getIdString(), v);
                     LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -798,11 +817,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 }
             }
 
-            // Re-index dirty (updated) vertices (only entity vertices)
             for (CassandraVertex v : dirtyVertices) {
                 if (isEntityVertex(v)) {
-                    appendESIndexAction(bulkBody, indexName, v);
-                    synced++;
+                    vertexMap.put(v.getIdString(), v);
                     LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -815,56 +832,164 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 LOG.info("syncVerticesToElasticsearch: skipped {} non-entity vertices (no __typeName)", skipped);
             }
 
-            // Delete removed vertices
+            // Track vertex IDs to delete
+            List<String> deleteIds = new ArrayList<>();
             for (CassandraVertex v : removedVertices) {
-                bulkBody.append("{\"delete\":{\"_index\":\"").append(indexName)
-                        .append("\",\"_id\":\"").append(v.getIdString()).append("\"}}\n");
+                deleteIds.add(v.getIdString());
             }
 
-            if (bulkBody.length() > 0) {
-                LOG.info("syncVerticesToElasticsearch: sending bulk request to ES index '{}', body length={}",
-                        indexName, bulkBody.length());
-                Request bulkReq = new Request("POST", "/_bulk");
-                bulkReq.setEntity(new StringEntity(bulkBody.toString(), ContentType.APPLICATION_JSON));
-                Response resp = client.performRequest(bulkReq);
-                int status = resp.getStatusLine().getStatusCode();
-                String respBody = org.apache.http.util.EntityUtils.toString(resp.getEntity());
-                if (status >= 200 && status < 300) {
-                    LOG.info("Synced {} new + {} dirty vertices to ES index '{}', response status={}",
-                            newVertices.size(), dirtyVertices.size(), indexName, status);
-                    // Check for individual item errors in the bulk response
-                    if (respBody != null && respBody.contains("\"errors\":true")) {
-                        LOG.warn("ES bulk sync had item-level errors. Parsing per-item details...");
-                        try {
-                            @SuppressWarnings("unchecked")
-                            Map<String, Object> bulkResp = AtlasType.fromJson(respBody, Map.class);
-                            @SuppressWarnings("unchecked")
-                            List<Map<String, Object>> items = (List<Map<String, Object>>) bulkResp.get("items");
-                            if (items != null) {
-                                for (Map<String, Object> item : items) {
-                                    @SuppressWarnings("unchecked")
-                                    Map<String, Object> action = (Map<String, Object>) item.values().iterator().next();
-                                    if (action != null && action.containsKey("error")) {
-                                        LOG.error("ES bulk item FAILED: _id='{}', status={}, error={}",
-                                                action.get("_id"), action.get("status"),
-                                                AtlasType.toJson(action.get("error")));
-                                    }
-                                }
-                            }
-                        } catch (Exception parseEx) {
-                            LOG.warn("Could not parse ES bulk response for item errors: {}. Raw (truncated): {}",
-                                    parseEx.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
-                        }
-                    }
-                } else {
-                    LOG.warn("ES bulk sync returned status {}, response: {}", status, respBody);
-                }
-            } else {
+            if (vertexMap.isEmpty() && deleteIds.isEmpty()) {
                 LOG.info("syncVerticesToElasticsearch: no entity vertices to sync ({} new, {} dirty skipped)",
                         newVertices.size(), dirtyVertices.size());
+                return;
             }
+
+            // Attempt sync with retries for transient failures
+            Set<String> pendingIndexIds  = new LinkedHashSet<>(vertexMap.keySet());
+            Set<String> pendingDeleteIds = new LinkedHashSet<>(deleteIds);
+            Set<String> permanentlyFailed = new LinkedHashSet<>();
+
+            for (int attempt = 0; attempt <= ES_SYNC_MAX_RETRIES && (!pendingIndexIds.isEmpty() || !pendingDeleteIds.isEmpty()); attempt++) {
+                if (attempt > 0) {
+                    long delay = ES_SYNC_RETRY_DELAYS[Math.min(attempt - 1, ES_SYNC_RETRY_DELAYS.length - 1)];
+                    LOG.warn("ES sync retry attempt {}/{} after {}ms for {} index + {} delete operations",
+                            attempt, ES_SYNC_MAX_RETRIES, delay, pendingIndexIds.size(), pendingDeleteIds.size());
+                    Thread.sleep(delay);
+                }
+
+                StringBuilder bulkBody = new StringBuilder();
+                for (String vid : pendingIndexIds) {
+                    CassandraVertex v = vertexMap.get(vid);
+                    appendESIndexAction(bulkBody, indexName, v);
+                }
+                for (String vid : pendingDeleteIds) {
+                    bulkBody.append("{\"delete\":{\"_index\":\"").append(indexName)
+                            .append("\",\"_id\":\"").append(vid).append("\"}}\n");
+                }
+
+                LOG.info("syncVerticesToElasticsearch: sending bulk request to ES index '{}', body length={}, attempt={}",
+                        indexName, bulkBody.length(), attempt);
+
+                try {
+                    Request bulkReq = new Request("POST", "/_bulk");
+                    bulkReq.setEntity(new StringEntity(bulkBody.toString(), ContentType.APPLICATION_JSON));
+                    Response resp = client.performRequest(bulkReq);
+                    int status = resp.getStatusLine().getStatusCode();
+                    String respBody = org.apache.http.util.EntityUtils.toString(resp.getEntity());
+
+                    if (status >= 200 && status < 300) {
+                        if (respBody != null && respBody.contains("\"errors\":true")) {
+                            // Parse per-item results to find which items failed and why
+                            Set<String> retryableIds = new LinkedHashSet<>();
+                            processESBulkResponse(respBody, retryableIds, permanentlyFailed);
+                            // Only retry items with transient (5xx) failures
+                            pendingIndexIds.retainAll(retryableIds);
+                            pendingDeleteIds.retainAll(retryableIds);
+                        } else {
+                            // All items succeeded
+                            LOG.info("Synced {} index + {} delete to ES index '{}', status={}, attempt={}",
+                                    pendingIndexIds.size(), pendingDeleteIds.size(), indexName, status, attempt);
+                            pendingIndexIds.clear();
+                            pendingDeleteIds.clear();
+                        }
+                    } else if (status >= 500) {
+                        // Entire request failed with server error — retry everything
+                        LOG.warn("ES bulk sync returned status {} on attempt {}, will retry", status, attempt);
+                    } else {
+                        // 4xx — non-retryable request-level error
+                        LOG.error("ES bulk sync returned non-retryable status {} on attempt {}. Response: {}",
+                                status, attempt, respBody != null ? respBody.substring(0, Math.min(2000, respBody.length())) : "null");
+                        break;
+                    }
+                } catch (org.elasticsearch.client.ResponseException re) {
+                    int errStatus = re.getResponse().getStatusLine().getStatusCode();
+                    if (errStatus >= 500) {
+                        LOG.warn("ES sync ResponseException (status={}) on attempt {}: {}", errStatus, attempt, re.getMessage());
+                        // Retry on server error
+                    } else {
+                        LOG.error("ES sync non-retryable ResponseException (status={}) on attempt {}: {}",
+                                errStatus, attempt, re.getMessage());
+                        break;
+                    }
+                } catch (java.io.IOException ioe) {
+                    LOG.warn("ES sync IOException on attempt {}/{}: {}", attempt, ES_SYNC_MAX_RETRIES, ioe.getMessage());
+                    // Connection error — retry
+                }
+            }
+
+            // Log final state of any failures
+            if (!pendingIndexIds.isEmpty() || !pendingDeleteIds.isEmpty()) {
+                LOG.error("ES sync FAILED after {} retries. {} index operations and {} delete operations still pending. "
+                        + "Vertex IDs needing reindex: {}",
+                        ES_SYNC_MAX_RETRIES, pendingIndexIds.size(), pendingDeleteIds.size(),
+                        pendingIndexIds.stream().limit(50).collect(java.util.stream.Collectors.joining(", ")));
+            }
+            if (!permanentlyFailed.isEmpty()) {
+                LOG.error("ES sync had {} permanently failed items (non-retryable mapping/data errors). "
+                        + "Vertex IDs: {}",
+                        permanentlyFailed.size(),
+                        permanentlyFailed.stream().limit(50).collect(java.util.stream.Collectors.joining(", ")));
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            LOG.warn("ES sync interrupted during retry backoff: {}", ie.getMessage());
         } catch (Exception e) {
-            LOG.warn("Failed to sync vertices to ES: {}", e.getMessage(), e);
+            LOG.error("Failed to sync vertices to ES: {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Processes an ES bulk response with errors, separating retryable (5xx) from
+     * permanently failed (4xx) items.
+     *
+     * @param respBody        the raw ES bulk response JSON
+     * @param retryableIds    output: vertex IDs that failed with retryable errors (5xx)
+     * @param permanentlyFailed output: vertex IDs that failed with non-retryable errors (4xx)
+     */
+    private void processESBulkResponse(String respBody, Set<String> retryableIds, Set<String> permanentlyFailed) {
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> bulkResp = AtlasType.fromJson(respBody, Map.class);
+            @SuppressWarnings("unchecked")
+            List<Map<String, Object>> items = (List<Map<String, Object>>) bulkResp.get("items");
+            if (items == null) return;
+
+            int succeeded = 0;
+            int retryable = 0;
+            int permanent = 0;
+
+            for (Map<String, Object> item : items) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> action = (Map<String, Object>) item.values().iterator().next();
+                if (action == null) continue;
+
+                String docId = String.valueOf(action.get("_id"));
+                Object statusObj = action.get("status");
+                int itemStatus = (statusObj instanceof Number) ? ((Number) statusObj).intValue() : 0;
+
+                if (action.containsKey("error")) {
+                    if (itemStatus >= 500 || itemStatus == 429) {
+                        // Retryable: server error or rate-limited
+                        retryableIds.add(docId);
+                        retryable++;
+                        LOG.warn("ES bulk item retryable failure: _id='{}', status={}", docId, itemStatus);
+                    } else {
+                        // Permanent: mapping error, bad request, etc.
+                        permanentlyFailed.add(docId);
+                        permanent++;
+                        LOG.error("ES bulk item FAILED (non-retryable): _id='{}', status={}, error={}",
+                                docId, itemStatus, AtlasType.toJson(action.get("error")));
+                    }
+                } else {
+                    succeeded++;
+                }
+            }
+
+            LOG.info("ES bulk response: {} succeeded, {} retryable failures, {} permanent failures",
+                    succeeded, retryable, permanent);
+        } catch (Exception parseEx) {
+            LOG.warn("Could not parse ES bulk response for item errors: {}. Raw (truncated): {}",
+                    parseEx.getMessage(), respBody.substring(0, Math.min(4000, respBody.length())));
         }
     }
 
@@ -877,65 +1002,80 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     /**
      * Filters vertex properties before sending to Elasticsearch.
      *
-     * Two issues are addressed:
-     * 1. TypeDef metadata properties create thousands of unique ES fields, exhausting the
-     *    mapping.total_fields.limit (5000). These are already stored in Cassandra's
-     *    type_definitions table and not needed for entity search.
-     *    Filtered patterns:
-     *      - __type_* (e.g., __type_category, __type_name, __type_ADF_adfFactoryName)
-     *      - __type.<TypeName> and __type.<TypeName>.<attrName> (attribute metadata)
-     *      - endDef1, endDef2, relationshipCategory, relationshipLabel, tagPropagation
-     *    Kept: __type (bare), __typeName
-     * 2. Properties stored via setJsonProperty() are pre-serialized JSON strings. When
-     *    AtlasType.toJson() serializes the map, these become double-encoded (e.g., an array
-     *    "[\"a\",\"b\"]" becomes a string in ES instead of an array). We detect and parse
-     *    these back to their structured form so ES receives correct types.
+     * Three layers of filtering are applied to match JanusGraph's mixed index behavior:
+     *
+     * 1. Property name eligibility (whitelist):
+     *    If the vertex mixed index has been initialized (via GraphBackedSearchIndexer →
+     *    CassandraGraphManagement.addMixedIndex()), only properties registered in that
+     *    index are included. This mirrors JanusGraph's mixed index behavior.
+     *
+     * 2. Property name exclusion (blacklist, fallback when whitelist unavailable):
+     *    - __type_* (typedef metadata — ~2500+ unique fields)
+     *    - __type.* (typedef attribute metadata with dot notation)
+     *    - endDef1, endDef2, relationshipCategory, relationshipLabel, tagPropagation
+     *
+     * 3. Value type exclusion (matches JanusGraph's isIndexApplicable):
+     *    - Map values: map-type attributes stored via setProperty(key, HashMap) —
+     *      JanusGraph deliberately does NOT register these in the mixed index
+     *    - BigDecimal/BigInteger: excluded by JanusGraph's INDEX_EXCLUSION_CLASSES
+     *
+     * Additionally, JSON array strings from setJsonProperty() are parsed back to arrays
+     * so ES receives the correct type. JSON object strings are NOT parsed (they're mapped
+     * as "text" in ES — parsing them to Map causes mapper_parsing_exception).
      */
     private Map<String, Object> filterPropertiesForES(Map<String, Object> props) {
         Map<String, Object> filtered = new LinkedHashMap<>(props.size());
+        Set<String> eligible = getESEligiblePropertyNames(); // from in-memory graph index registry
 
         for (Map.Entry<String, Object> entry : props.entrySet()) {
             String key = entry.getKey();
-
-            // Skip typedef attribute metadata — these create ~2500+ fields in ES
-            // __type_ covers: __type_category, __type_name, __type_version, __type_description,
-            //   __type_options, __type_servicetype, __type_<TypeName>_<attrName>
-            // Does NOT skip: __type (bare, length 6) or __typeName (starts with __typeN)
-            if (key.startsWith("__type_")) {
-                continue;
-            }
-
-            // Skip typedef attribute lists/metadata with dot notation
-            // __type.<TypeName> (e.g., __type.PartialField = list of attribute names)
-            // __type.<TypeName>.<attrName> (e.g., __type.PartialField.partialDataType = metadata JSON)
-            if (key.startsWith("__type.")) {
-                continue;
-            }
-
-            // Skip relationship typedef properties (only present on relationship typedef vertices)
-            if (key.equals("endDef1") || key.equals("endDef2") ||
-                key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
-                key.equals("tagPropagation")) {
-                continue;
-            }
-
             Object value = entry.getValue();
 
-            // Fix double-encoded JSON strings from setJsonProperty().
-            // These are stored as String values containing JSON (e.g., "[\"a\",\"b\"]").
-            // Without this fix, ES would receive them as escaped strings instead of
-            // arrays/objects, causing type mapping conflicts.
+            // --- Layer 1: Property name whitelist (if available) ---
+            if (eligible != null) {
+                if (!eligible.contains(key)) {
+                    continue;
+                }
+            } else {
+                // --- Layer 2: Property name blacklist (fallback) ---
+
+                // Skip typedef attribute metadata — these create ~2500+ fields in ES
+                if (key.startsWith("__type_") || key.startsWith("__type.")) {
+                    continue;
+                }
+
+                // Skip relationship typedef properties
+                if (key.equals("endDef1") || key.equals("endDef2") ||
+                    key.equals("relationshipCategory") || key.equals("relationshipLabel") ||
+                    key.equals("tagPropagation")) {
+                    continue;
+                }
+            }
+
+            // --- Layer 3: Value type exclusion (always applied) ---
+
+            // Skip Map values — map-type attributes that JanusGraph doesn't index.
+            // These are stored via setProperty(key, new HashMap<>(..)) in EntityGraphMapper.mapMapValue().
+            // JanusGraph's createIndexForAttribute() creates a propertyKey for maps but deliberately
+            // does NOT call createVertexIndex()/addMixedIndex() for them.
+            if (value instanceof Map) {
+                continue;
+            }
+
+            // Skip BigDecimal/BigInteger — excluded by JanusGraph's INDEX_EXCLUSION_CLASSES
+            if (value instanceof BigDecimal || value instanceof BigInteger) {
+                continue;
+            }
+
+            // Fix double-encoded JSON array strings from setJsonProperty().
+            // Only parse arrays ([...]), NOT objects ({...}) — see __customAttributes bug.
             if (value instanceof String) {
                 String strVal = (String) value;
-                if (strVal.length() > 1) {
-                    char first = strVal.charAt(0);
-                    char last = strVal.charAt(strVal.length() - 1);
-                    if ((first == '[' && last == ']') || (first == '{' && last == '}')) {
-                        try {
-                            value = AtlasType.fromJson(strVal, Object.class);
-                        } catch (Exception e) {
-                            // Not valid JSON — keep as plain string
-                        }
+                if (strVal.length() > 1 && strVal.charAt(0) == '[' && strVal.charAt(strVal.length() - 1) == ']') {
+                    try {
+                        value = AtlasType.fromJson(strVal, Object.class);
+                    } catch (Exception e) {
+                        // Not valid JSON — keep as plain string
                     }
                 }
             }
@@ -966,6 +1106,197 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return false;
     }
 
+    // ---- Reindex (repair) operations ----
+
+    /**
+     * Reads vertices from Cassandra by GUID, filters their properties, and bulk-indexes
+     * them into Elasticsearch. Used by RepairIndex to recover entities that are in
+     * Cassandra but missing from (or stale in) ES.
+     *
+     * Each GUID is looked up via the __guid index. Vertices that can't be found or
+     * aren't entity vertices are logged and skipped. The bulk write uses the same
+     * retry logic as commit-time ES sync.
+     *
+     * @param guids GUIDs of entities to reindex
+     * @return number of vertices successfully sent to ES
+     */
+    public int reindexVertices(Collection<String> guids) {
+        if (guids == null || guids.isEmpty()) {
+            return 0;
+        }
+
+        RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+        if (client == null) {
+            LOG.error("reindexVertices: ES client not available, cannot reindex {} entities", guids.size());
+            return 0;
+        }
+
+        String indexName = Constants.VERTEX_INDEX_NAME;
+        ensureESIndexExists(indexName);
+
+        // Look up each GUID → vertex, filter to entity vertices
+        Map<String, CassandraVertex> vertexMap = new LinkedHashMap<>();
+        int notFound = 0;
+        int notEntity = 0;
+
+        for (String guid : guids) {
+            if (guid == null) continue;
+
+            // Look up vertex by GUID via index
+            String vertexId = indexRepository.lookupVertex("__guid_idx", guid);
+            if (vertexId == null) {
+                notFound++;
+                LOG.warn("reindexVertices: no vertex found for GUID '{}'", guid);
+                continue;
+            }
+
+            CassandraVertex vertex = vertexRepository.getVertex(vertexId, this);
+            if (vertex == null) {
+                notFound++;
+                LOG.warn("reindexVertices: vertex '{}' (GUID '{}') not found in Cassandra", vertexId, guid);
+                continue;
+            }
+
+            if (!isEntityVertex(vertex)) {
+                notEntity++;
+                continue;
+            }
+
+            vertexMap.put(vertex.getIdString(), vertex);
+        }
+
+        if (!vertexMap.isEmpty()) {
+            LOG.info("reindexVertices: resolved {}/{} GUIDs to entity vertices ({} not found, {} non-entity)",
+                    vertexMap.size(), guids.size(), notFound, notEntity);
+        } else {
+            LOG.warn("reindexVertices: no entity vertices resolved from {} GUIDs ({} not found, {} non-entity)",
+                    guids.size(), notFound, notEntity);
+            return 0;
+        }
+
+        // Bulk-write to ES with retry (same logic as commit-time sync)
+        Set<String> pendingIds = new LinkedHashSet<>(vertexMap.keySet());
+        Set<String> permanentlyFailed = new LinkedHashSet<>();
+
+        try {
+            for (int attempt = 0; attempt <= ES_SYNC_MAX_RETRIES && !pendingIds.isEmpty(); attempt++) {
+                if (attempt > 0) {
+                    long delay = ES_SYNC_RETRY_DELAYS[Math.min(attempt - 1, ES_SYNC_RETRY_DELAYS.length - 1)];
+                    LOG.info("reindexVertices: retry attempt {}/{} after {}ms for {} vertices",
+                            attempt, ES_SYNC_MAX_RETRIES, delay, pendingIds.size());
+                    Thread.sleep(delay);
+                }
+
+                StringBuilder bulkBody = new StringBuilder();
+                for (String vid : pendingIds) {
+                    CassandraVertex v = vertexMap.get(vid);
+                    appendESIndexAction(bulkBody, indexName, v);
+                }
+
+                LOG.info("reindexVertices: sending bulk request to ES index '{}', {} vertices, body length={}, attempt={}",
+                        indexName, pendingIds.size(), bulkBody.length(), attempt);
+
+                try {
+                    Request bulkReq = new Request("POST", "/_bulk");
+                    bulkReq.setEntity(new StringEntity(bulkBody.toString(), ContentType.APPLICATION_JSON));
+                    Response resp = client.performRequest(bulkReq);
+                    int status = resp.getStatusLine().getStatusCode();
+                    String respBody = org.apache.http.util.EntityUtils.toString(resp.getEntity());
+
+                    if (status >= 200 && status < 300) {
+                        if (respBody != null && respBody.contains("\"errors\":true")) {
+                            Set<String> retryableIds = new LinkedHashSet<>();
+                            processESBulkResponse(respBody, retryableIds, permanentlyFailed);
+                            pendingIds.retainAll(retryableIds);
+                        } else {
+                            LOG.info("reindexVertices: successfully indexed {} vertices to ES", pendingIds.size());
+                            pendingIds.clear();
+                        }
+                    } else if (status >= 500) {
+                        LOG.warn("reindexVertices: ES returned status {} on attempt {}, will retry", status, attempt);
+                    } else {
+                        LOG.error("reindexVertices: ES returned non-retryable status {} on attempt {}. Response: {}",
+                                status, attempt, respBody != null ? respBody.substring(0, Math.min(2000, respBody.length())) : "null");
+                        break;
+                    }
+                } catch (ResponseException re) {
+                    int errStatus = re.getResponse().getStatusLine().getStatusCode();
+                    if (errStatus >= 500) {
+                        LOG.warn("reindexVertices: ES ResponseException (status={}) on attempt {}: {}", errStatus, attempt, re.getMessage());
+                    } else {
+                        LOG.error("reindexVertices: ES non-retryable ResponseException (status={}) on attempt {}: {}",
+                                errStatus, attempt, re.getMessage());
+                        break;
+                    }
+                } catch (IOException ioe) {
+                    LOG.warn("reindexVertices: ES IOException on attempt {}/{}: {}", attempt, ES_SYNC_MAX_RETRIES, ioe.getMessage());
+                }
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            LOG.warn("reindexVertices: interrupted during retry backoff: {}", ie.getMessage());
+        }
+
+        int succeeded = vertexMap.size() - pendingIds.size() - permanentlyFailed.size();
+
+        if (!pendingIds.isEmpty()) {
+            LOG.error("reindexVertices: {} vertices still pending after {} retries. Vertex IDs: {}",
+                    pendingIds.size(), ES_SYNC_MAX_RETRIES,
+                    pendingIds.stream().limit(50).collect(Collectors.joining(", ")));
+        }
+        if (!permanentlyFailed.isEmpty()) {
+            LOG.error("reindexVertices: {} vertices permanently failed. Vertex IDs: {}",
+                    permanentlyFailed.size(),
+                    permanentlyFailed.stream().limit(50).collect(Collectors.joining(", ")));
+        }
+
+        LOG.info("reindexVertices: completed — {} succeeded, {} failed, {} permanently failed out of {} GUIDs",
+                succeeded, pendingIds.size(), permanentlyFailed.size(), guids.size());
+
+        return succeeded;
+    }
+
+    /**
+     * Scans the entire Cassandra vertices table, finds all entities whose qualifiedName
+     * starts with the given prefix (typically a connectionQualifiedName), and reindexes
+     * them to Elasticsearch in batches.
+     *
+     * Uses Cassandra driver's token-range paging to stream rows without loading the
+     * full table into memory. A fast string pre-filter on the raw JSON avoids
+     * deserializing non-matching rows.
+     *
+     * @param qualifiedNamePrefix  e.g., "default/snowflake/1772139790"
+     * @param fetchSize            Cassandra page size (default 1000)
+     * @param reindexBatchSize     batch size for ES bulk writes (default 500)
+     * @return total number of vertices reindexed to ES
+     */
+    public int reindexByQualifiedNamePrefix(String qualifiedNamePrefix, int fetchSize, int reindexBatchSize) {
+        if (qualifiedNamePrefix == null || qualifiedNamePrefix.isEmpty()) {
+            LOG.error("reindexByQualifiedNamePrefix: prefix is null/empty");
+            return 0;
+        }
+
+        LOG.info("reindexByQualifiedNamePrefix: starting full table scan for prefix '{}' (fetchSize={}, batchSize={})",
+                qualifiedNamePrefix, fetchSize, reindexBatchSize);
+        long startTime = System.currentTimeMillis();
+
+        int[] totalReindexed = {0};
+
+        int totalMatched = vertexRepository.scanVerticesByQualifiedNamePrefix(
+                qualifiedNamePrefix, fetchSize, reindexBatchSize,
+                guidBatch -> {
+                    LOG.info("reindexByQualifiedNamePrefix: reindexing batch of {} GUIDs", guidBatch.size());
+                    int count = reindexVertices(guidBatch);
+                    totalReindexed[0] += count;
+                });
+
+        long elapsed = System.currentTimeMillis() - startTime;
+        LOG.info("reindexByQualifiedNamePrefix: completed — {} matched, {} reindexed to ES in {} ms (prefix='{}')",
+                totalMatched, totalReindexed[0], elapsed, qualifiedNamePrefix);
+
+        return totalReindexed[0];
+    }
+
     // ---- Management operations ----
 
     @Override
@@ -980,7 +1311,42 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public Set<String> getVertexIndexKeys() {
-        return Collections.emptySet();
+        Set<String> eligible = getESEligiblePropertyNames();
+        return eligible != null ? eligible : Collections.emptySet();
+    }
+
+    /**
+     * Returns the set of property names registered in the vertex mixed index.
+     * Built from the in-memory graph index registry (populated by GraphBackedSearchIndexer
+     * via CassandraGraphManagement.addMixedIndex() during initialization and typedef changes).
+     *
+     * Returns null if the vertex index hasn't been initialized yet.
+     */
+    Set<String> getESEligiblePropertyNames() {
+        CassandraGraphIndex vertexIndex = graphIndexes.get(Constants.VERTEX_INDEX);
+        if (vertexIndex == null) {
+            return null;
+        }
+
+        Set<AtlasPropertyKey> fieldKeys = vertexIndex.getFieldKeys();
+        int currentCount = fieldKeys.size();
+
+        // Rebuild cache if the field count changed (new typedefs registered)
+        if (cachedESEligibleProperties == null || currentCount != cachedESEligibleFieldCount) {
+            Set<String> names = new HashSet<>(currentCount);
+            for (AtlasPropertyKey key : fieldKeys) {
+                names.add(key.getName());
+            }
+            cachedESEligibleProperties = Collections.unmodifiableSet(names);
+            cachedESEligibleFieldCount = currentCount;
+
+            if (LOG.isDebugEnabled()) {
+                LOG.debug("Rebuilt ES eligible properties cache: {} properties registered in vertex index",
+                        currentCount);
+            }
+        }
+
+        return cachedESEligibleProperties;
     }
 
     // ---- Utility operations ----
