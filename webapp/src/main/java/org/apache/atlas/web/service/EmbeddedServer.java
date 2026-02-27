@@ -79,8 +79,20 @@ public class EmbeddedServer {
         }
 
         public void setDelegate(Object delegate) {
-            this.delegate = delegate;
+            if (delegate == null) {
+                LOG.warn("LazySpringContext: Received null delegate. Main context not ready yet.");
+                return;
+            }
+
+            // Check if the delegate is actually an Exception (common when Spring fails to start)
+            if (delegate instanceof Throwable) {
+                LOG.error("LazySpringContext: Cannot set delegate! Main Spring Context failed with: " + 
+                        ((Throwable)delegate).getMessage(), (Throwable)delegate);
+                return;
+            }
+           
             try {
+                this.delegate = delegate;
                 // Find the getBean(String) method on whatever class the delegate is
                 //this.getBeanMethod = delegate.getClass().getMethod("getBean", String.class);
                 this.getBeanByNameMethod = delegate.getClass().getMethod("getBean", String.class);
@@ -550,6 +562,10 @@ public class EmbeddedServer {
                         Object realMainSpringContext = mainAppContext.getServletContext().getAttribute(
                             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                         if(realMainSpringContext != null){
+                            //align classloaders
+                            ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
+                            fastLaneContext.setClassLoader(mainClassLoader);
+                            LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
                             fastLaneContext.getServletContext().setAttribute(
                                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
                                 realMainSpringContext);
