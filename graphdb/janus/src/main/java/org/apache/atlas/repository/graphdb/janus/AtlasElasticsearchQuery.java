@@ -728,8 +728,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(hit.getId());
-            return graph.getVertex(String.valueOf(vertexId));
+            try {
+                long vertexId = LongEncoding.decode(hit.getId());
+                return graph.getVertex(String.valueOf(vertexId));
+            } catch (Exception e) {
+                // UUID-based document from Cassandra graph backend — skip in JanusGraph mode
+                LOG.debug("Skipping ES document with non-JanusGraph _id='{}': {}", hit.getId(), e.getMessage());
+                return null;
+            }
         }
 
         @Override
@@ -772,8 +778,14 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
 
         @Override
         public AtlasVertex<AtlasJanusVertex, AtlasJanusEdge> getVertex() {
-            long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
-            return graph.getVertex(String.valueOf(vertexId));
+            try {
+                long vertexId = LongEncoding.decode(String.valueOf(hit.get("_id")));
+                return graph.getVertex(String.valueOf(vertexId));
+            } catch (Exception e) {
+                // UUID-based document from Cassandra graph backend — skip in JanusGraph mode
+                LOG.debug("Skipping ES document with non-JanusGraph _id='{}': {}", hit.get("_id"), e.getMessage());
+                return null;
+            }
         }
 
         @Override

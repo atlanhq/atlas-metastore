@@ -25,6 +25,9 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
     // Cache of ES index -> set of field names already mapped, to avoid redundant PUT requests on restart
     private static final Map<String, Set<String>> esMappingCache = new ConcurrentHashMap<>();
 
+    // Cache of ES index -> set of field names that already have rich sub-fields (so we don't retry)
+    private static final Map<String, Set<String>> esRichMappingCache = new ConcurrentHashMap<>();
+
     private final CassandraGraph graph;
 
     public CassandraGraphManagement(CassandraGraph graph) {
@@ -173,7 +176,27 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
     public String addMixedIndex(String vertexIndex, AtlasPropertyKey propertyKey, boolean isStringField,
                                 HashMap<String, Object> indexTypeESConfig,
                                 HashMap<String, HashMap<String, Object>> indexTypeESFields) {
-        return addMixedIndex(vertexIndex, propertyKey, isStringField);
+        CassandraGraphIndex index = graph.getGraphIndexesMap().get(vertexIndex);
+        if (index != null) {
+            index.addFieldKey(propertyKey);
+        }
+
+        String esIndexName = Constants.INDEX_PREFIX + vertexIndex;
+        Class<?> propClass = (propertyKey instanceof CassandraPropertyKey)
+                ? ((CassandraPropertyKey) propertyKey).getPropertyClass() : null;
+
+        // If typedef provides rich ES field config (sub-fields like .keyword, .stemmed, .delimiter),
+        // use it to create the full mapping. Otherwise fall back to simple type mapping.
+        if (indexTypeESFields != null && !indexTypeESFields.isEmpty()) {
+            addESFieldMappingWithSubFields(esIndexName, propertyKey.getName(), propClass, isStringField,
+                    indexTypeESConfig, indexTypeESFields);
+        } else if (indexTypeESConfig != null && !indexTypeESConfig.isEmpty()) {
+            addESFieldMappingWithConfig(esIndexName, propertyKey.getName(), propClass, isStringField, indexTypeESConfig);
+        } else {
+            addESFieldMapping(esIndexName, propertyKey.getName(), propClass, isStringField);
+        }
+
+        return propertyKey.getName();
     }
 
     @Override
@@ -321,6 +344,10 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
                 mappingBody = String.format(
                     "{\"properties\":{\"%s\":{\"type\":\"keyword\",\"ignore_above\":5120}}}", fieldName);
             } else {
+                // For text and all other types: just set the type.
+                // Sub-fields (e.g., .keyword, .stemmed) come from typedef's indexTypeESFields
+                // via addESFieldMappingWithSubFields, not hardcoded here.
+                // This matches JanusGraph behavior: Mapping.TEXT → bare "text" in ES.
                 mappingBody = String.format(
                     "{\"properties\":{\"%s\":{\"type\":\"%s\"}}}", fieldName, esType);
             }
@@ -331,12 +358,12 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
 
             if (resp.getStatusLine().getStatusCode() >= 200 && resp.getStatusLine().getStatusCode() < 300) {
                 cachedFields.add(fieldName);
-                LOG.debug("Added ES field mapping: index={}, field={}, type={}", indexName, fieldName, esType);
+                LOG.info("Added ES field mapping: index={}, field={}, type={}", indexName, fieldName, esType);
             }
         } catch (Exception e) {
             // If it fails because the field already exists with a different type, cache it to avoid retrying
             String msg = e.getMessage();
-            if (msg != null && msg.contains("mapper_parsing_exception")) {
+            if (msg != null && (msg.contains("mapper_parsing_exception") || msg.contains("cannot be changed from type"))) {
                 cachedFields.add(fieldName);
                 LOG.debug("ES field mapping already exists with different type for {}.{}, skipping", indexName, fieldName);
             } else {
@@ -345,9 +372,249 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
         }
     }
 
+    /**
+     * Creates an ES field mapping with sub-fields (e.g., name.keyword, name.stemmed, name.delimiter).
+     * These come from typedef attribute definitions via indexTypeESConfig and indexTypeESFields.
+     * This replicates what JanusGraph's addMixedIndex does when creating property keys.
+     */
+    private void addESFieldMappingWithSubFields(String indexName, String fieldName, Class<?> propertyClass,
+                                                 boolean isStringField,
+                                                 HashMap<String, Object> indexTypeESConfig,
+                                                 HashMap<String, HashMap<String, Object>> indexTypeESFields) {
+        Set<String> cachedFields = esMappingCache.computeIfAbsent(indexName, k -> ConcurrentHashMap.newKeySet());
+        Set<String> richCachedFields = esRichMappingCache.computeIfAbsent(indexName, k -> ConcurrentHashMap.newKeySet());
+
+        // If we've already successfully added rich sub-fields for this field, skip
+        if (richCachedFields.contains(fieldName)) {
+            return;
+        }
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                return;
+            }
+
+            String esType = mapPropertyClassToESType(propertyClass, isStringField);
+
+            // If the top-level config specifies an "analyzer", the field must be "text" (not "keyword"),
+            // because ES analyzers only apply to text fields. Similarly, if it specifies "normalizer",
+            // keep it as "keyword" since normalizers only apply to keyword fields.
+            if ("keyword".equals(esType) && indexTypeESConfig != null && indexTypeESConfig.containsKey("analyzer")) {
+                esType = "text";
+            }
+
+            boolean fieldAlreadyExists = cachedFields.contains(fieldName);
+
+            // If field already exists in ES, try adding just the sub-fields with the existing base type.
+            // ES won't let us change a field's base type (e.g., keyword → text), but it WILL let us
+            // add new sub-fields to an existing field (sub-fields are additive).
+            if (fieldAlreadyExists) {
+                addSubFieldsToExistingField(client, indexName, fieldName, indexTypeESFields);
+                richCachedFields.add(fieldName);
+                return;
+            }
+
+            // Field doesn't exist yet — create with full mapping (base type + config + sub-fields)
+            String mappingJson = buildRichFieldMappingJson(fieldName, esType, indexTypeESConfig, indexTypeESFields);
+
+            Request req = new Request("PUT", "/" + indexName + "/_mapping");
+            req.setEntity(new StringEntity(mappingJson, ContentType.APPLICATION_JSON));
+            Response resp = client.performRequest(req);
+
+            if (resp.getStatusLine().getStatusCode() >= 200 && resp.getStatusLine().getStatusCode() < 300) {
+                cachedFields.add(fieldName);
+                richCachedFields.add(fieldName);
+                LOG.info("Added rich ES field mapping: index={}, field={}, type={}, subFields={}",
+                        indexName, fieldName, esType, indexTypeESFields != null ? indexTypeESFields.keySet() : "none");
+            }
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg != null && msg.contains("cannot be changed from type")) {
+                // Base type conflict on a new field — shouldn't happen, but handle gracefully
+                LOG.warn("Type conflict adding rich ES field mapping for {}.{}: {}. Trying sub-fields only.",
+                        indexName, fieldName, msg);
+                try {
+                    RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+                    if (client != null) {
+                        addSubFieldsToExistingField(client, indexName, fieldName, indexTypeESFields);
+                        richCachedFields.add(fieldName);
+                    }
+                } catch (Exception retryEx) {
+                    LOG.warn("Failed to add sub-fields for {}.{}: {}", indexName, fieldName, retryEx.getMessage());
+                }
+            } else if (msg != null && msg.contains("mapper_parsing_exception")) {
+                cachedFields.add(fieldName);
+                richCachedFields.add(fieldName);
+                LOG.debug("ES field mapping already exists for {}.{}, skipping rich mapping", indexName, fieldName);
+            } else {
+                LOG.warn("Failed to add rich ES field mapping for {}.{}: {}", indexName, fieldName, msg);
+            }
+        }
+    }
+
+    /**
+     * Adds sub-fields to an existing ES field without changing its base type.
+     * ES allows adding sub-fields additively via PUT _mapping.
+     * For example, if a field exists as keyword, we can add .text, .stemmed sub-fields.
+     */
+    private void addSubFieldsToExistingField(RestClient client, String indexName, String fieldName,
+                                              HashMap<String, HashMap<String, Object>> indexTypeESFields) throws Exception {
+        if (indexTypeESFields == null || indexTypeESFields.isEmpty()) {
+            return;
+        }
+
+        // Build mapping with ONLY sub-fields — no base type change, no top-level config.
+        // ES will merge these sub-fields into the existing field definition.
+        StringBuilder mapping = new StringBuilder();
+        mapping.append("{\"properties\":{\"").append(fieldName).append("\":{");
+        mapping.append("\"fields\":{");
+        boolean first = true;
+        for (Map.Entry<String, HashMap<String, Object>> subField : indexTypeESFields.entrySet()) {
+            if (!first) mapping.append(",");
+            first = false;
+            mapping.append("\"").append(subField.getKey()).append("\":{");
+            HashMap<String, Object> subFieldConfig = subField.getValue();
+            boolean firstProp = true;
+            for (Map.Entry<String, Object> prop : subFieldConfig.entrySet()) {
+                if (!firstProp) mapping.append(",");
+                firstProp = false;
+                mapping.append("\"").append(prop.getKey()).append("\":").append(toJsonValue(prop.getValue()));
+            }
+            mapping.append("}");
+        }
+        mapping.append("}}}}");
+
+        Request req = new Request("PUT", "/" + indexName + "/_mapping");
+        req.setEntity(new StringEntity(mapping.toString(), ContentType.APPLICATION_JSON));
+        Response resp = client.performRequest(req);
+
+        if (resp.getStatusLine().getStatusCode() >= 200 && resp.getStatusLine().getStatusCode() < 300) {
+            LOG.info("Added sub-fields to existing ES field: index={}, field={}, subFields={}",
+                    indexName, fieldName, indexTypeESFields.keySet());
+        }
+    }
+
+    /**
+     * Builds the full rich field mapping JSON with base type, config, and sub-fields.
+     */
+    private String buildRichFieldMappingJson(String fieldName, String esType,
+                                              HashMap<String, Object> indexTypeESConfig,
+                                              HashMap<String, HashMap<String, Object>> indexTypeESFields) {
+        StringBuilder mapping = new StringBuilder();
+        mapping.append("{\"properties\":{\"").append(fieldName).append("\":{");
+        mapping.append("\"type\":\"").append(esType).append("\"");
+        if ("keyword".equals(esType)) {
+            mapping.append(",\"ignore_above\":5120");
+        }
+
+        // Add top-level config (e.g., analyzer, normalizer)
+        if (indexTypeESConfig != null) {
+            for (Map.Entry<String, Object> entry : indexTypeESConfig.entrySet()) {
+                mapping.append(",\"").append(entry.getKey()).append("\":").append(toJsonValue(entry.getValue()));
+            }
+        }
+
+        // Add sub-fields
+        if (indexTypeESFields != null && !indexTypeESFields.isEmpty()) {
+            mapping.append(",\"fields\":{");
+            boolean first = true;
+            for (Map.Entry<String, HashMap<String, Object>> subField : indexTypeESFields.entrySet()) {
+                if (!first) mapping.append(",");
+                first = false;
+                mapping.append("\"").append(subField.getKey()).append("\":{");
+                HashMap<String, Object> subFieldConfig = subField.getValue();
+                boolean firstProp = true;
+                for (Map.Entry<String, Object> prop : subFieldConfig.entrySet()) {
+                    if (!firstProp) mapping.append(",");
+                    firstProp = false;
+                    mapping.append("\"").append(prop.getKey()).append("\":").append(toJsonValue(prop.getValue()));
+                }
+                mapping.append("}");
+            }
+            mapping.append("}");
+        }
+
+        mapping.append("}}}");
+        return mapping.toString();
+    }
+
+    /**
+     * Creates an ES field mapping with top-level config (e.g., analyzer) but no sub-fields.
+     */
+    private void addESFieldMappingWithConfig(String indexName, String fieldName, Class<?> propertyClass,
+                                              boolean isStringField, HashMap<String, Object> indexTypeESConfig) {
+        Set<String> cachedFields = esMappingCache.computeIfAbsent(indexName, k -> ConcurrentHashMap.newKeySet());
+        if (cachedFields.contains(fieldName)) {
+            return;
+        }
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                return;
+            }
+
+            String esType = mapPropertyClassToESType(propertyClass, isStringField);
+
+            // If the config specifies an "analyzer", the field must be "text"
+            if ("keyword".equals(esType) && indexTypeESConfig.containsKey("analyzer")) {
+                esType = "text";
+            }
+
+            StringBuilder mapping = new StringBuilder();
+            mapping.append("{\"properties\":{\"").append(fieldName).append("\":{");
+            mapping.append("\"type\":\"").append(esType).append("\"");
+            if ("keyword".equals(esType)) {
+                mapping.append(",\"ignore_above\":5120");
+            }
+
+            for (Map.Entry<String, Object> entry : indexTypeESConfig.entrySet()) {
+                mapping.append(",\"").append(entry.getKey()).append("\":").append(toJsonValue(entry.getValue()));
+            }
+
+            mapping.append("}}}");
+
+            Request req = new Request("PUT", "/" + indexName + "/_mapping");
+            req.setEntity(new StringEntity(mapping.toString(), ContentType.APPLICATION_JSON));
+            Response resp = client.performRequest(req);
+
+            if (resp.getStatusLine().getStatusCode() >= 200 && resp.getStatusLine().getStatusCode() < 300) {
+                cachedFields.add(fieldName);
+                LOG.debug("Added ES field mapping with config: index={}, field={}, type={}", indexName, fieldName, esType);
+            }
+        } catch (Exception e) {
+            String msg = e.getMessage();
+            if (msg != null && (msg.contains("mapper_parsing_exception") || msg.contains("cannot be changed from type"))) {
+                cachedFields.add(fieldName);
+                LOG.debug("ES field mapping with config already exists for {}.{}, skipping", indexName, fieldName);
+            } else {
+                LOG.warn("Failed to add ES field mapping with config for {}.{}: {}", indexName, fieldName, msg);
+            }
+        }
+    }
+
+    /**
+     * Converts a value to a JSON string representation.
+     * Numbers and booleans are unquoted; strings are quoted.
+     */
+    private static String toJsonValue(Object value) {
+        if (value instanceof Number || value instanceof Boolean) {
+            return value.toString();
+        }
+        return "\"" + value + "\"";
+    }
+
+    /**
+     * Maps a Java property class to an ES field type.
+     * For String fields:
+     *   - isStringField=true (IndexType.STRING) → "keyword" (exact match, normalizer-compatible)
+     *   - isStringField=false (default IndexType) → "text" (analyzed, full-text searchable)
+     * This matches JanusGraph's Mapping.TEXT / Mapping.STRING behavior.
+     */
     private static String mapPropertyClassToESType(Class<?> clazz, boolean isStringField) {
         if (clazz == null || clazz == String.class) {
-            return "keyword";
+            return isStringField ? "keyword" : "text";
         } else if (clazz == Integer.class || clazz == int.class) {
             return "integer";
         } else if (clazz == Long.class || clazz == long.class) {
@@ -370,14 +637,13 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
                 return;
             }
 
+            // Create with empty body so the ES index template (atlan-template / atlas-graph-template)
+            // applies its analyzers, normalizers, dynamic_templates, and settings automatically.
+            // Only override settings that are not in the template.
             String settings = "{\n" +
                 "  \"settings\": {\n" +
                 "    \"number_of_shards\": 1,\n" +
-                "    \"number_of_replicas\": 0,\n" +
-                "    \"index.mapping.total_fields.limit\": 2000\n" +
-                "  },\n" +
-                "  \"mappings\": {\n" +
-                "    \"dynamic\": true\n" +
+                "    \"number_of_replicas\": 0\n" +
                 "  }\n" +
                 "}";
 
@@ -387,7 +653,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
 
             int status = resp.getStatusLine().getStatusCode();
             if (status >= 200 && status < 300) {
-                LOG.info("Created ES index: {}", indexName);
+                LOG.info("Created ES index: {} (template settings will be applied if matching template exists)", indexName);
             } else {
                 LOG.warn("Failed to create ES index {}: status={}", indexName, status);
             }
