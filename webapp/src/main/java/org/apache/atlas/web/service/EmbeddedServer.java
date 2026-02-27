@@ -588,7 +588,7 @@ public class EmbeddedServer {
                                     fastLaneContext.getClass().getName());
                          
                             fastLaneContext.start();
-                            LOG.info("Fast lane context started. Ready to start v2Holder")
+                            LOG.info("Fast lane context started. Ready to start v2Holder");
                                             
                             v2Holder.start();
 
