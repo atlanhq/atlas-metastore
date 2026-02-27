@@ -429,7 +429,7 @@ public class EmbeddedServer {
                 Object mainSpring = mainAppContext.getServletContext().getAttribute(
                     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                 
-                if (mainSpring != null && curContextForFastLane instanceof LazySpringContext) {
+                if (curContextForFastLane instanceof LazySpringContext) {
                      LOG.info("V2Holder: set delegate to main.");
                     ((LazySpringContext)curContextForFastLane).setDelegate(mainSpring);
                 }
@@ -545,6 +545,8 @@ public class EmbeddedServer {
                     // FIX: Initialize the servlet even if the context is already started
                     try {
                         //v2Holder.getServletHandler().initialize();
+                        //force restart before start
+                        v2Holder.stop();
                         v2Holder.start();
                         bridge.markSynchronized();
                         LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
