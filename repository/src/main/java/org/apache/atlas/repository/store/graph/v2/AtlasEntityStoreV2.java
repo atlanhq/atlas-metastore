@@ -409,6 +409,29 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
     @Override
     @GraphTransaction
+    public Map<String, AtlasEntityHeader> getEntityHeadersByIdsWithoutAuthorization(List<String> guids) throws AtlasBaseException {
+        Map<String, AtlasEntityHeader> ret = new HashMap<>();
+
+        for (String guid : guids) {
+            try {
+                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(guid);
+                if (header != null) {
+                    ret.put(guid, header);
+                }
+            } catch (AtlasBaseException e) {
+                if (e.getAtlasErrorCode() != AtlasErrorCode.INSTANCE_GUID_NOT_FOUND) {
+                    throw e;
+                }
+                LOG.warn("Entity not found for guid: {}, skipping", guid);
+            }
+        }
+
+        return ret;
+    }
+
+
+    @Override
+    @GraphTransaction
     public AtlasEntityHeader getEntityHeaderByUniqueAttributes(AtlasEntityType entityType, Map<String, Object> uniqAttributes) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> getEntityHeaderByUniqueAttributes({}, {})", entityType.getTypeName(), uniqAttributes);
