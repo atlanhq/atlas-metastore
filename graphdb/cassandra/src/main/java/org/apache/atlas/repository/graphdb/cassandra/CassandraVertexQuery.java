@@ -64,6 +64,21 @@ public class CassandraVertexQuery implements AtlasVertexQuery<CassandraVertex, C
 
     @Override
     public long count() {
+        // When there are no has-predicates, use server-side CQL COUNT(*)
+        // instead of materialising all edges into Java.
+        if (hasPredicates.isEmpty()) {
+            long total = 0;
+            if (labels != null && labels.length > 0) {
+                for (String label : labels) {
+                    total += vertex.getEdgesCount(direction, label);
+                }
+            } else {
+                total = vertex.getEdgesCount(direction, null);
+            }
+            return total;
+        }
+
+        // Has-predicates require property inspection — fall back to materialise-and-count
         Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getMatchingEdges(-1);
         return StreamSupport.stream(edges.spliterator(), false).count();
     }

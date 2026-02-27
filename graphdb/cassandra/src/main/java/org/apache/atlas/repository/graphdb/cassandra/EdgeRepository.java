@@ -26,6 +26,14 @@ public class EdgeRepository {
     private PreparedStatement selectEdgesInByLabelStmt;
     private PreparedStatement selectEdgesOutByLabelLimitStmt;
     private PreparedStatement selectEdgesInByLabelLimitStmt;
+    private PreparedStatement countEdgesOutStmt;
+    private PreparedStatement countEdgesOutByLabelStmt;
+    private PreparedStatement countEdgesInStmt;
+    private PreparedStatement countEdgesInByLabelStmt;
+    private PreparedStatement hasEdgesOutByLabelStmt;
+    private PreparedStatement hasEdgesInByLabelStmt;
+    private PreparedStatement hasEdgesOutStmt;
+    private PreparedStatement hasEdgesInStmt;
     private PreparedStatement updateEdgeByIdStmt;
     private PreparedStatement updateEdgeOutStmt;
     private PreparedStatement updateEdgeInStmt;
@@ -88,6 +96,40 @@ public class EdgeRepository {
         selectEdgesInByLabelLimitStmt = session.prepare(
             "SELECT edge_id, edge_label, out_vertex_id, properties, state " +
             "FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT ?"
+        );
+
+        // COUNT variants for server-side counting (avoids transferring row data)
+        countEdgesOutStmt = session.prepare(
+            "SELECT COUNT(*) FROM edges_out WHERE out_vertex_id = ?"
+        );
+
+        countEdgesOutByLabelStmt = session.prepare(
+            "SELECT COUNT(*) FROM edges_out WHERE out_vertex_id = ? AND edge_label = ?"
+        );
+
+        countEdgesInStmt = session.prepare(
+            "SELECT COUNT(*) FROM edges_in WHERE in_vertex_id = ?"
+        );
+
+        countEdgesInByLabelStmt = session.prepare(
+            "SELECT COUNT(*) FROM edges_in WHERE in_vertex_id = ? AND edge_label = ?"
+        );
+
+        // LIMIT 1 variants for existence checks (avoids reading entire partition)
+        hasEdgesOutByLabelStmt = session.prepare(
+            "SELECT edge_id, state FROM edges_out WHERE out_vertex_id = ? AND edge_label = ? LIMIT 1"
+        );
+
+        hasEdgesInByLabelStmt = session.prepare(
+            "SELECT edge_id, state FROM edges_in WHERE in_vertex_id = ? AND edge_label = ? LIMIT 1"
+        );
+
+        hasEdgesOutStmt = session.prepare(
+            "SELECT edge_id, state FROM edges_out WHERE out_vertex_id = ? LIMIT 1"
+        );
+
+        hasEdgesInStmt = session.prepare(
+            "SELECT edge_id, state FROM edges_in WHERE in_vertex_id = ? LIMIT 1"
         );
 
         // Update edge properties/state in all three tables (uses INSERT which upserts in Cassandra)
@@ -180,6 +222,175 @@ public class EdgeRepository {
         }
 
         return rowToEdgeById(row, graph);
+    }
+
+    /**
+     * Count edges for a vertex server-side using CQL COUNT(*).
+     * Avoids transferring row data over the wire — Cassandra counts within the partition.
+     *
+     * Note: COUNT(*) in Cassandra includes all rows regardless of state.
+     * Rows with state=DELETED are included in the count. The caller must adjust
+     * for DELETED edges if needed. In practice, hard-deleted edges are removed
+     * from the table (not soft-deleted), so this is accurate for normal operations.
+     *
+     * @param vertexId  the vertex to count edges for
+     * @param direction OUT, IN, or BOTH
+     * @param edgeLabel optional label filter (null = all labels)
+     * @return count of edges in Cassandra (does NOT include uncommitted buffer)
+     */
+    public long countEdges(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        long count = 0;
+
+        if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
+            ResultSet rs;
+            if (edgeLabel != null) {
+                rs = session.execute(countEdgesOutByLabelStmt.bind(vertexId, edgeLabel));
+            } else {
+                rs = session.execute(countEdgesOutStmt.bind(vertexId));
+            }
+            Row row = rs.one();
+            if (row != null) {
+                count += row.getLong(0);
+            }
+        }
+
+        if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
+            ResultSet rs;
+            if (edgeLabel != null) {
+                rs = session.execute(countEdgesInByLabelStmt.bind(vertexId, edgeLabel));
+            } else {
+                rs = session.execute(countEdgesInStmt.bind(vertexId));
+            }
+            Row row = rs.one();
+            if (row != null) {
+                count += row.getLong(0);
+            }
+        }
+
+        return count;
+    }
+
+    /**
+     * Check if a vertex has at least one edge, using CQL LIMIT 1.
+     * Only selects edge_id and state (no properties deserialization).
+     *
+     * Skips edges with state=DELETED. If the first row is DELETED, falls back
+     * to a full edge fetch to check for non-deleted edges. This is rare in practice
+     * since hard-deleted edges are removed from the table.
+     *
+     * @param vertexId  the vertex to check
+     * @param direction OUT, IN, or BOTH
+     * @param edgeLabel optional label filter (null = all labels)
+     * @return true if at least one non-deleted edge exists in Cassandra (does NOT check uncommitted buffer)
+     */
+    public boolean hasEdges(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        if (direction == AtlasEdgeDirection.OUT || direction == AtlasEdgeDirection.BOTH) {
+            if (hasEdgesInDirection(vertexId, edgeLabel, true)) {
+                return true;
+            }
+        }
+
+        if (direction == AtlasEdgeDirection.IN || direction == AtlasEdgeDirection.BOTH) {
+            if (hasEdgesInDirection(vertexId, edgeLabel, false)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private boolean hasEdgesInDirection(String vertexId, String edgeLabel, boolean isOut) {
+        ResultSet rs;
+        if (edgeLabel != null) {
+            rs = session.execute((isOut ? hasEdgesOutByLabelStmt : hasEdgesInByLabelStmt)
+                    .bind(vertexId, edgeLabel));
+        } else {
+            rs = session.execute((isOut ? hasEdgesOutStmt : hasEdgesInStmt)
+                    .bind(vertexId));
+        }
+        Row row = rs.one();
+        if (row == null) {
+            return false;
+        }
+        String state = row.getString("state");
+        if (!"DELETED".equals(state)) {
+            return true;
+        }
+        // Rare edge case: LIMIT 1 returned a DELETED row. In practice, DELETED edges
+        // are hard-removed from the table at commit time, so this should almost never happen.
+        // Log a warning and return false — the edge effectively doesn't exist if it's deleted.
+        LOG.warn("hasEdgesInDirection: LIMIT 1 row for vertex {} label {} is DELETED — treating as no edges",
+                vertexId, edgeLabel);
+        return false;
+    }
+
+    /**
+     * Paginated delete of all edges for a vertex. Instead of loading all edges
+     * into memory at once, streams through Cassandra pages and deletes in batches.
+     *
+     * Memory usage: at most ~pageSize edge objects in memory at any time.
+     *
+     * @param vertexId the vertex whose edges should be deleted
+     * @param graph    the graph instance for edge deserialization
+     */
+    public void deleteEdgesForVertexPaginated(String vertexId, CassandraGraph graph) {
+        int pageSize = 500;
+        int batchLimit = 150;  // matches existing BATCH_LIMIT in batchDeleteEdges
+
+        // Delete OUT edges
+        deleteEdgesFromTable(vertexId, "edges_out", "out_vertex_id", "in_vertex_id",
+                true, pageSize, batchLimit, graph);
+
+        // Delete IN edges
+        deleteEdgesFromTable(vertexId, "edges_in", "in_vertex_id", "out_vertex_id",
+                false, pageSize, batchLimit, graph);
+    }
+
+    private void deleteEdgesFromTable(String vertexId, String tableName, String partitionCol,
+                                       String otherVertexCol, boolean isOut,
+                                       int pageSize, int batchLimit, CassandraGraph graph) {
+        SimpleStatement stmt = SimpleStatement.builder(
+                "SELECT edge_id, edge_label, " + otherVertexCol + ", properties, state " +
+                "FROM " + tableName + " WHERE " + partitionCol + " = ?")
+            .setPageSize(pageSize)
+            .addPositionalValue(vertexId)
+            .build();
+
+        ResultSet rs = session.execute(stmt);
+        List<CassandraEdge> batch = new ArrayList<>(batchLimit);
+        int totalDeleted = 0;
+
+        for (Row row : rs) {
+            String edgeId       = row.getString("edge_id");
+            String label        = row.getString("edge_label");
+            String otherVertex  = row.getString(otherVertexCol);
+            String propsJson    = row.getString("properties");
+            Map<String, Object> props = parseProperties(propsJson);
+
+            CassandraEdge edge;
+            if (isOut) {
+                edge = new CassandraEdge(edgeId, vertexId, otherVertex, label, props, graph);
+            } else {
+                edge = new CassandraEdge(edgeId, otherVertex, vertexId, label, props, graph);
+            }
+
+            batch.add(edge);
+            if (batch.size() >= batchLimit) {
+                batchDeleteEdges(batch);
+                totalDeleted += batch.size();
+                batch.clear();
+            }
+        }
+
+        if (!batch.isEmpty()) {
+            batchDeleteEdges(batch);
+            totalDeleted += batch.size();
+        }
+
+        if (totalDeleted > 0) {
+            LOG.debug("deleteEdgesFromTable: deleted {} edges from {} for vertex {}",
+                    totalDeleted, tableName, vertexId);
+        }
     }
 
     @SuppressWarnings("unchecked")

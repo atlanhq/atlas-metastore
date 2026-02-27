@@ -385,6 +385,63 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         return (Iterable) new ArrayList<>(merged.values());
     }
 
+    /**
+     * Server-side COUNT of persisted edges via CQL COUNT(*).
+     * Does NOT include uncommitted buffer — caller must adjust separately.
+     */
+    long countEdgesForVertex(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        return edgeRepository.countEdges(vertexId, direction, edgeLabel);
+    }
+
+    /**
+     * Calculate the buffer adjustment for edge counts.
+     * Returns: (new buffered edges matching criteria) - (removed buffered edges that exist in Cassandra).
+     *
+     * For removed edges: they are still counted by Cassandra's COUNT(*), so we subtract them.
+     * For new edges: they are NOT in Cassandra yet, so we add them.
+     */
+    long countBufferedEdgeAdjustment(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        TransactionBuffer buffer = txBuffer.get();
+
+        // Count new buffered edges matching the criteria
+        List<CassandraEdge> bufferedNew = buffer.getEdgesForVertex(vertexId, direction, edgeLabel);
+        long newCount = bufferedNew.size();
+
+        // Count removed edges matching the criteria (these are still in Cassandra's COUNT)
+        long removedCount = 0;
+        for (CassandraEdge removed : buffer.getRemovedEdges()) {
+            if (edgeLabel != null && !edgeLabel.equals(removed.getLabel())) {
+                continue;
+            }
+            boolean matches = switch (direction) {
+                case OUT -> removed.getOutVertexId().equals(vertexId);
+                case IN -> removed.getInVertexId().equals(vertexId);
+                case BOTH -> removed.getOutVertexId().equals(vertexId) || removed.getInVertexId().equals(vertexId);
+            };
+            if (matches) {
+                removedCount++;
+            }
+        }
+
+        return newCount - removedCount;
+    }
+
+    /**
+     * Check if the transaction buffer has any new (uncommitted) edges matching the criteria.
+     */
+    boolean hasBufferedEdges(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        List<CassandraEdge> buffered = txBuffer.get().getEdgesForVertex(vertexId, direction, edgeLabel);
+        return !buffered.isEmpty();
+    }
+
+    /**
+     * Server-side existence check via CQL LIMIT 1.
+     * Does NOT check uncommitted buffer — caller must check buffer separately.
+     */
+    boolean hasEdgesForVertex(String vertexId, AtlasEdgeDirection direction, String edgeLabel) {
+        return edgeRepository.hasEdges(vertexId, direction, edgeLabel);
+    }
+
     // ---- Query operations ----
 
     @Override
@@ -582,8 +639,8 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             // 2. For removed vertices: cascade-delete their edges, then the vertex + its indexes
             if (!removedVertices.isEmpty()) {
                 for (CassandraVertex vertex : removedVertices) {
-                    // Cascade-delete all edges (already uses batchDeleteEdges internally)
-                    edgeRepository.deleteEdgesForVertex(vertex.getIdString(), this);
+                    // Cascade-delete all edges using paginated approach (bounded memory)
+                    edgeRepository.deleteEdgesForVertexPaginated(vertex.getIdString(), this);
                     vertexRepository.deleteVertex(vertex.getIdString());
                 }
 

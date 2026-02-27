@@ -69,14 +69,24 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
 
     @Override
     public long getEdgesCount(AtlasEdgeDirection direction, String edgeLabel) {
-        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getEdges(direction, edgeLabel);
-        return StreamSupport.stream(edges.spliterator(), false).count();
+        // Server-side count via CQL COUNT(*) — avoids materialising all edges
+        long cassandraCount = graph.countEdgesForVertex(this.id, direction, edgeLabel);
+
+        // Adjust for uncommitted buffer: add new buffered edges, subtract removed buffered edges
+        long bufferAdjustment = graph.countBufferedEdgeAdjustment(this.id, direction, edgeLabel);
+
+        return cassandraCount + bufferAdjustment;
     }
 
     @Override
     public boolean hasEdges(AtlasEdgeDirection dir, String edgeLabel) {
-        Iterable<AtlasEdge<CassandraVertex, CassandraEdge>> edges = getEdges(dir, edgeLabel);
-        return edges.iterator().hasNext();
+        // Check buffer first — if there's a new buffered edge, return true without hitting Cassandra
+        if (graph.hasBufferedEdges(this.id, dir, edgeLabel)) {
+            return true;
+        }
+
+        // CQL LIMIT 1 check — avoids materialising all edges
+        return graph.hasEdgesForVertex(this.id, dir, edgeLabel);
     }
 
     @Override
