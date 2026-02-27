@@ -7,7 +7,7 @@ metadata:
   namespace: {{ .Values.Namespace }}
   labels:
     app: {{ template "name" . }}
-    component: vpa-recommender
+    app.kubernetes.io/component: recommender
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 
@@ -18,7 +18,7 @@ metadata:
   name: {{ .Values.vpa.recommender.name }}-recommender
   labels:
     app: {{ template "name" . }}
-    component: vpa-recommender
+    app.kubernetes.io/component: recommender
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 rules:
@@ -72,7 +72,7 @@ metadata:
   name: {{ .Values.vpa.recommender.name }}-recommender
   labels:
     app: {{ template "name" . }}
-    component: vpa-recommender
+    app.kubernetes.io/component: recommender
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
 roleRef:
@@ -84,6 +84,32 @@ subjects:
     name: {{ .Values.vpa.recommender.name }}-recommender
     namespace: {{ .Values.Namespace }}
 
+{{- if .Values.vpa.recommender.podDisruptionBudget }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ .Values.vpa.recommender.name }}-recommender
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: {{ template "name" . }}
+    app.kubernetes.io/component: recommender
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+spec:
+  {{- with .Values.vpa.recommender.podDisruptionBudget.minAvailable }}
+  minAvailable: {{ . }}
+  {{- end }}
+  {{- with .Values.vpa.recommender.podDisruptionBudget.maxUnavailable }}
+  maxUnavailable: {{ . }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app: {{ template "name" . }}
+      app.kubernetes.io/component: recommender
+      release: {{ .Release.Name }}
+{{- end }}
+
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -92,7 +118,7 @@ metadata:
   namespace: {{ .Values.Namespace }}
   labels:
     app: {{ template "name" . }}
-    component: vpa-recommender
+    app.kubernetes.io/component: recommender
     release: {{ .Release.Name }}
     heritage: {{ .Release.Service }}
   {{- with .Values.vpa.recommender.annotations }}
@@ -105,13 +131,13 @@ spec:
   selector:
     matchLabels:
       app: {{ template "name" . }}
-      component: vpa-recommender
+      app.kubernetes.io/component: recommender
       release: {{ .Release.Name }}
   template:
     metadata:
       labels:
         app: {{ template "name" . }}
-        component: vpa-recommender
+        app.kubernetes.io/component: recommender
         release: {{ .Release.Name }}
       {{- with .Values.vpa.recommender.podAnnotations }}
       annotations:
@@ -119,6 +145,10 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ .Values.vpa.recommender.name }}-recommender
+      {{- with .Values.vpa.recommender.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.vpa.recommender.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
