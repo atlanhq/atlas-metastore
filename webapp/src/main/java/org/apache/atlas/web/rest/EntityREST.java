@@ -1986,6 +1986,52 @@ public class EntityREST {
     }
 
     @POST
+    @Path("/repairindex/connection")
+    public Map<String, Object> repairIndexByConnection(
+            @QueryParam("connectionQualifiedName") String connectionQualifiedName,
+            @QueryParam("fetchSize") @DefaultValue("1000") int fetchSize,
+            @QueryParam("batchSize") @DefaultValue("500") int batchSize) throws AtlasBaseException {
+
+        Servlets.validateQueryParamLength("connectionQualifiedName", connectionQualifiedName);
+
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "EntityREST.repairIndexByConnection");
+            }
+
+            AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index by Connection");
+
+            if (connectionQualifiedName == null || connectionQualifiedName.isEmpty()) {
+                throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS, "connectionQualifiedName is required");
+            }
+
+            LOG.info("Repairing ES index for connection: {} (fetchSize={}, batchSize={})",
+                    connectionQualifiedName, fetchSize, batchSize);
+
+            long startTime = System.currentTimeMillis();
+            int reindexed = repairIndex.reindexByQualifiedNamePrefix(connectionQualifiedName, fetchSize, batchSize);
+            long elapsed = System.currentTimeMillis() - startTime;
+
+            LOG.info("Repaired ES index for connection '{}': {} entities reindexed in {} ms",
+                    connectionQualifiedName, reindexed, elapsed);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("connectionQualifiedName", connectionQualifiedName);
+            result.put("entitiesReindexed", reindexed);
+            result.put("elapsedMs", elapsed);
+            return result;
+
+        } catch (Exception e) {
+            LOG.error("Exception while repairIndexByConnection for '{}'", connectionQualifiedName, e);
+            throw new AtlasBaseException(e);
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    @POST
     @Path("/repairAllClassifications")
     public void repairAllClassifications(@QueryParam("delay") @DefaultValue("0") int delay, @QueryParam("batchSize") @DefaultValue("1000") int batchSize, @QueryParam("fetchSize") @DefaultValue("5000") int fetchSize) throws AtlasBaseException {
         AtlasPerfTracer perf = null;

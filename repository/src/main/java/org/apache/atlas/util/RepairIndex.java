@@ -28,6 +28,7 @@ import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.service.metrics.MetricUtils;
@@ -66,14 +67,20 @@ public class RepairIndex {
     private static final int  MAX_TRIES_ON_FAILURE = 3;
 
     private JanusGraph graph;
+    private CassandraGraph cassandraGraph;
     private AtlanElasticSearchIndex searchIndex;
     private EntityMutationService entityMutationService;
     private GraphHelper graphHelper;
+    private boolean isCassandraBackend;
 
     @Inject
     public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph) {
         this.entityMutationService = entityMutationService;
         graphHelper = new GraphHelper(atlasGraph);
+
+        if (atlasGraph instanceof CassandraGraph) {
+            this.cassandraGraph = (CassandraGraph) atlasGraph;
+        }
     }
 
     @PostConstruct
@@ -86,8 +93,9 @@ public class RepairIndex {
         }
 
         if (GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)) {
-            LOG.info("RepairIndex: Cassandra backend detected — skipping JanusGraph initialization (RepairIndex is JanusGraph-only)");
+            LOG.info("RepairIndex: Cassandra backend detected — using CassandraGraph.reindexVertices() for repair");
             graph = null;
+            isCassandraBackend = true;
             return;
         }
 
@@ -115,8 +123,27 @@ public class RepairIndex {
      * @throws Exception
      */
     public void reindexVerticesByIds(String indexName, Set<Long> vertexIds) throws Exception {
+        if (isCassandraBackend) {
+            // Long vertex IDs are JanusGraph-specific. Cassandra uses UUID strings.
+            // Convert to String vertex IDs, look up GUID from each, and reindex.
+            Set<String> guids = new HashSet<>();
+            Set<AtlasVertex> vertices = graphHelper.getVertices(vertexIds);
+            for (AtlasVertex vertex : vertices) {
+                String guid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+                if (guid != null) guids.add(guid);
+            }
+            if (!guids.isEmpty()) {
+                LOG.info("RepairIndex.reindexVerticesByIds (Cassandra): resolved {} GUIDs from {} vertex IDs",
+                        guids.size(), vertexIds.size());
+                restoreByIdsCassandra(guids);
+            } else {
+                LOG.warn("RepairIndex.reindexVerticesByIds (Cassandra): no GUIDs resolved from {} vertex IDs",
+                        vertexIds.size());
+            }
+            return;
+        }
         if (graph == null) {
-            throw new UnsupportedOperationException("RepairIndex.reindexVerticesByIds is not supported with Cassandra backend");
+            throw new UnsupportedOperationException("RepairIndex.reindexVerticesByIds: graph not initialized");
         }
         Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
         StandardJanusGraphTx tx = null;
@@ -144,11 +171,18 @@ public class RepairIndex {
     }
 
     public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
-        if (graph == null) {
-            throw new UnsupportedOperationException("RepairIndex.restoreSelective is not supported with Cassandra backend");
-        }
         Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
         LOG.info("processing referencedGuids => " + referencedGUIDs);
+
+        if (isCassandraBackend) {
+            referencedGUIDs.add(guid);
+            restoreByIdsCassandra(referencedGUIDs);
+            return;
+        }
+
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.restoreSelective: graph not initialized");
+        }
 
         StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
         IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
@@ -166,8 +200,13 @@ public class RepairIndex {
     }
 
     public void restoreByIds(Set<String> guids) throws Exception {
+        if (isCassandraBackend) {
+            restoreByIdsCassandra(guids);
+            return;
+        }
+
         if (graph == null) {
-            throw new UnsupportedOperationException("RepairIndex.restoreByIds is not supported with Cassandra backend");
+            throw new UnsupportedOperationException("RepairIndex.restoreByIds: graph not initialized");
         }
 
         StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
@@ -183,6 +222,50 @@ public class RepairIndex {
         }
 
         entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
+    }
+
+    /**
+     * Cassandra backend: reads vertices from Cassandra by GUID and bulk-indexes them to ES.
+     * Uses CassandraGraph.reindexVertices() which applies the same filterPropertiesForES()
+     * logic used during commit-time sync.
+     */
+    private void restoreByIdsCassandra(Set<String> guids) throws Exception {
+        if (cassandraGraph == null) {
+            throw new IllegalStateException("RepairIndex: Cassandra backend but CassandraGraph not injected");
+        }
+
+        LOG.info("RepairIndex (Cassandra): reindexing {} entities to ES", guids.size());
+        long startTime = System.currentTimeMillis();
+
+        int succeeded = cassandraGraph.reindexVertices(guids);
+
+        LOG.info("RepairIndex (Cassandra): reindexed {}/{} entities in {} ms",
+                succeeded, guids.size(), System.currentTimeMillis() - startTime);
+
+        // Repair classification mappings (same as JanusGraph path)
+        entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
+    }
+
+    /**
+     * Scans the Cassandra vertices table for all entities whose qualifiedName
+     * starts with the given prefix and reindexes them to ES.
+     * Only supported on Cassandra backend.
+     *
+     * @param qualifiedNamePrefix  e.g., a connectionQualifiedName like "default/snowflake/1772139790"
+     * @param fetchSize            Cassandra page size for the scan
+     * @param reindexBatchSize     ES bulk write batch size
+     * @return total number of vertices reindexed
+     */
+    public int reindexByQualifiedNamePrefix(String qualifiedNamePrefix, int fetchSize, int reindexBatchSize) throws Exception {
+        if (!isCassandraBackend || cassandraGraph == null) {
+            throw new UnsupportedOperationException(
+                    "reindexByQualifiedNamePrefix is only supported with Cassandra backend");
+        }
+
+        LOG.info("RepairIndex: reindexByQualifiedNamePrefix prefix='{}' fetchSize={} batchSize={}",
+                qualifiedNamePrefix, fetchSize, reindexBatchSize);
+
+        return cassandraGraph.reindexByQualifiedNamePrefix(qualifiedNamePrefix, fetchSize, reindexBatchSize);
     }
 
     private static String[] getIndexes() {
