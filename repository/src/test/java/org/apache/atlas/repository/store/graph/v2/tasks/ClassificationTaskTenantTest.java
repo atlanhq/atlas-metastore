@@ -9,7 +9,7 @@ import org.apache.atlas.repository.metrics.TaskMetricsService;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphMapper;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.config.dynamic.DynamicConfigStore;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
