@@ -444,7 +444,7 @@ public class EmbeddedServer {
             }
         };
         v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
-        v2Holder.setInitOrder(1);
+        v2Holder.setInitOrder(-1);
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerRequestFilters", 
                           "com.sun.jersey.api.container.filter.LoggingFilter");
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerResponseFilters", 
@@ -507,6 +507,8 @@ public class EmbeddedServer {
 
             server.start(); 
             int attempts = 0;
+            //Explicitly sleep for full initialization main
+            Thread.sleep(2000); 
             while (mainSpringContext == null && attempts < 10) {
                 mainSpringContext = mainAppContext.getServletContext().getAttribute(
                     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
