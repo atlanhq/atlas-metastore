@@ -1270,7 +1270,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * @param reindexBatchSize     batch size for ES bulk writes (default 500)
      * @return total number of vertices reindexed to ES
      */
-    public int reindexByQualifiedNamePrefix(String qualifiedNamePrefix, int fetchSize, int reindexBatchSize) {
+    /**
+     * @param progressCallback optional callback invoked after each batch with the cumulative count reindexed so far
+     */
+    public int reindexByQualifiedNamePrefix(String qualifiedNamePrefix, int fetchSize, int reindexBatchSize,
+                                             java.util.function.IntConsumer progressCallback) {
         if (qualifiedNamePrefix == null || qualifiedNamePrefix.isEmpty()) {
             LOG.error("reindexByQualifiedNamePrefix: prefix is null/empty");
             return 0;
@@ -1288,6 +1292,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     LOG.info("reindexByQualifiedNamePrefix: reindexing batch of {} GUIDs", guidBatch.size());
                     int count = reindexVertices(guidBatch);
                     totalReindexed[0] += count;
+                    if (progressCallback != null) {
+                        progressCallback.accept(totalReindexed[0]);
+                    }
                 });
 
         long elapsed = System.currentTimeMillis() - startTime;

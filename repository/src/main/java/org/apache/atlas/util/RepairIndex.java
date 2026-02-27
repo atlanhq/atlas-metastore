@@ -22,6 +22,7 @@ import io.micrometer.core.instrument.Timer;
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlanElasticSearchIndex;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graph.GraphHelper;
@@ -49,9 +50,11 @@ import javax.annotation.PostConstruct;
 import javax.inject.Inject;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.apache.atlas.ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA;
 import static org.apache.atlas.ApplicationProperties.GRAPHDB_BACKEND_CONF;
@@ -72,6 +75,9 @@ public class RepairIndex {
     private EntityMutationService entityMutationService;
     private GraphHelper graphHelper;
     private boolean isCassandraBackend;
+
+    // Async repair job tracking
+    private final AtomicReference<RepairConnectionJob> currentRepairJob = new AtomicReference<>();
 
     @Inject
     public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph) {
@@ -247,25 +253,100 @@ public class RepairIndex {
     }
 
     /**
-     * Scans the Cassandra vertices table for all entities whose qualifiedName
-     * starts with the given prefix and reindexes them to ES.
-     * Only supported on Cassandra backend.
+     * Starts an async repair job that scans the Cassandra vertices table for all
+     * entities whose qualifiedName starts with the given prefix, and reindexes
+     * them to ES. Returns immediately with the job status.
      *
-     * @param qualifiedNamePrefix  e.g., a connectionQualifiedName like "default/snowflake/1772139790"
-     * @param fetchSize            Cassandra page size for the scan
-     * @param reindexBatchSize     ES bulk write batch size
-     * @return total number of vertices reindexed
+     * Only one connection repair job can run at a time. If a job is already
+     * running, this throws an exception.
+     *
+     * @return initial job status map (jobId, status, connectionQualifiedName)
      */
-    public int reindexByQualifiedNamePrefix(String qualifiedNamePrefix, int fetchSize, int reindexBatchSize) throws Exception {
+    public Map<String, Object> startReindexByQualifiedNamePrefix(String qualifiedNamePrefix,
+                                                                  int fetchSize,
+                                                                  int reindexBatchSize) throws Exception {
         if (!isCassandraBackend || cassandraGraph == null) {
             throw new UnsupportedOperationException(
                     "reindexByQualifiedNamePrefix is only supported with Cassandra backend");
         }
 
-        LOG.info("RepairIndex: reindexByQualifiedNamePrefix prefix='{}' fetchSize={} batchSize={}",
-                qualifiedNamePrefix, fetchSize, reindexBatchSize);
+        // Prevent concurrent repair jobs
+        RepairConnectionJob existing = currentRepairJob.get();
+        if (existing != null && "IN_PROGRESS".equals(existing.status)) {
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST,
+                    "A connection repair job is already in progress for '" + existing.connectionQualifiedName
+                    + "' (started at " + existing.startTime + ")");
+        }
 
-        return cassandraGraph.reindexByQualifiedNamePrefix(qualifiedNamePrefix, fetchSize, reindexBatchSize);
+        RepairConnectionJob job = new RepairConnectionJob(qualifiedNamePrefix);
+        currentRepairJob.set(job);
+
+        Thread repairThread = new Thread(() -> {
+            try {
+                LOG.info("RepairIndex (async): starting reindex for prefix='{}' fetchSize={} batchSize={}",
+                        qualifiedNamePrefix, fetchSize, reindexBatchSize);
+
+                int count = cassandraGraph.reindexByQualifiedNamePrefix(
+                        qualifiedNamePrefix, fetchSize, reindexBatchSize,
+                        reindexedSoFar -> job.entitiesReindexed = reindexedSoFar);
+
+                job.entitiesReindexed = count;
+                job.status = "COMPLETED";
+                job.endTime = System.currentTimeMillis();
+
+                LOG.info("RepairIndex (async): completed — {} entities reindexed for prefix='{}' in {} ms",
+                        count, qualifiedNamePrefix, job.endTime - job.startTime);
+            } catch (Exception e) {
+                job.status = "FAILED";
+                job.errorMessage = e.getMessage();
+                job.endTime = System.currentTimeMillis();
+
+                LOG.error("RepairIndex (async): failed for prefix='{}'", qualifiedNamePrefix, e);
+            }
+        }, "repair-connection-" + qualifiedNamePrefix);
+
+        repairThread.setDaemon(true);
+        repairThread.start();
+
+        return job.toMap();
+    }
+
+    /**
+     * Returns the current/last connection repair job status, or null if no job has run.
+     */
+    public Map<String, Object> getRepairConnectionJobStatus() {
+        RepairConnectionJob job = currentRepairJob.get();
+        return job != null ? job.toMap() : null;
+    }
+
+    /**
+     * Tracks the state of an async connection repair job.
+     */
+    static class RepairConnectionJob {
+        final String connectionQualifiedName;
+        final long   startTime;
+        volatile String status          = "IN_PROGRESS";
+        volatile int    entitiesReindexed = 0;
+        volatile long   endTime         = 0;
+        volatile String errorMessage    = null;
+
+        RepairConnectionJob(String connectionQualifiedName) {
+            this.connectionQualifiedName = connectionQualifiedName;
+            this.startTime = System.currentTimeMillis();
+        }
+
+        Map<String, Object> toMap() {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("connectionQualifiedName", connectionQualifiedName);
+            m.put("status", status);
+            m.put("entitiesReindexed", entitiesReindexed);
+            m.put("startTime", startTime);
+            m.put("elapsedMs", (endTime > 0 ? endTime : System.currentTimeMillis()) - startTime);
+            if (errorMessage != null) {
+                m.put("errorMessage", errorMessage);
+            }
+            return m;
+        }
     }
 
     private static String[] getIndexes() {
