@@ -554,22 +554,17 @@ public class EmbeddedServer {
                                 realMainSpringContext);
                             if (fastLaneContext instanceof org.eclipse.jetty.webapp.WebAppContext) {
                                 ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
-                                LOG.info("ParentLoaderPriority set to true for Fast-Lane WebAppContext.");
-                            }
+                                LOG.info("ParentLoaderPriority is set to true for Fast-Lane WebAppContext.");
+                            } 
                             else
                             {
                                 LOG.warn("setParentLoaderPriority not set as fastLaneContext hasn't switched yetfastLaneContext type is: {}", 
                                     fastLaneContext.getClass().getName());
                             }
-                            if (fastLaneContext instanceof LazySpringContext) {
-                                ((LazySpringContext) fastLaneContext).setDelegate((org.springframework.context.ApplicationContext) realMainSpringContext);
-                                LOG.info("setDelegate called with correct main spring context."); 
-                            }
-                            else
-                            {
-                                LOG.warn("setDelegate NOT called. fastLaneContext type is: {}", 
+
+                            LOG.warn("Fast lane context parent priority set. fastLaneContext type is: {} . Ready to call start on v2Holder", 
                                     fastLaneContext.getClass().getName());
-                            }
+                         
                                             
                             v2Holder.start();
                             bridge.markSynchronized();
