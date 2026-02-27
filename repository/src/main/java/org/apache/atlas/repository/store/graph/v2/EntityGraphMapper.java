@@ -6225,7 +6225,7 @@ public class EntityGraphMapper {
                 if (CollectionUtils.isEmpty(finalClassifications)) {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
                 } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2, false);
                 }
 
                 deNormAttributesMap.put(vertex.getDocId(), deNormAttributes);
@@ -6272,7 +6272,7 @@ public class EntityGraphMapper {
                 if (CollectionUtils.isEmpty(finalClassifications)) {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
                 } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2, true);
                 }
 
                 deNormAttributesMap.put(vertexIdstoDocIdMap.get(tagAttachment.getVertexId()), deNormAttributes);
