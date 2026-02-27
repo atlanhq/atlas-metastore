@@ -183,7 +183,7 @@ resources_development:
     cpu: 300m
   limits:
     memory: 4Gi
-    cpu: 300m
+    cpu: 800m
 
 resources_lite:
   requests:
