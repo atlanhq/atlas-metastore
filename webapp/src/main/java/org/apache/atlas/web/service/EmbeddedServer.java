@@ -562,6 +562,11 @@ public class EmbeddedServer {
                         Object realMainSpringContext = mainAppContext.getServletContext().getAttribute(
                             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                         if(realMainSpringContext != null){
+                            //Stop fastLaneContext, if started to change the class loader
+                            if (fastLaneContext.isStarted()) {
+                                LOG.info("Fast-lane context is already started. Stopping it to apply ClassLoader...");
+                                fastLaneContext.stop();
+                            }
                             //align classloaders
                             ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
                             fastLaneContext.setClassLoader(mainClassLoader);
@@ -579,9 +584,11 @@ public class EmbeddedServer {
                                     fastLaneContext.getClass().getName());
                             }
 
-                            LOG.info("Fast lane context parent priority set. fastLaneContext type is: {} . Ready to call start on v2Holder", 
+                            LOG.info("Fast lane context parent priority set. fastLaneContext type is: {} . Ready to call start on fastlaneContext ", 
                                     fastLaneContext.getClass().getName());
                          
+                            fastLaneContext.start();
+                            LOG.info("Fast lane context started. Ready to start v2Holder")
                                             
                             v2Holder.start();
 
