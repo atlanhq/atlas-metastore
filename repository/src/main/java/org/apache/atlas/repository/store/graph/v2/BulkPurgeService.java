@@ -35,6 +35,11 @@ import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
+import org.apache.atlas.model.Tag;
+import org.apache.atlas.repository.store.graph.v2.tags.PaginatedTagResult;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.type.AtlasType;
 import org.janusgraph.util.encoding.LongEncoding;
@@ -82,6 +87,7 @@ public class BulkPurgeService {
 
     // Lazily initialized ES client (cached for reuse across calls)
     private volatile RestClient esClient;
+    private volatile Boolean tagV2Override; // @VisibleForTesting: override DynamicConfigStore in tests
 
     // Active purge tracking for cancel support
     private final ConcurrentHashMap<String, PurgeContext> activePurges = new ConcurrentHashMap<>();
@@ -145,6 +151,11 @@ public class BulkPurgeService {
     @VisibleForTesting
     void setEsClient(RestClient client) {
         this.esClient = client;
+    }
+
+    @VisibleForTesting
+    void setTagV2Override(Boolean tagV2Enabled) {
+        this.tagV2Override = tagV2Enabled;
     }
 
     /**
@@ -319,6 +330,16 @@ public class BulkPurgeService {
             }
 
             ctx.status = "RUNNING";
+            if (tagV2Override != null) {
+                ctx.isTagV2 = tagV2Override;
+            } else {
+                try {
+                    ctx.isTagV2 = DynamicConfigStore.isTagV2Enabled();
+                } catch (Exception e) {
+                    LOG.warn("BulkPurge: Could not determine Tag V2 status, defaulting to false", e);
+                    ctx.isTagV2 = false;
+                }
+            }
             ctx.lastHeartbeat = System.currentTimeMillis();
             writeRedisStatus(ctx);
 
@@ -335,7 +356,6 @@ public class BulkPurgeService {
                 }
             }, heartbeatInterval, heartbeatInterval, TimeUnit.MILLISECONDS);
 
-            // Phase 1+2: Stream from ES and delete in parallel
             long startTime = System.currentTimeMillis();
             streamAndDelete(ctx);
 
@@ -344,10 +364,8 @@ public class BulkPurgeService {
                 LOG.info("BulkPurge: Cancelled for purgeKey={}, deleted={}, failed={}",
                         ctx.purgeKey, ctx.totalDeleted.get(), ctx.totalFailed.get());
             } else {
-                // Phase 3a: ES delete_by_query safety net
                 esCleanup(ctx);
 
-                // Phase 5: Verification — confirm all deleted
                 try {
                     long remainingAfterEsCleanup = getEntityCount(ctx.esQuery);
                     ctx.remainingAfterCleanup = remainingAfterEsCleanup;
@@ -362,13 +380,12 @@ public class BulkPurgeService {
                     LOG.warn("BulkPurge: Verification count failed for purgeKey={}", ctx.purgeKey, e);
                 }
 
-                // Phase 3b: Repair __hasLineage on external vertices
                 repairExternalLineage(ctx);
 
-                // Phase 3c: Clean stale propagated classifications on external vertices
+                cleanPropagatedTagsFromDeletedSources(ctx);
+
                 repairExternalPropagatedClassifications(ctx);
 
-                // Phase 4: Delete the Connection entity itself (if requested)
                 if (ctx.deleteConnection && PURGE_MODE_CONNECTION.equals(ctx.purgeMode)) {
                     deleteConnectionVertex(ctx);
                 }
@@ -550,6 +567,15 @@ public class BulkPurgeService {
                 Boolean vertexHasLineage = vertex.getProperty(HAS_LINEAGE, Boolean.class);
                 if (Boolean.TRUE.equals(vertexHasLineage)) {
                     collectExternalLineageVertices(ctx, vertex);
+                }
+
+                // For Tag V2: collect entities with direct tags so Phase 3c-1 can
+                // clean propagated tags from Cassandra after vertex deletion
+                if (ctx.isTagV2) {
+                    List<String> traitNames = vertex.getMultiValuedProperty(TRAIT_NAMES_PROPERTY_KEY, String.class);
+                    if (traitNames != null && !traitNames.isEmpty()) {
+                        ctx.entitiesWithDirectTags.add(vertexId);
+                    }
                 }
 
                 // removeVertex() handles edge removal internally via JanusGraph's
@@ -864,11 +890,14 @@ public class BulkPurgeService {
     }
 
     /**
-     * Phase 3c: Clean stale propagated classifications on external vertices.
+     * Phase 3c-2: Clean stale propagated classifications on direct lineage neighbor vertices.
      *
-     * When entity A (in connection, has tag "PII") propagated that tag via lineage to
-     * entity B (in another connection), bulk purge deletes A but B retains stale
-     * __propagatedTraitNames and classification edges. This method cleans them up.
+     * For V1 (graph-based tags): Uses classification edges to find stale propagated tags.
+     * For V2 (Cassandra-based tags): Uses TagDAO to find stale propagated tags in Cassandra.
+     *
+     * This acts as a safety net for Phase 3c-1 (which handles cleanup from the source side).
+     * Phase 3c-1 handles transitive propagation via Cassandra; this method handles direct
+     * neighbors and catches any entities missed by Phase 3c-1.
      */
     private void repairExternalPropagatedClassifications(PurgeContext ctx) {
         if (ctx.externalLineageVertexIds.isEmpty()) {
@@ -879,6 +908,7 @@ public class BulkPurgeService {
         LOG.info("BulkPurge: Checking {} external vertices for stale propagated classifications for purgeKey={}",
                 ctx.externalLineageVertexIds.size(), ctx.purgeKey);
 
+        TagDAO tagDAO = ctx.isTagV2 ? TagDAOCassandraImpl.getInstance() : null;
         int cleaned = 0;
         int errors = 0;
 
@@ -889,73 +919,10 @@ public class BulkPurgeService {
                     continue;
                 }
 
-                List<String> staleClassificationNames = new ArrayList<>();
-
-                // Find propagated classification edges where the source entity no longer exists
-                Iterable<AtlasEdge> classEdges = vertex.getEdges(AtlasEdgeDirection.OUT, CLASSIFICATION_LABEL);
-                List<AtlasEdge> edgesToRemove = new ArrayList<>();
-
-                for (AtlasEdge edge : classEdges) {
-                    Boolean isPropagated = edge.getProperty(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
-                    if (!Boolean.TRUE.equals(isPropagated)) {
-                        continue;
-                    }
-
-                    // Check if the source entity (the one that originally had the classification) still exists
-                    AtlasVertex classificationVertex = edge.getInVertex();
-                    String sourceEntityGuid = classificationVertex.getProperty(CLASSIFICATION_ENTITY_GUID, String.class);
-
-                    if (sourceEntityGuid != null) {
-                        AtlasVertex sourceEntity = AtlasGraphUtilsV2.findByGuid(graph, sourceEntityGuid);
-                        if (sourceEntity == null) {
-                            // Source entity was deleted (part of purged connection) — mark for removal
-                            String classificationName = edge.getProperty(CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class);
-                            if (classificationName != null) {
-                                staleClassificationNames.add(classificationName);
-                            }
-                            edgesToRemove.add(edge);
-                        }
-                    }
-                }
-
-                if (!edgesToRemove.isEmpty()) {
-                    // Remove stale classification edges
-                    for (AtlasEdge edge : edgesToRemove) {
-                        graph.removeEdge(edge);
-                    }
-
-                    // Update __propagatedTraitNames: remove stale names
-                    List<String> currentPropagatedTraits = vertex.getMultiValuedProperty(
-                            PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, String.class);
-                    if (currentPropagatedTraits != null && !currentPropagatedTraits.isEmpty()) {
-                        List<String> updatedTraits = new ArrayList<>(currentPropagatedTraits);
-                        updatedTraits.removeAll(staleClassificationNames);
-
-                        vertex.removeProperty(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
-                        for (String trait : updatedTraits) {
-                            vertex.addListProperty(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, trait);
-                        }
-
-                        // Rebuild __propagatedClassificationNames (pipe-delimited string)
-                        if (updatedTraits.isEmpty()) {
-                            vertex.removeProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY);
-                        } else {
-                            StringBuilder sb = new StringBuilder();
-                            for (String trait : updatedTraits) {
-                                if (sb.length() > 0) sb.append("|");
-                                sb.append(trait);
-                            }
-                            AtlasGraphUtilsV2.setEncodedProperty(vertex, PROPAGATED_CLASSIFICATION_NAMES_KEY, sb.toString());
-                        }
-                    }
-
-                    // Update modification timestamp
-                    AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, System.currentTimeMillis());
-
-                    graph.commit();
-                    cleaned++;
-                    LOG.debug("BulkPurge: Cleaned {} stale propagated classifications from vertex {}",
-                            staleClassificationNames.size(), vertexId);
+                if (ctx.isTagV2) {
+                    cleaned += repairPropagatedClassificationsV2(vertex, vertexId, tagDAO);
+                } else {
+                    cleaned += repairPropagatedClassificationsV1(vertex, vertexId);
                 }
             } catch (Exception e) {
                 LOG.warn("BulkPurge: Failed to clean propagated classifications for vertex {}", vertexId, e);
@@ -968,6 +935,234 @@ public class BulkPurgeService {
 
         LOG.info("BulkPurge: Propagated classification cleanup complete for purgeKey={}: cleaned={}, errors={}",
                 ctx.purgeKey, cleaned, errors);
+    }
+
+    /**
+     * V1 path: Clean stale propagated classification edges on an external vertex.
+     * Uses graph classification edges to find propagated tags where the source entity no longer exists.
+     */
+    private int repairPropagatedClassificationsV1(AtlasVertex vertex, String vertexId) {
+        List<String> staleClassificationNames = new ArrayList<>();
+
+        Iterable<AtlasEdge> classEdges = vertex.getEdges(AtlasEdgeDirection.OUT, CLASSIFICATION_LABEL);
+        List<AtlasEdge> edgesToRemove = new ArrayList<>();
+
+        for (AtlasEdge edge : classEdges) {
+            Boolean isPropagated = edge.getProperty(CLASSIFICATION_EDGE_IS_PROPAGATED_PROPERTY_KEY, Boolean.class);
+            if (!Boolean.TRUE.equals(isPropagated)) {
+                continue;
+            }
+
+            AtlasVertex classificationVertex = edge.getInVertex();
+            String sourceEntityGuid = classificationVertex.getProperty(CLASSIFICATION_ENTITY_GUID, String.class);
+
+            if (sourceEntityGuid != null) {
+                AtlasVertex sourceEntity = AtlasGraphUtilsV2.findByGuid(graph, sourceEntityGuid);
+                if (sourceEntity == null) {
+                    String classificationName = edge.getProperty(CLASSIFICATION_EDGE_NAME_PROPERTY_KEY, String.class);
+                    if (classificationName != null) {
+                        staleClassificationNames.add(classificationName);
+                    }
+                    edgesToRemove.add(edge);
+                }
+            }
+        }
+
+        if (!edgesToRemove.isEmpty()) {
+            for (AtlasEdge edge : edgesToRemove) {
+                graph.removeEdge(edge);
+            }
+
+            for (String staleName : staleClassificationNames) {
+                removePropagatedTraitFromVertex(vertex, staleName);
+            }
+
+            graph.commit();
+            LOG.debug("BulkPurge: Cleaned {} stale propagated classifications (V1) from vertex {}",
+                    staleClassificationNames.size(), vertexId);
+        }
+
+        return edgesToRemove.isEmpty() ? 0 : 1;
+    }
+
+    /**
+     * V2 path: Clean stale propagated tags on an external vertex using Cassandra TagDAO.
+     * Finds propagated tags where the source entity no longer exists in the graph.
+     */
+    private int repairPropagatedClassificationsV2(AtlasVertex vertex, String vertexId, TagDAO tagDAO) throws Exception {
+        List<Tag> allTags = tagDAO.getAllTagsByVertexId(vertexId);
+        if (allTags == null || allTags.isEmpty()) {
+            return 0;
+        }
+
+        List<Tag> stalePropagatedTags = new ArrayList<>();
+
+        for (Tag tag : allTags) {
+            if (!tag.isPropagated()) {
+                continue;
+            }
+
+            // Check if source entity still exists in the graph
+            String sourceVertexId = tag.getSourceVertexId();
+            if (sourceVertexId != null) {
+                AtlasVertex sourceVertex = graph.getVertex(sourceVertexId);
+                if (sourceVertex == null) {
+                    stalePropagatedTags.add(tag);
+                }
+            }
+        }
+
+        if (!stalePropagatedTags.isEmpty()) {
+            tagDAO.deleteTags(stalePropagatedTags);
+
+            for (Tag tag : stalePropagatedTags) {
+                removePropagatedTraitFromVertex(vertex, tag.getTagTypeName());
+            }
+            graph.commit();
+
+            LOG.debug("BulkPurge: Cleaned {} stale propagated tags (V2) from vertex {}",
+                    stalePropagatedTags.size(), vertexId);
+        }
+
+        return stalePropagatedTags.size();
+    }
+
+    /**
+     * Phase 3c-1 (V2 only): Clean propagated tags from deleted source entities using Cassandra.
+     *
+     * When entity A (in purged connection) has direct tag "PII" that propagated via lineage
+     * to entities B, C, D (possibly in other connections and at any hop distance), this method:
+     * 1. Queries Cassandra's propagated_tags_by_source to find ALL downstream entities
+     * 2. Deletes the propagated tag entries from Cassandra
+     * 3. Updates graph properties (__propagatedTraitNames, __propagatedClassificationNames) on external vertices
+     * 4. Cleans zombie Cassandra entries for the deleted entity itself
+     *
+     * This uses Cassandra's propagated_tags_by_source index which tracks ALL propagated entities
+     * per (source, tagType) — no BFS traversal needed, handles any hop distance.
+     */
+    private void cleanPropagatedTagsFromDeletedSources(PurgeContext ctx) {
+        if (!ctx.isTagV2 || ctx.entitiesWithDirectTags.isEmpty()) {
+            return;
+        }
+
+        TagDAO tagDAO = TagDAOCassandraImpl.getInstance();
+        int totalCleaned = 0;
+        int totalErrors = 0;
+
+        LOG.info("BulkPurge: Cleaning propagated tags from {} deleted source entities for purgeKey={}",
+                ctx.entitiesWithDirectTags.size(), ctx.purgeKey);
+
+        for (String deletedVertexId : ctx.entitiesWithDirectTags) {
+            try {
+                List<Tag> allTags = tagDAO.getAllTagsByVertexId(deletedVertexId);
+                if (allTags == null || allTags.isEmpty()) {
+                    continue;
+                }
+
+                // Process each DIRECT tag that allows propagation removal on delete
+                for (Tag tag : allTags) {
+                    if (tag.isPropagated()) {
+                        continue;
+                    }
+                    if (!tag.getRemovePropagationsOnEntityDelete()) {
+                        continue;
+                    }
+
+                    // Page through ALL entities that received this tag (any hop distance)
+                    String pagingState = null;
+                    List<Tag> propagatedTagsToDelete = new ArrayList<>();
+                    List<AtlasVertex> verticesToUpdate = new ArrayList<>();
+
+                    while (true) {
+                        PaginatedTagResult result = tagDAO.getPropagationsForAttachmentBatchWithPagination(
+                                deletedVertexId, tag.getTagTypeName(), pagingState, 10000);
+
+                        for (Tag propagatedTag : result.getTags()) {
+                            propagatedTagsToDelete.add(propagatedTag);
+
+                            // Update graph properties on the receiving vertex (if it still exists in graph)
+                            AtlasVertex extVertex = graph.getVertex(propagatedTag.getVertexId());
+                            if (extVertex != null) {
+                                verticesToUpdate.add(extVertex);
+                            }
+                        }
+
+                        if (result.isDone() || !result.hasMorePages()) {
+                            break;
+                        }
+                        pagingState = result.getPagingState();
+                    }
+
+                    // Delete propagated tags from Cassandra (soft-delete tags_by_id + hard-delete propagated_tags_by_source)
+                    if (!propagatedTagsToDelete.isEmpty()) {
+                        tagDAO.deleteTags(propagatedTagsToDelete);
+                    }
+
+                    // Update graph properties on external vertices (batched commits)
+                    int batchCount = 0;
+                    for (AtlasVertex extVertex : verticesToUpdate) {
+                        try {
+                            removePropagatedTraitFromVertex(extVertex, tag.getTagTypeName());
+                            batchCount++;
+                            if (batchCount % 50 == 0) {
+                                graph.commit();
+                            }
+                        } catch (Exception e) {
+                            LOG.warn("BulkPurge: Failed to update graph properties on vertex for tag {}", tag.getTagTypeName(), e);
+                        }
+                    }
+                    if (batchCount % 50 != 0 && batchCount > 0) {
+                        graph.commit();
+                    }
+
+                    totalCleaned += propagatedTagsToDelete.size();
+                }
+
+                // Clean zombie Cassandra entries for the deleted entity itself
+                tagDAO.deleteTags(allTags);
+
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Failed to clean propagated tags for deleted source {}", deletedVertexId, e);
+                totalErrors++;
+            }
+        }
+
+        LOG.info("BulkPurge: Propagated tag cleanup from deleted sources complete for purgeKey={}: cleaned={}, errors={}",
+                ctx.purgeKey, totalCleaned, totalErrors);
+    }
+
+    /**
+     * Remove a single propagated tag name from a vertex's graph properties.
+     * Updates __propagatedTraitNames (multi-valued) and __propagatedClassificationNames (pipe-delimited).
+     */
+    private void removePropagatedTraitFromVertex(AtlasVertex vertex, String tagTypeName) {
+        List<String> currentTraits = vertex.getMultiValuedProperty(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, String.class);
+        if (currentTraits == null || currentTraits.isEmpty()) {
+            return;
+        }
+
+        List<String> updatedTraits = new ArrayList<>(currentTraits);
+        if (!updatedTraits.remove(tagTypeName)) {
+            return; // tag not present on this vertex
+        }
+
+        vertex.removeProperty(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY);
+        for (String trait : updatedTraits) {
+            vertex.addListProperty(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, trait);
+        }
+
+        if (updatedTraits.isEmpty()) {
+            vertex.removeProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY);
+        } else {
+            StringBuilder sb = new StringBuilder();
+            for (String trait : updatedTraits) {
+                if (sb.length() > 0) sb.append("|");
+                sb.append(trait);
+            }
+            AtlasGraphUtilsV2.setEncodedProperty(vertex, PROPAGATED_CLASSIFICATION_NAMES_KEY, sb.toString());
+        }
+
+        AtlasGraphUtilsV2.setEncodedProperty(vertex, MODIFICATION_TIMESTAMP_PROPERTY_KEY, System.currentTimeMillis());
     }
 
     /**
@@ -1299,6 +1494,8 @@ public class BulkPurgeService {
         final AtomicInteger totalFailed = new AtomicInteger(0);
         final AtomicInteger completedBatches = new AtomicInteger(0);
         final Set<String> externalLineageVertexIds = ConcurrentHashMap.newKeySet();
+        final Set<String> entitiesWithDirectTags = ConcurrentHashMap.newKeySet();
+        volatile boolean isTagV2;
 
         PurgeContext(String requestId, String purgeKey, String purgeMode, String submittedBy, String esQuery, boolean deleteConnection, int workerCountOverride) {
             this.requestId = requestId;
