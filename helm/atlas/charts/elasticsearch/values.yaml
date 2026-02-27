@@ -105,6 +105,8 @@ resources_lite:
 vpa:
   enabled: true
   updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
   # minReplicas is always computed as (replicas - 2), floored at 2.
   controlledResources:
     - cpu

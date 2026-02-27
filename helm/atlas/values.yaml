@@ -48,6 +48,8 @@ hpa:
 vpa:
   enabled: true
   updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
   # minReplicas is always computed as (atlas.replicaCount - 1), floored at 1.
   controlledResources:
     - cpu
