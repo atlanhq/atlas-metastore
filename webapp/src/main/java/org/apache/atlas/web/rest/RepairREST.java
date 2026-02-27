@@ -40,6 +40,13 @@ public class RepairREST {
         this.indexRepairService = indexRepairService;
     }
 
+    private void ensureJanusGraphBackend() throws AtlasBaseException {
+        if (!indexRepairService.isAvailable()) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                    "Index repair operations are not supported with the Cassandra graph backend");
+        }
+    }
+
     /**
      * Repair single index only
      */
@@ -48,6 +55,7 @@ public class RepairREST {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response repairSingleIndex(@QueryParam("qualifiedName") String qualifiedName) throws AtlasBaseException {
+        ensureJanusGraphBackend();
 
         if (StringUtils.isBlank(qualifiedName)) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "qualifiedName is required");
@@ -86,6 +94,7 @@ public class RepairREST {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     public Response repairCompositeIndex(RepairRequest request) throws AtlasBaseException {
+        ensureJanusGraphBackend();
 
         if (StringUtils.isBlank(request.getQualifiedName()) || StringUtils.isBlank(request.getTypeName())) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Both qualifiedName and typeName are required");
@@ -132,6 +141,7 @@ public class RepairREST {
     public Response repairBatch(
             BatchRepairRequest request,
             @QueryParam("indexType") @DefaultValue("COMPOSITE") String indexTypeStr) throws AtlasBaseException {
+        ensureJanusGraphBackend();
 
         if (request.getEntities() == null || request.getEntities().isEmpty()) {
             throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "Entities list is required");

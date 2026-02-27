@@ -193,6 +193,20 @@ public class CassandraGraphTest {
         assertEquals(edge.getInVertexId(), ((CassandraVertex) v2).getIdString());
     }
 
+    @Test(expectedExceptions = IllegalArgumentException.class)
+    public void testAddEdgeNullLabelThrows() {
+        AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
+        AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
+        graph.addEdge(v1, v2, null);
+    }
+
+    @Test(expectedExceptions = IllegalArgumentException.class)
+    public void testAddEdgeEmptyLabelThrows() {
+        AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
+        AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
+        graph.addEdge(v1, v2, "");
+    }
+
     // ======================== getEdgeBetweenVertices ========================
 
     @Test

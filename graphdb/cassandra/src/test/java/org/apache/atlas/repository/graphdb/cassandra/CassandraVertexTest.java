@@ -343,4 +343,29 @@ public class CassandraVertexTest {
     public void testNormalize_nullReturnsNull() {
         assertNull(VertexRepository.normalizePropertyName(null));
     }
+
+    @Test
+    public void testNormalize_cacheReturnsSameResult() {
+        // Verify repeated calls return identical results (cache consistency)
+        String first  = VertexRepository.normalizePropertyName("Asset.displayName");
+        String second = VertexRepository.normalizePropertyName("Asset.displayName");
+        assertEquals(first, "displayName");
+        assertSame(first, second); // Same cached instance
+    }
+
+    @Test
+    public void testNormalize_cacheWorksForPlainNames() {
+        String first  = VertexRepository.normalizePropertyName("qualifiedName");
+        String second = VertexRepository.normalizePropertyName("qualifiedName");
+        assertEquals(first, "qualifiedName");
+        assertSame(first, second);
+    }
+
+    @Test
+    public void testNormalize_cacheWorksForInternalProps() {
+        String first  = VertexRepository.normalizePropertyName("__typeName");
+        String second = VertexRepository.normalizePropertyName("__typeName");
+        assertEquals(first, "__typeName");
+        assertSame(first, second);
+    }
 }
