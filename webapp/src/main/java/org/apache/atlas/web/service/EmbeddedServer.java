@@ -74,8 +74,8 @@ public class EmbeddedServer {
         public LazySpringContext(org.eclipse.jetty.servlet.ServletContextHandler fastLane) {
             super(fastLane.getServletContext());
             setDisplayName("FastLane-Slimstack-Bridge-Context");
-            this.refresh();
-            LOG.info("LazySpringContext: Refresh complete, diagnostic calls active.");
+            //this.refresh();
+            LOG.info("LazySpringContext: construction complete, diagnostic calls active.");
         }
 
         public void setDelegate(Object delegate) {
@@ -426,19 +426,19 @@ public class EmbeddedServer {
                 LOG.info("V2Holder: Intercepting doStart to ensure Spring Context Bridge is present.");
                 
                 // Final safety check: if main context is ready but bridge isn't delegated, fix it now
-                Object mainSpring = mainAppContext.getServletContext().getAttribute(
-                    org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+                // Object mainSpring = mainAppContext.getServletContext().getAttribute(
+                //     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                 
-                if (curContextForFastLane instanceof LazySpringContext) {
-                     LOG.info("V2Holder: set delegate to main.");
-                    ((LazySpringContext)curContextForFastLane).setDelegate(mainSpring);
-                }
+                // if (curContextForFastLane instanceof LazySpringContext) {
+                //      LOG.info("V2Holder: set delegate to main.");
+                //     ((LazySpringContext)curContextForFastLane).setDelegate(mainSpring);
+                // }
 
-                // RE-ASSERT the attribute in the fastLane context right before Jersey initializes
-                getServletHandler().getServletContext().setAttribute(
-                    org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-                    curContextForFastLane
-                );
+                // // RE-ASSERT the attribute in the fastLane context right before Jersey initializes
+                // getServletHandler().getServletContext().setAttribute(
+                //     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
+                //     curContextForFastLane
+                // );
                 
                 super.doStart();
             }
@@ -499,7 +499,7 @@ public class EmbeddedServer {
 
         // Routing with correct ordered  setup - first fastLaneContext
         org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {fastLaneContext, mainAppContext});
+        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {mainAppContext, fastLaneContext});
         server.setHandler(contexts);
         Object mainSpringContext = null;
         // This will start both contexts in the correct order
