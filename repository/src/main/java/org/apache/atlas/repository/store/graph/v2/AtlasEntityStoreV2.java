@@ -423,7 +423,10 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
                     if (entityType != null) {
                         primitiveAttributes = fetchAttributes.stream()
-                                .filter(attr -> entityType.getAttribute(attr) != null)
+                                .filter(attr -> {
+                                    AtlasAttribute attribute = entityType.getAttribute(attr);
+                                    return attribute != null && !attribute.isObjectRef();
+                                })
                                 .collect(Collectors.toSet());
                     }
                 }
