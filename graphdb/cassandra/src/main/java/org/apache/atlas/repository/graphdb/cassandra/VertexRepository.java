@@ -215,6 +215,103 @@ public class VertexRepository {
      * Results are cached because this pure function is called for every property on
      * every vertex read (100 vertices × 50 properties = 5000 calls with identical inputs).
      */
+    /**
+     * Streams all vertices in the table, filtering by qualifiedName prefix.
+     * Uses Cassandra driver's automatic paging to avoid loading the full table into memory.
+     *
+     * For each page of rows:
+     * 1. Fast pre-filter: check if raw JSON contains the prefix string (skips ~99% of rows)
+     * 2. Deserialize only matching rows and verify qualifiedName properly
+     * 3. Invoke the callback with each batch of matching GUIDs
+     *
+     * @param qualifiedNamePrefix  the prefix to match (e.g., "default/snowflake/1772139790")
+     * @param fetchSize            Cassandra page size (rows per network round-trip)
+     * @param reindexBatchSize     how many matching GUIDs to collect before calling the callback
+     * @param batchCallback        receives batches of matching GUIDs for reindex
+     * @return total number of matching vertices found
+     */
+    public int scanVerticesByQualifiedNamePrefix(String qualifiedNamePrefix, int fetchSize,
+                                                  int reindexBatchSize,
+                                                  java.util.function.Consumer<List<String>> batchCallback) {
+        // Full table scan — use SimpleStatement with page size to stream rows
+        com.datastax.oss.driver.api.core.cql.SimpleStatement stmt =
+                com.datastax.oss.driver.api.core.cql.SimpleStatement.builder(
+                        "SELECT vertex_id, properties FROM vertices")
+                .setPageSize(fetchSize)
+                .build();
+
+        ResultSet rs = session.execute(stmt);
+
+        int totalScanned = 0;
+        int totalMatched = 0;
+        List<String> batch = new ArrayList<>(reindexBatchSize);
+
+        // The driver fetches rows in pages automatically — we iterate without loading all into memory
+        for (Row row : rs) {
+            totalScanned++;
+
+            String propsJson = row.getString("properties");
+            if (propsJson == null || propsJson.isEmpty()) {
+                continue;
+            }
+
+            // Fast pre-filter: raw string search avoids JSON deserialization for non-matching rows
+            if (!propsJson.contains(qualifiedNamePrefix)) {
+                continue;
+            }
+
+            // Deserialize and verify qualifiedName properly
+            try {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
+                if (props == null) continue;
+
+                // Check both raw and normalized property names
+                Object qnObj = props.get("qualifiedName");
+                if (qnObj == null) qnObj = props.get("Referenceable.qualifiedName");
+                if (qnObj == null) {
+                    // The prefix matched inside the JSON but not in qualifiedName — skip
+                    continue;
+                }
+
+                String qn = String.valueOf(qnObj);
+                if (!qn.startsWith(qualifiedNamePrefix)) {
+                    continue;
+                }
+
+                // Extract GUID
+                Object guidObj = props.get("__guid");
+                if (guidObj == null) continue;
+
+                batch.add(String.valueOf(guidObj));
+                totalMatched++;
+
+                if (batch.size() >= reindexBatchSize) {
+                    batchCallback.accept(new ArrayList<>(batch));
+                    batch.clear();
+                }
+            } catch (Exception e) {
+                LOG.warn("scanVerticesByQualifiedNamePrefix: failed to parse properties for vertex {}",
+                        row.getString("vertex_id"), e);
+            }
+
+            if (totalScanned % 10000 == 0) {
+                LOG.info("scanVerticesByQualifiedNamePrefix: scanned {} vertices, {} matched so far (prefix='{}')",
+                        totalScanned, totalMatched, qualifiedNamePrefix);
+            }
+        }
+
+        // Flush remaining batch
+        if (!batch.isEmpty()) {
+            batchCallback.accept(new ArrayList<>(batch));
+        }
+
+        LOG.info("scanVerticesByQualifiedNamePrefix: completed — scanned {} vertices, {} matched prefix '{}'",
+                totalScanned, totalMatched, qualifiedNamePrefix);
+
+        return totalMatched;
+    }
+
     static String normalizePropertyName(String name) {
         if (name == null) return null;
         return PROPERTY_NAME_CACHE.computeIfAbsent(name, VertexRepository::doNormalizePropertyName);
