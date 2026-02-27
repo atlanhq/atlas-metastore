@@ -388,7 +388,7 @@ public class EmbeddedServer {
         
         Object springContext = mainAppContext.getServletContext().getAttribute(
             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-        final Object curContext = null;
+        Object curContext = null;
         if (springContext != null) {
             curContext = springContext;
             LOG.info("Spring context ready. Linking to fast lane, slim stack context.");
@@ -398,6 +398,7 @@ public class EmbeddedServer {
             LOG.warn("Spring Context not ready during Fast-Lane creation. Let's link to a LazySpringContext.");
             curContext = new LazySpringContext(fastLaneContext);     
         }
+        
         fastLaneContext.getServletContext().setAttribute(
                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
                 curContext);
@@ -416,6 +417,7 @@ public class EmbeddedServer {
             }
         }), "/atlas/admin/health");
 
+        final Object curContextForFastLane = curContext;
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
         // Use the Spring-specific servlet implementation
         org.eclipse.jetty.servlet.ServletHolder v2Holder = new org.eclipse.jetty.servlet.ServletHolder( ){
@@ -427,15 +429,15 @@ public class EmbeddedServer {
                 Object mainSpring = mainAppContext.getServletContext().getAttribute(
                     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                 
-                if (mainSpring != null && curContext instanceof LazySpringContext) {
+                if (mainSpring != null && curContextForFastLane instanceof LazySpringContext) {
                      LOG.info("V2Holder: set delegate to main.");
-                    ((LazySpringContext)curContext).setDelegate(mainSpring);
+                    ((LazySpringContext)curContextForFastLane).setDelegate(mainSpring);
                 }
 
                 // RE-ASSERT the attribute in the fastLane context right before Jersey initializes
                 getServletHandler().getServletContext().setAttribute(
                     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-                    curContext
+                    curContextForFastLane
                 );
                 
                 super.doStart();
