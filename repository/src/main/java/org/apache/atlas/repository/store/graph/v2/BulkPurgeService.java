@@ -172,7 +172,7 @@ public class BulkPurgeService {
     }
 
     private TagDAO getTagDAO() {
-        return tagDAOOverride != null ? tagDAOOverride : getTagDAO();
+        return tagDAOOverride != null ? tagDAOOverride : TagDAOCassandraImpl.getInstance();
     }
 
     /**
@@ -374,6 +374,8 @@ public class BulkPurgeService {
             }, heartbeatInterval, heartbeatInterval, TimeUnit.MILLISECONDS);
 
             long startTime = System.currentTimeMillis();
+            ctx.currentPhase = "VERTEX_DELETION";
+            writeRedisStatus(ctx);
             streamAndDelete(ctx);
 
             if (ctx.cancelRequested) {
@@ -381,8 +383,16 @@ public class BulkPurgeService {
                 LOG.info("BulkPurge: Cancelled for purgeKey={}, deleted={}, failed={}",
                         ctx.purgeKey, ctx.totalDeleted.get(), ctx.totalFailed.get());
             } else {
-                esCleanup(ctx);
+                long phaseStart = System.currentTimeMillis();
 
+                ctx.currentPhase = "ES_CLEANUP";
+                writeRedisStatus(ctx);
+                esCleanup(ctx);
+                LOG.info("BulkPurge: Phase ES_CLEANUP completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
+
+                ctx.currentPhase = "ES_VERIFICATION";
+                writeRedisStatus(ctx);
                 try {
                     long remainingAfterEsCleanup = getEntityCount(ctx.esQuery);
                     ctx.remainingAfterCleanup = remainingAfterEsCleanup;
@@ -397,20 +407,44 @@ public class BulkPurgeService {
                     LOG.warn("BulkPurge: Verification count failed for purgeKey={}", ctx.purgeKey, e);
                 }
 
+                phaseStart = System.currentTimeMillis();
+                ctx.currentPhase = "LINEAGE_REPAIR";
+                writeRedisStatus(ctx);
                 repairExternalLineage(ctx);
+                LOG.info("BulkPurge: Phase LINEAGE_REPAIR completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
+                phaseStart = System.currentTimeMillis();
+                ctx.currentPhase = "TAG_CLEANUP_SOURCES";
+                writeRedisStatus(ctx);
                 cleanPropagatedTagsFromDeletedSources(ctx);
+                LOG.info("BulkPurge: Phase TAG_CLEANUP_SOURCES completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
+                phaseStart = System.currentTimeMillis();
+                ctx.currentPhase = "TAG_CLEANUP_EXTERNAL";
+                writeRedisStatus(ctx);
                 repairExternalPropagatedClassifications(ctx);
+                LOG.info("BulkPurge: Phase TAG_CLEANUP_EXTERNAL completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
+                phaseStart = System.currentTimeMillis();
+                ctx.currentPhase = "RELAY_PROPAGATION_REFRESH";
+                writeRedisStatus(ctx);
                 triggerRelayPropagationRefresh(ctx);
+                LOG.info("BulkPurge: Phase RELAY_PROPAGATION_REFRESH completed in {}ms for purgeKey={}",
+                        System.currentTimeMillis() - phaseStart, ctx.purgeKey);
 
                 if (ctx.deleteConnection && PURGE_MODE_CONNECTION.equals(ctx.purgeMode)) {
+                    ctx.currentPhase = "DELETE_CONNECTION";
+                    writeRedisStatus(ctx);
                     deleteConnectionVertex(ctx);
                 }
 
+                ctx.currentPhase = "AUDIT";
                 writeSummaryAuditEvent(ctx, startTime);
 
+                ctx.currentPhase = null;
                 ctx.status = "COMPLETED";
                 long duration = System.currentTimeMillis() - startTime;
                 LOG.info("BulkPurge: Completed for purgeKey={}, deleted={}, failed={}, remaining={}, duration={}ms",
@@ -785,21 +819,88 @@ public class BulkPurgeService {
 
     /**
      * Phase 3a: ES delete_by_query as safety-net cleanup.
+     * Uses wait_for_completion=false for large purges to avoid blocking on a
+     * slow single-node ES. Falls back to synchronous mode if async submission fails.
      */
     private void esCleanup(PurgeContext ctx) {
         try {
             RestClient esClient = getEsClient();
-            String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&slices=auto";
 
-            Request request = new Request("POST", endpoint);
-            request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
-
-            Response response = esClient.performRequest(request);
-            String responseBody = readResponseBody(response);
-            LOG.info("BulkPurge: ES cleanup completed for purgeKey={}, response={}", ctx.purgeKey, responseBody);
+            if (ctx.totalDiscovered > 10_000) {
+                // Large purge: run async to avoid blocking the coordinator thread
+                esCleanupAsync(esClient, ctx);
+            } else {
+                // Small purge: synchronous is fine
+                esCleanupSync(esClient, ctx);
+            }
         } catch (Exception e) {
             LOG.error("BulkPurge: ES cleanup failed for purgeKey={}. Manual cleanup may be needed.", ctx.purgeKey, e);
         }
+    }
+
+    private void esCleanupSync(RestClient esClient, PurgeContext ctx) throws Exception {
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed";
+
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(request);
+        String responseBody = readResponseBody(response);
+        LOG.info("BulkPurge: ES cleanup completed (sync) for purgeKey={}, response={}", ctx.purgeKey, responseBody);
+    }
+
+    private void esCleanupAsync(RestClient esClient, PurgeContext ctx) throws Exception {
+        // Submit as async task — ES returns immediately with a task ID
+        String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&wait_for_completion=false";
+
+        Request request = new Request("POST", endpoint);
+        request.setEntity(new NStringEntity(ctx.esQuery, ContentType.APPLICATION_JSON));
+
+        Response response = esClient.performRequest(request);
+        String responseBody = readResponseBody(response);
+        JsonNode root = MAPPER.readTree(responseBody);
+
+        String taskId = root.has("task") ? root.get("task").asText() : null;
+        if (taskId == null) {
+            LOG.warn("BulkPurge: ES delete_by_query did not return task ID, response={}", responseBody);
+            return;
+        }
+
+        LOG.info("BulkPurge: ES cleanup submitted as async task={} for purgeKey={}", taskId, ctx.purgeKey);
+
+        // Poll task status until complete (with timeout)
+        long maxWaitMs = 5 * 60 * 1000; // 5 minutes max
+        long deadline = System.currentTimeMillis() + maxWaitMs;
+        int pollIntervalMs = 2000;
+
+        while (System.currentTimeMillis() < deadline) {
+            Thread.sleep(pollIntervalMs);
+
+            Request taskRequest = new Request("GET", "/_tasks/" + taskId);
+            Response taskResponse = esClient.performRequest(taskRequest);
+            String taskBody = readResponseBody(taskResponse);
+            JsonNode taskNode = MAPPER.readTree(taskBody);
+
+            boolean completed = taskNode.has("completed") && taskNode.get("completed").asBoolean();
+            if (completed) {
+                JsonNode taskResponseNode = taskNode.path("response");
+                long deleted = taskResponseNode.path("deleted").asLong();
+                long failures = taskResponseNode.path("failures").size();
+                LOG.info("BulkPurge: ES cleanup completed (async) for purgeKey={}, deleted={}, failures={}",
+                        ctx.purgeKey, deleted, failures);
+                return;
+            }
+
+            // Log progress
+            JsonNode taskStatus = taskNode.path("task").path("status");
+            long esDeleted = taskStatus.path("deleted").asLong();
+            long esTotal = taskStatus.path("total").asLong();
+            LOG.debug("BulkPurge: ES cleanup in progress for purgeKey={}, deleted={}/{}",
+                    ctx.purgeKey, esDeleted, esTotal);
+        }
+
+        LOG.warn("BulkPurge: ES cleanup async task {} did not complete within {}ms for purgeKey={}. " +
+                "Task continues in background.", taskId, maxWaitMs, ctx.purgeKey);
     }
 
     /**
@@ -1652,6 +1753,7 @@ public class BulkPurgeService {
         volatile boolean cancelRequested;
         volatile boolean connectionDeleted;
         volatile int resubmitCount;
+        volatile String currentPhase;
 
         final AtomicInteger totalDeleted = new AtomicInteger(0);
         final AtomicInteger totalFailed = new AtomicInteger(0);
@@ -1698,6 +1800,9 @@ public class BulkPurgeService {
             map.put("batchSize", AtlasConfiguration.BULK_PURGE_BATCH_SIZE.getInt());
             map.put("deleteConnection", deleteConnection);
             map.put("connectionDeleted", connectionDeleted);
+            if (currentPhase != null) {
+                map.put("currentPhase", currentPhase);
+            }
             if (remainingAfterCleanup >= 0) {
                 map.put("remainingAfterCleanup", remainingAfterCleanup);
             }
