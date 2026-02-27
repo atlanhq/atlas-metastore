@@ -1,0 +1,174 @@
+{{- if and .Values.vpa.enabled .Values.vpa.recommender.enabled (ne (.Values.global.Infra_Tier | default "") "Lite") }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.vpa.recommender.name }}-recommender
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: {{ template "name" . }}
+    component: vpa-recommender
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.vpa.recommender.name }}-recommender
+  labels:
+    app: {{ template "name" . }}
+    component: vpa-recommender
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+rules:
+  # Read workload and pod data to compute recommendations
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+      - namespaces
+      - limitranges
+      - persistentvolumeclaims
+      - replicationcontrollers
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - daemonsets
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources:
+      - jobs
+      - cronjobs
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["storage.k8s.io"]
+    resources:
+      - storageclasses
+    verbs: ["get", "list", "watch"]
+  # Read and patch VPA objects
+  - apiGroups: ["autoscaling.k8s.io"]
+    resources:
+      - verticalpodautoscalers
+      - verticalpodautoscalercheckpoints
+    verbs: ["get", "list", "watch", "patch", "create", "delete"]
+  # Emit events
+  - apiGroups: [""]
+    resources:
+      - events
+    verbs: ["get", "list", "watch", "create"]
+  # Read metrics
+  - apiGroups: ["metrics.k8s.io"]
+    resources:
+      - pods
+    verbs: ["get", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Values.vpa.recommender.name }}-recommender
+  labels:
+    app: {{ template "name" . }}
+    component: vpa-recommender
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Values.vpa.recommender.name }}-recommender
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Values.vpa.recommender.name }}-recommender
+    namespace: {{ .Values.Namespace }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Values.vpa.recommender.name }}-recommender
+  namespace: {{ .Values.Namespace }}
+  labels:
+    app: {{ template "name" . }}
+    component: vpa-recommender
+    release: {{ .Release.Name }}
+    heritage: {{ .Release.Service }}
+  {{- with .Values.vpa.recommender.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  replicas: {{ .Values.vpa.recommender.replicaCount | default 1 }}
+  revisionHistoryLimit: 2
+  selector:
+    matchLabels:
+      app: {{ template "name" . }}
+      component: vpa-recommender
+      release: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        app: {{ template "name" . }}
+        component: vpa-recommender
+        release: {{ .Release.Name }}
+      {{- with .Values.vpa.recommender.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ .Values.vpa.recommender.name }}-recommender
+      {{- with .Values.vpa.recommender.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vpa.recommender.priorityClassName }}
+      priorityClassName: {{ . }}
+      {{- end }}
+      containers:
+        - name: recommender
+          image: "{{ .Values.vpa.recommender.image.repository }}:{{ .Values.vpa.recommender.image.tag }}"
+          imagePullPolicy: {{ .Values.vpa.recommender.image.pullPolicy | default "IfNotPresent" }}
+          {{- with .Values.vpa.recommender.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          args:
+            - --recommender-name={{ .Values.vpa.recommender.name }}
+            {{- range $key, $value := .Values.vpa.recommender.extraArgs }}
+            - --{{ $key }}={{ $value }}
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8942
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /health-check
+              port: metrics
+            initialDelaySeconds: 120
+            periodSeconds: 60
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health-check
+              port: metrics
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.vpa.recommender.resources | nindent 12 }}
+      {{- with .Values.vpa.recommender.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vpa.recommender.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.vpa.recommender.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
