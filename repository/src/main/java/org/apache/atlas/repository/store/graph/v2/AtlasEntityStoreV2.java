@@ -416,7 +416,19 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         for (String guid : guids) {
             try {
                 AtlasVertex vertex = entityRetriever.getEntityVertex(guid);
-                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, fetchAttributes);
+
+                Set<String> primitiveAttributes = fetchAttributes;
+                if (CollectionUtils.isNotEmpty(fetchAttributes)) {
+                    String typeName = vertex.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+                    AtlasEntityType entityType = typeRegistry.getEntityTypeByName(typeName);
+                    if (entityType != null) {
+                        primitiveAttributes = fetchAttributes.stream()
+                                .filter(attr -> entityType.getAttribute(attr) != null)
+                                .collect(Collectors.toSet());
+                    }
+                }
+
+                AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, primitiveAttributes);
                 if (header != null) {
                     ret.put(guid, header);
                 }
