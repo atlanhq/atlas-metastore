@@ -4560,15 +4560,21 @@ public class EntityGraphMapper {
                 toIndex = Math.min(offset + CHUNK_SIZE, impactedVerticesSize);
                 List<AtlasVertex> chunkedVerticesToPropagate = verticesToPropagate.subList(offset, toIndex);
                 Set<AtlasVertex> chunkedVerticesToPropagateSet = new HashSet<>(chunkedVerticesToPropagate);
-                Map<String, Map<String, Object>> deNormAttributesMap = new HashMap<>();
+
+                // Build minimal asset attrs from graph (needed for Cassandra write)
                 Map<String, Map<String, Object>> assetMinAttrsMap = new HashMap<>();
-
-                List<AtlasEntity> propagatedEntitiesChunked = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
-
-                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), deNormAttributesMap.keySet(), assetMinAttrsMap, classification);
-                if (MapUtils.isNotEmpty(deNormAttributesMap)) {
-                    ESConnector.writeTagProperties(deNormAttributesMap);
+                List<String> chunkVertexIds = new ArrayList<>();
+                for (AtlasVertex vertex : chunkedVerticesToPropagate) {
+                    String vid = vertex.getIdForDisplay();
+                    chunkVertexIds.add(vid);
+                    assetMinAttrsMap.put(vid, getMinimalAssetMap(vertex));
                 }
+
+                // Write to Cassandra first
+                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), new HashSet<>(chunkVertexIds), assetMinAttrsMap, classification);
+
+                // Reconcile ES denorm attributes from Cassandra truth (after write)
+                reconcileTagDenormToES(chunkVertexIds);
                 
                 // Convert vertices to entities before async notification (prevent transaction closure issues)
                 try {
@@ -5618,13 +5624,8 @@ public class EntityGraphMapper {
                 // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
 
-                // compute fresh classification‑text de‑norm attributes for this batch
-                Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap);
-                // push them to ES
-                if (MapUtils.isNotEmpty(deNormMap)) {
-                    ESConnector.writeTagProperties(deNormMap);
-                }
+                // Reconcile ES denorm attributes from Cassandra truth (after delete)
+                reconcileTagDenormToES(vertexIds);
 
                 Set<AtlasVertex> vertices = graph.getVertices(vertexIds.toArray(new String[0]));
 
@@ -6228,6 +6229,40 @@ public class EntityGraphMapper {
         RequestContext.get().endMetricRecord(metricRecorder);
     }
 
+    /**
+     * Reconciles tag denorm attributes in ES from Cassandra's authoritative state.
+     *
+     * For each vertex ID, batch-reads all current (non-deleted) tags from Cassandra,
+     * recomputes all 5 denorm attributes from scratch, and writes them to ES in a single bulk call.
+     *
+     * This is the foolproof ES sync mechanism: it does not compute deltas or rely on
+     * the caller to track what changed. It simply reads the truth and writes it.
+     *
+     * @param vertexIds The vertex IDs whose ES denorm attributes should be reconciled
+     */
+    void reconcileTagDenormToES(Collection<String> vertexIds) throws AtlasBaseException {
+        if (CollectionUtils.isEmpty(vertexIds)) {
+            return;
+        }
+        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("reconcileTagDenormToES");
+        try {
+            Map<String, List<Tag>> allTagsByVertex = tagDAO.getAllTagsByVertexIds(vertexIds);
+
+            Map<String, Map<String, Object>> deNormMap = new HashMap<>();
+            for (String vertexId : vertexIds) {
+                List<Tag> tags = allTagsByVertex.getOrDefault(vertexId, Collections.emptyList());
+                Map<String, Object> attrs = TagDeNormAttributesUtil.reconcileDenormAttributes(tags, typeRegistry, fullTextMapperV2);
+                deNormMap.put(vertexId, attrs);
+            }
+
+            if (MapUtils.isNotEmpty(deNormMap)) {
+                ESConnector.writeTagProperties(deNormMap);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(recorder);
+        }
+    }
+
     private void updateLabels(AtlasVertex vertex, Set<String> labels) {
         if (CollectionUtils.isNotEmpty(labels)) {
             AtlasGraphUtilsV2.setEncodedProperty(vertex, LABELS_PROPERTY_KEY, getLabelString(labels));
@@ -6700,15 +6735,8 @@ public class EntityGraphMapper {
                 // Update all propagated tags in Cassandra
                 tagDAO.putPropagatedTags(sourceEntityVertex.getIdForDisplay(), tagTypeName, new HashSet<>(vertexIds), assetMinAttrsMap, originalClassification);
 
-                // compute fresh classification‑text de‑norm attributes for this batch
-                Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToUpdate, deNormMap);
-
-                // push them to ES
-                if (MapUtils.isNotEmpty(deNormMap)) {
-                    ESConnector.writeTagProperties(deNormMap);
-                }
-
+                // Reconcile ES denorm attributes from Cassandra truth (after update)
+                reconcileTagDenormToES(vertexIds);
 
                 //new bulk method to fetch in batches
                 Set<AtlasVertex> propagtedVertices = graph.getVertices(vertexIds.toArray(new String[0]));
@@ -6935,11 +6963,8 @@ public class EntityGraphMapper {
                 .map(Tag::getVertexId)
                 .toList();
 
-        Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap);
-        if (MapUtils.isNotEmpty(deNormMap)) {
-            ESConnector.writeTagProperties(deNormMap);
-        }
+        // Reconcile ES denorm attributes from Cassandra truth (after delete)
+        reconcileTagDenormToES(vertexIdsToDelete);
 
         Set<AtlasVertex> vertices = graph.getVertices(vertexIdsToDelete.toArray(new String[0]));
         if (!vertices.isEmpty()) {
