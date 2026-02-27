@@ -51,18 +51,24 @@ vpa:
   recommender:
     # name: identifier used both by VPA objects (spec.recommenders[].name) and the recommender's
     # --recommender-name flag. Must be non-empty when enabled: true.
-    name: ""  # e.g. "atlas-metastore-recommender"
+    name: "atlas-metastore-recommender"
 
     # enabled: deploy the custom recommender Deployment + RBAC into this namespace.
     # Requires vpa.recommender.name to be set.
     enabled: false
 
-    replicaCount: 1
+    replicaCount: 2
+
+    podDisruptionBudget:
+      minAvailable: 1
 
     image:
-      repository: registry.k8s.io/autoscaling/vpa-recommender
-      tag: "1.2.0"
+      repository: ghcr.io/atlanhq/vpa-recommender
+      tag: "1.4.1"
       pullPolicy: IfNotPresent
+
+    imagePullSecrets:
+      - name: github-docker-registry
 
     resources:
       requests:
@@ -73,12 +79,21 @@ vpa:
         memory: 1000Mi
 
     # Extra CLI flags passed to the recommender binary (key: value).
-    # Example:
-    #   recommender-interval: "1m"
-    #   memory-saver: "true"
-    extraArgs: {}
+    extraArgs:
+      v: "4"
+      pod-recommendation-min-cpu-millicores: 15
+      pod-recommendation-min-memory-mb: 100
+      # Target percentiles for CPU and memory recommendations
+      target-cpu-percentile: "0.99"
+      target-memory-percentile: "0.99"
+      # Decay half-life for histograms (14 days)
+      memory-histogram-decay-half-life: "336h"
+      cpu-histogram-decay-half-life: "336h"
+      # TODO: Only enable if we need prometheus history
+      # history-length: "21d"
 
-    podAnnotations: {}
+    podAnnotations:
+      cluster-autoscaler.kubernetes.io/safe-to-evict: "true"
     annotations: {}
     priorityClassName: ""
 
@@ -95,7 +110,36 @@ vpa:
 
     nodeSelector: {}
     tolerations: []
-    affinity: {}
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+          - matchExpressions:
+            - key: eks.amazonaws.com/capacityType   #AWS
+              operator: In
+              values:
+              - ON_DEMAND
+          - matchExpressions:
+            - key: lifecycle     #Azure
+              operator: In
+              values:
+              - ondemand
+          - matchExpressions:
+            - key: cloud.google.com/gke-provisioning  #GCP
+              operator: In
+              values:
+              - standard
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app.kubernetes.io/component
+                    operator: In
+                    values:
+                      - recommender
+              topologyKey: kubernetes.io/hostname
 
   # minReplicas is always computed as (atlas.replicaCount - 1), floored at 1.
   controlledResources:
