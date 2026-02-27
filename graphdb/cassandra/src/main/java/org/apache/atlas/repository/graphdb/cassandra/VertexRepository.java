@@ -8,6 +8,7 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -93,6 +94,7 @@ public class VertexRepository {
 
         // Collect results
         Map<String, CassandraVertex> results = new LinkedHashMap<>();
+        int failedCount = 0;
         for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : futures.entrySet()) {
             try {
                 AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
@@ -101,9 +103,15 @@ public class VertexRepository {
                     CassandraVertex vertex = rowToVertex(row, graph);
                     results.put(vertex.getIdString(), vertex);
                 }
-            } catch (Exception e) {
+            } catch (CompletionException e) {
+                failedCount++;
                 LOG.warn("Failed to fetch vertex {}", entry.getKey(), e);
             }
+        }
+
+        if (failedCount > 0) {
+            LOG.warn("getVerticesAsync: {} of {} vertex fetches failed — results are partial",
+                     failedCount, futures.size());
         }
 
         return results;
@@ -117,31 +125,38 @@ public class VertexRepository {
         session.execute(deleteVertexStmt.bind(vertexId));
     }
 
+    // 1 statement per vertex; keep batches under 100 to avoid Cassandra's
+    // batch_size_fail_threshold (50KB default) for vertices with large property JSON.
+    private static final int VERTEX_BATCH_LIMIT = 100;
+
     public void batchInsertVertices(List<CassandraVertex> vertices) {
         if (vertices.isEmpty()) {
             return;
         }
 
-        BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.LOGGED);
+        for (int i = 0; i < vertices.size(); i += VERTEX_BATCH_LIMIT) {
+            List<CassandraVertex> batch = vertices.subList(i, Math.min(i + VERTEX_BATCH_LIMIT, vertices.size()));
+            BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.LOGGED);
 
-        for (CassandraVertex vertex : vertices) {
-            Map<String, Object> props = vertex.getProperties();
-            String typeName = props.containsKey("__typeName") ? String.valueOf(props.get("__typeName")) : null;
-            String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
-            Instant now     = Instant.now();
+            for (CassandraVertex vertex : batch) {
+                Map<String, Object> props = vertex.getProperties();
+                String typeName = props.containsKey("__typeName") ? String.valueOf(props.get("__typeName")) : null;
+                String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
+                Instant now     = Instant.now();
 
-            batchBuilder.addStatement(insertVertexStmt.bind(
-                vertex.getIdString(),
-                AtlasType.toJson(props),
-                vertex.getVertexLabel(),
-                typeName,
-                state,
-                now,
-                now
-            ));
+                batchBuilder.addStatement(insertVertexStmt.bind(
+                    vertex.getIdString(),
+                    AtlasType.toJson(props),
+                    vertex.getVertexLabel(),
+                    typeName,
+                    state,
+                    now,
+                    now
+                ));
+            }
+
+            session.execute(batchBuilder.build());
         }
-
-        session.execute(batchBuilder.build());
     }
 
     @SuppressWarnings("unchecked")

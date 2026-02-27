@@ -109,6 +109,14 @@ public class RepairIndex {
     }
 
     /**
+     * Returns true if RepairIndex is functional (JanusGraph backend).
+     * On Cassandra backend, graph is null and repair operations are unsupported.
+     */
+    public boolean isAvailable() {
+        return graph != null;
+    }
+
+    /**
      * Used by DLQ replay service
      * @param indexName
      * @param vertexIds

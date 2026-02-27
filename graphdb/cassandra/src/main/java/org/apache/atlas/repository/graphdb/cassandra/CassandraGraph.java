@@ -3,6 +3,7 @@ package org.apache.atlas.repository.graphdb.cassandra;
 import com.datastax.oss.driver.api.core.CqlSession;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.groovy.GroovyExpression;
 import org.apache.atlas.model.discovery.SearchParams;
@@ -418,15 +419,46 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     }
 
     @Override
-    public void createOrUpdateESAlias(ESAliasRequestBuilder aliasRequestBuilder) throws AtlasBaseException {
-        // TODO: implement ES alias management
-        LOG.debug("createOrUpdateESAlias called - delegating to ES client");
+    public void createOrUpdateESAlias(ESAliasRequestBuilder builder) throws AtlasBaseException {
+        String aliasRequest = builder.build();
+        StringEntity entity = new StringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", "Status code " + statusCode);
+            }
+        } catch (IOException e) {
+            LOG.error("Failed to create/update ES alias: {}", e.getMessage());
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "creating/updating", e.getMessage());
+        }
     }
 
     @Override
     public void deleteESAlias(String indexName, String aliasName) throws AtlasBaseException {
-        // TODO: implement ES alias deletion
-        LOG.debug("deleteESAlias called for index={}, alias={}", indexName, aliasName);
+        ESAliasRequestBuilder builder = new ESAliasRequestBuilder();
+        builder.addAction(ESAliasRequestBuilder.ESAliasAction.REMOVE, new ESAliasRequestBuilder.AliasAction(indexName, aliasName));
+
+        String aliasRequest = builder.build();
+        StringEntity entity = new StringEntity(aliasRequest, ContentType.APPLICATION_JSON);
+        Request request = new Request("POST", Constants.ES_API_ALIASES);
+        request.setEntity(entity);
+
+        try {
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            Response response = client.performRequest(request);
+            int statusCode = response.getStatusLine().getStatusCode();
+            if (statusCode != 200) {
+                throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", "Status code " + statusCode);
+            }
+        } catch (IOException e) {
+            LOG.error("Failed to delete ES alias: {}", e.getMessage());
+            throw new AtlasBaseException(AtlasErrorCode.INDEX_ALIAS_FAILED, "deleting", e.getMessage());
+        }
     }
 
     @Override
@@ -470,6 +502,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         }
     }
 
+    private static int getESConfigInt(String key, int defaultValue) {
+        try {
+            return org.apache.atlas.ApplicationProperties.get().getInt(key, defaultValue);
+        } catch (AtlasException e) {
+            return defaultValue;
+        }
+    }
+
     private static void createESIndex(String indexName) {
         try {
             RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
@@ -477,11 +517,15 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 return;
             }
 
+            int shards     = getESConfigInt("atlas.cassandra.es.shards", 1);
+            int replicas   = getESConfigInt("atlas.cassandra.es.replicas", 0);
+            int fieldLimit = getESConfigInt("atlas.cassandra.es.field.limit", 10000);
+
             String settings = "{\n" +
                 "  \"settings\": {\n" +
-                "    \"number_of_shards\": 1,\n" +
-                "    \"number_of_replicas\": 0,\n" +
-                "    \"index.mapping.total_fields.limit\": 10000\n" +
+                "    \"number_of_shards\": " + shards + ",\n" +
+                "    \"number_of_replicas\": " + replicas + ",\n" +
+                "    \"index.mapping.total_fields.limit\": " + fieldLimit + "\n" +
                 "  },\n" +
                 "  \"mappings\": {\n" +
                 "    \"dynamic\": true\n" +
@@ -661,19 +705,19 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
         } finally {
-            buffer.clear();
-            // Clear vertex cache so the next transaction on this thread reads fresh from Cassandra.
-            // Without this, a thread reused from the pool could return stale cached vertices.
-            vertexCache.get().clear();
+            // Remove ThreadLocal values entirely so they can be GC'd when threads are returned
+            // to the pool. ThreadLocal.withInitial() will create fresh instances on next access.
+            txBuffer.remove();
+            vertexCache.remove();
         }
     }
 
     @Override
     public void rollback() {
-        TransactionBuffer buffer = txBuffer.get();
-        buffer.clear();
-        // Clear vertex cache so the next transaction reads fresh from Cassandra
-        vertexCache.get().clear();
+        // Remove ThreadLocal values entirely so they can be GC'd when threads are returned
+        // to the pool. ThreadLocal.withInitial() will create fresh instances on next access.
+        txBuffer.remove();
+        vertexCache.remove();
     }
 
     private void buildIndexEntries(CassandraVertex vertex,

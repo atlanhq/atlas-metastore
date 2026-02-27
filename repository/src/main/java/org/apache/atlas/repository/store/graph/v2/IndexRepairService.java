@@ -33,6 +33,12 @@ public class IndexRepairService {
         this.graph = graph;
     }
 
+    /**
+     * Returns true if the index repair service is functional (requires JanusGraph backend).
+     */
+    public boolean isAvailable() {
+        return graph instanceof AtlasJanusGraph;
+    }
 
     /**
      * Find corrupted vertex using single index (qualifiedName only)
