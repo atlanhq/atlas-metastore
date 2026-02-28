@@ -565,13 +565,25 @@ public class EmbeddedServer {
                     LOG.info("Plugging real Spring Context  from main into Reflection Bridge...");
                     bridge.setDelegate(mainSpringContext);
                     LOG.info("Delegate set to main spring context...");
+                    LOG.info("V2Holder: Forcing TCCL synchronization before start.");
+    
+                    // Capture the Main App ClassLoader
+                    // Assuming mainSpringContext is the WebApp's context
+                   
                     // FIX: Initialize the servlet even if the context is already started
                     try {
                         //v2Holder.getServletHandler().initialize();
                         //force stop before start
                         //at this time we have fastLaneContext as LazySpringContext . 
                         //Switch and sync
+                        //Temporarily set the TCCL to the Main WebApp's loader
+                        
+                        // Ensure FastLane uses the same loader as the main app
                         v2Holder.stop();
+                        ClassLoader webAppClassLoader = mainSpringContext.getClassLoader();
+                        v2Holder.setClassLoader(webAppClassLoader);
+                        ClassLoader originalTCCL = Thread.currentThread().getContextClassLoader();
+                        
                         Object realMainSpringContext = mainAppContext.getServletContext().getAttribute(
                             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                         if(realMainSpringContext != null){
@@ -581,8 +593,10 @@ public class EmbeddedServer {
                                 fastLaneContext.stop();
                             }
                             //align classloaders
-                            ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
-                            fastLaneContext.setClassLoader(mainClassLoader);
+                            // ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
+                            // fastLaneContext.setClassLoader(mainClassLoader);
+                            Thread.currentThread().setContextClassLoader(webAppClassLoader);
+                            LOG.info("TCCL switched. Calling v2Holder.start()...");
                             LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
                             fastLaneContext.getServletContext().setAttribute(
                                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
