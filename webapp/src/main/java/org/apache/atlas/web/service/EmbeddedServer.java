@@ -332,62 +332,6 @@ public class EmbeddedServer {
         return connector;
     }
 
-    private void syncFastLane(WebAppContext mainAppContext, ServletContextHandler fastLaneContext, ServletHolder v2Holder) {
-        try {
-
-            LOG.info("Main App started. Linking dependencies to V2 Fast-Lane...");
-            Object springContext = mainAppContext.getServletContext().getAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-
-            if (springContext == null) {
-                // This is normal at early startup. Don't log it as "Critical".
-                LOG.info("Main App Spring context not yet initialized. Sync need a trigger on next lifecycle event.");
-                return; 
-            }
-
-            Object existingAttr = fastLaneContext.getServletContext().getAttribute(
-                org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-            //if the temporary lazy context is replaced by spring context already return
-            if (existingAttr instanceof LazySpringContext) {
-                LOG.info("Filling Fast-Lane bridge with real Spring Context.");
-                LazySpringContext bridge = (LazySpringContext) existingAttr;
-
-                // Protection against double-invocation
-                if (bridge.isSynchronized()) {
-                    LOG.info("Fast-Lane already synchronized. Skipping redundant init.");
-                    return;
-                }
-                LOG.info("Plugging real Spring Context  from main into Reflection Bridge...");
-                bridge.setDelegate(springContext);
-
-                // FIX: Initialize the servlet even if the context is already started
-                try {
-                    //v2Holder.getServletHandler().initialize();
-                    v2Holder.start();
-                    bridge.markSynchronized();
-                    LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
-
-                } catch (Exception e) {
-                    LOG.error("Failed to initialize V2 Jersey Servlet", e);
-                }
-            }
-            else
-            {
-                LOG.info("Fast lane context can't start as delegated spring context does not exist");
-            }
-            
-            //LOG.info("No root web app context. Replacing temporary proxy with the real Main App Spring Context. Setting up sync");
-            // Sync ClassLoaders
-           // fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
-
-            // Sync Spring Context so @Inject works in EntityResourceV2       
-            
-            LOG.info("V2 Optimization Path Linked and Synchronized.");
-        } catch (Exception e) {
-            LOG.error("Critical error linking V2 optimization path", e);
-        }
-    }
-
     public void start() throws AtlasBaseException {
     try {
         final org.eclipse.jetty.webapp.WebAppContext mainAppContext = getWebAppContext(atlasPath);
@@ -406,7 +350,7 @@ public class EmbeddedServer {
             LOG.info("Spring context ready. Linking to fast lane, slim stack context.");
         } else {
             // This is the "Critical Error" path - it means Main App isn't ready.
-            // We will let syncFastLane handle it later once the listener fires.
+            // We will let sync handle it later once the listener fires.
             LOG.warn("Spring Context not ready during Fast-Lane creation. Let's link to a LazySpringContext.");
             curContext = new LazySpringContext(fastLaneContext);     
         }
@@ -434,24 +378,71 @@ public class EmbeddedServer {
             public void doStart() throws Exception {
                 LOG.info("V2Holder: Intercepting doStart to ensure Spring Context Bridge is present.");
                 
-                // Final safety check: if main context is ready but bridge isn't delegated, fix it now
-                // Object mainSpring = mainAppContext.getServletContext().getAttribute(
-                //     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
-                
-                // if (curContextForFastLane instanceof LazySpringContext) {
-                //      LOG.info("V2Holder: set delegate to main.");
-                //     ((LazySpringContext)curContextForFastLane).setDelegate(mainSpring);
-                // }
-
-                // // RE-ASSERT the attribute in the fastLane context right before Jersey initializes
-                // getServletHandler().getServletContext().setAttribute(
-                //     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
-                //     curContextForFastLane
-                // );
-                
                 super.doStart();
             }
         };
+
+        // --- DIAGNOSTIC BLOCK 1: EARLY CHECK ---
+        try {
+            LOG.info("[DIAG-EARLY] === Checking Initial Fast-Lane State ===");
+    
+            // Check Jersey Interface
+            try {
+                Class<?> providerIntf = com.sun.jersey.spi.container.WebApplicationProvider.class;
+                LOG.info("[DIAG-EARLY] Jersey Interface Loader: " + providerIntf.getClassLoader());
+                LOG.info("[DIAG-EARLY] Jersey Interface Source: " + providerIntf.getProtectionDomain().getCodeSource().getLocation());
+            } catch (Throwable t) {
+                LOG.info("[DIAG-EARLY] Jersey Interface not yet loaded (this is preferred).");
+            }
+
+            //  Check Objects and their ClassLoaders
+            LOG.info("[DIAG-EARLY] fastLaneContext Class: " + fastLaneContext.getClass().getName());
+            LOG.info("[DIAG-EARLY] fastLaneContext Loader: " + fastLaneContext.getClassLoader());
+            
+            if (v2Holder != null) {
+                LOG.info("[DIAG-EARLY] v2Holder Loader: " + v2Holder.getClass().getClassLoader());
+                // Check if v2Holder already has a servlet instance (should be null at this point)
+               // LOG.info("[DIAG-EARLY] v2Holder Servlet Instance: " + v2Holder.getServlet());
+                LOG.info("[DIAG-EARLY] Holder State: {}, Servlet Instance: {}, Available: {}", 
+                                        v2Holder.getState(), 
+                                        v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
+                                        v2Holder.isAvailable());
+                // Context State
+                if (fastLaneContext != null) {
+                    ClassLoader cl = fastLaneContext.getClassLoader();
+                    LOG.info("[DIAG-EARLY] Context: {}, State: {}, Loader: {} (hash: {})", 
+                        fastLaneContext.getDisplayName(), 
+                        fastLaneContext.getState(), 
+                        cl, 
+                        (cl != null ? System.identityHashCode(cl) : "null"));
+                }
+
+
+                // Spring Attribute Check
+                Object springCtx = context.getServletContext().getAttribute(
+                    org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
+                LOG.info("Spring Context Attribute Present: {}", (springCtx != null));
+
+            }
+
+            if (mainAppContext != null) {
+                LOG.info("[DIAG-EARLY] mainAppContext (Atlas) Loader: " + mainAppContext.getClassLoader());
+                ClassLoader cl = mainAppContext.getClassLoader();
+                    LOG.info("[DIAG-EARLY] Context: {}, State: {}, Loader: {} (hash: {})", 
+                        mainAppContext.getDisplayName(), 
+                        mainAppContext.getState(), 
+                        cl, 
+                        (cl != null ? System.identityHashCode(cl) : "null"));
+            }
+
+            LOG.info("[DIAG-EARLY] Current Thread Context Loader: " + Thread.currentThread().getContextClassLoader());
+            LOG.info("[DIAG-EARLY] EmbeddedServer Loader: " + this.getClass().getClassLoader());
+            LOG.info("[DIAG-EARLY] ==============================================");
+        } catch (Throwable t) {
+            LOG.info("[DIAG-EARLY] Jersey Interface not yet loaded (this is good).");
+        }
+        // ----------------------------------------
+
         v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
         v2Holder.setInitOrder(-1);
         v2Holder.setInitParameter("com.sun.jersey.spi.container.ContainerRequestFilters", 
@@ -505,7 +496,7 @@ public class EmbeddedServer {
         mainAppContext.addLifeCycleListener(new org.eclipse.jetty.util.component.AbstractLifeCycle.AbstractLifeCycleListener() {
             @Override
             public void lifeCycleStarted(org.eclipse.jetty.util.component.LifeCycle event) {
-               //syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+               // 
                LOG.info("Diagnostics: Jetty Server called lifeCycleStarted. Is it too early? Before the springContext is ready?...");
             }
         });
@@ -552,7 +543,7 @@ public class EmbeddedServer {
         LOG.info("Server started. Triggering V2 Fast-Lane slim stack synchronization manually not waiting for lifeCycleStarted...");
         try {
             LOG.info("Manual fast lane Sync Trigger: Starting bridge between Main and V2...");
-            //syncFastLane(mainAppContext, fastLaneContext, v2Holder);
+            // check context type
             if (curContext instanceof LazySpringContext) {
                 LOG.info("Filling Fast-Lane bridge with real Spring Context.");
                 LazySpringContext bridge = (LazySpringContext) curContext;
@@ -566,13 +557,10 @@ public class EmbeddedServer {
                     bridge.setDelegate(mainSpringContext);
                     LOG.info("Delegate set to main spring context...");
                     LOG.info("V2Holder: Forcing TCCL synchronization before start.");
-    
-                    // Capture the Main App ClassLoader
-                    // Assuming mainSpringContext is the WebApp's context
-                   
+               
                     // FIX: Initialize the servlet even if the context is already started
                     try {
-                        //v2Holder.getServletHandler().initialize();
+      
                         //force stop before start
                         //at this time we have fastLaneContext as LazySpringContext . 
                         //Switch and sync
@@ -594,8 +582,48 @@ public class EmbeddedServer {
                             fastLaneContext.setClassLoader(webAppClassLoader);
                             ClassLoader originalTCCL = Thread.currentThread().getContextClassLoader();
                              
-                            // ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
-                            // fastLaneContext.setClassLoader(mainClassLoader);
+                            // --- START DIAGNOSTIC BLOCK 2---
+                            try {
+                                Class<?> providerIntf = com.sun.jersey.spi.container.WebApplicationProvider.class;
+                                LOG.info("[DIAG-2] WebApplicationProvider Interface Loader: " + providerIntf.getClassLoader());
+                                LOG.info("[DIAG-2] WebApplicationProvider Interface Source: " + providerIntf.getProtectionDomain().getCodeSource().getLocation());
+
+                                try {
+                                    Class<?> providerImpl = Class.forName("com.sun.jersey.server.impl.container.WebApplicationProviderImpl", true, webAppClassLoader);
+                                    LOG.info("[DIAG-2] WebApplicationProvider Impl Loader: " + providerImpl.getClassLoader());
+                                    LOG.info("[DIAG-2] WebApplicationProvider Impl Source: " + providerImpl.getProtectionDomain().getCodeSource().getLocation());
+                                    LOG.info("[DIAG-2] Assignment Compatible? " + providerIntf.isAssignableFrom(providerImpl));
+                                    LOG.info("[DIAG-2] V2 Holder State -2 : {}, Servlet Instance: {}, Available: {}", 
+                                        v2Holder.getState(), 
+                                        v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
+                                        v2Holder.isAvailable());
+                                     
+                                    // Context State
+                                    if (fastLaneContext != null) {
+                                        ClassLoader cl = fastLaneContext.getClassLoader();
+                                        LOG.info("[DIAG-2] Fast Context: {}, State: {}, Loader: {} (hash: {})", 
+                                            fastLaneContext.getDisplayName(), 
+                                            fastLaneContext.getState(), 
+                                            cl, 
+                                            (cl != null ? System.identityHashCode(cl) : "null"));
+                                    }
+                                    if (mainAppContext != null) {
+                                        LOG.info("[DIAG-2] mainAppContext (Atlas) Loader: " + mainAppContext.getClassLoader());
+                                        ClassLoader cl = mainAppContext.getClassLoader();
+                                            LOG.info("[DIAG-2] main Context: {}, State: {}, Loader: {} (hash: {})", 
+                                                mainAppContext.getDisplayName(), 
+                                                mainAppContext.getState(), 
+                                                cl, 
+                                                (cl != null ? System.identityHashCode(cl) : "null"));
+                                    }
+
+                                } catch (ClassNotFoundException e) {
+                                    LOG.error("[DIAG-2] WebApplicationProviderImpl NOT FOUND in webAppClassLoader!");
+                                }
+                            } catch (Throwable t) {
+                                LOG.error("[DIAG-2] Diagnostic block failed: " + t.getMessage());
+                            }
+                            // --- END DIAGNOSTIC BLOCK ---
                             Thread.currentThread().setContextClassLoader(webAppClassLoader);
                             LOG.info("TCCL switched. Calling v2Holder.start()...");
                             LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
@@ -619,6 +647,29 @@ public class EmbeddedServer {
                             LOG.info("Fast lane context started. Ready to start v2Holder");
                                             
                             v2Holder.start();
+                            LOG.info("[DIAG-3] Holder State -3 : {}, Servlet Instance: {}, Available: {}", 
+                                        v2Holder.getState(), 
+                                        v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
+                                        v2Holder.isAvailable());
+                            // Context State
+                            if (fastLaneContext != null) {
+                                ClassLoader cl = fastLaneContext.getClassLoader();
+                                LOG.info("[DIAG-3] fast Context: {}, State: {}, Loader: {} (hash: {})", 
+                                    fastLaneContext.getDisplayName(), 
+                                    fastLaneContext.getState(), 
+                                    cl, 
+                                    (cl != null ? System.identityHashCode(cl) : "null"));
+                            }
+                            if (mainAppContext != null) {
+                                LOG.info("[DIAG-3] mainAppContext (Atlas) Loader: " + mainAppContext.getClassLoader());
+                                ClassLoader cl = mainAppContext.getClassLoader();
+                                    LOG.info("[DIAG-3] main Context: {}, State: {}, Loader: {} (hash: {})", 
+                                        mainAppContext.getDisplayName(), 
+                                        mainAppContext.getState(), 
+                                        cl, 
+                                        (cl != null ? System.identityHashCode(cl) : "null"));
+                            }
+
 
                             bridge.markSynchronized();
                             LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
