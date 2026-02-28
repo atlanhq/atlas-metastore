@@ -664,38 +664,43 @@ public class EmbeddedServer {
                             LOG.info("Fast lane context started. Ready to start v2Holder");
                                             
                             v2Holder.start();
-                            LOG.info("[DIAG-3] Holder State -3 : {}, Servlet Instance: {}, Available: {}", 
-                                        v2Holder.getState(), 
-                                        v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
-                                        v2Holder.isAvailable());
-                            // Context State
-                            if (fastLaneContext != null) {
-                                ClassLoader cl = fastLaneContext.getClassLoader();
-                                LOG.info("[DIAG-3] fast Context: {}, State: {}, Loader: {} (hash: {})", 
-                                    fastLaneContext.getDisplayName(), 
-                                    fastLaneContext.getState(), 
-                                    cl, 
-                                    (cl != null ? System.identityHashCode(cl) : "null"));
-                            }
-                            if (mainAppContext != null) {
-                                LOG.info("[DIAG-3] mainAppContext (Atlas) Loader: " + mainAppContext.getClassLoader());
-                                ClassLoader cl = mainAppContext.getClassLoader();
-                                    LOG.info("[DIAG-3] main Context: {}, State: {}, Loader: {} (hash: {})", 
-                                        mainAppContext.getDisplayName(), 
-                                        mainAppContext.getState(), 
+                            try{
+                                LOG.info("[DIAG-3] Holder State -3 : {}, Servlet Instance: {}, Available: {}", 
+                                            v2Holder.getState(), 
+                                            v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
+                                            v2Holder.isAvailable());
+                                // Context State
+                                if (fastLaneContext != null) {
+                                    ClassLoader cl = fastLaneContext.getClassLoader();
+                                    LOG.info("[DIAG-3] fast Context: {}, State: {}, Loader: {} (hash: {})", 
+                                        fastLaneContext.getDisplayName(), 
+                                        fastLaneContext.getState(), 
                                         cl, 
                                         (cl != null ? System.identityHashCode(cl) : "null"));
+                                }
+                                if (mainAppContext != null) {
+                                    LOG.info("[DIAG-3] mainAppContext (Atlas) Loader: " + mainAppContext.getClassLoader());
+                                    ClassLoader cl = mainAppContext.getClassLoader();
+                                        LOG.info("[DIAG-3] main Context: {}, State: {}, Loader: {} (hash: {})", 
+                                            mainAppContext.getDisplayName(), 
+                                            mainAppContext.getState(), 
+                                            cl, 
+                                            (cl != null ? System.identityHashCode(cl) : "null"));
+                                }
+                                //Spring Diagnostics
+                                LOG.info("[DIAG-SPRING-AFTER] Verifying context state after Servlet Start...");
+                                if (realMainSpringContext instanceof org.springframework.context.ConfigurableApplicationContext) {
+                                    boolean active = ((org.springframework.context.ConfigurableApplicationContext) realMainSpringContext).isActive();
+                                    LOG.info("[DIAG-SPRING-AFTER] Context still active: {}", active);
+                                }
+                                else
+                                {
+                                    LOG.info("[DIAG-SPRING-AFTER] realMainSpringContext is not of ConfigurableApplicationContext type  ");
+                                }
+                            } catch (Exception e) {
+                                LOG.error("[DIAG-3] Diagnostic block failed:", e);
                             }
-                            //Spring Diagnostics
-                            LOG.info("[DIAG-SPRING-AFTER] Verifying context state after Servlet Start...");
-                            if (realMainSpringContext instanceof org.springframework.context.ConfigurableApplicationContext) {
-                                boolean active = ((org.springframework.context.ConfigurableApplicationContext) realMainSpringContext).isActive();
-                                LOG.info("[DIAG-SPRING-AFTER] Context still active: {}", active);
-                            }
-                            else
-                            {
-                                LOG.info("[DIAG-SPRING-AFTER] realMainSpringContext is not of ConfigurableApplicationContext type  ");
-                            }
+
                             //End Spring Diagnostics
                             bridge.markSynchronized();
                             LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
