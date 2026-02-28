@@ -118,6 +118,11 @@ public class TaskQueueWatcher implements Runnable {
             TasksFetcher fetcher = new TasksFetcher(registry);
             boolean lockAcquired = false;
             try {
+                if (!redisService.isAvailable()) {
+                    LOG.info("TaskQueueWatcher: Redis unavailable, sleeping for TASK_WAIT_TIME_MS: {}", AtlasConstants.TASK_WAIT_TIME_MS);
+                    Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
+                    continue;
+                }
                 if (!redisService.acquireDistributedLock(ATLAS_TASK_LOCK)) {
                     LOG.info("TaskQueueWatcher: Failed to acquire distributed lock, sleeping for TASK_WAIT_TIME_MS: {}", AtlasConstants.TASK_WAIT_TIME_MS);
                     Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);

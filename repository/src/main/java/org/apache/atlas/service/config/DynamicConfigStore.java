@@ -131,9 +131,11 @@ public class DynamicConfigStore implements ApplicationContextAware {
             registerMetrics();
 
         } catch (Exception e) {
-            LOG.error("Failed to initialize DynamicConfigStore - Cassandra config store will be unavailable", e);
-            // Fail-fast if Cassandra is enabled but unavailable
-            throw new RuntimeException("DynamicConfigStore initialization failed - Cassandra unavailable", e);
+            LOG.error("Failed to initialize DynamicConfigStore - will serve ConfigKey defaults until Cassandra recovers", e);
+            // Graceful degradation: mark as initialized but Cassandra unavailable.
+            // All reads will fall back to ConfigKey defaults via getDefaultValue().
+            initialized = true;
+            cassandraAvailable = false;
         }
     }
 

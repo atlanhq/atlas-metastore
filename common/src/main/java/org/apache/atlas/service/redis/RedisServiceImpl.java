@@ -47,6 +47,9 @@ public class RedisServiceImpl extends AbstractRedisService {
                 Thread.sleep(BACKGROUND_INIT_DELAY_MS);  // Wait for other services to start
                 ensureInitialized();
                 LOG.info("Background Redis initialization successful");
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                LOG.info("Background Redis initialization interrupted during startup delay");
             } catch (Exception e) {
                 LOG.warn("Background Redis initialization failed - will retry on first use: {}", e.getMessage());
             }
