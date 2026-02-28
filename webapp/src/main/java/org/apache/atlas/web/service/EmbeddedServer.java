@@ -455,21 +455,35 @@ public class EmbeddedServer {
         // Only register what exists in Atlas built JARs
         v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", 
             "org.apache.atlas.web.resources.AdminResource;" +
-            "org.apache.atlas.web.rest.EntityREST;" +
-            "org.apache.atlas.web.rest.DirectSearchREST;" + 
+            "org.apache.atlas.web.rest.AttributeREST;" +
+            "org.apache.atlas.web.rest.AuthREST;" +
+            "org.apache.atlas.web.rest.BusinessLineageREST;" +
+            "org.apache.atlas.web.rest.BusinessPolicyREST;" +
+            "org.apache.atlas.web.rest.ConfigCacheRefreshREST;" +
+            "org.apache.atlas.web.rest.ConfigREST;" +
+            "org.apache.atlas.web.rest.DirectSearchREST;" +
             "org.apache.atlas.web.rest.DiscoveryREST;" +
-            "org.apache.atlas.web.rest.TypesREST;" +
+            "org.apache.atlas.web.rest.EntityREST;" +
+            "org.apache.atlas.web.rest.FeatureFlagREST;" +
             "org.apache.atlas.web.rest.GlossaryREST;" +
             "org.apache.atlas.web.rest.LineageREST;" +
+            "org.apache.atlas.web.rest.MeshEntityAssetLinkREST;" +
+            "org.apache.atlas.web.rest.MigrationREST;" +
+            "org.apache.atlas.web.rest.ModelREST;" +
             "org.apache.atlas.web.rest.RelationshipREST;" +
+            "org.apache.atlas.web.rest.RepairREST;" +
+            "org.apache.atlas.web.rest.TaskREST;" +
+            "org.apache.atlas.web.rest.TypeCacheRefreshREST;" +
+            "org.apache.atlas.web.rest.TypesREST;" +
+
 
             "org.apache.atlas.web.util.Servlets;" +
             // Jackson 2 provider for SearchLog classes
             "com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;" +
-            
+            "org.apache.atlas.web.util.AtlasJsonProvider;" +
             // The JSON/Jackson providers (Required for AdminResource to work)
-            "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
-            "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
+          //  "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
+           // "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
         
             // Exception mappers (Required to handle errors gracefully)
             "org.apache.atlas.web.errors.AtlasBaseExceptionMapper;" +
