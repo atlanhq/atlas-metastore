@@ -151,7 +151,7 @@
                     <artifactId>metrics-core</artifactId>
                 </exclusion>
             </exclusions>
-            <version>3.11.18</version>
+            <version>4.1.10</version>
         </dependency>
 
 
