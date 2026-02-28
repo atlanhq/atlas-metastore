@@ -589,11 +589,11 @@ public class EmbeddedServer {
                                 LOG.info("Fast-lane context is already started. Stopping it to apply ClassLoader...");
                                 fastLaneContext.stop();
                             }
-                            ClassLoader webAppClassLoader = realMainSpringContext.getClassLoader();
+                            //align classloaders
+                            ClassLoader webAppClassLoader = realMainSpringContext.getClass().getClassLoader();
                             fastLaneContext.setClassLoader(webAppClassLoader);
                             ClassLoader originalTCCL = Thread.currentThread().getContextClassLoader();
-                            
-                            //align classloaders
+                             
                             // ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
                             // fastLaneContext.setClassLoader(mainClassLoader);
                             Thread.currentThread().setContextClassLoader(webAppClassLoader);
