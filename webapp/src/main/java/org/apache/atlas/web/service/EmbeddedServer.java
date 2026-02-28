@@ -360,15 +360,7 @@ public class EmbeddedServer {
             ((org.eclipse.jetty.webapp.WebAppContext) fastLaneContext).setParentLoaderPriority(true);
         }
 
-        //  Add Health Check (Always available)
-        fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
-            @Override
-            protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
-                throws java.io.IOException {
-                resp.setContentType("application/json");
-                resp.getWriter().println("{\"status\":\"FAST_LANE_READY\"}");
-            }
-        }), "/atlas/admin/health");
+        
 
         final Object curContextForFastLane = curContext;
         //  Prepare the V2 Holder but ***without*** starting; the context is then started manually in a listener
@@ -410,7 +402,7 @@ public class EmbeddedServer {
                 // Context State
                 if (fastLaneContext != null) {
                     ClassLoader cl = fastLaneContext.getClassLoader();
-                    LOG.info("[DIAG-EARLY] Context: {}, State: {}, Loader: {} (hash: {})", 
+                    LOG.info("[DIAG-EARLY] fastLaneContext: {}, State: {}, Loader: {} (hash: {})", 
                         fastLaneContext.getDisplayName(), 
                         fastLaneContext.getState(), 
                         cl, 
@@ -428,7 +420,7 @@ public class EmbeddedServer {
             if (mainAppContext != null) {
                 LOG.info("[DIAG-EARLY] mainAppContext (Atlas) Loader: " + mainAppContext.getClassLoader());
                 ClassLoader cl = mainAppContext.getClassLoader();
-                    LOG.info("[DIAG-EARLY] Context: {}, State: {}, Loader: {} (hash: {})", 
+                    LOG.info("[DIAG-EARLY] mainAppContext: {}, State: {}, Loader: {} (hash: {})", 
                         mainAppContext.getDisplayName(), 
                         mainAppContext.getState(), 
                         cl, 
@@ -487,9 +479,9 @@ public class EmbeddedServer {
             "org.apache.atlas.web.filters.AtlasAuthenticationFilter" 
         );
    
-        // Add /v2 calls to the context now, Jetty will handle the start sequence
-        fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
-        fastLaneContext.addServlet(v2Holder, "/meta/*");
+        // // Add /v2 calls to the context now, Jetty will handle the start sequence
+        // fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
+        // fastLaneContext.addServlet(v2Holder, "/meta/*");
 
         // This Listener is **only** to inject the dependencies once Main App is ready
         // TODO UPDATE : This is only for logging rifht now. Remove after flow check
@@ -642,7 +634,20 @@ public class EmbeddedServer {
                             }
                             // --- END DIAGNOSTIC BLOCK ---
                             Thread.currentThread().setContextClassLoader(webAppClassLoader);
-                            LOG.info("TCCL switched. Calling v2Holder.start()...");
+                            LOG.info("TCCL switched. Calling addServlet and v2Holder.start()...");
+                            //  Add Health Check (Always available)
+                            fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
+                                @Override
+                                protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
+                                    throws java.io.IOException {
+                                    resp.setContentType("application/json");
+                                    resp.getWriter().println("{\"status\":\"FAST_LANE_READY\"}");
+                                }
+                            }), "/atlas/admin/health");
+                            // Add /v2 calls to the context now, Jetty will handle the start sequence
+                            fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
+                            fastLaneContext.addServlet(v2Holder, "/meta/*");
+
                             LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
                             fastLaneContext.getServletContext().setAttribute(
                                 org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE,
@@ -665,11 +670,8 @@ public class EmbeddedServer {
                                             
                             v2Holder.start();
                             try{
-                                LOG.info("[DIAG-3] Holder State -3 : {}, Servlet Instance: {}, Available: {}", 
-                                            v2Holder.getState(), 
-                                            v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
-                                            v2Holder.isAvailable());
                                 // Context State
+                                LOG.info("Diagnostic logging after  v2Holder.start(); ");
                                 if (fastLaneContext != null) {
                                     ClassLoader cl = fastLaneContext.getClassLoader();
                                     LOG.info("[DIAG-3] fast Context: {}, State: {}, Loader: {} (hash: {})", 
@@ -697,6 +699,10 @@ public class EmbeddedServer {
                                 {
                                     LOG.info("[DIAG-SPRING-AFTER] realMainSpringContext is not of ConfigurableApplicationContext type  ");
                                 }
+                                LOG.info("[DIAG-3] Holder State after v2Holder.start() : {}, Servlet Instance: {}, Available: {}", 
+                                        v2Holder.getState(), 
+                                        v2Holder.getServlet(), // If this is NOT null before sync, it's a problem
+                                        v2Holder.isAvailable());
                             } catch (Exception e) {
                                 LOG.error("[DIAG-3] Diagnostic block failed:", e);
                             }
