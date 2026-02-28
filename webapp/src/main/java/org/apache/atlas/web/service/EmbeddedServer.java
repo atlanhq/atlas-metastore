@@ -482,8 +482,8 @@ public class EmbeddedServer {
             "com.fasterxml.jackson.jaxrs.json.JacksonJsonProvider;" +
             "org.apache.atlas.web.util.AtlasJsonProvider;" +
             // The JSON/Jackson providers (Required for AdminResource to work)
-          //  "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
-           // "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
+            //  "org.codehaus.jackson.jaxrs.JacksonJsonProvider;" +
+            // "org.codehaus.jackson.jaxrs.JacksonJaxbJsonProvider;" +
         
             // Exception mappers (Required to handle errors gracefully)
             "org.apache.atlas.web.errors.AtlasBaseExceptionMapper;" +
@@ -661,6 +661,7 @@ public class EmbeddedServer {
                             // Add /v2 calls to the context now, Jetty will handle the start sequence
                             fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
                             fastLaneContext.addServlet(v2Holder, "/meta/*");
+                            fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
 
                             LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
                             fastLaneContext.getServletContext().setAttribute(
