@@ -580,9 +580,6 @@ public class EmbeddedServer {
                         
                         // Ensure FastLane uses the same loader as the main app
                         v2Holder.stop();
-                        ClassLoader webAppClassLoader = mainSpringContext.getClassLoader();
-                        v2Holder.setClassLoader(webAppClassLoader);
-                        ClassLoader originalTCCL = Thread.currentThread().getContextClassLoader();
                         
                         Object realMainSpringContext = mainAppContext.getServletContext().getAttribute(
                             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
@@ -592,6 +589,10 @@ public class EmbeddedServer {
                                 LOG.info("Fast-lane context is already started. Stopping it to apply ClassLoader...");
                                 fastLaneContext.stop();
                             }
+                            ClassLoader webAppClassLoader = realMainSpringContext.getClassLoader();
+                            fastLaneContext.setClassLoader(webAppClassLoader);
+                            ClassLoader originalTCCL = Thread.currentThread().getContextClassLoader();
+                            
                             //align classloaders
                             // ClassLoader mainClassLoader = realMainSpringContext.getClass().getClassLoader();
                             // fastLaneContext.setClassLoader(mainClassLoader);
@@ -621,6 +622,7 @@ public class EmbeddedServer {
 
                             bridge.markSynchronized();
                             LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
+                            Thread.currentThread().setContextClassLoader(originalTCCL);
                         }
                         else
                         {
