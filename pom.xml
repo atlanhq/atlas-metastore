@@ -113,7 +113,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
         </developer>
         <developer>
             <id>apoorvnaik</id>
@@ -124,7 +124,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
             <!--<organizationUrl></organizationUrl>-->
         </developer>
         <developer>
@@ -348,7 +348,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
         </developer>
         <developer>
             <id>kalyanikashikar</id>
@@ -529,7 +529,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
             <!--<organizationUrl></organizationUrl>-->
         </developer>
         <developer>
@@ -541,7 +541,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
         </developer>
         <developer>
             <id>vranganathan</id>
@@ -552,7 +552,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
             <!--<organizationUrl></organizationUrl>-->
         </developer>
         <developer>
@@ -564,7 +564,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
         </developer>
         <developer>
             <id>svimal2106</id>
@@ -575,7 +575,7 @@
                 <role>committer</role>
                 <role>PMC</role>
             </roles>
-            <organization></organization>
+            <organization/>
             <!--<organizationUrl></organizationUrl>-->
         </developer>
     </developers>
@@ -682,7 +682,7 @@
         <antlr4.version>4.7</antlr4.version>
         <aopalliance.version>1.0</aopalliance.version>
         <aspectj.runtime.version>1.8.7</aspectj.runtime.version>
-        <atlas.surefire.options></atlas.surefire.options>
+        <atlas.surefire.options/>
         <avro.version>1.7.5</avro.version>
         <calcite.version>1.16.0</calcite.version>
         <checkstyle.failOnViolation>false</checkstyle.failOnViolation>
@@ -719,7 +719,7 @@
         <hppc.version>0.8.1</hppc.version>
         <httpcomponents-httpclient.version>4.5.13</httpcomponents-httpclient.version>
         <httpcomponents-httpcore.version>4.4.13</httpcomponents-httpcore.version>
-        <jackson.databind.version>2.13.4.2</jackson.databind.version>
+        <jackson.databind.version>2.15.0</jackson.databind.version>
         <jackson.version>2.12.4</jackson.version>
         <janusgraph.version>1.0.4-atlan</janusgraph.version>
         <janusgraph.cassandra.version>0.5.3</janusgraph.cassandra.version>
