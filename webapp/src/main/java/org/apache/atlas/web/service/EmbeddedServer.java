@@ -419,7 +419,7 @@ public class EmbeddedServer {
 
 
                 // Spring Attribute Check
-                Object springCtx = context.getServletContext().getAttribute(
+                Object springCtx = mainAppContext.getServletContext().getAttribute(
                     org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                 LOG.info("Spring Context Attribute Present: {}", (springCtx != null));
 
@@ -572,6 +572,23 @@ public class EmbeddedServer {
                         Object realMainSpringContext = mainAppContext.getServletContext().getAttribute(
                             org.springframework.web.context.WebApplicationContext.ROOT_WEB_APPLICATION_CONTEXT_ATTRIBUTE);
                         if(realMainSpringContext != null){
+                            //Spring Diagnostics
+                            // Log class and loader to ensure it matches what we expect
+                            LOG.info("[DIAG-SPRING-BEFORE] Context Loader: " + realMainSpringContext.getClass().getClassLoader());
+                            
+                            if (realMainSpringContext instanceof org.springframework.context.ConfigurableApplicationContext) {
+                                org.springframework.context.ConfigurableApplicationContext cfgCtx = 
+                                    (org.springframework.context.ConfigurableApplicationContext) realMainSpringContext;
+                                
+                                LOG.info("[DIAG-SPRING-BEFORE] ID: {}, Active: {}, Startup: {}", 
+                                        cfgCtx.getId(), cfgCtx.isActive(), new java.util.Date(cfgCtx.getStartupDate()));
+                                LOG.info("[DIAG-SPRING-BEFORE] Bean Count: {}", cfgCtx.getBeanDefinitionCount());
+                            }
+                            else
+                            {
+                                LOG.info("[DIAG-SPRING-BEFORE] realMainSpringContext is not of ConfigurableApplicationContext type  ");
+                            }
+                            //End Spring Diagnostics
                             //Stop fastLaneContext, if started to change the class loader
                             if (fastLaneContext.isStarted()) {
                                 LOG.info("Fast-lane context is already started. Stopping it to apply ClassLoader...");
@@ -669,8 +686,17 @@ public class EmbeddedServer {
                                         cl, 
                                         (cl != null ? System.identityHashCode(cl) : "null"));
                             }
-
-
+                            //Spring Diagnostics
+                            LOG.info("[DIAG-SPRING-AFTER] Verifying context state after Servlet Start...");
+                            if (realMainSpringContext instanceof org.springframework.context.ConfigurableApplicationContext) {
+                                boolean active = ((org.springframework.context.ConfigurableApplicationContext) realMainSpringContext).isActive();
+                                LOG.info("[DIAG-SPRING-AFTER] Context still active: {}", active);
+                            }
+                            else
+                            {
+                                LOG.info("[DIAG-SPRING-AFTER] realMainSpringContext is not of ConfigurableApplicationContext type  ");
+                            }
+                            //End Spring Diagnostics
                             bridge.markSynchronized();
                             LOG.info("V2 Fast-Lane Jersey Servlet initialized successfully.");
                             Thread.currentThread().setContextClassLoader(originalTCCL);
