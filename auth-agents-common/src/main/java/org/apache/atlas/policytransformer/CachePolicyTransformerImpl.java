@@ -40,10 +40,11 @@ import org.apache.atlas.plugin.model.RangerPolicy.RangerPolicyResource;
 import org.apache.atlas.plugin.model.RangerServiceDef;
 import org.apache.atlas.plugin.model.RangerValiditySchedule;
 import org.apache.atlas.plugin.util.ServicePolicies.TagPolicies;
+import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
-import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAO;
+import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.utils.AtlasPerfMetrics;
@@ -88,8 +89,6 @@ import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyCateg
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyFilterCriteria;
 import static org.apache.atlas.repository.util.AccessControlUtils.getPolicyResourceCategory;
 
-import org.apache.atlas.utils.AtlasJson;
-
 @Component
 public class CachePolicyTransformerImpl {
     private static final Logger LOG = LoggerFactory.getLogger(CachePolicyTransformerImpl.class);
@@ -122,9 +121,8 @@ public class CachePolicyTransformerImpl {
     public static final int POLICY_BATCH_SIZE = 250;
 
     private EntityDiscoveryService discoveryService;
-    private final AtlasGraph                graph;
-    private final EntityGraphRetriever      entityRetriever;
-    private final DynamicVertexService dynamicVertexService;
+    private AtlasGraph                graph;
+    private EntityGraphRetriever      entityRetriever;
 
     private PersonaCachePolicyTransformer personaTransformer;
     private PurposeCachePolicyTransformer purposeTransformer;
@@ -135,19 +133,17 @@ public class CachePolicyTransformerImpl {
     private final Map<EntityAuditActionV2, Integer> auditEventToDeltaChangeType;
 
     @Inject
-    public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry,
-                                      DynamicVertexService dynamicVertexService) throws AtlasBaseException {
-        this.graph                = new AtlasJanusGraph();
+    public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry) throws AtlasBaseException {
+        this.graph                = AtlasGraphProvider.getGraphInstance();
         this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
-        this.dynamicVertexService = dynamicVertexService;
 
         personaTransformer = new PersonaCachePolicyTransformer(entityRetriever);
         purposeTransformer = new PurposeCachePolicyTransformer(entityRetriever);
 
         try {
-            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
+            this.discoveryService = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
         } catch (AtlasException e) {
-            LOG.error("Failed to initialize discoveryService in CachePolicyTransformerImpl", e);
+            LOG.error("Failed to initialize discoveryService");
             throw new AtlasBaseException(e.getCause());
         }
 
@@ -639,14 +635,9 @@ public class CachePolicyTransformerImpl {
             return null;
         }
 
-        List<Object> conditionsRaw = (List<Object>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
+        List<AtlasStruct> conditions = (List<AtlasStruct>) atlasPolicy.getAttribute(ATTR_POLICY_CONDITIONS);
 
-        for (Object conditionObj : conditionsRaw) {
-            // Convert LinkedHashMap (from JSON deserialization) to AtlasStruct
-            AtlasStruct condition = (conditionObj instanceof AtlasStruct) ?
-                                    (AtlasStruct) conditionObj :
-                                    new AtlasStruct((Map) conditionObj);
-
+        for (AtlasStruct condition : conditions) {
             RangerPolicyItemCondition rangerCondition = new RangerPolicyItemCondition();
 
             rangerCondition.setType((String) condition.getAttribute("policyConditionType"));

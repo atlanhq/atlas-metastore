@@ -26,7 +26,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.inject.Inject;
 
-
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.GraphTransaction;
 import org.apache.atlas.authorize.AtlasEntityAccessRequest;
@@ -54,7 +53,6 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
@@ -67,8 +65,8 @@ import org.apache.atlas.repository.store.graph.v2.tags.TagDAOCassandraImpl;
 import org.apache.atlas.repository.store.graph.v2.tasks.ClassificationTask;
 import org.apache.atlas.repository.store.graph.v2.utils.TagAttributeMapper;
 import org.apache.atlas.repository.util.TagDeNormAttributesUtil;
-import org.apache.atlas.config.dynamic.ConfigKey;
-import org.apache.atlas.config.dynamic.DynamicConfigStore;
+import org.apache.atlas.service.config.ConfigKey;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.tasks.TaskManagement;
 import org.apache.atlas.type.*;
 import org.apache.atlas.type.AtlasBusinessMetadataType.AtlasBusinessAttribute;
@@ -85,6 +83,7 @@ import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.math.NumberUtils;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -197,7 +196,6 @@ public class EntityGraphMapper {
     private static final int MAX_NUMBER_OF_RETRIES = AtlasConfiguration.MAX_NUMBER_OF_RETRIES.getInt();
     private static final int CHUNK_SIZE            = AtlasConfiguration.TAG_CASSANDRA_BATCHING_CHUNK_SIZE.getInt();
     private static final int UD_REL_THRESHOLD = AtlasConfiguration.ATLAS_UD_RELATIONSHIPS_MAX_COUNT.getInt();
-    private static final int VERTEX_FETCH_BATCH_SIZE = 100;
 
     private final GraphHelper               graphHelper;
     private final AtlasGraph                graph;
@@ -245,9 +243,9 @@ public class EntityGraphMapper {
         DEFERRED_ACTION_ENABLED = value;
     }
 
-    public AtlasVertex createAssetVertex(AtlasEntity entity) throws AtlasBaseException {
+    public AtlasVertex createVertex(AtlasEntity entity) throws AtlasBaseException {
         final String guid = UUID.randomUUID().toString();
-        return createAssetVertexWithGuid(entity, guid);
+        return createVertexWithGuid(entity, guid);
     }
 
     public AtlasVertex createShellEntityVertex(AtlasObjectId objectId, EntityGraphDiscoveryContext context) throws AtlasBaseException {
@@ -257,7 +255,7 @@ public class EntityGraphMapper {
 
         final String    guid       = UUID.randomUUID().toString();
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(objectId.getTypeName());
-        AtlasVertex     ret        = createAssetVertex(objectId.getTypeName());
+        AtlasVertex     ret        = createStructVertex(objectId);
 
         for (String superTypeName : entityType.getAllSuperTypes()) {
             AtlasGraphUtilsV2.addEncodedProperty(ret, SUPER_TYPES_PROPERTY_KEY, superTypeName);
@@ -286,13 +284,13 @@ public class EntityGraphMapper {
         return ret;
     }
 
-    public AtlasVertex createAssetVertexWithGuid(AtlasEntity entity, String guid) throws AtlasBaseException {
+    public AtlasVertex createVertexWithGuid(AtlasEntity entity, String guid) throws AtlasBaseException {
         if (LOG.isDebugEnabled()) {
-            LOG.debug("==> createAssetVertexWithGuid({})", entity.getTypeName());
+            LOG.debug("==> createVertexWithGuid({})", entity.getTypeName());
         }
 
         AtlasEntityType entityType = typeRegistry.getEntityTypeByName(entity.getTypeName());
-        AtlasVertex     ret        = createAssetVertex(entity.getTypeName());
+        AtlasVertex     ret        = createStructVertex(entity);
 
         for (String superTypeName : entityType.getAllSuperTypes()) {
             AtlasGraphUtilsV2.addEncodedProperty(ret, SUPER_TYPES_PROPERTY_KEY, superTypeName);
@@ -370,12 +368,7 @@ public class EntityGraphMapper {
         if (CollectionUtils.isNotEmpty(context.getEntitiesToRestore())) {
             restoreHandlerV1.restoreEntities(context.getEntitiesToRestore());
             for (AtlasEntityHeader restoredEntity : reqContext.getRestoredEntities()) {
-                if (restoredEntity == null) {
-                    continue;
-                }
-
                 AtlasEntity diffEntity;
-
                 if (reqContext.getDifferentialEntity(restoredEntity.getGuid()) != null){
                     diffEntity = reqContext.getDifferentialEntity(restoredEntity.getGuid());
                 } else {
@@ -385,7 +378,7 @@ public class EntityGraphMapper {
                 diffEntity.setUpdatedBy(RequestContext.get().getUser());
                 diffEntity.setUpdateTime(new Date(RequestContext.get().getRequestTime()));
                 diffEntity.setAttribute(STATE_PROPERTY_KEY, ACTIVE.name());
-                reqContext.cacheDifferentialEntity(diffEntity, reqContext.getRestoredVertex(restoredEntity.getGuid()));
+                reqContext.cacheDifferentialEntity(diffEntity);
 
                 resp.addEntity(UPDATE, restoredEntity);
             }
@@ -753,8 +746,6 @@ public class EntityGraphMapper {
         String                           typeName                     = getTypeName(entityVertex);
         AtlasEntityType                  entityType                   = typeRegistry.getEntityTypeByName(typeName);
         AtlasEntityHeader                entityHeader                 = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
-        RequestContext.get().cacheDifferentialEntity(new AtlasEntity(entityHeader), entityVertex);
-
         Map<String, Map<String, Object>> currEntityBusinessAttributes = entityRetriever.getBusinessMetadata(entityVertex);
         Set<String>                      updatedBusinessMetadataNames = new HashSet<>();
 
@@ -966,8 +957,6 @@ public class EntityGraphMapper {
         AtlasEntityHeader               entityHeader   = entityRetriever.toAtlasEntityHeaderWithClassifications(entityVertex);
         AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder requestBuilder = new AtlasEntityAccessRequest.AtlasEntityAccessRequestBuilder(typeRegistry, AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, entityHeader);
 
-        RequestContext.get().cacheDifferentialEntity(new AtlasEntity(entityHeader), entityVertex);
-
         for (String bmName : businessAttributes.keySet()) {
             requestBuilder.setBusinessMetadata(bmName);
 
@@ -1053,27 +1042,6 @@ public class EntityGraphMapper {
         return ret;
     }
 
-    private AtlasVertex createAssetVertex(String typeName) {
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("==> createAssetVertex({})", typeName);
-        }
-
-        final AtlasVertex ret = graph.addAssetVertex();
-
-        AtlasGraphUtilsV2.setEncodedProperty(ret, ENTITY_TYPE_PROPERTY_KEY, typeName);
-        AtlasGraphUtilsV2.setEncodedProperty(ret, STATE_PROPERTY_KEY, AtlasEntity.Status.ACTIVE.name());
-        AtlasGraphUtilsV2.setEncodedProperty(ret, TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-        AtlasGraphUtilsV2.setEncodedProperty(ret, MODIFICATION_TIMESTAMP_PROPERTY_KEY, RequestContext.get().getRequestTime());
-        AtlasGraphUtilsV2.setEncodedProperty(ret, CREATED_BY_KEY, RequestContext.get().getUser());
-        AtlasGraphUtilsV2.setEncodedProperty(ret, MODIFIED_BY_KEY, RequestContext.get().getUser());
-
-        if (LOG.isDebugEnabled()) {
-            LOG.debug("<== createAssetVertex({})", typeName);
-        }
-
-        return ret;
-    }
-
     private AtlasVertex createClassificationVertex(AtlasClassification classification) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> createVertex({})", classification.getTypeName());
@@ -1100,7 +1068,7 @@ public class EntityGraphMapper {
         }
 
         if (MapUtils.isNotEmpty(struct.getAttributes())) {
-            MetricRecorder metric = RequestContext.get().startMetricRecord("EntityGraphMapper.mapAttributes");
+            MetricRecorder metric = RequestContext.get().startMetricRecord("mapAttributes");
 
             List<String> timestampAutoUpdateAttributes = new ArrayList<>();
             List<String> userAutoUpdateAttributes = new ArrayList<>();
@@ -1363,29 +1331,25 @@ public class EntityGraphMapper {
                 return null;
             }
 
-            switch (ctx.getAttrType().getTypeCategory()) { // bulk
+            switch (ctx.getAttrType().getTypeCategory()) {
                 case PRIMITIVE:
                 case ENUM:
                     return mapPrimitiveValue(ctx, context);
 
                 case STRUCT: {
+                    String    edgeLabel   = AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty());
+                    AtlasEdge currentEdge = graphHelper.getEdgeForLabel(ctx.getReferringVertex(), edgeLabel);
+                    AtlasEdge edge        = currentEdge != null ? currentEdge : null;
 
-                    if (LEAN_GRAPH_ENABLED) {
-                        return mapToVertexByTypeCategoryForStructV2(ctx);
-                    } else {
-                        String    edgeLabel   = AtlasGraphUtilsV2.getEdgeLabel(ctx.getVertexProperty());
-                        AtlasEdge currentEdge = graphHelper.getEdgeForLabel(ctx.getReferringVertex(), edgeLabel);
-                        AtlasEdge edge        = currentEdge != null ? currentEdge : null;
+                    ctx.setExistingEdge(edge);
 
-                        ctx.setExistingEdge(edge);
+                    AtlasEdge newEdge = mapStructValue(ctx, context);
 
-                        AtlasEdge newEdge = mapStructValue(ctx, context);
-
-                        if (currentEdge != null && !currentEdge.equals(newEdge)) {
-                            deleteDelegate.getHandler().deleteEdgeReference(currentEdge, ctx.getAttrType().getTypeCategory(), false, true, ctx.getReferringVertex());
-                        }
-                        return newEdge;
+                    if (currentEdge != null && !currentEdge.equals(newEdge)) {
+                        deleteDelegate.getHandler().deleteEdgeReference(currentEdge, ctx.getAttrType().getTypeCategory(), false, true, ctx.getReferringVertex());
                     }
+
+                    return newEdge;
                 }
 
                 case OBJECT_ID_TYPE: {
@@ -1512,19 +1476,6 @@ public class EntityGraphMapper {
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
-    }
-
-    private Object mapToVertexByTypeCategoryForStructV2(AttributeMutationContext ctx) throws AtlasBaseException {
-
-        AtlasStructType structType = typeRegistry.getStructTypeByName(ctx.getAttributeDef().getTypeName());
-        if (structType == null) {
-            structType = typeRegistry.getStructTypeByName(ctx.getCurrentElementType().getTypeName());
-        }
-        AtlasStruct struct = structType.getStructFromValue(ctx.getValue());
-
-        ctx.getReferringVertex().setProperty(ctx.getVertexProperty(), struct);
-
-        return struct;
     }
 
     private String mapSoftRefValue(AttributeMutationContext ctx, EntityMutationContext context) {
@@ -1803,7 +1754,6 @@ public class EntityGraphMapper {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> mapObjectIdValue({})", ctx);
         }
-        MetricRecorder recorder = RequestContext.get().startMetricRecord("mapObjectIdValue");
 
         AtlasEdge ret = null;
 
@@ -1845,7 +1795,6 @@ public class EntityGraphMapper {
             LOG.debug("<== mapObjectIdValue({})", ctx);
         }
 
-        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -3290,13 +3239,8 @@ public class EntityGraphMapper {
             case ARRAY:
                 return ctx.getValue();
 
-        case STRUCT:
-            if (LEAN_GRAPH_ENABLED) {
-                //return ctx.getValue();
-                return mapToVertexByTypeCategoryForStructV2(ctx);
-            } else {
+            case STRUCT:
                 return mapStructValue(ctx, context);
-            }
 
             case OBJECT_ID_TYPE:
                 AtlasEntityType instanceType = getInstanceType(ctx.getValue(), context);
@@ -3354,7 +3298,6 @@ public class EntityGraphMapper {
 
     private void setAssignedGuid(Object val, EntityMutationContext context) {
         if (val != null) {
-            MetricRecorder recorder = RequestContext.get().startMetricRecord("setAssignedGuid");
             Map<String, String> guidAssignements = context.getGuidAssignments();
 
             if (val instanceof AtlasObjectId) {
@@ -3403,7 +3346,6 @@ public class EntityGraphMapper {
                     mapObjId.put(AtlasObjectId.KEY_GUID, assignedGuid);
                 }
             }
-            RequestContext.get().endMetricRecord(recorder);
         }
     }
 
@@ -3727,19 +3669,13 @@ public class EntityGraphMapper {
     private void setArrayElementsProperty(AtlasType elementType, boolean isSoftReference, AtlasVertex vertex, String vertexPropertyName, List<Object> allValues, List<Object> currentValues, Cardinality cardinality) {
         boolean isArrayOfPrimitiveType = elementType.getTypeCategory().equals(TypeCategory.PRIMITIVE);
         boolean isArrayOfEnum = elementType.getTypeCategory().equals(TypeCategory.ENUM);
-        boolean isArrayOfStruct = elementType.getTypeCategory().equals(TypeCategory.STRUCT);
 
         if (!isReference(elementType) || isSoftReference) {
-            if (isArrayOfPrimitiveType || isArrayOfEnum || isArrayOfStruct) {
-                if (LEAN_GRAPH_ENABLED) {
-                    AtlasGraphUtilsV2.setEncodedProperty(vertex, vertexPropertyName, allValues);
-
-                } else {
-                    vertex.removeProperty(vertexPropertyName);
-                    if (CollectionUtils.isNotEmpty(allValues)) {
-                        for (Object value: allValues) {
-                            AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
-                        }
+            if (isArrayOfPrimitiveType || isArrayOfEnum) {
+                vertex.removeProperty(vertexPropertyName);
+                if (CollectionUtils.isNotEmpty(allValues)) {
+                    for (Object value: allValues) {
+                        AtlasGraphUtilsV2.addEncodedProperty(vertex, vertexPropertyName, value);
                     }
                 }
             } else {
@@ -3970,7 +3906,7 @@ public class EntityGraphMapper {
             try {
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
 
-                deNormMap.put(entityVertex.getDocId(),
+                deNormMap.put(entityVertex.getIdForDisplay(),
                         TagDeNormAttributesUtil.getAllAttributesForAllTagsForRepair(GraphHelper.getGuid(entityVertex), currentTags, typeRegistry, fullTextMapperV2));
 
                 // ES operation collected to be executed in the end
@@ -4248,7 +4184,7 @@ public class EntityGraphMapper {
 
                 // Update ES attributes
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
+                deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                         currentTags, typeRegistry, fullTextMapperV2));
                 // ES operation collected to be executed in the end
                 RequestContext.get().addESDeferredOperation(
@@ -4627,9 +4563,9 @@ public class EntityGraphMapper {
                 Map<String, Map<String, Object>> deNormAttributesMap = new HashMap<>();
                 Map<String, Map<String, Object>> assetMinAttrsMap = new HashMap<>();
 
-                Set<String> propagatedVertexIds = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
+                List<AtlasEntity> propagatedEntitiesChunked = updateClassificationTextV2(classification, chunkedVerticesToPropagate, deNormAttributesMap, assetMinAttrsMap);
 
-                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), propagatedVertexIds, assetMinAttrsMap, classification);
+                tagDAO.putPropagatedTags(entityVertexId, classification.getTypeName(), deNormAttributesMap.keySet(), assetMinAttrsMap, classification);
                 if (MapUtils.isNotEmpty(deNormAttributesMap)) {
                     ESConnector.writeTagProperties(deNormAttributesMap);
                 }
@@ -4919,7 +4855,7 @@ public class EntityGraphMapper {
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
+        deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
 
         // ES operation collected to be executed in the end
         RequestContext.get().addESDeferredOperation(
@@ -4970,6 +4906,38 @@ public class EntityGraphMapper {
             LOG.warn("Task classificationVertexId or entityGuid is null");
         }
         return false;
+    }
+
+    private AtlasEntity updateClassificationText(AtlasVertex vertex) throws AtlasBaseException {
+        String guid        = graphHelper.getGuid(vertex);
+        AtlasEntity entity = instanceConverter.getAndCacheEntity(guid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
+
+        vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
+        return entity;
+    }
+
+    public void updateClassificationTextAndNames(AtlasVertex vertex) throws AtlasBaseException {
+        if(CollectionUtils.isEmpty(vertex.getPropertyValues(Constants.TRAIT_NAMES_PROPERTY_KEY, String.class)) &&
+                CollectionUtils.isEmpty(vertex.getPropertyValues(Constants.PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, String.class))) {
+            return;
+        }
+
+        String guid = graphHelper.getGuid(vertex);
+        AtlasEntity entity = instanceConverter.getAndCacheEntity(guid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
+        List<String> classificationNames = new ArrayList<>();
+        List<String> propagatedClassificationNames = new ArrayList<>();
+
+        for (AtlasClassification classification : entity.getClassifications()) {
+            if (isPropagatedClassification(classification, guid)) {
+                propagatedClassificationNames.add(classification.getTypeName());
+            } else {
+                classificationNames.add(classification.getTypeName());
+            }
+        }
+
+        vertex.setProperty(CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(classificationNames));
+        vertex.setProperty(PROPAGATED_CLASSIFICATION_NAMES_KEY, getDelimitedClassificationNames(propagatedClassificationNames));
+        vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
     }
 
     private boolean isPropagatedClassification(AtlasClassification classification, String guid) {
@@ -5326,7 +5294,7 @@ public class EntityGraphMapper {
                     )
             );
             Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-            deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
+            deNormMap.put(entityVertex.getIdForDisplay(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForAddTag(classification,
                     currentTags, typeRegistry, fullTextMapperV2));
             // ES operation collected to be executed in the end
             RequestContext.get().addESDeferredOperation(
@@ -5454,6 +5422,7 @@ public class EntityGraphMapper {
             AtlasEntity entity     = instanceConverter.getAndCacheEntity(entityGuid, ENTITY_CHANGE_NOTIFY_IGNORE_RELATIONSHIP_ATTRIBUTES);
 
             if (entity != null) {
+                vertex.setProperty(CLASSIFICATION_TEXT_KEY, fullTextMapperV2.getClassificationTextForEntity(entity));
                 entityChangeNotifier.onClassificationUpdatedToEntity(entity, updatedClassifications);
             }
         }
@@ -5644,7 +5613,7 @@ public class EntityGraphMapper {
                         .map(Tag::getVertexId)
                         .toList();
 
-                batchToDelete.stream().map(x->getEntityForNotification(x.getAssetMetadata())).toList();
+                List<AtlasEntity> entities = batchToDelete.stream().map(x->getEntityForNotification(x.getAssetMetadata())).toList();
 
                 // Delete from Cassandra. The DAO correctly performs a hard delete on the lookup table.
                 deletePropagations(batchToDelete);
@@ -5867,7 +5836,6 @@ public class EntityGraphMapper {
     private void recordEntityUpdate(AtlasVertex vertex, AttributeMutationContext ctx, boolean isAdd) throws AtlasBaseException {
         if (vertex != null) {
             RequestContext req = RequestContext.get();
-            MetricRecorder recorder = req.startMetricRecord("recordEntityUpdate");
 
             AtlasEntityHeader header = new AtlasEntityHeader(getTypeName(vertex));
             header.setGuid(GraphHelper.getGuid(vertex));
@@ -5878,7 +5846,7 @@ public class EntityGraphMapper {
             header.setAttribute(NAME, vertex.getProperty(NAME, String.class));
             header.setAttribute(QUALIFIED_NAME, vertex.getProperty(QUALIFIED_NAME, String.class));
 
-            header.setDocId(vertex.getDocId());
+            header.setDocId(LongEncodingUtil.vertexIdToDocId(vertex.getIdForDisplay()));
             header.setSuperTypeNames(typeRegistry.getEntityTypeByName(header.getTypeName()).getAllSuperTypes());
 
             if (!req.isUpdatedEntity(header.getGuid())) {
@@ -5921,13 +5889,10 @@ public class EntityGraphMapper {
                     }
                 }
 
-                // passing atlasVertex null since only relation was updated & no update of metadata of asset
-                req.cacheDifferentialEntity(entity, vertex);
+                req.cacheDifferentialEntity(entity);
             } finally {
                 req.endMetricRecord(recorderInverseMutatedDetails);
             }
-
-            req.endMetricRecord(recorder);
         }
     }
 
@@ -6163,10 +6128,8 @@ public class EntityGraphMapper {
                 }
 
                 if (entity != null) {
-                    if (!LEAN_GRAPH_ENABLED) {
-                        String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
-                        vertex.setProperty(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
-                    }
+                    String classificationTextForEntity = fullTextMapperV2.getClassificationTextForEntity(entity);
+                    vertex.setProperty(CLASSIFICATION_TEXT_KEY, classificationTextForEntity);
                     propagatedEntities.add(entity);
                 }
             }
@@ -6176,11 +6139,11 @@ public class EntityGraphMapper {
         return propagatedEntities;
     }
 
-    Set<String> updateClassificationTextV2(AtlasClassification currentTag,
+    List<AtlasEntity> updateClassificationTextV2(AtlasClassification currentTag,
                                                  Collection<AtlasVertex> propagatedVertices,
                                                  Map<String, Map<String, Object>> deNormAttributesMap,
                                                  Map<String, Map<String, Object>> assetMinAttrsMap) throws AtlasBaseException {
-        Set<String> propagatedVertexIds = new HashSet<>();
+        List<AtlasEntity> propagatedEntities = new ArrayList<>();
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
         if(CollectionUtils.isNotEmpty(propagatedVertices)) {
@@ -6228,12 +6191,12 @@ public class EntityGraphMapper {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2, false);
                 }
 
-                deNormAttributesMap.put(vertex.getDocId(), deNormAttributes);
-                propagatedVertexIds.add(vertex.getIdForDisplay());
+                deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
+                propagatedEntities.add(entity);
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
-        return propagatedVertexIds;
+        return propagatedEntities;
     }
 
     void updateClassificationTextV2(AtlasClassification currentTag,
@@ -6243,23 +6206,7 @@ public class EntityGraphMapper {
                                                  boolean isDelete) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
-
         if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
-            Map<String, String> vertexIdstoDocIdMap = new HashMap<>(propagatedVertexIds.size());
-
-            for (int i = 0; i < propagatedVertexIds.size(); i += VERTEX_FETCH_BATCH_SIZE) {
-                int endIndex = Math.min(i + VERTEX_FETCH_BATCH_SIZE, propagatedVertexIds.size());
-                List<String> batch = propagatedVertexIds.subList(i, endIndex);
-
-                // Get vertices for this batch
-                Set<AtlasVertex> batchVertices = graph.getVertices(batch.toArray(new String[0]));
-
-                // Add to map
-                batchVertices.forEach(vertex ->
-                        vertexIdstoDocIdMap.put(vertex.getIdForDisplay(), vertex.getDocId())
-                );
-            }
-
             for(Tag tagAttachment : propagatedTags) {
                 //get current associated tags to asset ONLY from Cassandra namespace
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
@@ -6276,7 +6223,7 @@ public class EntityGraphMapper {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2, isDelete);
                 }
 
-                deNormAttributesMap.put(vertexIdstoDocIdMap.get(tagAttachment.getVertexId()), deNormAttributes);
+                deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
             }
         }
         RequestContext.get().endMetricRecord(metricRecorder);
@@ -6454,7 +6401,7 @@ public class EntityGraphMapper {
         AtlasEntity diffEntity = createDifferentialEntity(
                 vertex, effectiveCompliantGUIDs, effectiveNonCompliantGUIDs, existingCompliant, existingNonCompliant, totalPolicyCount);
 
-        RequestContext.get().cacheDifferentialEntity(diffEntity, vertex);
+        RequestContext.get().cacheDifferentialEntity(diffEntity);
         return vertex;
     }
 
@@ -6645,7 +6592,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(ASSET_POLICIES_COUNT, complaint.size() + nonComplaint.size());
 
         RequestContext requestContext = RequestContext.get();
-        requestContext.cacheDifferentialEntity(diffEntity, ev);
+        requestContext.cacheDifferentialEntity(diffEntity);
     }
 
     private void cacheDifferentialMeshEntity(AtlasVertex ev, Set<String> existingValues) {
@@ -6654,7 +6601,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(DOMAIN_GUIDS_ATTR, existingValues);
 
         RequestContext requestContext = RequestContext.get();
-        requestContext.cacheDifferentialEntity(diffEntity, ev);
+        requestContext.cacheDifferentialEntity(diffEntity);
     }
 
     private void setEntityCommonAttributes(AtlasVertex ev, AtlasEntity diffEntity) {
@@ -7099,7 +7046,7 @@ public class EntityGraphMapper {
         diffEntity.setAttribute(property, value);
 
         RequestContext requestContext = RequestContext.get();
-        requestContext.cacheDifferentialEntity(diffEntity, ev);
+        requestContext.cacheDifferentialEntity(diffEntity);
     }
 
     private Set<AtlasStructType.AtlasAttribute> getEntityTypeAttributes(Set<AtlasVertex> vertices) {

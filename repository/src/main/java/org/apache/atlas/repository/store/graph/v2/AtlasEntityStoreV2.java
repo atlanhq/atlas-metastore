@@ -46,10 +46,8 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusVertex;
-import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
-import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
 import org.apache.atlas.repository.patches.PatchContext;
 import org.apache.atlas.repository.patches.ReIndexPatch;
 import org.apache.atlas.observability.AtlasObservabilityData;
@@ -62,7 +60,7 @@ import org.apache.atlas.repository.store.graph.EntityGraphDiscovery;
 import org.apache.atlas.repository.store.graph.EntityGraphDiscoveryContext;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.repository.store.graph.v1.RestoreHandlerV1;
-import org.apache.atlas.config.dynamic.DynamicConfigStore;
+import org.apache.atlas.service.config.DynamicConfigStore;
 import org.apache.atlas.repository.store.graph.v2.AtlasEntityComparator.AtlasEntityDiffResult;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AssetPreProcessor;
 import org.apache.atlas.repository.store.graph.v2.preprocessor.AuthPolicyPreProcessor;
@@ -99,7 +97,6 @@ import org.apache.atlas.utils.AtlasPerfTracer;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.lang3.StringUtils;
-import org.janusgraph.util.encoding.LongEncoding;
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.__;
 import org.janusgraph.core.JanusGraphException;
 
@@ -137,7 +134,6 @@ import static org.apache.atlas.repository.store.graph.v2.tasks.MeaningsTaskFacto
 import static org.apache.atlas.repository.util.AccessControlUtils.REL_ATTR_POLICIES;
 import static org.apache.atlas.type.Constants.*;
 
-import org.apache.atlas.utils.AtlasJson;
 
 @Component
 public class AtlasEntityStoreV2 implements AtlasEntityStore {
@@ -170,7 +166,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final List<String> RELATIONSHIP_CLEANUP_SUPPORTED_TYPES = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_ASSET_TYPES.getStringArray());
     private static final List<String> RELATIONSHIP_CLEANUP_RELATIONSHIP_LABELS = Arrays.asList(AtlasConfiguration.ATLAS_RELATIONSHIP_CLEANUP_SUPPORTED_RELATIONSHIP_LABELS.getStringArray());
 
-    private DynamicVertexService dynamicVertexService;
 
     @Inject
     public AtlasEntityStoreV2(AtlasGraph graph, DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry,
@@ -194,10 +189,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         this.esAliasStore = new ESAliasStore(graph, entityRetriever);
         this.atlasAlternateChangeNotifier = atlasAlternateChangeNotifier;
         this.taskNotificationSender = taskNotificationSender;
-        this.dynamicVertexService = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
         this.observabilityService = observabilityService;
         try {
-            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, this.dynamicVertexService, null, entityRetriever);
+            this.discovery = new EntityDiscoveryService(typeRegistry, graph, null, null, null, null, entityRetriever);
         } catch (AtlasException e) {
             e.printStackTrace();
         }
@@ -1532,19 +1526,19 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     @Override
-    public Set<String> getVertexIdFromTags(int fetchSize) throws AtlasBaseException {
+    public Set<Long> getVertexIdFromTags(int fetchSize) throws AtlasBaseException {
             String pagingState = null;
             boolean hasMorePages = true;
             int pageCount = 0;
 
-            Set<String> allVertexIds = new LinkedHashSet<>();
+            Set<Long> allVertexIds = new LinkedHashSet<>();
 
             while (hasMorePages) {
                 pageCount++;
                 PaginatedVertexIdResult result =
                         getVertexIdFromTagsByIdTableWithPagination(pagingState, fetchSize);
 
-                Set<String> pageVertexIds = result.getVertexIds();
+                Set<Long> pageVertexIds = result.getVertexIds();
                 LOG.info("Page {}: Found {} unique GUIDs", pageCount, pageVertexIds.size());
 
                 allVertexIds.addAll(pageVertexIds);
@@ -1561,7 +1555,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
     }
 
     @Override
-    public Set<AtlasVertex> getVertices(Set<String> vertexIds) {
+    public Set<AtlasVertex> getVertices(Set<Long> vertexIds) {
         return graphHelper.getVertices(vertexIds);
     }
 
@@ -1928,7 +1922,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                     if (diffResult.hasDifference()) {
                         if (storeDifferentialAudits) {
                             diffResult.getDiffEntity().setGuid(entity.getGuid());
-                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity(), storedVertex);
+                            reqContext.cacheDifferentialEntity(diffResult.getDiffEntity());
                         }
 
                         if (diffResult.hasDifferenceOnlyInCustomAttributes()) {
@@ -1992,7 +1986,7 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             }
 
             for (AtlasEntity entity: context.getCreatedEntities()) {
-                RequestContext.get().cacheDifferentialEntity(entity, context.getVertex(entity.getGuid()));
+                RequestContext.get().cacheDifferentialEntity(entity);
             }
 
             long ingestionStart = System.currentTimeMillis();
@@ -2056,64 +2050,6 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
             RequestContext.get().endMetricRecord(metric);
             AtlasPerfTracer.log(perf);
         }
-    }
-
-    private Map<String, Map<String, Object>> normalizeAttributes(List<AtlasVertex> vertices) {
-        Map<String, Map<String, Object>> rt = new HashMap<>();
-
-        for (AtlasVertex vertex : vertices) {
-            String typeName = vertex.getProperty(Constants.TYPE_NAME_PROPERTY_KEY, String.class);
-            AtlasEntityType type = typeRegistry.getEntityTypeByName(typeName);
-
-            Map<String, Object> allProperties = new HashMap<>(((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties());
-
-            type.normalizeAttributeValuesForUpdate(allProperties);
-
-            rt.put(vertex.getIdForDisplay(), allProperties);
-        }
-
-        return rt;
-    }
-
-    private Map<String, Map<String, Object>> getESPropertiesForUpdateFromVertices(List<AtlasVertex> vertices) {
-        MetricRecorder recorder = RequestContext.get().startMetricRecord("getESPropertiesForUpdateFromVertices");
-        if (CollectionUtils.isEmpty(vertices)) {
-            return null;
-        }
-        Map<String, Map<String, Object>> ret = new HashMap<>();
-
-        for (AtlasVertex vertex : vertices) {
-            Map<String, Object> properties = ((AtlasJanusVertex) vertex).getDynamicVertex().getAllProperties();
-            Map<String, Object> propertiesToUpdate = new HashMap<>();
-            AtlasEntityType type = typeRegistry.getEntityTypeByName((String) properties.get(Constants.TYPE_NAME_PROPERTY_KEY));
-
-            getEligibleProperties(properties, type).forEach(x -> propertiesToUpdate.put(x, properties.get(x)));
-            ret.put(vertex.getIdForDisplay(), propertiesToUpdate);
-        }
-
-        RequestContext.get().endMetricRecord(recorder);
-
-        return ret;
-    }
-
-    private List<String> getEligibleProperties(Map<String, Object> properties, AtlasEntityType type) {
-        return properties.keySet().stream().filter(x -> isEligibleForESSync(x, type.getAttribute(x))).toList();
-    }
-
-    private boolean isEligibleForESSync(String propertyName, AtlasAttribute attribute) {
-        return  ((attribute != null  && isPrimitiveAttribute(attribute.getAttributeType()))
-                || propertyName.startsWith(Constants.INTERNAL_PROPERTY_KEY_PREFIX)) ;
-    }
-
-    private boolean isPrimitiveAttribute (AtlasType attributeType) {
-        boolean ret = attributeType.getTypeCategory() == TypeCategory.PRIMITIVE || attributeType.getTypeCategory() == TypeCategory.ENUM;
-
-        if (!ret)
-            ret = attributeType.getTypeCategory() == TypeCategory.ARRAY && (
-                   ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.PRIMITIVE
-                || ((AtlasArrayType) attributeType).getElementType().getTypeCategory() == TypeCategory.ENUM);
-
-        return ret;
     }
 
     private void executePreProcessor(EntityMutationContext context) throws AtlasBaseException {
@@ -2223,9 +2159,9 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
                         //Create vertices which do not exist in the repository
                         if (RequestContext.get().isImportInProgress() && AtlasTypeUtil.isAssignedGuid(entity.getGuid())) {
-                            vertex = entityGraphMapper.createAssetVertexWithGuid(entity, entity.getGuid());
+                            vertex = entityGraphMapper.createVertexWithGuid(entity, entity.getGuid());
                         } else {
-                            vertex = entityGraphMapper.createAssetVertex(entity);
+                            vertex = entityGraphMapper.createVertex(entity);
                         }
 
                         discoveryContext.addResolvedGuid(guid, vertex);
@@ -2438,23 +2374,23 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
         switch (typeName) {
             case ATLAS_GLOSSARY_ENTITY_TYPE:
-                preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph, dynamicVertexService));
+                preProcessors.add(new GlossaryPreProcessor(typeRegistry, entityRetriever, graph));
                 break;
 
             case ATLAS_GLOSSARY_TERM_ENTITY_TYPE:
-                preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, dynamicVertexService));
+                preProcessors.add(new TermPreProcessor(typeRegistry, entityRetriever, graph, taskManagement));
                 break;
 
             case ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE:
-                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper, dynamicVertexService));
+                preProcessors.add(new CategoryPreProcessor(typeRegistry, entityRetriever, graph, taskManagement, entityGraphMapper));
                 break;
 
             case DATA_DOMAIN_ENTITY_TYPE:
-                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph, this.dynamicVertexService));
+                preProcessors.add(new DataDomainPreProcessor(typeRegistry, entityRetriever, graph));
                 break;
 
             case DATA_PRODUCT_ENTITY_TYPE:
-                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this, this.dynamicVertexService));
+                preProcessors.add(new DataProductPreProcessor(typeRegistry, entityRetriever, graph, this));
                 break;
 
             case DATASET_ENTITY_TYPE:
@@ -2506,12 +2442,12 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                 break;
 
             case STAKEHOLDER_TITLE_ENTITY_TYPE:
-                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever, dynamicVertexService));
+                preProcessors.add(new StakeholderTitlePreProcessor(graph, typeRegistry, entityRetriever));
                 break;
         }
 
         //  The default global pre-processor for all AssetTypes
-        preProcessors.add(new AssetPreProcessor(typeRegistry, entityRetriever, graph, dynamicVertexService));
+        preProcessors.add(new AssetPreProcessor(typeRegistry, entityRetriever, graph));
 
         return preProcessors;
     }
@@ -3288,24 +3224,32 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("repairHasLineageForProcess");
 
         try {
-            // Get Gremlin traversal source for native graph operations
-            GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
+            boolean hasActiveInput;
+            boolean hasActiveOutput;
 
-            // Check for active input edges with active vertices using graph traversal
-            boolean hasActiveInput = g.V(processVertex.getId())
-                    .outE(PROCESS_INPUTS)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .inV()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .hasNext();
+            if (graph instanceof CassandraGraph) {
+                hasActiveInput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_INPUTS, AtlasEdgeDirection.OUT);
+                hasActiveOutput = hasActiveEdgeWithActiveVertex(processVertex, PROCESS_OUTPUTS, AtlasEdgeDirection.OUT);
+            } else {
+                // Get Gremlin traversal source for native graph operations
+                GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
 
-            // Check for active output edges with active vertices using graph traversal
-            boolean hasActiveOutput = g.V(processVertex.getId())
-                    .outE(PROCESS_OUTPUTS)
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .inV()
-                    .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
-                    .hasNext();
+                // Check for active input edges with active vertices using graph traversal
+                hasActiveInput = g.V(processVertex.getId())
+                        .outE(PROCESS_INPUTS)
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .inV()
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .hasNext();
+
+                // Check for active output edges with active vertices using graph traversal
+                hasActiveOutput = g.V(processVertex.getId())
+                        .outE(PROCESS_OUTPUTS)
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .inV()
+                        .has(STATE_PROPERTY_KEY, ACTIVE_STATE_VALUE)
+                        .hasNext();
+            }
 
             boolean shouldHaveLineage = hasActiveInput && hasActiveOutput;
             boolean currentHasLineage = getEntityHasLineage(processVertex);
@@ -3412,11 +3356,15 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
      */
     private Boolean checkIfAssetShouldHaveLineage(AtlasVertex assetVertex) {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("checkIfAssetShouldHaveLineage");
-        
+
         try {
+            if (graph instanceof CassandraGraph) {
+                return checkIfAssetShouldHaveLineageViaAtlasApi(assetVertex);
+            }
+
             // Get Gremlin traversal source for native graph operations
             GraphTraversalSource g = ((AtlasJanusGraph) graph).getGraph().traversal();
-            
+
             // Single unified query: Get all active edges connected to this asset that could indicate lineage
             // This replaces multiple separate queries with one comprehensive traversal
             return g.V(assetVertex.getId())
@@ -3444,13 +3392,70 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         )
                     )
                     .hasNext(); // Early termination - returns true as soon as first valid lineage is found
-                    
+
         } catch (Exception e) {
             LOG.error("Failed to use optimized Gremlin traversal for lineage check, falling back to Atlas queries", e);
             return null;
         } finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    /**
+     * Atlas API-based lineage check for non-JanusGraph backends.
+     * Finds active process vertices connected to the asset, then checks if they
+     * have both active inputs and active outputs (i.e., valid lineage).
+     */
+    private Boolean checkIfAssetShouldHaveLineageViaAtlasApi(AtlasVertex assetVertex) {
+        for (String edgeLabel : PROCESS_EDGE_LABELS) {
+            for (AtlasEdgeDirection dir : new AtlasEdgeDirection[]{AtlasEdgeDirection.IN, AtlasEdgeDirection.OUT}) {
+                Iterable<AtlasEdge> edges = assetVertex.getEdges(dir, edgeLabel);
+                for (AtlasEdge edge : edges) {
+                    String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE_STATE_VALUE.equals(edgeState)) continue;
+
+                    AtlasVertex processVertex = (dir == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
+                    if (processVertex == null) continue;
+
+                    String processState = processVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+                    if (!ACTIVE_STATE_VALUE.equals(processState)) continue;
+
+                    // Short-circuit: process already has lineage flag
+                    Boolean processHasLineage = processVertex.getProperty(HAS_LINEAGE, Boolean.class);
+                    if (Boolean.TRUE.equals(processHasLineage)) {
+                        return true;
+                    }
+
+                    // Check if process has valid input/output structure
+                    if (hasActiveEdgeWithActiveVertex(processVertex, PROCESS_INPUTS, AtlasEdgeDirection.OUT)
+                            && hasActiveEdgeWithActiveVertex(processVertex, PROCESS_OUTPUTS, AtlasEdgeDirection.OUT)) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Check if a vertex has at least one active edge (with given label and direction)
+     * whose other-end vertex is also active.
+     */
+    private boolean hasActiveEdgeWithActiveVertex(AtlasVertex vertex, String edgeLabel, AtlasEdgeDirection direction) {
+        Iterable<AtlasEdge> edges = vertex.getEdges(direction, edgeLabel);
+        for (AtlasEdge edge : edges) {
+            String edgeState = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(edgeState)) continue;
+
+            AtlasVertex otherVertex = (direction == AtlasEdgeDirection.OUT) ? edge.getInVertex() : edge.getOutVertex();
+            if (otherVertex != null) {
+                String otherState = otherVertex.getProperty(STATE_PROPERTY_KEY, String.class);
+                if (ACTIVE_STATE_VALUE.equals(otherState)) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     public void repairHasLineageWithAtlasEdges(Set<AtlasEdge> inputOutputEdges) {

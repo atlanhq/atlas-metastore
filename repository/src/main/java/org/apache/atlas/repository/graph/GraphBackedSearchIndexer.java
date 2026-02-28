@@ -95,6 +95,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
         }
     };
 
+    // Tracks property names for which we've already logged the "propertyKey is null" warning, to avoid log spam
+    private static final Set<String> loggedNullPropertyKeyWarnings = java.util.concurrent.ConcurrentHashMap.newKeySet();
+
     // Added for type lookup when indexing the new typedefs
     private final AtlasTypeRegistry typeRegistry;
     private final List<IndexChangeListener> indexChangeListeners = new ArrayList<>();
@@ -322,10 +325,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                 LOG.debug("Created index : {}", FULLTEXT_INDEX);
             }
 
-            if (LEAN_GRAPH_ENABLED) {
-                createVertexLabel(management, ASSET_VERTEX_LABEL);
-            }
-
             HashMap<String, Object> ES_DATE_FIELD = new HashMap<>();
             ES_DATE_FIELD.put("type", "date");
             ES_DATE_FIELD.put("format", "epoch_millis");
@@ -528,7 +527,9 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
                             LOG.debug("Property {} is mapped to index field name {}", attribute.getQualifiedName(), attribute.getIndexFieldName());
                         }
                     } else {
-                        LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        if (loggedNullPropertyKeyWarnings.add(attribute.getVertexPropertyName())) {
+                            LOG.warn("resolveIndexFieldName(attribute={}): propertyKey is null for vertextPropertyName={}", attribute.getQualifiedName(), attribute.getVertexPropertyName());
+                        }
                     }
                 }
             }
@@ -828,20 +829,6 @@ public class GraphBackedSearchIndexer implements SearchIndexer, ActiveStateChang
             management.makeEdgeLabel(label);
 
             LOG.info("Created edge label {} ", label);
-        }
-    }
-
-    private void createVertexLabel(final AtlasGraphManagement management, final String label) {
-        if (StringUtils.isEmpty(label)) {
-            return;
-        }
-
-        org.apache.atlas.repository.graphdb.AtlasVertexLabel vertexLabel = management.getVertexLabel(label);
-
-        if (vertexLabel == null) {
-            management.makeVertexLabel(label);
-
-            LOG.info("Created vertex label {} ", label);
         }
     }
 

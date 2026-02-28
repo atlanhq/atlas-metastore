@@ -24,6 +24,10 @@ on:
       - beta
       - master
       - staging
+      - lite_master
+      - switchable-graph-provider
+      - ring-*
+      - ms-635
 
     paths-ignore:
       - '.claude/**'
@@ -881,7 +885,7 @@ jobs:
           echo "📦 Chart: ${{ matrix.chart }}"
           echo "📌 Version: ${{ steps.version.outputs.chart }}"
           echo "🏷️  Registry: oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }}"
-      
+
       - name: Chart publish summary
         if: steps.can_publish.outputs.should_publish == 'true'
         run: |

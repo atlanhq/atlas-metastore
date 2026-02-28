@@ -37,9 +37,6 @@ import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.typedef.AtlasBaseTypeDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
-import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
@@ -778,9 +775,9 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
         RangerBasePlugin plugin = atlasPlugin;
 
         if (plugin != null) {
-            
+
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            
+
             request.setUserGroups(groupUtil.getContainedGroups(userName));
 
             if (LOG.isDebugEnabled()) {
@@ -796,19 +793,24 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
         }
 
+        if (result == null) {
+            LOG.warn("checkAccess(): policy engine returned null result for user=" + userName + ". Defaulting to DENY.");
+            result = new AtlasAccessResult(false);
+        }
+
         return result;
     }
 
     private AtlasAccessResult checkAccess(RangerAccessRequestImpl request, RangerAtlasAuditHandler auditHandler) {
         AtlasAccessResult result = null;
-        
+
         RangerBasePlugin plugin = atlasPlugin;
         String userName = request.getUser();
 
         if (plugin != null) {
-            
+
             groupUtil.setUserStore(atlasPlugin.getUserStore());
-            
+
             request.setUserGroups(groupUtil.getContainedGroups(userName));
 
             if (LOG.isDebugEnabled()) {
@@ -819,9 +821,14 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
             if (rangerResult != null) {
                 result = new AtlasAccessResult(rangerResult.getIsAllowed(), rangerResult.getPolicyId(), rangerResult.getPolicyPriority());
             }
-        
+
         } else {
             LOG.warn("RangerAtlasPlugin not initialized. Access blocked!!!");
+        }
+
+        if (result == null) {
+            LOG.warn("checkAccess(): policy engine returned null result for user=" + userName + ". Defaulting to DENY.");
+            result = new AtlasAccessResult(false);
         }
 
         return result;
@@ -872,34 +879,11 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
 
     class RangerAtlasPlugin extends RangerBasePlugin {
         RangerAtlasPlugin() {
-            super("atlas", "atlas", null, getVertexRetrievalServiceInstance());
+            super("atlas", "atlas");
         }
 
         RangerAtlasPlugin(AtlasTypeRegistry typeRegistry) {
-            super("atlas", "atlas", typeRegistry, getVertexRetrievalServiceInstance());
-        }
-
-        private static DynamicVertexService getVertexRetrievalServiceInstance() {
-            DynamicVertexService vrs = null;
-            try {
-                AtlasGraph graph = new AtlasJanusGraph();
-
-                if (graph instanceof AtlasJanusGraph) {
-                    vrs = ((AtlasJanusGraph) graph).getDynamicVertexRetrievalService();
-                    if (vrs != null) {
-                        if (LOG.isInfoEnabled()) {
-                            LOG.info("RangerAtlasPlugin: Successfully obtained DynamicVertexService instance.");
-                        }
-                    } else {
-                        LOG.error("RangerAtlasPlugin: AtlasJanusGraph instance provided a null DynamicVertexService. Policy processing for 'atlas' service may fail.");
-                    }
-                } else {
-                    LOG.error("RangerAtlasPlugin: Graph instance is not of type AtlasJanusGraph. Cannot obtain DynamicVertexService.");
-                }
-            } catch (Throwable t) {
-                LOG.error("RangerAtlasPlugin: Exception while trying to obtain DynamicVertexService instance. Policy processing for 'atlas' service may fail.", t);
-            }
-            return vrs;
+            super("atlas", "atlas", typeRegistry);
         }
     }
 
