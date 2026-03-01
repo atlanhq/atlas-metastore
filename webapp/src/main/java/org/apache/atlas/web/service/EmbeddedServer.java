@@ -517,14 +517,14 @@ public class EmbeddedServer {
         });
 
         // Routing with correct ordered  setup - first fastLaneContext
-        // org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-        // contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {mainAppContext, fastLaneContext});
-        org.eclipse.jetty.server.handler.HandlerList handlers = new org.eclipse.jetty.server.handler.HandlerList();
-        // 1. Main App (Starts first, initializes Spring)
-        handlers.addHandler(mainAppContext); 
-        // 2. Fast-Lane (Starts second, waits for Main App to sync)
-        handlers.addHandler(fastLaneContext);
-        server.setHandler(handlers);
+        org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
+        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {mainAppContext, fastLaneContext});
+        // org.eclipse.jetty.server.handler.HandlerList handlers = new org.eclipse.jetty.server.handler.HandlerList();
+        // // 1. Main App (Starts first, initializes Spring)
+        // handlers.addHandler(mainAppContext); 
+        // // 2. Fast-Lane (Starts second, waits for Main App to sync)
+        // handlers.addHandler(fastLaneContext);
+        // server.setHandler(handlers);
         // server.setHandler(contexts);
         Object mainSpringContext = null;
         // This will start both contexts in the correct order
