@@ -45,7 +45,7 @@ jobs:
       non_helm: ${{ steps.filter.outputs.non_helm }}
       helm: ${{ steps.filter.outputs.helm }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for accurate comparisons
 
@@ -96,7 +96,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -231,7 +231,7 @@ jobs:
             echo "✅ Sufficient disk space available (${AVAILABLE_GB}GB)"
           fi
 
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       # Set up Docker
       - name: Set up Docker
@@ -241,8 +241,9 @@ jobs:
           install: true
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v1
+        uses: actions/setup-java@v4
         with:
+          distribution: 'temurin'
           java-version: 17
 
       - name: Print JDK version
@@ -255,7 +256,7 @@ jobs:
          docker info
 
       - name: Cache Maven packages
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         id: maven-cache
         with:
           path: ~/.m2/repository
@@ -398,7 +399,7 @@ jobs:
           output: 'trivy-image-results.sarif'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2.1.33
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: 'trivy-image-results.sarif'
 
@@ -431,7 +432,7 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Get branch name
         run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
@@ -737,7 +738,7 @@ jobs:
       
       - name: Checkout code
         if: steps.can_publish.outputs.should_publish == 'true'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       
       - name: Get branch name
         if: steps.can_publish.outputs.should_publish == 'true'

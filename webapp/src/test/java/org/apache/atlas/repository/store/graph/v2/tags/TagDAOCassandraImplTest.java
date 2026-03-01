@@ -14,6 +14,9 @@ import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.junit.jupiter.api.*;
+import org.testcontainers.containers.CassandraContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -32,13 +35,17 @@ import static org.junit.jupiter.api.Assertions.*;
  * data is correctly written to and read from the Cassandra tables.
  *
  * Prerequisites:
- * - A Cassandra instance running and accessible on localhost:9042.
  * - The keyspace 'tags_v2' should be accessible (the DAO will create it if not present).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@Testcontainers
 public class TagDAOCassandraImplTest {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
+    private static final int CASSANDRA_NATIVE_PORT = 9042;
+
+    @Container
+    private static final CassandraContainer<?> cassandra = new CassandraContainer<>("cassandra:4.1.6");
 
     private TagDAOCassandraImpl tagDAO;
     private CqlSession testSession;
@@ -49,7 +56,9 @@ public class TagDAOCassandraImplTest {
         // Create an in-memory configuration to prevent the DAO from trying to load a file.
         // This resolves the "Failed to load application properties" error during tests.
         Configuration testConfig = new PropertiesConfiguration();
-        testConfig.setProperty(CassandraTagConfig.CASSANDRA_HOSTNAME_PROPERTY, "localhost");
+        testConfig.setProperty(CassandraTagConfig.CASSANDRA_HOSTNAME_PROPERTY, cassandra.getHost());
+        testConfig.setProperty(CassandraTagConfig.CASSANDRA_PORT_PROPERTY, cassandra.getMappedPort(CASSANDRA_NATIVE_PORT));
+        testConfig.setProperty(CassandraTagConfig.CASSANDRA_REPLICATION_FACTOR_PROPERTY, "1");
 
         // Inject the mock configuration into the ApplicationProperties class.
         ApplicationProperties.set(testConfig);
@@ -59,7 +68,7 @@ public class TagDAOCassandraImplTest {
 
         // Create a separate CqlSession for test utility functions like data setup and cleanup.
         testSession = CqlSession.builder()
-                .addContactPoint(new InetSocketAddress("localhost", CASSANDRA_PORT))
+                .addContactPoint(new InetSocketAddress(cassandra.getHost(), cassandra.getMappedPort(CASSANDRA_NATIVE_PORT)))
                 .withLocalDatacenter(DATACENTER) // Use the same datacenter as the DAO
                 .build();
     }
@@ -82,6 +91,9 @@ public class TagDAOCassandraImplTest {
         }
         if (testSession != null && !testSession.isClosed()) {
             testSession.close();
+        }
+        if (cassandra != null && cassandra.isRunning()) {
+            cassandra.stop();
         }
 
         ApplicationProperties.forceReload();

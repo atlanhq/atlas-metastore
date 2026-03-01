@@ -22,8 +22,8 @@ import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.utils.KafkaUtils;
 import org.apache.commons.configuration.Configuration;
 import org.mockito.Mockito;
-import org.testng.Assert;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.concurrent.ExecutionException;
 
@@ -71,7 +71,7 @@ public class AtlasTopicCreatorTest {
         try {
             verify(mockKafkaUtils).createTopics(anyList(), anyInt(), anyInt());
         } catch (ExecutionException | InterruptedException e) {
-            Assert.fail("Caught exception while verifying createTopics: " + e.getMessage());
+            Assertions.fail("Caught exception while verifying createTopics: " + e.getMessage());
         }
 
     }
@@ -112,7 +112,7 @@ public class AtlasTopicCreatorTest {
         try {
             verify(mockKafkaUtils, times(0)).createTopics(anyList(), anyInt(), anyInt());
         } catch (ExecutionException | InterruptedException e) {
-            Assert.fail("Caught exception while verifying createTopics: " + e.getMessage());
+            Assertions.fail("Caught exception while verifying createTopics: " + e.getMessage());
         }
     }
 }

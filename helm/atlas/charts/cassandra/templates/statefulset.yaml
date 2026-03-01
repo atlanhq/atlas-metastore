@@ -4,7 +4,7 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ template "cassandra.fullname" . }}
-  namespace: {{ .Values.Namespace }}
+  namespace: {{ .Values.Namespace | default .Release.Namespace }}
   labels:
     app: {{ template "cassandra.name" . }}
     release: {{ .Release.Name }}
@@ -226,7 +226,7 @@ spec:
           {{- if .Values.hostNetwork }}
           value: {{ required "You must fill \".Values.config.seeds\" with list of Cassandra seeds when hostNetwork is set to true" .Values.config.seeds | quote }}
           {{- else }}
-          value: "{{- range $i, $e := until $seed_size }}{{ template "cassandra.fullname" $global }}-{{ $i }}.{{ template "cassandra.fullname" $global }}.{{ $global.Values.Namespace }}.svc.{{ $global.Values.config.cluster_domain }}{{- if (lt ( add1 $i ) $seed_size ) }},{{- end }}{{- end }}"
+          value: "{{- range $i, $e := until $seed_size }}{{ template "cassandra.fullname" $global }}-{{ $i }}.{{ template "cassandra.fullname" $global }}.{{ $global.Values.Namespace | default $global.Release.Namespace }}.svc.{{ $global.Values.config.cluster_domain }}{{- if (lt ( add1 $i ) $seed_size ) }},{{- end }}{{- end }}"
           {{- end }}
         - name: MAX_HEAP_SIZE
 {{- if eq .Values.global.Deployment_Type "Development" }}
@@ -320,6 +320,7 @@ spec:
             exec:
               command: ["/bin/sh", "-c", "exec nodetool decommission"]
         {{- end }}
+      {{- if .Values.icarus.enabled }}
       - name: cassandra-icarus
         {{- if and .Values.multiarch.enabled .Values.multiarch.image.icarus }}
         image: {{ .Values.multiarch.image.icarus }}
@@ -417,6 +418,7 @@ spec:
             subPath: gcp_credentials.json
             readOnly: true
           {{- end }}
+      {{- end }}
 
       {{- if .Values.extraContainers }}
       # Currently some extra blocks accept strings

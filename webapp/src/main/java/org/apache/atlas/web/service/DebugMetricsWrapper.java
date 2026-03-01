@@ -19,9 +19,12 @@
 
 package org.apache.atlas.web.service;
 
+import org.apache.hadoop.metrics2.MetricsException;
 import org.apache.hadoop.metrics2.MetricsSystem;
 import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
 import org.aspectj.lang.Signature;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
@@ -33,6 +36,8 @@ import static org.apache.atlas.web.service.DebugMetricsWrapper.Constants.*;
 @Lazy()
 @Service
 public class DebugMetricsWrapper {
+	private static final Logger LOG = LoggerFactory.getLogger(DebugMetricsWrapper.class);
+
 	private AtlasDebugMetricsSource debugMetricsSource = new AtlasDebugMetricsSource();
 
 	@Inject
@@ -41,9 +46,22 @@ public class DebugMetricsWrapper {
 	@PostConstruct
 	public void init() {
 		MetricsSystem metricsSystem = DefaultMetricsSystem.initialize(DEBUG_METRICS_CONTEXT);
-		metricsSystem.register(debugMetricsSource);
-        metricsSystem.register(DEBUG_METRICS_REST_SINK, "", debugMetricsRESTSink);
+		registerOrIgnoreDuplicate(metricsSystem, DEBUG_METRICS_SOURCE, () -> metricsSystem.register(debugMetricsSource));
+		registerOrIgnoreDuplicate(metricsSystem, DEBUG_METRICS_REST_SINK, () -> metricsSystem.register(DEBUG_METRICS_REST_SINK, "", debugMetricsRESTSink));
     }
+
+	private void registerOrIgnoreDuplicate(MetricsSystem metricsSystem, String name, Runnable registration) {
+		try {
+			registration.run();
+		} catch (MetricsException e) {
+			String message = e.getMessage();
+			if (message != null && message.contains("already exists")) {
+				LOG.warn("Metrics name '{}' already registered in context '{}'; continuing startup", name, DEBUG_METRICS_CONTEXT);
+				return;
+			}
+			throw e;
+		}
+	}
 
 	public void update(Signature name, long timeConsumed) {
 		debugMetricsSource.update(name, timeConsumed);

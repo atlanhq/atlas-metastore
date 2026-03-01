@@ -36,8 +36,8 @@ import org.apache.kafka.clients.consumer.OffsetAndMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
@@ -46,7 +46,7 @@ import java.util.Map;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * KafkaConsumer tests.
@@ -61,7 +61,7 @@ public class KafkaConsumerTest {
     @Mock
     private KafkaConsumer kafkaConsumer;
 
-    @BeforeMethod
+    @BeforeEach
     public void setup() {
         MockitoAnnotations.initMocks(this);
     }

@@ -1,0 +1,226 @@
+# Local single-node profile for Docker Desktop / kind / minikube.
+#
+# Usage:
+# helm upgrade --install atlas-local ./helm/atlas -n atlas-local --create-namespace -f helm/atlas/values.local.yaml
+
+Namespace: ""
+
+global:
+  Infra_Tier: Lite
+  Tier_Type: Basic
+  Deployment_Type: Development
+
+# Keep local install self-contained and runnable.
+cassandra:
+  enabled: false
+elasticsearch:
+  enabled: false
+logstash:
+  enabled: false
+
+localDependencies:
+  enabled: true
+  cassandra:
+    image:
+      repository: cassandra
+      tag: "4.1"
+    env:
+      - name: MAX_HEAP_SIZE
+        value: "512M"
+      - name: HEAP_NEWSIZE
+        value: "128M"
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1000m
+        memory: 1536Mi
+  elasticsearch:
+    image:
+      repository: elasticsearch
+      tag: "7.17.27"
+  redis:
+    image:
+      repository: redis
+      tag: "7"
+  zookeeper:
+    image:
+      repository: confluentinc/cp-zookeeper
+      tag: "7.6.1"
+    env:
+      - name: ZOOKEEPER_CLIENT_PORT
+        value: "2181"
+      - name: ZOOKEEPER_TICK_TIME
+        value: "2000"
+  kafka:
+    image:
+      repository: confluentinc/cp-kafka
+      tag: "7.6.1"
+  keycloak:
+    enabled: true
+    postgres:
+      enabled: true
+      image:
+        repository: postgres
+        tag: "14"
+      auth:
+        database: keycloak
+        username: keycloak
+        password: keycloak
+    realmImport:
+      enabled: true
+      realm: atlas
+      clientId: atlas
+      clientSecret: atlas-dev-secret
+      testUser:
+        username: atlas
+        password: atlas
+    image:
+      repository: quay.io/keycloak/keycloak
+      tag: "24.0.4"
+    command:
+      - /opt/keycloak/bin/kc.sh
+    args:
+      - start
+      - --import-realm
+      - --http-port=8080
+      - --http-enabled=true
+      - --http-relative-path=/auth
+      - --hostname-strict=false
+    env:
+      - name: KEYCLOAK_ADMIN
+        value: "admin"
+      - name: KEYCLOAK_ADMIN_PASSWORD
+        value: "admin"
+      - name: KC_HEALTH_ENABLED
+        value: "true"
+      - name: KC_DB
+        value: "postgres"
+      - name: KC_DB_URL_HOST
+        value: "keycloak-postgres"
+      - name: KC_DB_URL_PORT
+        value: "5432"
+      - name: KC_DB_URL_DATABASE
+        value: "keycloak"
+      - name: KC_DB_USERNAME
+        value: "keycloak"
+      - name: KC_DB_PASSWORD
+        value: "keycloak"
+
+nginx:
+  enabled: false
+
+atlas_ha: false
+atlas_auth: true
+auth:
+  localKeycloakEnabled: true
+  authorizerImplOverride: "none"
+
+atlas:
+  replicaCount: 1
+  podAntiAffinity: false
+  imagePullSecrets: []
+  initContainers: []
+  ingress:
+    enabled: false
+  healthcheckIngress:
+    enabled: false
+  secondaryIngress:
+    enabled: false
+  podMonitor:
+    enabled: false
+  telegraf:
+    enabled: false
+  statsdJob:
+    enabled: false
+
+  image:
+    repository: atlas-metastore
+    tag: "dev"
+    pullPolicy: IfNotPresent
+  command:
+    - /bin/bash
+  args:
+    - -lc
+    - |
+      set -e
+      /create-atlas-keycloak-config.sh
+      wait_for_port() {
+        host="$1"
+        port="$2"
+        for i in $(seq 1 120); do
+          if (echo >"/dev/tcp/${host}/${port}") >/dev/null 2>&1; then
+            echo "Dependency ${host}:${port} is reachable"
+            return 0
+          fi
+          echo "Waiting for ${host}:${port} (${i}/120)"
+          sleep 5
+        done
+        echo "Timed out waiting for ${host}:${port}"
+        return 1
+      }
+      wait_for_port atlas-cassandra 9042
+      wait_for_port atlas-elasticsearch-master 9200
+      wait_for_port kafka 9092
+      wait_for_port keycloak 8080
+      wait_for_keycloak() {
+        for i in $(seq 1 60); do
+          status=$(curl -sS -o /tmp/keycloak-token.json -w "%{http_code}" \
+            -X POST "http://keycloak:8080/auth/realms/atlas/protocol/openid-connect/token" \
+            -H "Content-Type: application/x-www-form-urlencoded" \
+            --data-urlencode "client_id=atlas" \
+            --data-urlencode "client_secret=atlas-dev-secret" \
+            --data-urlencode "grant_type=client_credentials" || true)
+          if [ "$status" = "200" ] && grep -q '"access_token"' /tmp/keycloak-token.json; then
+            echo "Keycloak realm and client are ready"
+            return 0
+          fi
+          echo "Waiting for Keycloak realm/client import (${i}/60)"
+          sleep 5
+        done
+        echo "Timed out waiting for Keycloak token endpoint readiness"
+        return 1
+      }
+      wait_for_keycloak
+      for i in $(seq 1 20); do
+        /opt/apache-atlas/bin/atlas_start.py && break
+        echo "Atlas startup attempt ${i} failed, retrying in 15s"
+        sleep 15
+      done
+      while ! ls /opt/apache-atlas/logs/* >/dev/null 2>&1; do
+        sleep 2
+      done
+      tail -F /opt/apache-atlas/logs/*
+  env:
+    - name: ATLAS_SERVER_OPTS
+      value: '-XX:MaxRAMPercentage=80.0 -XX:InitialRAMPercentage=50.0'
+    - name: MAVEN_OPTS
+      value: '-Xmx2g -Xms2g'
+    - name: ATLAS_CLIENT_OPTS
+      value: '-Xmx1g -Xms1g'
+    - name: RANGER_SERVICE_URL
+      value: 'http://localhost'
+    - name: ATLAS_REPOSITORY_NAME
+      value: "atlas"
+    - name: ATLAS_USE_LEGACY_SEARCH
+      value: "false"
+  redis:
+    enabled: true
+    host: redis
+    port: 6379
+    sentinel_urls: ""
+    sentinel_urls_lite: ""
+    master_name: "mymaster"
+    password: "atlasredis"
+    username: "default"
+    maxConnections: 50
+    timeout: 100000
+  janusgraph:
+    atomic_mutation: false
+    janusgraph_tx_buffer_size: 256
+  secrets:
+    KEYCLOAK_REALM: "atlas"
+    AUTH_SERVER_URL: "http://keycloak:8080/auth"
+    KEYCLOAK_CLIENT_ID: "atlas"
+    KEYCLOAK_CLIENT_SECRET: "atlas-dev-secret"

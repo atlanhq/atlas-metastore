@@ -19,8 +19,8 @@ package org.apache.atlas.notification;
 
 import org.apache.atlas.model.notification.AtlasNotificationBaseMessage.CompressionKind;
 import org.apache.atlas.model.notification.AtlasNotificationStringMessage;
-import org.testng.Assert;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -34,7 +34,7 @@ public class SplitMessageAggregatorTest {
 
         AtlasNotificationMessageDeserializer.purgeStaleMessages(map, System.currentTimeMillis(), 250);
 
-        Assert.assertEquals(map.size(), 0);
+        Assertions.assertEquals(map.size(), 0);
     }
 
 
@@ -48,7 +48,7 @@ public class SplitMessageAggregatorTest {
 
         AtlasNotificationMessageDeserializer.purgeStaleMessages(map, System.currentTimeMillis(), Long.MAX_VALUE);
 
-        Assert.assertEquals(map.size(), expectedSize);
+        Assertions.assertEquals(map.size(), expectedSize);
     }
 
     private Map<String, SplitMessageAggregator> getStringSplitMessageAggregatorMap() {

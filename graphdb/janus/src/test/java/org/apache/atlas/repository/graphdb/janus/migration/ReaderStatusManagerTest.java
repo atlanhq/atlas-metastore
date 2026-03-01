@@ -20,10 +20,10 @@ package org.apache.atlas.repository.graphdb.janus.migration;
 
 import org.apache.atlas.model.impexp.MigrationStatus;
 import org.apache.tinkerpop.gremlin.tinkergraph.structure.TinkerGraph;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 public class ReaderStatusManagerTest {
     @Test
