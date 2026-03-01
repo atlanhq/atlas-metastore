@@ -193,23 +193,6 @@ resources_lite:
     memory: 5Gi
     cpu: 2000m
 
-vpa:
-  enabled: true
-  updateMode: "Off"
-  recommender:
-    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
-  # minReplicas is always computed as (config.cluster_size - 2), floored at 2.
-  controlledResources:
-    - cpu
-    - memory
-  controlledValues: "RequestsAndLimits"
-  minAllowed:
-    cpu: "800m"
-    memory: "5Gi"
-  maxAllowed:
-    cpu: "3000m"
-    memory: "10Gi"
-
 # Persistence changes for cassandra
 persistence:
   enabled: true
@@ -263,6 +246,13 @@ affinity_lite:
 affinity:
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+        - key: lifecycle     #Azure
+          operator: In
+          values:
+          - ondemand
     - weight: 1
       preference:
         matchExpressions:
@@ -377,14 +367,15 @@ icarus:
     repo: ghcr.io/atlanhq/cassandra-icarus-atlan-v2
     tag: 1.0.4
   port: 4567
-  jvmOpts: "-Xmx1g -Xms512m"
+  jvmOpts: "-Xmx2g -Xms1g"
+  jvmOpts_lite: "-Xmx512m -Xms256m"
   resources:
     limits:
-      cpu: 0.5
-      memory: 2Gi
+      cpu: 1
+      memory: 4Gi
     requests:
-      cpu: 0.5
-      memory: 2Gi
+      cpu: 1
+      memory: 4Gi
   resources_lite:
     limits:
       cpu: 1

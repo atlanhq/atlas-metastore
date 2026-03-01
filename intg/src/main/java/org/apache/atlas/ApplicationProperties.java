@@ -55,6 +55,7 @@ public final class ApplicationProperties extends PropertiesConfiguration {
     public static final String  ENABLE_FREETEXT_SEARCH_CONF     = "atlas.search.freetext.enable";
     public static final String  ATLAS_RUN_MODE                  = "atlas.run.mode";
     public static final String  GRAPHBD_BACKEND_JANUS           = "janus";
+    public static final String  GRAPHDB_BACKEND_CASSANDRA       = "cassandra";
     public static final String  INDEX_BACKEND_SOLR              = "solr";
     public static final String  LDAP_TYPE                       =  "atlas.authentication.method.ldap.type";
     public static final String  LDAP                            =  "LDAP";

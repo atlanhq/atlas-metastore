@@ -14,6 +14,8 @@ multiarch:
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 global:
+  # Graph backend mode: "janus" (default, JanusGraph) or "cassandra" (Cassandra+ES direct)
+  graphBackend: "janus"
   Tier_Type: ""
   Deployment_Type: ""
   cloud: ""

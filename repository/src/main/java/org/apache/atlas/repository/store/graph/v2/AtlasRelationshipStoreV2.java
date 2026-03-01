@@ -43,7 +43,7 @@ import org.apache.atlas.repository.graphdb.AtlasEdge;
 import org.apache.atlas.repository.graphdb.AtlasEdgeDirection;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.apache.atlas.repository.graphdb.janus.JanusUtils;
+import org.apache.atlas.repository.store.graph.v2.LongEncodingUtil;
 import org.apache.atlas.repository.store.graph.AtlasRelationshipStore;
 import org.apache.atlas.repository.store.graph.v1.DeleteHandlerDelegate;
 import org.apache.atlas.type.AtlasEntityType;
@@ -100,8 +100,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     private static final String ES_DOC_ID_MAP_KEY = "esDocIdMap";
 
     private static final String UD_RELATIONSHIP_TYPE_NAME = "UserDefRelationship";
-
-    private static final List<String> ALLOWED_RELATIONSHIP_TYPES_FOR_ES_FILTERING = Arrays.asList(AtlasConfiguration.SUPPORTED_RELATIONSHIP_EVENTS.getStringArray());
 
     private static Set<String> EXCLUDE_MUTATION_REL_TYPE_NAMES = new HashSet<String>() {{
         add(REL_DOMAIN_TO_DOMAINS);
@@ -410,7 +408,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     @Override
     public AtlasEdge getOrCreate(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean skipAuth) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("entityStoreV2.getOrCreate");
         AtlasEdge ret = getRelationship(end1Vertex, end2Vertex, relationship);
 
         if (ret == null) {
@@ -418,7 +415,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             recordRelationshipMutation(RelationshipMutation.RELATIONSHIP_CREATE, ret, entityRetriever);
         }
 
-        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -468,7 +464,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     private AtlasEdge createRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex, AtlasRelationship relationship, boolean existingRelationshipCheck, boolean skipAuth) throws AtlasBaseException {
         AtlasEdge ret;
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("createRelationship");
 
         try {
             validateRelationship(end1Vertex, end2Vertex, relationship);
@@ -538,8 +533,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         } catch (RepositoryException e) {
             throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR, e);
         }
-
-        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -622,7 +615,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     private void validateRelationship(AtlasVertex end1Vertex, AtlasVertex end2Vertex,  AtlasRelationship relationship) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("validateRelationship");
+
         String relationshipName = relationship.getTypeName();
 
         AtlasRelationshipType relationshipType = typeRegistry.getRelationshipTypeByName(relationshipName);
@@ -694,8 +687,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
         Map<String, Object> relAttrs = relationship.getAttributes();
         EntityGraphMapper.validateCustomRelationshipAttributeValueCase(relAttrs);
-
-        RequestContext.get().endMetricRecord(recorder);
     }
 
 
@@ -827,7 +818,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     public String getRelationshipEdgeLabel(AtlasVertex fromVertex, AtlasVertex toVertex, String relationshipTypeName) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("entityStoreV2.getRelationshipEdgeLabel");
         if (LOG.isDebugEnabled()) {
             LOG.debug("getRelationshipEdgeLabel({})", relationshipTypeName);
         }
@@ -869,7 +859,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             ret = attribute.getRelationshipEdgeLabel();
         }
 
-        RequestContext.get().endMetricRecord(recorder);
         return ret;
     }
 
@@ -925,8 +914,8 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
 
     public void onRelationshipsMutated(Map<String, Set<AtlasRelationship>> relationshipsMutationMap) throws AtlasBaseException {
         entityChangeNotifier.notifyPropagatedEntities();
+        RelationshipMutationContext relationshipMutationContext = getRelationshipMutationContext(relationshipsMutationMap);
         if (notificationsEnabled) {
-            RelationshipMutationContext relationshipMutationContext = getRelationshipMutationContext(relationshipsMutationMap);
             entityChangeNotifier.notifyRelationshipMutation(relationshipMutationContext.getCreatedRelationships(), OperationType.RELATIONSHIP_CREATE);
             entityChangeNotifier.notifyRelationshipMutation(relationshipMutationContext.getUpdatedRelationships(), OperationType.RELATIONSHIP_UPDATE);
             entityChangeNotifier.notifyRelationshipMutation(relationshipMutationContext.getDeletedRelationships(), OperationType.RELATIONSHIP_DELETE);
@@ -953,7 +942,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     public static void recordRelationshipMutation(RelationshipMutation relationshipMutation, AtlasEdge edge, EntityGraphRetriever entityRetriever) throws AtlasBaseException {
-        AtlasPerfMetrics.MetricRecorder recorder = RequestContext.get().startMetricRecord("recordRelationshipMutation");
         if (Objects.isNull(edge))
             throw new IllegalStateException("edge cannot be null");
         final AtlasRelationship relationship = entityRetriever.mapEdgeToAtlasRelationship(edge);
@@ -961,8 +949,6 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
             relationship.setStatus(AtlasRelationship.Status.PURGED);
         AtlasRelationshipStoreV2.setEdgeVertexIdsInContext(edge);
         RequestContext.get().saveRelationshipsMutationContext(relationshipMutation.name(), relationship);
-
-        RequestContext.get().endMetricRecord(recorder);
     }
 
     private void addRelationshipMetadataForNotificationEvent(Set<AtlasRelationship> relationships) {
@@ -974,7 +960,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
         }
     }
 
-    private Map<String, String> builsESDocIdMapping(AtlasRelationship r) {
+    private static Map<String, String> builsESDocIdMapping(AtlasRelationship r) {
 
         final Map<String, String> esDocIdMapping = new HashMap<>();
 
@@ -993,12 +979,7 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
                         return esDocIdMapping;
                     }
 
-                    AtlasVertex relationshipEndVertex = graph.getVertex(relationshipEndToVertexIdMap.get(atlasObjectId));
-                    if (relationshipEndVertex == null) {
-                        return esDocIdMapping;
-                    }
-
-                    final String docId = relationshipEndVertex.getDocId();
+                    final String docId = LongEncodingUtil.vertexIdToDocId(String.valueOf(relationshipEndToVertexIdMap.get(atlasObjectId)));
                     String guid = atlasObjectId.getGuid();
                     AtlasObjectId end1 = r.getEnd1();
                     AtlasObjectId end2 = r.getEnd2();
@@ -1039,8 +1020,8 @@ public class AtlasRelationshipStoreV2 implements AtlasRelationshipStore {
     }
 
     private static void setEdgeVertexIdsInContext(AtlasEdge edge) {
-        RequestContext.get().addRelationshipEndToVertexIdMapping(GraphHelper.getAtlasObjectIdForOutVertex(edge), edge.getOutVertex().getIdForDisplay());
-        RequestContext.get().addRelationshipEndToVertexIdMapping(GraphHelper.getAtlasObjectIdForInVertex(edge), edge.getInVertex().getIdForDisplay());
+        RequestContext.get().addRelationshipEndToVertexIdMapping(GraphHelper.getAtlasObjectIdForOutVertex(edge), String.valueOf(edge.getOutVertex().getId()));
+        RequestContext.get().addRelationshipEndToVertexIdMapping(GraphHelper.getAtlasObjectIdForInVertex(edge), String.valueOf(edge.getInVertex().getId()));
     }
 
     private static void validateRelationshipType(String relationshipTypeName) throws AtlasBaseException {

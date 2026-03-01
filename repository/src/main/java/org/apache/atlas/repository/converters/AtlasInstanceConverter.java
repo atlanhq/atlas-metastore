@@ -293,7 +293,7 @@ public class AtlasInstanceConverter {
                 .collect(Collectors.toSet());
 
         for (AtlasVertex vertex : vertices) {
-            AtlasEntityHeader entityHeader =  entityGraphRetriever.dynamicVertexToAtlasEntityHeader(vertex, attributeNames);
+            AtlasEntityHeader entityHeader =  entityGraphRetriever.toAtlasEntityHeader(vertex, attributeNames);
             if (entityHeader != null) {
                 enrichedEntities.add(new AtlasEntity(entityHeader));
             }

@@ -429,14 +429,26 @@ public class TypeCacheRefresher {
     /**
      * Result of a pod refresh operation
      */
-    @Data
-    @AllArgsConstructor
     public static class RefreshResult {
-        private String podIp;
-        private boolean success;
-        private long durationMs;
-        private long refreshRetries;
-        private String error;
+        private final String podIp;
+        private final boolean success;
+        private final long durationMs;
+        private final long refreshRetries;
+        private final String error;
+
+        public RefreshResult(String podIp, boolean success, long durationMs, long refreshRetries, String error) {
+            this.podIp = podIp;
+            this.success = success;
+            this.durationMs = durationMs;
+            this.refreshRetries = refreshRetries;
+            this.error = error;
+        }
+
+        public String getPodIp() { return podIp; }
+        public boolean isSuccess() { return success; }
+        public long getDurationMs() { return durationMs; }
+        public long getRefreshRetries() { return refreshRetries; }
+        public String getError() { return error; }
     }
 
 }

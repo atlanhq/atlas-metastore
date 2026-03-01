@@ -291,12 +291,19 @@ public final class Constants {
 
     /**
      * elasticsearch index prefix.
+     * Configurable via atlas.graph.index.search.es.prefix (default: "janusgraph_")
      */
+    public static final String ES_INDEX_PREFIX_PROPERTY = "atlas.graph.index.search.es.prefix";
     public static final String INDEX_PREFIX = loadIndexPrefix();
     public static final boolean LEAN_GRAPH_ENABLED = loadLeanGraphEnabled();
+    public static final String VERTEX_INDEX_NAME;
+    public static final String EDGE_INDEX_NAME;
 
-    public static final String VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
-    public static final String EDGE_INDEX_NAME = INDEX_PREFIX + EDGE_INDEX;
+    static {
+        VERTEX_INDEX_NAME = INDEX_PREFIX + VERTEX_INDEX;
+        EDGE_INDEX_NAME   = INDEX_PREFIX + EDGE_INDEX;
+        LOG.info("ES index prefix: '{}', vertex_index: '{}', edge_index: '{}'", INDEX_PREFIX, VERTEX_INDEX_NAME, EDGE_INDEX_NAME);
+    }
 
     public static final String NAME                                    = "name";
     public static final String QUALIFIED_NAME                          = "qualifiedName";

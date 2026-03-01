@@ -40,8 +40,8 @@ import org.apache.atlas.plugin.model.RangerPolicy.RangerPolicyResource;
 import org.apache.atlas.plugin.model.RangerServiceDef;
 import org.apache.atlas.plugin.model.RangerValiditySchedule;
 import org.apache.atlas.plugin.util.ServicePolicies.TagPolicies;
+import org.apache.atlas.repository.graph.AtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
-import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertexService;
 import org.apache.atlas.type.AtlasType;
@@ -137,7 +137,7 @@ public class CachePolicyTransformerImpl {
     @Inject
     public CachePolicyTransformerImpl(AtlasTypeRegistry typeRegistry,
                                       DynamicVertexService dynamicVertexService) throws AtlasBaseException {
-        this.graph                = new AtlasJanusGraph();
+        this.graph                = AtlasGraphProvider.getGraphInstance();
         this.entityRetriever      = new EntityGraphRetriever(graph, typeRegistry);
         this.dynamicVertexService = dynamicVertexService;
 
@@ -518,6 +518,11 @@ public class CachePolicyTransformerImpl {
     private Map<String, RangerPolicyResource> getFinalResources(AtlasEntityHeader atlasPolicy) {
         List<String> atlasResources = (List<String>) atlasPolicy.getAttribute("policyResources");
 
+        if (atlasResources == null) {
+            LOG.warn("getFinalResources: policyResources is null for policy: {}", atlasPolicy.getGuid());
+            return new HashMap<>();
+        }
+
         Map<String, List<String>> resourceValuesMap = new HashMap<>();
 
         for (String atlasResource : atlasResources) {
@@ -729,6 +734,7 @@ public class CachePolicyTransformerImpl {
 
             indexSearchParams.setDsl(dsl);
             indexSearchParams.setAttributes(attributes);
+            indexSearchParams.setIncludeSourceInResults(true);
 
             int from = 0;
             int size = 100;
@@ -783,6 +789,7 @@ public class CachePolicyTransformerImpl {
 
         indexSearchParams.setDsl(dsl);
         indexSearchParams.setAttributes(attributes);
+        indexSearchParams.setIncludeSourceInResults(true);
 
         AtlasSearchResult searchResult = discoveryService.directIndexSearch(indexSearchParams);
 

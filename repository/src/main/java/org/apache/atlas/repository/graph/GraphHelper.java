@@ -34,6 +34,7 @@ import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.repository.VertexEdgePropertiesCache;
 import org.apache.atlas.model.instance.AtlasStruct;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.graphdb.janus.*;
 import org.apache.atlas.repository.graphdb.janus.cassandra.DynamicVertex;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
@@ -2312,6 +2313,10 @@ public final class GraphHelper {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("GraphHelper.retrieveEdgeLabelsAndTypeName");
         long timeoutSeconds = org.apache.atlas.AtlasConfiguration.TIMEOUT_SUPER_VERTEX_FETCH.getLong();
         try {
+            if (graph instanceof CassandraGraph) {
+                return retrieveEdgeLabelsAndTypeNameViaAtlasApi(vertex);
+            }
+
             // Use try-with-resources to ensure stream is properly closed
             try (Stream<Map<String, Object>> stream = ((AtlasJanusGraph) graph).getGraph().traversal()
                     .V(vertex.getId())
@@ -2344,6 +2349,25 @@ public final class GraphHelper {
         finally {
             RequestContext.get().endMetricRecord(metricRecorder);
         }
+    }
+
+    private Set<AbstractMap.SimpleEntry<String,String>> retrieveEdgeLabelsAndTypeNameViaAtlasApi(AtlasVertex vertex) {
+        Set<AbstractMap.SimpleEntry<String,String>> ret = new HashSet<>();
+        Iterable<AtlasEdge> edges = vertex.getEdges(AtlasEdgeDirection.BOTH);
+
+        for (AtlasEdge edge : edges) {
+            String state = edge.getProperty(STATE_PROPERTY_KEY, String.class);
+            if (!ACTIVE_STATE_VALUE.equals(state)) {
+                continue;
+            }
+
+            String label = edge.getLabel();
+            String typeName = edge.getProperty(TYPE_NAME_PROPERTY_KEY, String.class);
+            if (label != null && !label.isEmpty()) {
+                ret.add(new AbstractMap.SimpleEntry<>(label, typeName != null ? typeName : ""));
+            }
+        }
+        return ret;
     }
 
     /**

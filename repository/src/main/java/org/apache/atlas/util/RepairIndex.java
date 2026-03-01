@@ -20,20 +20,23 @@ package org.apache.atlas.util;
 
 import org.apache.atlas.model.instance.AtlasEntity;
 import io.micrometer.core.instrument.Timer;
+import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlanElasticSearchIndex;
 import org.apache.atlas.AtlasException;
+import org.apache.atlas.AtlasErrorCode;
+import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.repository.graph.GraphHelper;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraph;
 import org.apache.atlas.repository.graphdb.janus.AtlasJanusGraphDatabase;
 import org.apache.atlas.repository.graphdb.janus.cassandra.ESConnector;
+import org.apache.atlas.repository.graphdb.cassandra.CassandraGraph;
 import org.apache.atlas.repository.store.graph.v2.AtlasGraphUtilsV2;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.apache.atlas.service.metrics.MetricUtils;
 import org.janusgraph.core.JanusGraph;
-import org.apache.atlas.repository.store.graph.v2.EntityMutationService;
 import org.janusgraph.diskstorage.BackendException;
 import org.janusgraph.diskstorage.indexing.IndexEntry;
 import org.janusgraph.graphdb.database.IndexSerializer;
@@ -51,11 +54,17 @@ import javax.annotation.PostConstruct;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
+import static org.apache.atlas.ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA;
+import static org.apache.atlas.ApplicationProperties.GRAPHDB_BACKEND_CONF;
+import static org.apache.atlas.ApplicationProperties.DEFAULT_GRAPHDB_BACKEND;
+import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
 import static org.apache.atlas.repository.Constants.LEAN_GRAPH_ENABLED;
 import static org.apache.atlas.type.Constants.INDEX_NAME_EDGE_INDEX;
 import static org.apache.atlas.type.Constants.INDEX_NAME_VERTEX_INDEX;
@@ -69,10 +78,15 @@ public class RepairIndex {
 
     private JanusGraph graph;
     private AtlasGraph atlasGraph;
+    private CassandraGraph cassandraGraph;
     private AtlanElasticSearchIndex searchIndex;
     private EntityMutationService entityMutationService;
     private AtlasTypeRegistry typeRegistry;
     private GraphHelper graphHelper;
+    private boolean isCassandraBackend;
+
+    // Async repair job tracking
+    private final AtomicReference<RepairConnectionJob> currentRepairJob = new AtomicReference<>();
 
     @Inject
     public RepairIndex(EntityMutationService entityMutationService, AtlasGraph atlasGraph,
@@ -81,6 +95,10 @@ public class RepairIndex {
         this.typeRegistry = typeRegistry;
         this.atlasGraph = atlasGraph;
         graphHelper = new GraphHelper(atlasGraph);
+
+        if (atlasGraph instanceof CassandraGraph) {
+            this.cassandraGraph = (CassandraGraph) atlasGraph;
+        }
     }
 
     /**
@@ -129,6 +147,20 @@ public class RepairIndex {
 
     @PostConstruct
     protected void setupGraph() {
+        String backend = DEFAULT_GRAPHDB_BACKEND;
+        try {
+            backend = ApplicationProperties.get().getString(GRAPHDB_BACKEND_CONF, DEFAULT_GRAPHDB_BACKEND);
+        } catch (AtlasException e) {
+            LOG.warn("Failed to read graphdb backend config, assuming default (janus)", e);
+        }
+
+        if (GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)) {
+            LOG.info("RepairIndex: Cassandra backend detected — using CassandraGraph.reindexVertices() for repair");
+            graph = null;
+            isCassandraBackend = true;
+            return;
+        }
+
         LOG.info("Initializing graph: ");
         Timer.Sample sample = Timer.start(MetricUtils.getMeterRegistry());
         try {
@@ -146,9 +178,74 @@ public class RepairIndex {
         LOG.info("Graph Initialized!");
     }
 
+    /**
+     * Used by DLQ replay service
+     * @param indexName
+     * @param vertexIds
+     * @throws Exception
+     */
+    public void reindexVerticesByLongIds(String indexName, Set<Long> vertexIds) throws Exception {
+        Set<String> stringVertexIds = vertexIds.stream().map(String::valueOf).collect(Collectors.toSet());
+        if (isCassandraBackend) {
+            // Long vertex IDs are JanusGraph-specific. Cassandra uses UUID strings.
+            // Convert to String vertex IDs, look up GUID from each, and reindex.
+            Set<String> guids = new HashSet<>();
+            Set<AtlasVertex> vertices = graphHelper.getVertices(stringVertexIds);
+            for (AtlasVertex vertex : vertices) {
+                String guid = vertex.getProperty(GUID_PROPERTY_KEY, String.class);
+                if (guid != null) guids.add(guid);
+            }
+            if (!guids.isEmpty()) {
+                LOG.info("RepairIndex.reindexVerticesByLongIds (Cassandra): resolved {} GUIDs from {} vertex IDs",
+                        guids.size(), vertexIds.size());
+                restoreByIdsCassandra(guids);
+            } else {
+                LOG.warn("RepairIndex.reindexVerticesByLongIds (Cassandra): no GUIDs resolved from {} vertex IDs",
+                        vertexIds.size());
+            }
+            return;
+        }
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.reindexVerticesByLongIds: graph not initialized");
+        }
+        Map<String, Map<String, List<IndexEntry>>> documentsPerStore = new java.util.HashMap<>();
+        StandardJanusGraphTx tx = null;
+        try {
+            tx = (StandardJanusGraphTx) graph.newTransaction();
+            JanusGraphSchemaVertex indexV = tx.getSchemaVertex(JanusGraphSchemaCategory.GRAPHINDEX.getSchemaName(indexName));
+            MixedIndexType indexType = (MixedIndexType) indexV.asIndexType();
+            Set<AtlasVertex> vertices = graphHelper.getVertices(stringVertexIds);
+            StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
+            IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
+            Set<String> guids = new HashSet<>();
+            for (AtlasVertex vertex : vertices) {
+                indexSerializer.reindexElement(vertex.getWrappedElement(), indexType, documentsPerStore);
+                guids.add(vertex.getProperty(GUID_PROPERTY_KEY, String.class));
+            }
+            searchIndex.restore(documentsPerStore, indexSerializer.getIndexInfoRetriever(tx).get("search"));
+            entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
+        } catch (BackendException | AtlasBaseException e) {
+            throw e;
+        } finally {
+            if (tx != null && tx.isOpen()) {
+                tx.rollback();
+            }
+        }
+    }
+
     public void restoreSelective(String guid, Map<String, AtlasEntity> referredEntities) throws Exception {
         Set<String> referencedGUIDs = new HashSet<>(getEntityAndReferenceGuids(guid, referredEntities));
         LOG.info("processing referencedGuids => " + referencedGUIDs);
+
+        if (isCassandraBackend) {
+            referencedGUIDs.add(guid);
+            restoreByIdsCassandra(referencedGUIDs);
+            return;
+        }
+
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.restoreSelective: graph not initialized");
+        }
 
         StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
         IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
@@ -164,6 +261,14 @@ public class RepairIndex {
     }
 
     public void restoreByIds(Set<String> guids) throws Exception {
+        if (isCassandraBackend) {
+            restoreByIdsCassandra(guids);
+            return;
+        }
+
+        if (graph == null) {
+            throw new UnsupportedOperationException("RepairIndex.restoreByIds: graph not initialized");
+        }
 
         StandardJanusGraph janusGraph = (StandardJanusGraph) graph;
         IndexSerializer indexSerializer = janusGraph.getIndexSerializer();
@@ -177,6 +282,125 @@ public class RepairIndex {
             LOG.info(": Done!");
         }
         entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
+    }
+
+    /**
+     * Cassandra backend: reads vertices from Cassandra by GUID and bulk-indexes them to ES.
+     * Uses CassandraGraph.reindexVertices() which applies the same filterPropertiesForES()
+     * logic used during commit-time sync.
+     */
+    private void restoreByIdsCassandra(Set<String> guids) throws Exception {
+        if (cassandraGraph == null) {
+            throw new IllegalStateException("RepairIndex: Cassandra backend but CassandraGraph not injected");
+        }
+
+        LOG.info("RepairIndex (Cassandra): reindexing {} entities to ES", guids.size());
+        long startTime = System.currentTimeMillis();
+
+        int succeeded = cassandraGraph.reindexVertices(guids);
+
+        LOG.info("RepairIndex (Cassandra): reindexed {}/{} entities in {} ms",
+                succeeded, guids.size(), System.currentTimeMillis() - startTime);
+
+        // Repair classification mappings (same as JanusGraph path)
+        entityMutationService.repairClassificationMappings(new ArrayList<>(guids));
+    }
+
+    /**
+     * Starts an async repair job that scans the Cassandra vertices table for all
+     * entities whose qualifiedName starts with the given prefix, and reindexes
+     * them to ES. Returns immediately with the job status.
+     *
+     * Only one connection repair job can run at a time. If a job is already
+     * running, this throws an exception.
+     *
+     * @return initial job status map (jobId, status, connectionQualifiedName)
+     */
+    public Map<String, Object> startReindexByQualifiedNamePrefix(String qualifiedNamePrefix,
+                                                                  int fetchSize,
+                                                                  int reindexBatchSize) throws Exception {
+        if (!isCassandraBackend || cassandraGraph == null) {
+            throw new UnsupportedOperationException(
+                    "reindexByQualifiedNamePrefix is only supported with Cassandra backend");
+        }
+
+        // Prevent concurrent repair jobs
+        RepairConnectionJob existing = currentRepairJob.get();
+        if (existing != null && "IN_PROGRESS".equals(existing.status)) {
+            throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST,
+                    "A connection repair job is already in progress for '" + existing.connectionQualifiedName
+                    + "' (started at " + existing.startTime + ")");
+        }
+
+        RepairConnectionJob job = new RepairConnectionJob(qualifiedNamePrefix);
+        currentRepairJob.set(job);
+
+        Thread repairThread = new Thread(() -> {
+            try {
+                LOG.info("RepairIndex (async): starting reindex for prefix='{}' fetchSize={} batchSize={}",
+                        qualifiedNamePrefix, fetchSize, reindexBatchSize);
+
+                int count = cassandraGraph.reindexByQualifiedNamePrefix(
+                        qualifiedNamePrefix, fetchSize, reindexBatchSize,
+                        reindexedSoFar -> job.entitiesReindexed = reindexedSoFar);
+
+                job.entitiesReindexed = count;
+                job.status = "COMPLETED";
+                job.endTime = System.currentTimeMillis();
+
+                LOG.info("RepairIndex (async): completed — {} entities reindexed for prefix='{}' in {} ms",
+                        count, qualifiedNamePrefix, job.endTime - job.startTime);
+            } catch (Exception e) {
+                job.status = "FAILED";
+                job.errorMessage = e.getMessage();
+                job.endTime = System.currentTimeMillis();
+
+                LOG.error("RepairIndex (async): failed for prefix='{}'", qualifiedNamePrefix, e);
+            }
+        }, "repair-connection-" + qualifiedNamePrefix);
+
+        repairThread.setDaemon(true);
+        repairThread.start();
+
+        return job.toMap();
+    }
+
+    /**
+     * Returns the current/last connection repair job status, or null if no job has run.
+     */
+    public Map<String, Object> getRepairConnectionJobStatus() {
+        RepairConnectionJob job = currentRepairJob.get();
+        return job != null ? job.toMap() : null;
+    }
+
+    /**
+     * Tracks the state of an async connection repair job.
+     */
+    static class RepairConnectionJob {
+        final String connectionQualifiedName;
+        final long   startTime;
+        volatile String status          = "IN_PROGRESS";
+        volatile int    entitiesReindexed = 0;
+        volatile long   endTime         = 0;
+        volatile String errorMessage    = null;
+
+        RepairConnectionJob(String connectionQualifiedName) {
+            this.connectionQualifiedName = connectionQualifiedName;
+            this.startTime = System.currentTimeMillis();
+        }
+
+        Map<String, Object> toMap() {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("connectionQualifiedName", connectionQualifiedName);
+            m.put("status", status);
+            m.put("entitiesReindexed", entitiesReindexed);
+            m.put("startTime", startTime);
+            m.put("elapsedMs", (endTime > 0 ? endTime : System.currentTimeMillis()) - startTime);
+            if (errorMessage != null) {
+                m.put("errorMessage", errorMessage);
+            }
+            return m;
+        }
     }
 
     private static String[] getIndexes() {
