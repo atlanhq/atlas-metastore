@@ -6,8 +6,6 @@ import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.util.RepairIndex;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.TopicPartition;
-import org.janusgraph.diskstorage.Backend;
-import org.janusgraph.diskstorage.BackendException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,26 +45,13 @@ class DLQReplayServiceIntegrationTest {
     private DLQReplayService dlqReplayService;
 
     private MockedStatic<ApplicationProperties> mockApplicationProperties;
-    private MockedStatic<Backend> mockBackend;
 
     @BeforeEach
-    void setUp() throws AtlasException {
+    void setUp() throws Exception {
         // Clean up any existing static mocks first (defensive programming)
         cleanupStaticMocks();
 
-        try {
-            setupMocks();
-        } catch (BackendException e) {
-            throw new RuntimeException(e);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-
-        // Mock ApplicationProperties (static)
-        //mockApplicationProperties = mockStatic(ApplicationProperties.class);
-        org.apache.commons.configuration.Configuration mockConfig = mock(org.apache.commons.configuration.Configuration.class);
-        mockApplicationProperties.when(ApplicationProperties::get).thenReturn(mockConfig);
-        when(mockConfig.getString("atlas.graph.kafka.bootstrap.servers")).thenReturn("localhost:9092");
+        setupMocks();
 
         dlqReplayService = spy(new DLQReplayService(repairIndex, atlasTypeRegistry));
 
@@ -106,20 +91,12 @@ class DLQReplayServiceIntegrationTest {
             }
             mockApplicationProperties = null;
         }
-        if (mockBackend != null) {
-            try {
-                mockBackend.close();
-            } catch (Exception e) {
-                // Ignore - mock might already be closed
-            }
-            mockBackend = null;
-        }
     }
 
     private void setupMocks() throws Exception {
         mockApplicationProperties = mockStatic(ApplicationProperties.class);
         org.apache.commons.configuration.Configuration mockConfig = mock(org.apache.commons.configuration.Configuration.class);
-        when(ApplicationProperties.get()).thenReturn(mockConfig);
+        mockApplicationProperties.when(ApplicationProperties::get).thenReturn(mockConfig);
         when(mockConfig.getString("atlas.graph.kafka.bootstrap.servers")).thenReturn("localhost:9092");
 
         // Setup JanusGraph transaction mocks
@@ -346,4 +323,3 @@ class DLQReplayServiceIntegrationTest {
         assertEquals(5000, delay4);  // Stays at cap
     }
 }
-

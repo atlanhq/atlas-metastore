@@ -221,11 +221,21 @@ public class AtlasTypeDefStoreInitializer implements ActiveStateChangeHandler {
 
                         AtlasTypesDef typesToCreate = getTypesToCreate(typesDef, typeRegistry);
                         AtlasTypesDef typesToUpdate = getTypesToUpdate(typesDef, typeRegistry, true);
+                        int createCount = getTypeCount(typesToCreate);
+                        int updateCount = getTypeCount(typesToUpdate);
 
                         if (!typesToCreate.isEmpty() || !typesToUpdate.isEmpty()) {
+                            long createUpdateStartNanos = System.nanoTime();
+                            LOG.info("Applying typedefs from {} (create={}, update={})",
+                                    typeDefFile.getAbsolutePath(), createCount, updateCount);
                             typeDefStore.createUpdateTypesDef(typesToCreate, typesToUpdate);
+                            long elapsedNanos = System.nanoTime() - createUpdateStartNanos;
+                            long elapsedMs = elapsedNanos / 1_000_000;
+                            int totalApplied = createCount + updateCount;
+                            double throughput = elapsedNanos > 0 ? (totalApplied * 1_000_000_000.0 / elapsedNanos) : 0.0;
 
-                            LOG.info("Created/Updated types defined in file {}", typeDefFile.getAbsolutePath());
+                            LOG.info("Created/Updated types defined in file {} in {} ms (total={}, throughput={} types/s)",
+                                    typeDefFile.getAbsolutePath(), elapsedMs, totalApplied, String.format("%.1f", throughput));
                         } else {
                             LOG.info("No new type in file {}", typeDefFile.getAbsolutePath());
                         }
@@ -239,6 +249,19 @@ public class AtlasTypeDefStoreInitializer implements ActiveStateChangeHandler {
             applyTypePatches(typesDir.getPath(), patchRegistry);
         }
         LOG.info("<== AtlasTypeDefStoreInitializer({})", typesDir);
+    }
+
+    private static int getTypeCount(AtlasTypesDef typesDef) {
+        if (typesDef == null) {
+            return 0;
+        }
+
+        return CollectionUtils.size(typesDef.getEnumDefs())
+                + CollectionUtils.size(typesDef.getStructDefs())
+                + CollectionUtils.size(typesDef.getClassificationDefs())
+                + CollectionUtils.size(typesDef.getEntityDefs())
+                + CollectionUtils.size(typesDef.getRelationshipDefs())
+                + CollectionUtils.size(typesDef.getBusinessMetadataDefs());
     }
 
     public static AtlasTypesDef getTypesToCreate(AtlasTypesDef typesDef, AtlasTypeRegistry typeRegistry) {

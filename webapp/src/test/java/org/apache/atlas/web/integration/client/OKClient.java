@@ -13,7 +13,6 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasRelationship;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.apache.atlas.web.integration.AtlasDockerIntegrationTest;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.slf4j.Logger;
@@ -35,33 +34,33 @@ public class OKClient {
 
     public static boolean isBeta = "beta".equals(ConfigReader.getString("atlas.client.mode", ""));
 
-    private static String BASE_URL = AtlasDockerIntegrationTest.ATLAS_BASE_URL;
+    private static String BASE_URL = "http://localhost:21000/api/atlas/v2";
 
-    private static String URL_TYPE_DEF = BASE_URL + "/types/typedefs";
-    private static String URL_TYPE_DEF_BY_NAME = BASE_URL + "/types/typedef/name/%s";
+    private static String URL_TYPE_DEF;
+    private static String URL_TYPE_DEF_BY_NAME;
 
-    private static String URL_ENTITY = BASE_URL + "/entity";
-    private static String URL_ENTITY_BULK = BASE_URL + "/entity/bulk?replaceTags=true";
-    private static String URL_GET_ENTITY_GUID = BASE_URL + "/entity/guid/%s";
+    private static String URL_ENTITY;
+    private static String URL_ENTITY_BULK;
+    private static String URL_GET_ENTITY_GUID;
 
-    private static String URL_UPSERT_BM = BASE_URL + "/entity/guid/%s/businessmetadata/%s";
-    private static String URL_UPSERT_BM_BULK = BASE_URL + "/entity/guid/%s/businessmetadata";
+    private static String URL_UPSERT_BM;
+    private static String URL_UPSERT_BM_BULK;
 
-    private static String URL_REPAIR_ASSET = BASE_URL + "/entity/guid/%s/repairindex";
+    private static String URL_REPAIR_ASSET;
 
-    private static String URL_REPAIR_ASSETS = BASE_URL + "/entity/guid/bulk/repairindex";
+    private static String URL_REPAIR_ASSETS;
 
-    private static String URL_REPAIR_CLASSIFICATIONS_MAPPINGS = BASE_URL + "/entity/bulk/repairClassificationsMappings";
+    private static String URL_REPAIR_CLASSIFICATIONS_MAPPINGS;
 
-    private static String URL_INDEX_SEARCH = BASE_URL + "/search/indexsearch";
+    private static String URL_INDEX_SEARCH;
 
-    private static String URL_RELATIONSHIP_BULK = BASE_URL + "/relationship/bulk";
-    private static String URL_RELATIONSHIP = BASE_URL + "/relationship";
-    private static String URL_RELATIONSHIP_DELETE_GUID = BASE_URL + "/relationship/guid/%s";
+    private static String URL_RELATIONSHIP_BULK;
+    private static String URL_RELATIONSHIP;
+    private static String URL_RELATIONSHIP_DELETE_GUID;
 
 
-    private static String URL_ADD_TAGS_BY_TYPE_UNIQUE_ATTR = BASE_URL + "/entity/uniqueAttribute/type/%s/classifications?attr:qualifiedName=%s";
-    private static String URL_DELETE_TAGS_BY_TYPE_UNIQUE_ATTR = BASE_URL + "/entity/uniqueAttribute/type/%s/classification/%s?attr:qualifiedName=%s";
+    private static String URL_ADD_TAGS_BY_TYPE_UNIQUE_ATTR;
+    private static String URL_DELETE_TAGS_BY_TYPE_UNIQUE_ATTR;
 
     private static OkHttpClient finalClient = null;
 
@@ -69,6 +68,47 @@ public class OKClient {
 
     private static long TIMEOUT  = 60000;
     private static TimeUnit TIME_UNIT = TimeUnit.SECONDS;
+
+    static {
+        rebuildUrls();
+    }
+
+    public static synchronized void configureBaseUrl(String baseUrl) {
+        if (StringUtils.isBlank(baseUrl)) {
+            throw new IllegalArgumentException("baseUrl must not be blank");
+        }
+
+        BASE_URL = StringUtils.removeEnd(baseUrl.trim(), "/");
+        rebuildUrls();
+        LOG.info("Configured OKClient base URL: {}", BASE_URL);
+    }
+
+    private static void rebuildUrls() {
+        URL_TYPE_DEF = BASE_URL + "/types/typedefs";
+        URL_TYPE_DEF_BY_NAME = BASE_URL + "/types/typedef/name/%s";
+
+        URL_ENTITY = BASE_URL + "/entity";
+        URL_ENTITY_BULK = BASE_URL + "/entity/bulk?replaceTags=true";
+        URL_GET_ENTITY_GUID = BASE_URL + "/entity/guid/%s";
+
+        URL_UPSERT_BM = BASE_URL + "/entity/guid/%s/businessmetadata/%s";
+        URL_UPSERT_BM_BULK = BASE_URL + "/entity/guid/%s/businessmetadata";
+
+        URL_REPAIR_ASSET = BASE_URL + "/entity/guid/%s/repairindex";
+
+        URL_REPAIR_ASSETS = BASE_URL + "/entity/guid/bulk/repairindex";
+
+        URL_REPAIR_CLASSIFICATIONS_MAPPINGS = BASE_URL + "/entity/bulk/repairClassificationsMappings";
+
+        URL_INDEX_SEARCH = BASE_URL + "/search/indexsearch";
+
+        URL_RELATIONSHIP_BULK = BASE_URL + "/relationship/bulk";
+        URL_RELATIONSHIP = BASE_URL + "/relationship";
+        URL_RELATIONSHIP_DELETE_GUID = BASE_URL + "/relationship/guid/%s";
+
+        URL_ADD_TAGS_BY_TYPE_UNIQUE_ATTR = BASE_URL + "/entity/uniqueAttribute/type/%s/classifications?attr:qualifiedName=%s";
+        URL_DELETE_TAGS_BY_TYPE_UNIQUE_ATTR = BASE_URL + "/entity/uniqueAttribute/type/%s/classification/%s?attr:qualifiedName=%s";
+    }
 
     public static OkHttpClient getClient() {
         if (finalClient == null) {

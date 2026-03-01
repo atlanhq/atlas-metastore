@@ -173,37 +173,37 @@ public class EntityAuthorizer {
         }
 
         switch (operator) {
-            case POLICY_FILTER_CRITERIA_EQUALS -> {
+            case POLICY_FILTER_CRITERIA_EQUALS:
                 return new HashSet<>(entityAttributeValues).containsAll(attributeValues);
-            }
-            case POLICY_FILTER_CRITERIA_STARTS_WITH -> {
+            case POLICY_FILTER_CRITERIA_STARTS_WITH:
                 for (String value : attributeValues) {
                     if (AuthorizerCommonUtil.listStartsWith(value, entityAttributeValues)) {
                         return true;
                     }
                 }
-            }
-            case POLICY_FILTER_CRITERIA_ENDS_WITH -> {
+                break;
+            case POLICY_FILTER_CRITERIA_ENDS_WITH:
                 for (String value : attributeValues) {
                     if (AuthorizerCommonUtil.listEndsWith(value, entityAttributeValues)) {
                         return true;
                     }
                 }
-            }
-            case POLICY_FILTER_CRITERIA_NOT_EQUALS -> {
+                break;
+            case POLICY_FILTER_CRITERIA_NOT_EQUALS:
                 return Collections.disjoint(entityAttributeValues, attributeValues);
-            }
-            case POLICY_FILTER_CRITERIA_IN -> {
+            case POLICY_FILTER_CRITERIA_IN:
                 if (AuthorizerCommonUtil.arrayListContains(attributeValues, entityAttributeValues)) {
                     return true;
                 }
-            }
-            case POLICY_FILTER_CRITERIA_NOT_IN -> {
+                break;
+            case POLICY_FILTER_CRITERIA_NOT_IN:
                 if (!AuthorizerCommonUtil.arrayListContains(attributeValues, entityAttributeValues)) {
                     return true;
                 }
-            }
-            default -> LOG.warn("Found unknown operator {}", operator);
+                break;
+            default:
+                LOG.warn("Found unknown operator {}", operator);
+                break;
         }
 
         RequestContext.get().endMetricRecord(recorder);
@@ -214,7 +214,7 @@ public class EntityAuthorizer {
         List<String> entityAttributeValues = new ArrayList<>();
 
         switch (attributeName) {
-            case "__traitNames" -> {
+            case "__traitNames":
                 List<AtlasClassification> tags = entity.getClassifications();
                 if (tags != null) {
                     for (AtlasClassification tag : tags) {
@@ -224,23 +224,25 @@ public class EntityAuthorizer {
                         }
                     }
                 }
-            }
-            case "__propagatedTraitNames" -> {
-                List<AtlasClassification> tags = entity.getClassifications();
-                if (tags != null) {
-                    for (AtlasClassification tag : tags) {
+                break;
+            case "__propagatedTraitNames":
+                List<AtlasClassification> tags_ = entity.getClassifications();
+                if (tags_ != null) {
+                    for (AtlasClassification tag : tags_) {
                         if (StringUtils.isNotEmpty(tag.getEntityGuid()) && !tag.getEntityGuid().equals(entity.getGuid())) {
                             entityAttributeValues.add(tag.getTypeName());
                             entityAttributeValues.addAll(extractTagAttachmentValues(tag));
                         }
                     }
                 }
-            }
-            case "__typeName" -> {
+                break;
+            case "__typeName":
                 String typeName = entity.getTypeName();
                 Set<String> allValidTypes = AuthorizerCommonUtil.getTypeAndSupertypesList(typeName);
                 entityAttributeValues.addAll(allValidTypes);
-            }
+                break;
+            default:
+                break;
         }
 
         return entityAttributeValues;
@@ -399,29 +401,32 @@ public class EntityAuthorizer {
         // no support required for starts_with and ends_with for tags
         boolean result = false;
         switch(operator) {
-            case POLICY_FILTER_CRITERIA_EQUALS -> {
+            case POLICY_FILTER_CRITERIA_EQUALS:
                 for (List<String> tagValues : attributeValues) {
                     if (!AuthorizerCommonUtil.arrayListContains(entityAttributeValues, tagValues)) {
                         return false;
                     }
                 }
                 result = true;
-            }
-            case POLICY_FILTER_CRITERIA_NOT_EQUALS, POLICY_FILTER_CRITERIA_NOT_IN -> {
+                break;
+            case POLICY_FILTER_CRITERIA_NOT_EQUALS:
+            case POLICY_FILTER_CRITERIA_NOT_IN:
                 for (List<String> tagValues : attributeValues) {
                     if (AuthorizerCommonUtil.arrayListContains(entityAttributeValues, tagValues)) {
                         return false;
                     }
                 }
                 result = true;
-            }
-            case POLICY_FILTER_CRITERIA_IN -> {
+                break;
+            case POLICY_FILTER_CRITERIA_IN:
                 for (List<String> tagValues : attributeValues) {
                     if (AuthorizerCommonUtil.arrayListContains(entityAttributeValues, tagValues)) {
                         return true;
                     }
                 }
-            }
+                break;
+            default:
+                break;
         }
         return result;
     }

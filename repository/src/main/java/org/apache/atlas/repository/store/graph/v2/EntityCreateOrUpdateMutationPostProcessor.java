@@ -22,9 +22,24 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
     private static final Logger LOG = LoggerFactory.getLogger(EntityCreateOrUpdateMutationPostProcessor.class);
 
     private final TagDAO tagDAO;
+    private final ESTagWriter esTagWriter;
+
+    @FunctionalInterface
+    interface ESTagWriter {
+        void writeTagProperties(Map<String, Map<String, Object>> batchPayload, boolean upsert);
+    }
 
     public EntityCreateOrUpdateMutationPostProcessor() {
-        this.tagDAO = TagDAOCassandraImpl.getInstance();
+        this(TagDAOCassandraImpl.getInstance(), ESConnector::writeTagProperties);
+    }
+
+    EntityCreateOrUpdateMutationPostProcessor(TagDAO tagDAO) {
+        this(tagDAO, ESConnector::writeTagProperties);
+    }
+
+    EntityCreateOrUpdateMutationPostProcessor(TagDAO tagDAO, ESTagWriter esTagWriter) {
+        this.tagDAO = tagDAO;
+        this.esTagWriter = esTagWriter;
     }
 
     @Override
@@ -100,7 +115,7 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
             }
 
             if (!batchPayload.isEmpty()) {
-                ESConnector.writeTagProperties(batchPayload, upsert);
+                esTagWriter.writeTagProperties(batchPayload, upsert);
             }
         }
     }
@@ -202,11 +217,16 @@ public class EntityCreateOrUpdateMutationPostProcessor implements EntityMutation
 
     private void rollbackUpdateOrDelete(String entityGuid, CassandraTagOperation op) throws AtlasBaseException {
         switch (op.getOperationType()) {
-            case UPDATE, DELETE -> tagDAO.putDirectTag(op.getVertexId(),
-                    op.getTagTypeName(),
-                    op.getAtlasClassification(),
-                    op.getMinAssetMap());
-            default -> LOG.warn("Unknown operation type {} for entity {}", op.getOperationType(), entityGuid);
+            case UPDATE:
+            case DELETE:
+                tagDAO.putDirectTag(op.getVertexId(),
+                        op.getTagTypeName(),
+                        op.getAtlasClassification(),
+                        op.getMinAssetMap());
+                break;
+            default:
+                LOG.warn("Unknown operation type {} for entity {}", op.getOperationType(), entityGuid);
+                break;
         }
     }
 

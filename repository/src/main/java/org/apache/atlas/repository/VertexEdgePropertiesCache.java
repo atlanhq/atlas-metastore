@@ -6,6 +6,7 @@ import org.apache.commons.collections.MapUtils;
 import org.javatuples.Pair;
 
 import java.util.*;
+import java.util.stream.Collectors;
 
 import static org.apache.atlas.repository.Constants.GUID_PROPERTY_KEY;
 
@@ -155,7 +156,7 @@ public class VertexEdgePropertiesCache {
 
         return references.stream()
                 .filter(reference -> !isDirectionMatch(reference, direction))
-                .toList();
+                .collect(Collectors.toList());
     }
 
     private boolean isDirectionMatch(
@@ -165,11 +166,14 @@ public class VertexEdgePropertiesCache {
         String referenceVertexId = reference.getReferenceVertexId();
         EdgeVertexReference.EdgeInfo edgeInfo = reference.getEdgeInfo();
 
-        return switch (direction) {
-            case IN -> edgeInfo.getInVertexId().equals(referenceVertexId);
-            case OUT -> edgeInfo.getOutVertexId().equals(referenceVertexId);
-            default -> false;
-        };
+        switch (direction) {
+            case IN:
+                return edgeInfo.getInVertexId().equals(referenceVertexId);
+            case OUT:
+                return edgeInfo.getOutVertexId().equals(referenceVertexId);
+            default:
+                return false;
+        }
     }
 
     public EdgeVertexReference getReferenceVertexByEdgeLabelAndId(String sourceVertexId, String edgeLabel, String targetVertexId, String edgeId, AtlasStructType.AtlasAttribute.AtlasRelationshipEdgeDirection direction) {
