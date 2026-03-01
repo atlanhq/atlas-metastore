@@ -201,13 +201,20 @@ atlas.cassandra.graph.hostname=<cassandra-host>
 atlas.cassandra.graph.port=9042
 atlas.cassandra.graph.keyspace=atlas_graph
 atlas.cassandra.graph.datacenter=<datacenter-name>
+
+# ES index prefix — MUST match the backend
+atlas.graph.index.search.es.prefix=atlas_graph_
 ```
 
 **Replace:**
 - `<cassandra-host>` with the Cassandra service hostname (e.g., `atlas-cassandra`)
 - `<datacenter-name>` with the Cassandra datacenter (usually `datacenter1`)
 
-The Elasticsearch properties (`atlas.graph.index.search.*`) remain the same — both backends use the same ES cluster.
+> **IMPORTANT — ES index prefix:** The `atlas.graph.index.search.es.prefix` property controls which Elasticsearch index Atlas and downstream services (Heka, PolicyRefresher, etc.) read from. It **must** match the backend:
+> - Cassandra backend: `atlas.graph.index.search.es.prefix=atlas_graph_`
+> - JanusGraph backend: `atlas.graph.index.search.es.prefix=janusgraph_` (default)
+>
+> If this is wrong, services like Heka will query the old ES index and fail to find policies — causing "invalid connection" errors for data queries.
 
 ### 3.2 How to apply the config change
 
@@ -230,6 +237,7 @@ kubectl edit configmap atlas-config -n atlas
 # Add: atlas.cassandra.graph.port=9042
 # Add: atlas.cassandra.graph.keyspace=atlas_graph
 # Add: atlas.cassandra.graph.datacenter=datacenter1
+# Add: atlas.graph.index.search.es.prefix=atlas_graph_
 
 # Restart the pod (if auto rollout restart doesn't happen)
 kubectl delete pod atlas-0 -n atlas
@@ -370,13 +378,14 @@ If anything goes wrong, rolling back is instant:
 
 ### 5.1 Switch back to JanusGraph
 
-Change the config property back:
+Change the config properties back:
 
 ```properties
 atlas.graphdb.backend=janus
+atlas.graph.index.search.es.prefix=janusgraph_
 ```
 
-Or simply remove the `atlas.graphdb.backend` line — the default is `janus`.
+Or simply remove the `atlas.graphdb.backend` and `atlas.graph.index.search.es.prefix` lines — the defaults are `janus` and `janusgraph_` respectively.
 
 ### 5.2 Restart the pod
 
@@ -531,7 +540,7 @@ kubectl exec -it atlas-0 -n $NS -c atlas-main -- /opt/apache-atlas/bin/atlas_mig
 # 2. Migrate data
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh
 
-# 3. Switch backend config (add atlas.graphdb.backend=cassandra + cassandra.graph.* properties)
+# 3. Switch backend config (add atlas.graphdb.backend=cassandra + cassandra.graph.* + ES prefix)
 # ... via your config management tool ...
 
 # 4. Restart pod
