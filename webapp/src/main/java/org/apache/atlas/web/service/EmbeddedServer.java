@@ -29,11 +29,13 @@ import org.apache.atlas.exception.AtlasBaseException;
 import org.apache.atlas.model.audit.AtlasAuditEntry;
 import org.apache.commons.configuration.Configuration;
 import org.eclipse.jetty.server.Connector;
+import org.eclipse.jetty.server.handler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.springframework.web.context.ContextLoaderListener;
@@ -515,7 +517,7 @@ public class EmbeddedServer {
         // Routing with correct ordered  setup - first fastLaneContext
         // org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
         // contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {mainAppContext, fastLaneContext});
-        HandlerList handlers = new HandlerList();
+        org.eclipse.jetty.server.handler.HandlerList handlers = new org.eclipse.jetty.server.handler.HandlerList();
         // 1. Main App (Starts first, initializes Spring)
         handlers.addHandler(mainAppContext); 
         // 2. Fast-Lane (Starts second, waits for Main App to sync)
