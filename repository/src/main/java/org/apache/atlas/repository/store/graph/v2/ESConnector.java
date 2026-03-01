@@ -108,7 +108,7 @@ public class ESConnector implements Closeable {
                 DENORM_ATTRS.stream().filter(entry::containsKey).forEach(x -> toUpdate.put(x, entry.get(x)));
 
                 String docId = LongEncodingUtil.vertexIdToDocId(assetVertexId);
-                bulkRequestBody.append("{\"update\":{\"_index\":\"janusgraph_vertex_index\",\"_id\":\"").append(docId).append("\" }}\n");
+                bulkRequestBody.append("{\"update\":{\"_index\":\"").append(VERTEX_INDEX_NAME).append("\",\"_id\":\"").append(docId).append("\" }}\n");
 
                 bulkRequestBody.append("{");
                 String attrsToUpdate = AtlasType.toJson(toUpdate);

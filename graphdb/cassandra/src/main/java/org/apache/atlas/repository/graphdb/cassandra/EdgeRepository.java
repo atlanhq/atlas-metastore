@@ -9,6 +9,8 @@ import org.slf4j.LoggerFactory;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
 public class EdgeRepository {
@@ -471,8 +473,13 @@ public class EdgeRepository {
             }
         }
 
-        // Collect results
+        // Wait for all queries to settle before processing results
+        awaitAll(outFutures.values());
+        awaitAll(inFutures.values());
+
+        // Collect results — each .join() is now instant since all futures have settled
         Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+        int failedCount = 0;
 
         for (Map.Entry<String, CompletionStage<AsyncResultSet>> entry : outFutures.entrySet()) {
             String vertexId = entry.getKey();
@@ -480,7 +487,8 @@ public class EdgeRepository {
                 AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
                 List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
                 collectOutEdgePages(rs, vertexId, edges, graph);
-            } catch (Exception e) {
+            } catch (CompletionException e) {
+                failedCount++;
                 LOG.warn("Failed to fetch out-edges for vertex {}", vertexId, e);
             }
         }
@@ -491,9 +499,15 @@ public class EdgeRepository {
                 AsyncResultSet rs = entry.getValue().toCompletableFuture().join();
                 List<CassandraEdge> edges = results.computeIfAbsent(vertexId, k -> new ArrayList<>());
                 collectInEdgePages(rs, vertexId, edges, graph);
-            } catch (Exception e) {
+            } catch (CompletionException e) {
+                failedCount++;
                 LOG.warn("Failed to fetch in-edges for vertex {}", vertexId, e);
             }
+        }
+
+        if (failedCount > 0) {
+            LOG.warn("getEdgesForVerticesAsync: {} of {} queries failed — results are partial",
+                     failedCount, outFutures.size() + inFutures.size());
         }
 
         return results;
@@ -540,8 +554,13 @@ public class EdgeRepository {
             }
         }
 
-        // Collect results
+        // Wait for all queries to settle before processing results
+        awaitAllNested(outFutures.values());
+        awaitAllNested(inFutures.values());
+
+        // Collect results — each .join() is now instant since all futures have settled
         Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+        int failedCount = 0;
 
         for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : outFutures.entrySet()) {
             String vertexId = entry.getKey();
@@ -550,7 +569,8 @@ public class EdgeRepository {
                 try {
                     AsyncResultSet rs = future.toCompletableFuture().join();
                     collectOutEdgePages(rs, vertexId, edges, graph);
-                } catch (Exception e) {
+                } catch (CompletionException e) {
+                    failedCount++;
                     LOG.warn("Failed to fetch out-edges by label for vertex {}", vertexId, e);
                 }
             }
@@ -563,10 +583,16 @@ public class EdgeRepository {
                 try {
                     AsyncResultSet rs = future.toCompletableFuture().join();
                     collectInEdgePages(rs, vertexId, edges, graph);
-                } catch (Exception e) {
+                } catch (CompletionException e) {
+                    failedCount++;
                     LOG.warn("Failed to fetch in-edges by label for vertex {}", vertexId, e);
                 }
             }
+        }
+
+        if (failedCount > 0) {
+            LOG.warn("getEdgesForVerticesByLabelsAsync: {} queries failed — results are partial for {} vertices × {} labels",
+                     failedCount, vertexIds.size(), edgeLabels.size());
         }
 
         LOG.debug("getEdgesForVerticesByLabelsAsync: {} vertices × {} labels = {} total edges fetched",
@@ -617,7 +643,12 @@ public class EdgeRepository {
             }
         }
 
+        // Wait for all queries to settle before processing results
+        awaitAllNested(outFutures.values());
+        awaitAllNested(inFutures.values());
+
         Map<String, List<CassandraEdge>> results = new LinkedHashMap<>();
+        int failedCount = 0;
 
         for (Map.Entry<String, List<CompletionStage<AsyncResultSet>>> entry : outFutures.entrySet()) {
             String vertexId = entry.getKey();
@@ -626,7 +657,8 @@ public class EdgeRepository {
                 try {
                     AsyncResultSet rs = future.toCompletableFuture().join();
                     collectOutEdgePages(rs, vertexId, edges, graph);
-                } catch (Exception e) {
+                } catch (CompletionException e) {
+                    failedCount++;
                     LOG.warn("Failed to fetch out-edges by label (limited) for vertex {}", vertexId, e);
                 }
             }
@@ -639,10 +671,16 @@ public class EdgeRepository {
                 try {
                     AsyncResultSet rs = future.toCompletableFuture().join();
                     collectInEdgePages(rs, vertexId, edges, graph);
-                } catch (Exception e) {
+                } catch (CompletionException e) {
+                    failedCount++;
                     LOG.warn("Failed to fetch in-edges by label (limited) for vertex {}", vertexId, e);
                 }
             }
+        }
+
+        if (failedCount > 0) {
+            LOG.warn("getEdgesForVerticesByLabelsAsync(limited): {} queries failed — results are partial for {} vertices × {} labels",
+                     failedCount, vertexIds.size(), edgeLabels.size());
         }
 
         LOG.debug("getEdgesForVerticesByLabelsAsync(limited={}): {} vertices × {} labels = {} total edges",
@@ -652,42 +690,62 @@ public class EdgeRepository {
         return results;
     }
 
+    /**
+     * Wait for all futures to settle (complete or fail) so subsequent .join() calls are non-blocking.
+     * Failures are swallowed here — callers handle them individually via try/catch around .join().
+     */
+    private static void awaitAll(Collection<? extends CompletionStage<?>> futures) {
+        if (futures.isEmpty()) return;
+        CompletableFuture<?>[] cfs = futures.stream()
+            .map(cs -> cs.toCompletableFuture().exceptionally(t -> null))
+            .toArray(CompletableFuture<?>[]::new);
+        CompletableFuture.allOf(cfs).join();
+    }
+
+    /** Like {@link #awaitAll} but for a collection of lists of futures (by-label queries). */
+    private static void awaitAllNested(Collection<? extends Collection<? extends CompletionStage<?>>> nested) {
+        if (nested.isEmpty()) return;
+        CompletableFuture<?>[] cfs = nested.stream()
+            .flatMap(Collection::stream)
+            .map(cs -> cs.toCompletableFuture().exceptionally(t -> null))
+            .toArray(CompletableFuture<?>[]::new);
+        CompletableFuture.allOf(cfs).join();
+    }
+
     private void collectOutEdgePages(AsyncResultSet rs, String vertexId,
                                       List<CassandraEdge> edges, CassandraGraph graph) {
-        while (rs != null) {
-            for (Row row : rs.currentPage()) {
-                String state = row.getString("state");
-                if (!"DELETED".equals(state)) {
-                    String edgeId     = row.getString("edge_id");
-                    String label      = row.getString("edge_label");
-                    String inVertexId = row.getString("in_vertex_id");
-                    String propsJson  = row.getString("properties");
-                    Map<String, Object> props = parseProperties(propsJson);
-                    props.put("__state", state != null ? state : "ACTIVE");
-                    edges.add(new CassandraEdge(edgeId, vertexId, inVertexId, label, props, graph));
-                }
-            }
-            if (rs.hasMorePages()) {
-                rs = rs.fetchNextPage().toCompletableFuture().join();
-            } else {
-                break;
-            }
-        }
+        collectEdgePages(rs, vertexId, true, edges, graph);
     }
 
     private void collectInEdgePages(AsyncResultSet rs, String vertexId,
                                      List<CassandraEdge> edges, CassandraGraph graph) {
+        collectEdgePages(rs, vertexId, false, edges, graph);
+    }
+
+    /**
+     * Collects edge rows from a paginated async result set.
+     *
+     * @param isOutEdge true for OUT edges (reads in_vertex_id), false for IN edges (reads out_vertex_id)
+     */
+    private void collectEdgePages(AsyncResultSet rs, String vertexId, boolean isOutEdge,
+                                   List<CassandraEdge> edges, CassandraGraph graph) {
+        // OUT edge rows have in_vertex_id; IN edge rows have out_vertex_id
+        String remoteVertexColumn = isOutEdge ? "in_vertex_id" : "out_vertex_id";
+
         while (rs != null) {
             for (Row row : rs.currentPage()) {
                 String state = row.getString("state");
                 if (!"DELETED".equals(state)) {
-                    String edgeId      = row.getString("edge_id");
-                    String label       = row.getString("edge_label");
-                    String outVertexId = row.getString("out_vertex_id");
-                    String propsJson   = row.getString("properties");
+                    String edgeId         = row.getString("edge_id");
+                    String label          = row.getString("edge_label");
+                    String remoteVertexId = row.getString(remoteVertexColumn);
+                    String propsJson      = row.getString("properties");
                     Map<String, Object> props = parseProperties(propsJson);
                     props.put("__state", state != null ? state : "ACTIVE");
-                    edges.add(new CassandraEdge(edgeId, outVertexId, vertexId, label, props, graph));
+
+                    String outVertexId = isOutEdge ? vertexId : remoteVertexId;
+                    String inVertexId  = isOutEdge ? remoteVertexId : vertexId;
+                    edges.add(new CassandraEdge(edgeId, outVertexId, inVertexId, label, props, graph));
                 }
             }
             if (rs.hasMorePages()) {
