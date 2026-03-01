@@ -33,7 +33,6 @@ import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.servlet.FilterHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
@@ -514,9 +513,15 @@ public class EmbeddedServer {
         });
 
         // Routing with correct ordered  setup - first fastLaneContext
-        org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
-        contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {mainAppContext, fastLaneContext});
-        server.setHandler(contexts);
+        // org.eclipse.jetty.server.handler.ContextHandlerCollection contexts = new org.eclipse.jetty.server.handler.ContextHandlerCollection();
+        // contexts.setHandlers(new org.eclipse.jetty.server.Handler[] {mainAppContext, fastLaneContext});
+        HandlerList handlers = new HandlerList();
+        // 1. Main App (Starts first, initializes Spring)
+        handlers.addHandler(mainAppContext); 
+        // 2. Fast-Lane (Starts second, waits for Main App to sync)
+        handlers.addHandler(fastLaneContext);
+        server.setHandler(handlers);
+        // server.setHandler(contexts);
         Object mainSpringContext = null;
         // This will start both contexts in the correct order
         try {
@@ -656,7 +661,8 @@ public class EmbeddedServer {
                             Thread.currentThread().setContextClassLoader(webAppClassLoader);
                             LOG.info("TCCL switched. Calling addServlet and v2Holder.start()...");
 
-                            FilterHolder springSecurityFilter = new FilterHolder(new DelegatingFilterProxy("springSecurityFilterChain"));
+
+                            FilterHolder springSecurityFilter = new FilterHolder(new org.springframework.web.filter.DelegatingFilterProxy("springSecurityFilterChain"));
                             fastLaneContext.addFilter(springSecurityFilter, "/*", EnumSet.allOf(DispatcherType.class));
                             // Inside start(), link the session handlers:
                             LOG.info("Linking Fast-Lane session handler to main application...");
@@ -671,10 +677,12 @@ public class EmbeddedServer {
                                 }
                             }), "/atlas/admin/health");
                             // Add /v2 calls to the context now, Jetty will handle the start sequence
-                            //fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
+                            fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
                             fastLaneContext.addServlet(v2Holder, "/meta/*");
-                            //fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
-                            fastLaneContext.addServlet(v2Holder, "/atlas/*");
+                            fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
+                            fastLaneContext.addServlet(v2Holder, "/atlas/v1/search/*");
+                            fastLaneContext.addServlet(v2Holder, "/atlas/lineage/*");
+                            //fastLaneContext.addServlet(v2Holder, "/atlas/*");
 
                             LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
                             fastLaneContext.getServletContext().setAttribute(
