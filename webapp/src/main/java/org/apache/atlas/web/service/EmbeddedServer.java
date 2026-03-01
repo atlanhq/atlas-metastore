@@ -37,6 +37,8 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.server.handler.ContextHandlerCollection;
 import org.springframework.web.context.ContextLoaderListener;
+import org.springframework.web.filter.DelegatingFilterProxy;
+import org.springframework.web.context.WebApplicationContext;
 import com.sun.jersey.spi.container.servlet.ServletContainer;
 import com.sun.jersey.spi.spring.container.servlet.SpringServlet;
 import org.eclipse.jetty.util.thread.ExecutorThreadPool;
@@ -47,9 +49,12 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.Date;
+import java.util.EnumSet;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import javax.servlet.DispatcherType;
+
 
 import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 
@@ -649,6 +654,12 @@ public class EmbeddedServer {
                             // --- END DIAGNOSTIC BLOCK ---
                             Thread.currentThread().setContextClassLoader(webAppClassLoader);
                             LOG.info("TCCL switched. Calling addServlet and v2Holder.start()...");
+
+                            FilterHolder springSecurityFilter = new FilterHolder(new DelegatingFilterProxy("springSecurityFilterChain"));
+                            fastLaneContext.addFilter(springSecurityFilter, "/*", EnumSet.allOf(DispatcherType.class));
+                            // Inside start(), link the session handlers:
+                            LOG.info("Linking Fast-Lane session handler to main application...");
+                            fastLaneContext.setSessionHandler(mainAppContext.getSessionHandler());
                             //  Add Health Check (Always available)
                             fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
                                 @Override
@@ -659,9 +670,10 @@ public class EmbeddedServer {
                                 }
                             }), "/atlas/admin/health");
                             // Add /v2 calls to the context now, Jetty will handle the start sequence
-                            fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
+                            //fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
                             fastLaneContext.addServlet(v2Holder, "/meta/*");
-                            fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
+                            //fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
+                            fastLaneContext.addServlet(v2Holder, "/atlas/*");
 
                             LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
                             fastLaneContext.getServletContext().setAttribute(
