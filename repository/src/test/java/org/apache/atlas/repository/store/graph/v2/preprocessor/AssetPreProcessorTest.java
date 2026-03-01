@@ -14,9 +14,9 @@ import org.apache.atlas.repository.store.graph.v2.EntityMutationContext;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -36,10 +36,10 @@ import static org.apache.atlas.repository.Constants.OWNER_ATTRIBUTE;
 import static org.apache.atlas.repository.Constants.QUALIFIED_NAME;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNull;
-import static org.testng.Assert.assertTrue;
-import static org.testng.Assert.fail;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 public class AssetPreProcessorTest {
 
@@ -65,7 +65,7 @@ public class AssetPreProcessorTest {
     private RangerUserStore originalUserStore;
     private AutoCloseable closeable;
 
-    @BeforeMethod
+    @BeforeEach
     public void setup() {
         closeable = MockitoAnnotations.openMocks(this);
         
@@ -91,7 +91,7 @@ public class AssetPreProcessorTest {
         RequestContext.clear();
     }
 
-    @AfterMethod
+    @AfterEach
     public void tearDown() throws Exception {
         UsersStore.getInstance().setUserStore(originalUserStore);
         RequestContext.clear();

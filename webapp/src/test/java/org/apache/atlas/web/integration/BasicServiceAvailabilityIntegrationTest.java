@@ -33,8 +33,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 @ExtendWith(TestcontainersExtension.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class BasicServiceAvailabilityTest extends AtlasDockerIntegrationTest {
-    private static final Logger LOG = LoggerFactory.getLogger(BasicServiceAvailabilityTest.class);
+public class BasicServiceAvailabilityIntegrationTest extends AtlasDockerIntegrationTest {
+    private static final Logger LOG = LoggerFactory.getLogger(BasicServiceAvailabilityIntegrationTest.class);
 
     @Test
     @Order(1)

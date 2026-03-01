@@ -263,11 +263,6 @@
         </dependency>
 
         <dependency>
-            <groupId>org.testng</groupId>
-            <artifactId>testng</artifactId>
-        </dependency>
-
-        <dependency>
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-graphdb-common</artifactId>
             <version>${project.version}</version>
@@ -277,7 +272,7 @@
 
 	<dependency>
             <groupId>org.mockito</groupId>
-            <artifactId>mockito-all</artifactId>
+            <artifactId>mockito-core</artifactId>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -294,6 +289,20 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>${surefire.version}</version>
                 <configuration>
+                    <systemProperties>
+                        <user.dir>${project.basedir}</user.dir>
+                        <atlas.conf>${project.basedir}/src/test/resources</atlas.conf>
+                        <atlas.data>${project.build.directory}/data</atlas.data>
+                        <atlas.log.dir>${project.build.directory}/logs</atlas.log.dir>
+                        <atlas.log.file>application.log</atlas.log.file>
+                        <logback.configurationFile>atlas-logback.xml</logback.configurationFile>
+                        <embedded.solr.directory>${project.basedir}/target</embedded.solr.directory>
+                        <graph.storage.backend>berkeleyje</graph.storage.backend>
+                        <graph.index.backend>lucene</graph.index.backend>
+                        <graph.storage.hostname>localhost</graph.storage.hostname>
+                        <solr.zk.address>localhost:9983</solr.zk.address>
+                        <tests.solr.embedded>false</tests.solr.embedded>
+                    </systemProperties>
                     <skip>${skipUTs}</skip>
                 </configuration>
             </plugin>
