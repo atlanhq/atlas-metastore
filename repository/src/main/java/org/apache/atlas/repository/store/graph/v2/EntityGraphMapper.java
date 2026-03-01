@@ -2014,7 +2014,6 @@ public class EntityGraphMapper {
         if (type instanceof AtlasEntityType) {
             AtlasEntityType entityType = (AtlasEntityType) type;
             AtlasAttribute  attribute     = ctx.getAttribute();
-            AtlasType atlasType = attribute.getAttributeType();
             String          attributeName = attribute.getName();
 
             if (entityType.hasRelationshipAttribute(attributeName)) {
@@ -2040,31 +2039,14 @@ public class EntityGraphMapper {
 
                 Map<String, Object> relationshipAttributes = getRelationshipAttributes(ctx.getValue());
                 AtlasRelationship relationship = new AtlasRelationship(relationshipName, relationshipAttributes);
-                String relationshipLabel = StringUtils.EMPTY;
 
                 if (createEdge) {
-                    // hard delete the edge if it exists and is  soft deleted
-                    if (relationshipStore instanceof  AtlasRelationshipStoreV2){
-                        relationshipLabel = ((AtlasRelationshipStoreV2)relationshipStore).getRelationshipEdgeLabel(fromVertex, toVertex,  relationship.getTypeName());
+                    MetricRecorder getOrCreateMetric = RequestContext.get().startMetricRecord("getEdgeUsingRelationship.getOrCreate");
+                    try {
+                        newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
+                    } finally {
+                        RequestContext.get().endMetricRecord(getOrCreateMetric);
                     }
-                    if (StringUtils.isNotEmpty(relationshipLabel)) {
-                        Iterator<AtlasEdge> edges = fromVertex.getEdges(AtlasEdgeDirection.OUT, relationshipLabel).iterator();
-                        while (edges.hasNext()) {
-                            AtlasEdge edge = edges.next();
-                            if (edge.getInVertex().equals(toVertex) && getStatus(edge) == DELETED) {
-                                // Hard delete the newEdge
-                                if (atlasType instanceof AtlasArrayType) {
-                                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, ((AtlasArrayType) atlasType).getElementType().getTypeCategory(), attribute.isOwnedRef(),
-                                            true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                                } else {
-                                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, attribute.getAttributeType().getTypeCategory(), attribute.isOwnedRef(),
-                                            true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                                }
-
-                            }
-                        }
-                    }
-                    newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
                     boolean isCreated = graphHelper.getCreatedTime(newEdge) == RequestContext.get().getRequestTime();
 
                     if (isCreated) {
