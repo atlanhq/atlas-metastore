@@ -113,16 +113,19 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
     private static final int DLQ_POLL_TIMEOUT_SECONDS = 5;
 
     /**
-     * ES error types that are non-retriable (mapping/parsing). Sending these to DLQ would create poison pills.
-     * Aligned with AtlanElasticSearchIndex.convert() permanent-error list and DLQReplayService poison-pill handling
-     * (do not enqueue / do not re-queue permanent failures).
+     * ES error types that are non-retriable (mapping/parsing/index). Sending these to DLQ would create poison pills.
+     * Aligned with AtlanElasticSearchIndex permanent-error list and DLQReplayService poison-pill handling.
+     * Includes: mapping/parsing (same payload will always fail), index_not_found / invalid_index_name (config/setup;
+     * retry won't fix without human intervention).
      */
     private static final Set<String> MAPPING_OR_PERMANENT_ES_ERROR_TYPES = Set.of(
             "mapper_parsing_exception",
             "illegal_argument_exception",
             "parsing_exception",
             "strict_dynamic_mapping_exception",
-            "version_conflict"
+            "version_conflict",
+            "index_not_found_exception",
+            "invalid_index_name_exception"
     );
 
     /*
@@ -567,6 +570,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                                 entry.events().size(), e.getMessage(), e);
                         recordAuditDlqMetric("retry_dropped_mapping_permanent", entry.events().size());
                     } else if (entry.retryCount() < maxRetries) {
+                        // Backoff before re-queue so we don't process immediately; during the failure period retries would likely fail again.
                         long backoffMs = Math.min(backoffMaxMs, backoffBaseMs * (long) Math.pow(2, entry.retryCount()));
                         try {
                             Thread.sleep(backoffMs);

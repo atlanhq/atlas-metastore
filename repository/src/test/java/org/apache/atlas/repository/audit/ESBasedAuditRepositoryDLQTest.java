@@ -191,6 +191,8 @@ class ESBasedAuditRepositoryDLQTest {
                     new AtlasBaseException("mapper_parsing_exception: failed to parse field [type]")));
             assertTrue(ESBasedAuditRepository.isMappingOrPermanentException(
                     new RuntimeException("illegal_argument_exception: ...")));
+            assertTrue(ESBasedAuditRepository.isMappingOrPermanentException(
+                    new AtlasBaseException("index_not_found_exception: no such index [entity_audits]")));
             assertFalse(ESBasedAuditRepository.isMappingOrPermanentException(
                     new AtlasBaseException("circuit_breaking_exception: data too large")));
         }
