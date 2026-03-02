@@ -32,8 +32,11 @@ import org.apache.atlas.model.audit.EntityAuditSearchResult;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.repository.store.graph.v2.EntityGraphRetriever;
+import org.apache.atlas.service.metrics.MetricUtils;
 import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.utils.AtlasPerfMetrics;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.collections.MapUtils;
 import org.apache.commons.configuration.Configuration;
@@ -128,8 +131,33 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
          eventKey  → entityId:timestamp
     * */
 
+    /** Metric name for entity audit DLQ outcomes (Victoria Metrics / Prometheus). */
+    private static final String METRIC_ENTITY_AUDIT_DLQ = "atlas.entity.audit.dlq.events";
+
     /** Holder for failed audit events enqueued to async DLQ for retry. */
     private static record EntityAuditDLQEntry(List<EntityAuditEventV2> events, int retryCount) {}
+
+    /**
+     * Record audit DLQ failure metric to the existing Micrometer/Prometheus registry (scraped by Victoria Metrics).
+     * Does not throw; failures are logged and ignored.
+     */
+    private static void recordAuditDlqMetric(String outcome, int eventCount) {
+        if (eventCount <= 0) {
+            return;
+        }
+        try {
+            MeterRegistry registry = MetricUtils.getMeterRegistry();
+            if (registry != null) {
+                Counter.builder(METRIC_ENTITY_AUDIT_DLQ)
+                        .description("Entity audit events in DLQ flow (failures, enqueued, dropped, published)")
+                        .tag("outcome", outcome)
+                        .register(registry)
+                        .increment(eventCount);
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to record entity audit DLQ metric outcome={} count={}", outcome, eventCount, e);
+        }
+    }
 
     /**
      * Returns true if the exception indicates a mapping or other permanent ES error.
@@ -192,18 +220,22 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             if (isMappingOrPermanent) {
                 LOG.error("Entity audit write to ES failed with mapping/permanent error (will not enqueue to DLQ to avoid poison pill). eventCount={}, error={}",
                         eventCount, e.getMessage(), e);
+                recordAuditDlqMetric("dropped_mapping_permanent", eventCount);
             } else if (ENTITY_AUDIT_DLQ_ENABLED.getBoolean() && auditDlqQueue != null && eventCount > 0) {
                 boolean offered = auditDlqQueue.offer(new EntityAuditDLQEntry(new ArrayList<>(events), 0));
                 if (offered) {
                     LOG.warn("Entity audit write to ES failed; enqueued to async DLQ for retry. eventCount={}, error={}",
                             eventCount, e.getMessage());
+                    recordAuditDlqMetric("enqueued", eventCount);
                 } else {
                     LOG.error("Entity audit DLQ full; dropping {} events. error={}. Consider increasing atlas.entity.audit.dlq.queue.capacity",
                             eventCount, e.getMessage(), e);
+                    recordAuditDlqMetric("dropped_queue_full", eventCount);
                 }
             } else {
                 LOG.error("Entity audit write to ES failed; main request will not fail. eventCount={}, error={}. " +
                         "Check ES health/circuit breaker if this recurs.", eventCount, e.getMessage(), e);
+                recordAuditDlqMetric("dropped_dlq_disabled", eventCount);
             }
         } finally {
             try {
@@ -533,6 +565,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                     if (isMappingOrPermanentException(e)) {
                         LOG.error("Entity audit retry failed with mapping/permanent error (dropping, will not re-queue). eventCount={}. error={}",
                                 entry.events().size(), e.getMessage(), e);
+                        recordAuditDlqMetric("retry_dropped_mapping_permanent", entry.events().size());
                     } else if (entry.retryCount() < maxRetries) {
                         long backoffMs = Math.min(backoffMaxMs, backoffBaseMs * (long) Math.pow(2, entry.retryCount()));
                         try {
@@ -545,9 +578,11 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                         if (reOffered) {
                             LOG.warn("Entity audit retry failed (retry {}/{}); backoff {}ms, re-queued. error={}",
                                     entry.retryCount() + 1, maxRetries, backoffMs, e.getMessage());
+                            recordAuditDlqMetric("retry_requeued", entry.events().size());
                         } else {
                             LOG.error("Entity audit retry queue full; dropping {} events after {} retries",
                                     entry.events().size(), entry.retryCount() + 1, e);
+                            recordAuditDlqMetric("retry_dropped_queue_full", entry.events().size());
                         }
                     } else {
                         if (ENTITY_AUDIT_DLQ_PUBLISH_TO_KAFKA_ENABLED.getBoolean()) {
@@ -555,6 +590,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
                         } else {
                             LOG.error("Entity audit retry failed after {} retries; dropping {} events (Kafka DLQ publish disabled). error={}",
                                     maxRetries, entry.events().size(), e.getMessage(), e);
+                            recordAuditDlqMetric("dropped_kafka_disabled", entry.events().size());
                         }
                     }
                 }
@@ -575,6 +611,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             if (producer == null) {
                 LOG.error("Entity audit retry failed after max retries; cannot publish to DLQ (producer not available). eventCount={}. error={}",
                         events.size(), failureReason);
+                recordAuditDlqMetric("dropped_producer_unavailable", events.size());
                 return;
             }
             String topic = ENTITY_AUDIT_DLQ_TOPIC.getString();
@@ -587,8 +624,10 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             producer.send(new ProducerRecord<>(topic, null, json));
             LOG.warn("Entity audit retry failed after max retries; published {} events to DLQ topic {} for inspection. error={}",
                     events.size(), topic, failureReason);
+            recordAuditDlqMetric("published_kafka", events.size());
         } catch (Exception ex) {
             LOG.error("Entity audit: failed to publish {} events to Kafka DLQ; events will be lost. error={}", events.size(), ex.getMessage(), ex);
+            recordAuditDlqMetric("dropped_kafka_publish_failed", events.size());
         }
     }
 
