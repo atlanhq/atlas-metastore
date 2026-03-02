@@ -214,14 +214,13 @@ public class LineageREST {
 
         // Capture RequestContext for propagation to async threads
         RequestContext parentContext = RequestContext.get();
-        RequestContext asyncContext = parentContext.copyForAsync();
 
         // Parallelize INPUT and OUTPUT queries
         CompletableFuture<AtlasLineageInfo> inputFuture = asyncExecutorService.supplyAsync(
             () -> {
                 try {
-                    // Propagate RequestContext
-                    RequestContext.setCurrentContext(asyncContext.copyForAsync());
+                    // Each worker gets its own independent copy from the parent context
+                    RequestContext.setCurrentContext(parentContext.copyForAsync());
                     return atlasLineageService.getAtlasLineageInfo(guid, LineageDirection.INPUT, depth, hideProcess, offset, limit, calculateRemainingVertexCounts);
                 } catch (AtlasBaseException e) {
                     throw new CompletionException(e);
@@ -235,8 +234,8 @@ public class LineageREST {
         CompletableFuture<AtlasLineageInfo> outputFuture = asyncExecutorService.supplyAsync(
             () -> {
                 try {
-                    // Propagate RequestContext
-                    RequestContext.setCurrentContext(asyncContext.copyForAsync());
+                    // Each worker gets its own independent copy from the parent context
+                    RequestContext.setCurrentContext(parentContext.copyForAsync());
                     return atlasLineageService.getAtlasLineageInfo(guid, LineageDirection.OUTPUT, depth, hideProcess, offset, limit, calculateRemainingVertexCounts);
                 } catch (AtlasBaseException e) {
                     throw new CompletionException(e);

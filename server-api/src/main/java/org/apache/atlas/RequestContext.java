@@ -1036,8 +1036,8 @@ public class RequestContext {
         // Copy trace ID for logging correlation
         copy.traceId = this.traceId;
         copy.requestUri = this.requestUri;
-        // Shared reference — not thread-safe, only parent thread should record metrics (see Javadoc)
-        copy.metricsRegistry = this.metricsRegistry;
+        // metricsRegistry is intentionally NOT copied — AtlasPerfMetrics is not thread-safe.
+        // Worker threads must not write metrics; only the coordinating (parent) thread should.
 
         return copy;
     }

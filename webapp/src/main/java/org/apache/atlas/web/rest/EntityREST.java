@@ -822,14 +822,13 @@ public class EntityREST {
 
         // Capture RequestContext for propagation to async threads
         RequestContext parentContext = RequestContext.get();
-        RequestContext asyncContext = parentContext.copyForAsync();
 
         // Fan-out: Create a future for each GUID
         List<CompletableFuture<AtlasEntityWithExtInfo>> futures = guids.stream()
             .map(guid -> asyncExecutorService.supplyAsync(() -> {
                 try {
-                    // Propagate RequestContext to async thread
-                    RequestContext.setCurrentContext(asyncContext.copyForAsync());
+                    // Each worker gets its own independent copy from the parent context
+                    RequestContext.setCurrentContext(parentContext.copyForAsync());
                     return entitiesStore.getById(guid, minExtInfo, ignoreRelationships);
                 } catch (AtlasBaseException e) {
                     throw new CompletionException(e);

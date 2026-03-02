@@ -133,7 +133,6 @@ public class AsyncBatchProcessor {
         // Capture contexts for propagation
         Map<String, String> mdcContext = MDC.getCopyOfContextMap();
         RequestContext parentContext = RequestContext.get();
-        RequestContext asyncContext = parentContext.copyForAsync();
 
         // Create futures for all items
         List<CompletableFuture<R>> futures = items.stream()
@@ -144,8 +143,8 @@ public class AsyncBatchProcessor {
                     if (mdcContext != null) {
                         MDC.setContextMap(mdcContext);
                     }
-                    // Propagate RequestContext
-                    RequestContext.setCurrentContext(asyncContext.copyForAsync());
+                    // Each worker gets its own independent copy from the parent context
+                    RequestContext.setCurrentContext(parentContext.copyForAsync());
 
                     return processor.apply(item);
                 } catch (Exception e) {
