@@ -125,7 +125,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
             "strict_dynamic_mapping_exception",
             "version_conflict",
             "index_not_found_exception",
-            "invalid_index_name_exception"
+            "invalid_index_name_exception");
     private static final List<String> SOURCE_FIELDS = Arrays.asList(
             ENTITYID, ACTION, DETAIL, USER, CREATED, TIMESTAMP,
             TYPE_NAME, ENTITY_QUALIFIED_NAME, EVENT_KEY, "headers"
