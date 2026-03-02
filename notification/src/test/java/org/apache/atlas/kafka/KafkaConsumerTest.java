@@ -115,17 +115,7 @@ public class KafkaConsumerTest {
 
         AtlasKafkaConsumer consumer =new AtlasKafkaConsumer(NotificationType.HOOK, kafkaConsumer ,false, 100L);
 
-        try {
-            List<AtlasKafkaMessage<HookNotification>> messageList = consumer.receive();
-
-            assertTrue(messageList.size() > 0);
-
-            HookNotification consumedMessage  = messageList.get(0).getMessage();
-
-            fail("Expected VersionMismatchException!");
-        } catch (IncompatibleVersionException e) {
-            e.printStackTrace();
-        }
+        assertThrows(IncompatibleVersionException.class, consumer::receive);
   }
 
 

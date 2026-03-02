@@ -125,7 +125,9 @@ public class AtlasFileSpoolTest extends BaseTest {
 
     @Test
     public void publisherTest() throws IOException, AtlasException, InterruptedException {
-        SpoolConfiguration cfg = getSpoolConfigurationTest();
+        // Use an isolated handler id and clean directory to avoid cross-test interference/flakes.
+        FileUtils.deleteQuietly(new File(spoolDirTest));
+        SpoolConfiguration cfg = getSpoolConfigurationTest(99);
 
         IndexManagement indexManagement = new IndexManagement(cfg);
         indexManagement.init();

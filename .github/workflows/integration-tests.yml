@@ -92,7 +92,7 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           set +e
-          mvn verify \
+          mvn verify -am \
             -Drat.skip=true \
             2>&1 | tee test-output.log
 
@@ -110,6 +110,11 @@ jobs:
           if [ ${#reports[@]} -gt 0 ]; then
             echo "has_reports=true" >> "$GITHUB_OUTPUT"
             echo "Found ${#reports[@]} test report file(s)."
+            {
+              echo "report_paths<<EOF"
+              printf '%s\n' "${reports[@]}"
+              echo "EOF"
+            } >> "$GITHUB_OUTPUT"
           else
             echo "has_reports=false" >> "$GITHUB_OUTPUT"
             echo "No JUnit XML files found under */target/{failsafe,surefire}-reports."
@@ -120,11 +125,10 @@ jobs:
         if: always() && steps.tests.outcome != 'skipped' && steps.discover-test-reports.outputs.has_reports == 'true'
         with:
           name: Integration Test Results
-          path: |
-            **/target/failsafe-reports/TEST-*.xml
-            **/target/surefire-reports/TEST-*.xml
+          path: ${{ steps.discover-test-reports.outputs.report_paths }}
           reporter: java-junit
           fail-on-error: false
+          fail-on-empty: false
 
       - name: Summarize integration test run
         if: always() && steps.tests.outcome != 'skipped'
