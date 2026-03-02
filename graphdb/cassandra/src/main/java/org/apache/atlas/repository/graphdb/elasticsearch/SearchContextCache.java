@@ -5,14 +5,16 @@ import org.apache.atlas.service.redis.RedisService;
 import org.apache.atlas.utils.AtlasPerfMetrics;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Component;
 
 import javax.inject.Inject;
 
 /**
  * SearchContextCache for Cassandra graph backend.
- * Note: @Component removed to avoid Spring bean conflict with janus module's version
- * during the migration period when both modules are on the classpath.
+ * Uses a distinct bean name to coexist with the janus module's SearchContextCache
+ * when both modules are on the classpath (component scan covers org.apache.atlas).
  */
+@Component("cassandraSearchContextCache")
 public class SearchContextCache {
     private static final Logger LOG = LoggerFactory.getLogger(SearchContextCache.class);
     private static RedisService redisService = null;

@@ -121,6 +121,13 @@ public class EntityREST {
         this.repairIndex = repairIndex;
     }
 
+    private void ensureRepairIndexAvailable() throws AtlasBaseException {
+        if (!repairIndex.isAvailable()) {
+            throw new AtlasBaseException(AtlasErrorCode.INVALID_PARAMETERS,
+                    "Index repair operations are not supported with the Cassandra graph backend");
+        }
+    }
+
     /**
      * Fetch complete definition of an entity given its GUID.
      * @param guid GUID for the entity
@@ -1665,6 +1672,7 @@ public class EntityREST {
     @Path("/repairindex")
     @Timed
     public void repairIndex() throws AtlasBaseException {
+        ensureRepairIndexAvailable();
 
         AtlasPerfTracer perf = null;
 
@@ -1852,6 +1860,7 @@ public class EntityREST {
     @POST
     @Path("/guid/{guid}/repairindex")
     public void repairEntityIndex(@PathParam("guid") String guid) throws AtlasBaseException {
+        ensureRepairIndexAvailable();
         Servlets.validateQueryParamLength("guid", guid);
 
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index");
@@ -1877,6 +1886,7 @@ public class EntityREST {
     @POST
     @Path("/guid/bulk/repairindex")
     public void repairEntityIndexBulk(Set<String> guids) throws AtlasBaseException {
+        ensureRepairIndexAvailable();
 
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_REPAIR_INDEX), "Admin Repair Index");
 
@@ -1930,6 +1940,7 @@ public class EntityREST {
     @POST
     @Path("/repairindex/{typename}")
     public void repairIndexByTypeName(@PathParam("typename") String typename, @QueryParam("delay") @DefaultValue("0") int delay, @QueryParam("limit") @DefaultValue("1000") int limit, @QueryParam("offset") @DefaultValue("0") int offset, @QueryParam("batchSize") @DefaultValue("1000") int batchSize) throws AtlasBaseException {
+        ensureRepairIndexAvailable();
         Servlets.validateQueryParamLength("typename", typename);
 
         AtlasPerfTracer perf = null;
@@ -2061,6 +2072,7 @@ public class EntityREST {
     @POST
     @Path("/repairAllClassifications")
     public void repairAllClassifications(@QueryParam("delay") @DefaultValue("0") int delay, @QueryParam("batchSize") @DefaultValue("1000") int batchSize, @QueryParam("fetchSize") @DefaultValue("5000") int fetchSize) throws AtlasBaseException {
+        ensureRepairIndexAvailable();
         AtlasPerfTracer perf = null;
 
         if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
