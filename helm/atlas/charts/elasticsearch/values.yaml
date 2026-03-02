@@ -102,6 +102,23 @@ resources_lite:
     cpu: "1000m"
     memory: "6Gi"
 
+vpa:
+  enabled: true
+  updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+  # minReplicas is always computed as (replicas - 2), floored at 2.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsAndLimits"
+  minAllowed:
+    cpu: "500m"
+    memory: "6Gi"
+  maxAllowed:
+    cpu: "2000m"
+    memory: "8Gi"
+
 podAnnotations: {}
   # iam.amazonaws.com/role: es-cluster
 

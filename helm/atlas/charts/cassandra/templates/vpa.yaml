@@ -1,0 +1,32 @@
+{{- if and .Values.vpa.enabled (ne (.Values.global.Infra_Tier | default "") "Lite") }}
+apiVersion: autoscaling.k8s.io/v1
+kind: VerticalPodAutoscaler
+metadata:
+  name: {{ template "cassandra.fullname" . }}-vpa
+  namespace: {{ .Values.Namespace }}
+spec:
+  {{- if .Values.vpa.recommender.name }}
+  recommenders:
+    - name: {{ .Values.vpa.recommender.name | quote }}
+  {{- end }}
+  targetRef:
+    apiVersion: apps/v1
+    kind: StatefulSet
+    name: {{ template "cassandra.fullname" . }}
+  updatePolicy:
+    updateMode: {{ .Values.vpa.updateMode | default "Off" | quote }}
+    minReplicas: {{ max 2 (sub (int .Values.config.cluster_size) 1) }}
+  resourcePolicy:
+    containerPolicies:
+    - containerName: {{ template "cassandra.fullname" . }}
+      controlledResources:
+        {{- $defaultControlledResources := list "cpu" "memory" }}
+        {{- toYaml (.Values.vpa.controlledResources | default $defaultControlledResources) | nindent 8 }}
+      controlledValues: {{ .Values.vpa.controlledValues | default "RequestsOnly" }}
+      minAllowed:
+        {{- $defaultMinAllowed := dict "cpu" "800m" "memory" "5Gi" }}
+        {{- toYaml (.Values.vpa.minAllowed | default $defaultMinAllowed) | nindent 8 }}
+      maxAllowed:
+        {{- $defaultMaxAllowed := dict "cpu" "3000m" "memory" "10Gi" }}
+        {{- toYaml (.Values.vpa.maxAllowed | default $defaultMaxAllowed) | nindent 8 }}
+{{- end }}
