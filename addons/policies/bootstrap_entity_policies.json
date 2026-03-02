@@ -3872,6 +3872,67 @@
                     "entity-delete"
                 ]
             }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "CRUD_CRITICAL_ASSET_COLLECTION",
+                "qualifiedName": "CRUD_CRITICAL_ASSET_COLLECTION",
+                "description": "Allows admins and api tokens to perform CRUD operations on Critical Asset Collection entities.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:CriticalAssetCollection",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions": [
+                    "entity-create",
+                    "entity-read",
+                    "entity-update",
+                    "entity-delete"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes": {
+                "name": "READ_CRITICAL_ASSET_COLLECTION_TEMPLATE",
+                "qualifiedName": "READ_CRITICAL_ASSET_COLLECTION_TEMPLATE",
+                "description": "Allows admins and api tokens to read Critical Asset Collection Template entities.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers": [],
+                "policyGroups": [],
+                "policyRoles": [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources": [
+                    "entity-type:CriticalAssetCollectionTemplate",
+                    "entity-classification:*",
+                    "entity:*"
+                ],
+                "policyActions": [
+                    "entity-read"
+                ]
+            }
         }
     ]
 }
