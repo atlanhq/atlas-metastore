@@ -50,6 +50,25 @@ After AuthPolicy entities are committed to JanusGraph, there is no mechanism to 
 2. Manual verification: Create a Connection via API and immediately query it — should no longer get 403
 3. Log verification: `lastKnownVersion` should advance from -1 after first refresh; ConnectException on first delta should trigger full load fallback
 
+## Iteration 2: Post-Deployment Fixes
+
+After initial deployment, DataMeshTest showed new intermittent 403 failures (`createView`, `createCol1`, `purgeConnection` failing while earlier steps pass). Root cause: three bugs in our initial implementation.
+
+### Bug 1: PostTransactionHook registered per-entity instead of per-transaction
+`getPreProcessors()` is called once per entity. For 7 bootstrap AuthPolicies in a bulk create, 7 separate `PostTransactionHook` instances were registered, each with its own `AtomicBoolean`. All 7 passed the `compareAndSet` check, scheduling 7 redundant refresh tasks.
+
+**Fix**: Replaced per-entity `AtomicBoolean` with a `ThreadLocal<Boolean>` guard. Only 1 hook is registered per thread (= per transaction). The ThreadLocal resets in `onComplete()` for the next transaction.
+
+### Bug 2: `isConnectException()` too narrow
+OkHttp throws `SocketTimeoutException`, `SocketException`, or `IOException` (not `ConnectException`) when the server isn't ready. The fallback to full cache load never triggered.
+
+**Fix**: Renamed to `isConnectionException()` and broadened to also match `SocketTimeoutException`, `SocketException`, `UnknownHostException`, and message-based patterns ("Connection refused", "Failed to connect").
+
+### Bug 3: 2-second delay too short for ES indexing
+The PostTransactionHook scheduled refresh 2s after commit. If ES hadn't indexed audit events within 2s, the delta load found 0 events.
+
+**Fix**: Increased delay from 2s to 5s.
+
 ## What This Does NOT Change
 
 - ABAC policy loading (separate data/config investigation needed)

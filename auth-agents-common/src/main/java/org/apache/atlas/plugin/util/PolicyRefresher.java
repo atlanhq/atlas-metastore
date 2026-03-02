@@ -370,7 +370,7 @@ public class PolicyRefresher extends Thread {
 				}
 			}
 		} catch (Exception excp) {
-			if (isConnectException(excp) && policiesSetInPlugin && plugIn.getTypeRegistry() != null) {
+			if (isConnectionException(excp) && policiesSetInPlugin && plugIn.getTypeRegistry() != null) {
 				LOG.info("PolicyRefresher(serviceName=" + serviceName + "): ConnectException during delta load (expected during startup). Falling back to full policy load from cache.", excp);
 				try {
 					CachePolicyTransformerImpl transformer = new CachePolicyTransformerImpl(plugIn.getTypeRegistry());
@@ -558,9 +558,17 @@ public class PolicyRefresher extends Thread {
 		}
 	}
 
-	private static boolean isConnectException(Throwable t) {
+	private static boolean isConnectionException(Throwable t) {
 		while (t != null) {
-			if (t instanceof java.net.ConnectException) {
+			if (t instanceof java.net.ConnectException ||
+				t instanceof java.net.SocketTimeoutException ||
+				t instanceof java.net.SocketException ||
+				t instanceof java.net.UnknownHostException) {
+				return true;
+			}
+			String msg = t.getMessage();
+			if (msg != null && (msg.contains("Connection refused") ||
+					msg.contains("Failed to connect"))) {
 				return true;
 			}
 			t = t.getCause();
