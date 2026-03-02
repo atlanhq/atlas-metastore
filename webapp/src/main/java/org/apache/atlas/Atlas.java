@@ -170,7 +170,6 @@ public final class Atlas {
         installLogBridge();
 
         server.start();
-        server.getServer().join();
     }
 
     private static void setApplicationHome() {
