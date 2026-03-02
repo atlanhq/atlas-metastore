@@ -425,7 +425,14 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
                         primitiveAttributes = fetchAttributes.stream()
                                 .filter(attr -> {
                                     AtlasAttribute attribute = entityType.getAttribute(attr);
-                                    return attribute != null && !attribute.isObjectRef();
+                                    if (attribute == null) return false;
+                                    TypeCategory tc = attribute.getAttributeType().getTypeCategory();
+                                    if (tc == TypeCategory.PRIMITIVE || tc == TypeCategory.ENUM) return true;
+                                    if (tc == TypeCategory.ARRAY) {
+                                        TypeCategory elemTc = ((AtlasArrayType) attribute.getAttributeType()).getElementType().getTypeCategory();
+                                        return elemTc == TypeCategory.PRIMITIVE || elemTc == TypeCategory.ENUM;
+                                    }
+                                    return false;
                                 })
                                 .collect(Collectors.toSet());
                     }
