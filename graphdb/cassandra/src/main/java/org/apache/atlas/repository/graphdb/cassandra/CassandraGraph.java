@@ -47,13 +47,20 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private volatile Set<String> cachedESEligibleProperties = null;
     private volatile int         cachedESEligibleFieldCount = -1;
 
-    private final CqlSession        session;
-    private final VertexRepository  vertexRepository;
-    private final EdgeRepository    edgeRepository;
-    private final IndexRepository   indexRepository;
-    private final TypeDefRepository typeDefRepository;
-    private final TypeDefCache      typeDefCache;
-    private final Set<String>       multiProperties;
+    private final CqlSession          session;
+    private final VertexRepository    vertexRepository;
+    private final EdgeRepository      edgeRepository;
+    private final IndexRepository     indexRepository;
+    private final TypeDefRepository   typeDefRepository;
+    private final TypeDefCache        typeDefCache;
+    private final ClaimRepository     claimRepository;
+    private final ESOutboxRepository  esOutboxRepository;
+    private final JobLeaseManager     leaseManager;
+    private final ESOutboxProcessor   esOutboxProcessor;
+    private final RepairJobScheduler  repairJobScheduler;
+    private final Set<String>         multiProperties;
+    private final RuntimeIdStrategy   idStrategy;
+    private final boolean             claimEnabled;
 
     // Transaction buffer: accumulates changes in memory, flushed on commit
     private final ThreadLocal<TransactionBuffer> txBuffer = ThreadLocal.withInitial(TransactionBuffer::new);
@@ -67,13 +74,28 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private final Map<String, CassandraGraphIndex>  graphIndexes = new ConcurrentHashMap<>();
 
     public CassandraGraph(CqlSession session) {
-        this.session           = session;
-        this.vertexRepository  = new VertexRepository(session);
-        this.edgeRepository    = new EdgeRepository(session);
-        this.indexRepository   = new IndexRepository(session);
-        this.typeDefRepository = new TypeDefRepository(session);
-        this.typeDefCache      = new TypeDefCache(typeDefRepository);
-        this.multiProperties   = ConcurrentHashMap.newKeySet();
+        this(session, RuntimeIdStrategy.LEGACY, false);
+    }
+
+    public CassandraGraph(CqlSession session, RuntimeIdStrategy idStrategy, boolean claimEnabled) {
+        this.session             = session;
+        this.vertexRepository    = new VertexRepository(session);
+        this.edgeRepository      = new EdgeRepository(session);
+        this.indexRepository     = new IndexRepository(session);
+        this.typeDefRepository   = new TypeDefRepository(session);
+        this.typeDefCache        = new TypeDefCache(typeDefRepository);
+        this.claimRepository     = new ClaimRepository(session);
+        this.esOutboxRepository  = new ESOutboxRepository(session);
+        this.leaseManager        = new JobLeaseManager(session);
+        this.esOutboxProcessor   = new ESOutboxProcessor(esOutboxRepository, leaseManager);
+        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager);
+        this.multiProperties     = ConcurrentHashMap.newKeySet();
+        this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
+        this.claimEnabled        = claimEnabled;
+
+        // Start background processors
+        this.esOutboxProcessor.start();
+        this.repairJobScheduler.start();
     }
 
     // ---- Vertex operations ----
@@ -310,10 +332,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     public AtlasEdge<CassandraVertex, CassandraEdge> addEdge(AtlasVertex<CassandraVertex, CassandraEdge> outVertex,
                                                                AtlasVertex<CassandraVertex, CassandraEdge> inVertex,
                                                                String label) {
-        String edgeId = UUID.randomUUID().toString();
+        String outId = ((CassandraVertex) outVertex).getIdString();
+        String inId = ((CassandraVertex) inVertex).getIdString();
+        String edgeId = idStrategy == RuntimeIdStrategy.DETERMINISTIC
+                ? GraphIdUtil.deterministicEdgeId(outId, label, inId)
+                : UUID.randomUUID().toString();
         CassandraEdge edge = new CassandraEdge(edgeId,
-                ((CassandraVertex) outVertex).getIdString(),
-                ((CassandraVertex) inVertex).getIdString(),
+                outId,
+                inId,
                 label, this);
         txBuffer.get().addEdge(edge);
         return edge;
@@ -580,19 +606,56 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         TransactionBuffer buffer = txBuffer.get();
 
         try {
-            // Flush new/dirty vertices
-            List<CassandraVertex> newVertices = buffer.getNewVertices();
-            if (!newVertices.isEmpty()) {
-                vertexRepository.batchInsertVertices(newVertices);
+            List<CassandraVertex> originalNewVertices = buffer.getNewVertices();
+            Map<String, String> vertexIdRewrite = resolveClaimedVertexIds(originalNewVertices);
+
+            List<CassandraVertex> newVertices = new ArrayList<>();
+            for (CassandraVertex v : originalNewVertices) {
+                String rewritten = vertexIdRewrite.get(v.getIdString());
+                if (rewritten == null || rewritten.equals(v.getIdString())) {
+                    newVertices.add(v);
+                } else {
+                    LOG.info("commit: duplicate logical vertex detected; skipping insert for tempVertexId={} claimedVertexId={}",
+                            v.getIdString(), rewritten);
+                }
             }
 
+            List<CassandraEdge> newEdges = rewriteEdgesForClaimedVertices(buffer.getNewEdges(), vertexIdRewrite);
+
+            // Flush new vertices + their index entries in a single LOGGED batch.
+            // This eliminates the W2 window where a vertex could exist without its indexes
+            // (making the entity unreachable via GUID or QN lookup).
+            if (!newVertices.isEmpty()) {
+                com.datastax.oss.driver.api.core.cql.BatchStatementBuilder atomicBatch =
+                        com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+                                com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
+
+                for (CassandraVertex v : newVertices) {
+                    atomicBatch.addStatement(vertexRepository.bindInsertVertex(v));
+
+                    List<IndexRepository.IndexEntry> uniqueEntries = new ArrayList<>();
+                    List<IndexRepository.IndexEntry> propertyEntries = new ArrayList<>();
+                    buildIndexEntries(v, uniqueEntries, propertyEntries);
+
+                    for (IndexRepository.IndexEntry e : uniqueEntries) {
+                        atomicBatch.addStatement(indexRepository.bindInsertIndex(e.indexName, e.indexValue, e.vertexId));
+                    }
+                    for (IndexRepository.IndexEntry e : propertyEntries) {
+                        atomicBatch.addStatement(indexRepository.bindInsertPropertyIndex(e.indexName, e.indexValue, e.vertexId));
+                    }
+                }
+
+                session.execute(atomicBatch.build());
+                LOG.info("commit: atomic batch wrote {} new vertices with their index entries", newVertices.size());
+            }
+
+            // Update dirty vertices (these already have indexes; index updates are idempotent overwrites)
             List<CassandraVertex> dirtyVertices = buffer.getDirtyVertices();
             for (CassandraVertex v : dirtyVertices) {
                 vertexRepository.updateVertex(v);
             }
 
             // Flush new edges
-            List<CassandraEdge> newEdges = buffer.getNewEdges();
             if (!newEdges.isEmpty()) {
                 edgeRepository.batchInsertEdges(newEdges);
             }
@@ -690,23 +753,20 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                         removedVertices.size(), vertexIndexRemovals.size(), vertexPropertyIndexRemovals.size());
             }
 
-            // Update index entries for new and dirty vertices
-            List<IndexRepository.IndexEntry> uniqueIndexEntries   = new ArrayList<>();
-            List<IndexRepository.IndexEntry> propertyIndexEntries = new ArrayList<>();
-            for (CassandraVertex v : newVertices) {
-                buildIndexEntries(v, uniqueIndexEntries, propertyIndexEntries);
-            }
+            // Update index entries for dirty vertices (new vertex indexes were already written atomically above)
+            List<IndexRepository.IndexEntry> dirtyUniqueIndexEntries   = new ArrayList<>();
+            List<IndexRepository.IndexEntry> dirtyPropertyIndexEntries = new ArrayList<>();
             for (CassandraVertex v : dirtyVertices) {
-                buildIndexEntries(v, uniqueIndexEntries, propertyIndexEntries);
+                buildIndexEntries(v, dirtyUniqueIndexEntries, dirtyPropertyIndexEntries);
             }
-            LOG.info("commit: {} new vertices, {} dirty vertices, {} unique index entries, {} property index entries",
-                    newVertices.size(), dirtyVertices.size(), uniqueIndexEntries.size(), propertyIndexEntries.size());
-            if (!uniqueIndexEntries.isEmpty()) {
-                indexRepository.batchAddIndexes(uniqueIndexEntries);
-                LOG.info("commit: wrote {} unique index entries to Cassandra", uniqueIndexEntries.size());
+            LOG.info("commit: {} new vertices (atomic), {} dirty vertices, {} dirty unique index entries, {} dirty property index entries",
+                    newVertices.size(), dirtyVertices.size(), dirtyUniqueIndexEntries.size(), dirtyPropertyIndexEntries.size());
+            if (!dirtyUniqueIndexEntries.isEmpty()) {
+                indexRepository.batchAddIndexes(dirtyUniqueIndexEntries);
+                LOG.info("commit: wrote {} dirty unique index entries to Cassandra", dirtyUniqueIndexEntries.size());
             }
-            if (!propertyIndexEntries.isEmpty()) {
-                indexRepository.batchAddPropertyIndexes(propertyIndexEntries);
+            if (!dirtyPropertyIndexEntries.isEmpty()) {
+                indexRepository.batchAddPropertyIndexes(dirtyPropertyIndexEntries);
             }
 
             // Sync TypeDef vertices to the dedicated type_definitions tables
@@ -716,7 +776,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             syncVerticesToElasticsearch(newVertices, dirtyVertices, removedVertices);
 
             // Mark all elements as persisted
-            for (CassandraVertex v : newVertices) {
+            for (CassandraVertex v : originalNewVertices) {
                 v.markPersisted();
             }
             for (CassandraVertex v : dirtyVertices) {
@@ -743,6 +803,71 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         buffer.clear();
         // Clear vertex cache so the next transaction reads fresh from Cassandra
         vertexCache.get().clear();
+    }
+
+    private Map<String, String> resolveClaimedVertexIds(List<CassandraVertex> newVertices) {
+        if (!claimEnabled || newVertices == null || newVertices.isEmpty()) {
+            return Collections.emptyMap();
+        }
+
+        Map<String, String> rewrites = new LinkedHashMap<>();
+        for (CassandraVertex vertex : newVertices) {
+            String qn = extractQualifiedName(vertex);
+            String typeName = vertex.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
+            String identityKey = GraphIdUtil.buildIdentityKey(typeName, qn);
+            if (identityKey == null) {
+                continue;
+            }
+
+            String candidateVertexId = vertex.getIdString();
+            if (idStrategy == RuntimeIdStrategy.DETERMINISTIC) {
+                // Deterministic identity mode currently uses claim-based convergence while preserving
+                // in-transaction generated vertex IDs. Full vertex-ID remapping is introduced separately.
+            }
+
+            String resolvedVertexId = claimRepository.claimOrGet(identityKey, candidateVertexId, "runtime");
+            if (!candidateVertexId.equals(resolvedVertexId)) {
+                rewrites.put(candidateVertexId, resolvedVertexId);
+            }
+        }
+
+        return rewrites;
+    }
+
+    private List<CassandraEdge> rewriteEdgesForClaimedVertices(List<CassandraEdge> original,
+                                                               Map<String, String> vertexIdRewrite) {
+        if (original == null || original.isEmpty() || vertexIdRewrite == null || vertexIdRewrite.isEmpty()) {
+            return original != null ? original : Collections.emptyList();
+        }
+
+        List<CassandraEdge> rewritten = new ArrayList<>(original.size());
+        for (CassandraEdge edge : original) {
+            String outVertexId = vertexIdRewrite.getOrDefault(edge.getOutVertexId(), edge.getOutVertexId());
+            String inVertexId = vertexIdRewrite.getOrDefault(edge.getInVertexId(), edge.getInVertexId());
+
+            if (outVertexId.equals(edge.getOutVertexId()) && inVertexId.equals(edge.getInVertexId())) {
+                rewritten.add(edge);
+                continue;
+            }
+
+            String edgeId = idStrategy == RuntimeIdStrategy.DETERMINISTIC
+                    ? GraphIdUtil.deterministicEdgeId(outVertexId, edge.getLabel(), inVertexId)
+                    : edge.getIdString();
+
+            Map<String, Object> props = new LinkedHashMap<>(edge.getProperties());
+            CassandraEdge re = new CassandraEdge(edgeId, outVertexId, inVertexId, edge.getLabel(), props, this);
+            rewritten.add(re);
+        }
+
+        return rewritten;
+    }
+
+    private String extractQualifiedName(CassandraVertex vertex) {
+        String qn = vertex.getProperty("qualifiedName", String.class);
+        if (qn == null) {
+            qn = vertex.getProperty("Referenceable.qualifiedName", String.class);
+        }
+        return qn;
     }
 
     private void buildIndexEntries(CassandraVertex vertex,
@@ -849,23 +974,18 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                                              List<CassandraVertex> dirtyVertices,
                                              List<CassandraVertex> removedVertices) {
         try {
-            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
-            if (client == null) {
-                LOG.warn("ES client not available, skipping ES sync for {} new + {} dirty + {} removed vertices. "
-                        + "These entities will be missing from search until a reindex is run.",
-                        newVertices.size(), dirtyVertices.size(), removedVertices.size());
-                return;
-            }
-
             String indexName = Constants.VERTEX_INDEX_NAME;
 
             // Collect entity vertices to sync, keyed by vertex ID for retry tracking
             Map<String, CassandraVertex> vertexMap = new LinkedHashMap<>();
+            // Pre-computed filtered JSON for each vertex (used for both ES sync and outbox)
+            Map<String, String> vertexJsonMap = new LinkedHashMap<>();
 
             int skipped = 0;
             for (CassandraVertex v : newVertices) {
                 if (isEntityVertex(v)) {
                     vertexMap.put(v.getIdString(), v);
+                    vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
                     LOG.info("syncVerticesToElasticsearch: NEW vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -877,6 +997,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             for (CassandraVertex v : dirtyVertices) {
                 if (isEntityVertex(v)) {
                     vertexMap.put(v.getIdString(), v);
+                    vertexJsonMap.put(v.getIdString(), AtlasType.toJson(filterPropertiesForES(v.getProperties())));
                     LOG.info("syncVerticesToElasticsearch: DIRTY vertex _id='{}', __typeName='{}', propCount={}",
                             v.getIdString(), v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class),
                             v.getProperties().size());
@@ -901,6 +1022,18 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 return;
             }
 
+            // Write outbox entries to Cassandra BEFORE attempting ES sync.
+            // This guarantees we can retry even if the process crashes during ES sync.
+            writeOutboxEntries(vertexMap, vertexJsonMap, deleteIds);
+
+            // Try synchronous ES sync (happy path)
+            RestClient client = AtlasElasticsearchDatabase.getLowLevelClient();
+            if (client == null) {
+                LOG.warn("ES client not available, {} index + {} delete operations written to outbox for background retry",
+                        vertexMap.size(), deleteIds.size());
+                return;
+            }
+
             // Attempt sync with retries for transient failures
             Set<String> pendingIndexIds  = new LinkedHashSet<>(vertexMap.keySet());
             Set<String> pendingDeleteIds = new LinkedHashSet<>(deleteIds);
@@ -916,8 +1049,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
                 StringBuilder bulkBody = new StringBuilder();
                 for (String vid : pendingIndexIds) {
-                    CassandraVertex v = vertexMap.get(vid);
-                    appendESIndexAction(bulkBody, indexName, v);
+                    bulkBody.append("{\"index\":{\"_index\":\"").append(indexName)
+                            .append("\",\"_id\":\"").append(vid).append("\"}}\n");
+                    bulkBody.append(vertexJsonMap.get(vid)).append("\n");
                 }
                 for (String vid : pendingDeleteIds) {
                     bulkBody.append("{\"delete\":{\"_index\":\"").append(indexName)
@@ -974,12 +1108,25 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 }
             }
 
-            // Log final state of any failures
-            if (!pendingIndexIds.isEmpty() || !pendingDeleteIds.isEmpty()) {
-                LOG.error("ES sync FAILED after {} retries. {} index operations and {} delete operations still pending. "
-                        + "Vertex IDs needing reindex: {}",
-                        ES_SYNC_MAX_RETRIES, pendingIndexIds.size(), pendingDeleteIds.size(),
-                        pendingIndexIds.stream().limit(50).collect(java.util.stream.Collectors.joining(", ")));
+            // Determine which vertices succeeded and clean up their outbox entries
+            Set<String> allPending = new LinkedHashSet<>(vertexMap.keySet());
+            allPending.addAll(deleteIds);
+            Set<String> stillFailing = new LinkedHashSet<>(pendingIndexIds);
+            stillFailing.addAll(pendingDeleteIds);
+            allPending.removeAll(stillFailing);
+            allPending.removeAll(permanentlyFailed);
+
+            if (!allPending.isEmpty()) {
+                esOutboxRepository.batchMarkDone(new ArrayList<>(allPending));
+                LOG.info("ES sync: cleaned up {} outbox entries for successfully synced vertices", allPending.size());
+            }
+
+            // Log final state of any failures (outbox entries remain PENDING for background retry)
+            if (!stillFailing.isEmpty()) {
+                LOG.error("ES sync FAILED after {} retries. {} operations still pending (outbox will retry). "
+                        + "Vertex IDs: {}",
+                        ES_SYNC_MAX_RETRIES, stillFailing.size(),
+                        stillFailing.stream().limit(50).collect(java.util.stream.Collectors.joining(", ")));
             }
             if (!permanentlyFailed.isEmpty()) {
                 LOG.error("ES sync had {} permanently failed items (non-retryable mapping/data errors). "
@@ -991,7 +1138,37 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             Thread.currentThread().interrupt();
             LOG.warn("ES sync interrupted during retry backoff: {}", ie.getMessage());
         } catch (Exception e) {
-            LOG.error("Failed to sync vertices to ES: {}", e.getMessage(), e);
+            LOG.error("Failed to sync vertices to ES (outbox entries preserved for background retry): {}", e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Writes outbox entries to Cassandra for all vertices that need ES sync.
+     * These entries act as a durable record so the background ESOutboxProcessor
+     * can retry any that fail during synchronous sync.
+     */
+    private void writeOutboxEntries(Map<String, CassandraVertex> vertexMap,
+                                     Map<String, String> vertexJsonMap,
+                                     List<String> deleteIds) {
+        try {
+            com.datastax.oss.driver.api.core.cql.BatchStatementBuilder outboxBatch =
+                    com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+                            com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
+
+            for (Map.Entry<String, String> entry : vertexJsonMap.entrySet()) {
+                outboxBatch.addStatement(esOutboxRepository.bindInsert(
+                        entry.getKey(), ESOutboxRepository.ACTION_INDEX, entry.getValue()));
+            }
+            for (String deleteId : deleteIds) {
+                outboxBatch.addStatement(esOutboxRepository.bindInsert(
+                        deleteId, ESOutboxRepository.ACTION_DELETE, null));
+            }
+
+            session.execute(outboxBatch.build());
+            LOG.info("writeOutboxEntries: wrote {} index + {} delete outbox entries",
+                    vertexJsonMap.size(), deleteIds.size());
+        } catch (Exception e) {
+            LOG.error("writeOutboxEntries: failed to write outbox entries: {}", e.getMessage(), e);
         }
     }
 
@@ -1435,6 +1612,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         session.execute("TRUNCATE edges_by_id");
         session.execute("TRUNCATE vertex_index");
         session.execute("TRUNCATE vertex_property_index");
+        session.execute("TRUNCATE entity_claims");
         session.execute("TRUNCATE type_definitions");
         session.execute("TRUNCATE type_definitions_by_category");
         typeDefCache.invalidateAll();

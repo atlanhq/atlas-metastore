@@ -66,6 +66,10 @@ public class MigratorConfig {
     private final boolean skipClassifications;
     private final boolean skipTasks;
 
+    // ID strategy / claim
+    private final IdStrategy idStrategy;
+    private final boolean claimEnabled;
+
     public MigratorConfig(String configPath) throws IOException {
         this.props = new Properties();
         try (FileInputStream fis = new FileInputStream(configPath)) {
@@ -125,6 +129,10 @@ public class MigratorConfig {
         this.skipEsReindex      = getBoolean("migration.skip.es.reindex", false);
         this.skipClassifications = getBoolean("migration.skip.classifications", false);
         this.skipTasks           = getBoolean("migration.skip.tasks", false);
+
+        // ID strategy / claim
+        this.idStrategy = IdStrategy.from(get("migration.id.strategy", "legacy"));
+        this.claimEnabled = getBoolean("migration.claim.enabled", false);
     }
 
     private String get(String key, String defaultValue) {
@@ -184,4 +192,7 @@ public class MigratorConfig {
     public boolean isSkipEsReindex()      { return skipEsReindex; }
     public boolean isSkipClassifications() { return skipClassifications; }
     public boolean isSkipTasks()           { return skipTasks; }
+
+    public IdStrategy getIdStrategy()      { return idStrategy; }
+    public boolean isClaimEnabled()        { return claimEnabled; }
 }

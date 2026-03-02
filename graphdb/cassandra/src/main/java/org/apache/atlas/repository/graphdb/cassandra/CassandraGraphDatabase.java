@@ -93,7 +93,11 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
             LOG.info("Creating CassandraGraph...");
             Configuration configuration = ApplicationProperties.get();
             CqlSession session = CassandraSessionProvider.getSession(configuration);
-            CassandraGraph graph = new CassandraGraph(session);
+            RuntimeIdStrategy idStrategy = RuntimeIdStrategy.from(
+                    configuration.getString("atlas.graph.id.strategy", "legacy"));
+            boolean claimEnabled = configuration.getBoolean("atlas.graph.claim.enabled", false);
+            LOG.info("CassandraGraph config: idStrategy={}, claimEnabled={}", idStrategy, claimEnabled);
+            CassandraGraph graph = new CassandraGraph(session, idStrategy, claimEnabled);
             LOG.info("CassandraGraph created successfully.");
             return graph;
         } catch (AtlasException e) {

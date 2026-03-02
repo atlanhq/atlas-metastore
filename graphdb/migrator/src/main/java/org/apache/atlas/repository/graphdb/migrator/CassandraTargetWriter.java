@@ -6,6 +6,8 @@ import com.datastax.oss.driver.api.core.cql.BatchType;
 import com.datastax.oss.driver.api.core.cql.BatchableStatement;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.ResultSet;
+import com.datastax.oss.driver.api.core.cql.Row;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +46,8 @@ public class CassandraTargetWriter implements AutoCloseable {
     private PreparedStatement insertEdgeByIdStmt;
     private PreparedStatement insertIndexStmt;
     private PreparedStatement insertPropertyIndexStmt;
+    private PreparedStatement insertClaimStmt;
+    private PreparedStatement selectClaimStmt;
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
     private final BlockingQueue<DecodedVertex> queue;
@@ -54,6 +58,7 @@ public class CassandraTargetWriter implements AutoCloseable {
     private final AtomicLong writeAttempts = new AtomicLong(0);
     private final AtomicLong writeErrors   = new AtomicLong(0);
     private static final int WRITE_SAMPLE_LOG_LIMIT = 10;
+    private final ConcurrentMap<Long, String> vertexIdOverrides = new ConcurrentHashMap<>();
 
     public CassandraTargetWriter(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
         this.config        = config;
@@ -159,6 +164,13 @@ public class CassandraTargetWriter implements AutoCloseable {
             "  cardinality text," +
             "  created_at timestamp)");
 
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".entity_claims (" +
+            "  identity_key text PRIMARY KEY," +
+            "  vertex_id text," +
+            "  claimed_at timestamp," +
+            "  source text)");
+
         LOG.info("Target schema created/verified in keyspace '{}'", ks);
     }
 
@@ -188,6 +200,12 @@ public class CassandraTargetWriter implements AutoCloseable {
 
         insertPropertyIndexStmt = targetSession.prepare(
             "INSERT INTO " + ks + ".vertex_property_index (index_name, index_value, vertex_id) VALUES (?, ?, ?)");
+
+        insertClaimStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".entity_claims (identity_key, vertex_id, claimed_at, source) VALUES (?, ?, ?, ?) IF NOT EXISTS");
+
+        selectClaimStmt = targetSession.prepare(
+            "SELECT vertex_id FROM " + ks + ".entity_claims WHERE identity_key = ?");
     }
 
     /**
@@ -303,7 +321,7 @@ public class CassandraTargetWriter implements AutoCloseable {
      * For high-edge vertices, edges are chunked to stay under batch_size_fail_threshold.
      */
     private List<BatchStatement> buildVertexBatches(DecodedVertex vertex) {
-        String vertexId = vertex.getVertexId();
+        String vertexId = resolveVertexId(vertex);
         Instant now = Instant.now();
 
         String propsJson;
@@ -332,7 +350,7 @@ public class CassandraTargetWriter implements AutoCloseable {
         if (edges.size() <= maxEdges) {
             // Everything fits in one batch
             for (DecodedEdge edge : edges) {
-                buildEdgeStatements(edge, now, stmts);
+            buildEdgeStatements(edge, now, stmts);
             }
             return Collections.singletonList(
                 BatchStatement.newInstance(BatchType.UNLOGGED,
@@ -378,14 +396,18 @@ public class CassandraTargetWriter implements AutoCloseable {
         Object edgeState = edge.getProperties().get("__state");
         String state = edgeState != null ? edgeState.toString() : "ACTIVE";
 
+        String outVertexId = resolveVertexId(edge.getOutVertexJgId());
+        String inVertexId = resolveVertexId(edge.getInVertexJgId());
+        String edgeId = DeterministicIdUtil.edgeIdFromJg(edge.getJgRelationId(), config.getIdStrategy());
+
         stmts.add(insertEdgeOutStmt.bind(
-            edge.getOutVertexId(), edge.getLabel(), edge.getEdgeId(),
-            edge.getInVertexId(), edgePropsJson, state, now, now));
+            outVertexId, edge.getLabel(), edgeId,
+            inVertexId, edgePropsJson, state, now, now));
         stmts.add(insertEdgeInStmt.bind(
-            edge.getInVertexId(), edge.getLabel(), edge.getEdgeId(),
-            edge.getOutVertexId(), edgePropsJson, state, now, now));
+            inVertexId, edge.getLabel(), edgeId,
+            outVertexId, edgePropsJson, state, now, now));
         stmts.add(insertEdgeByIdStmt.bind(
-            edge.getEdgeId(), edge.getOutVertexId(), edge.getInVertexId(),
+            edgeId, outVertexId, inVertexId,
             edge.getLabel(), edgePropsJson, state, now, now));
     }
 
@@ -394,7 +416,7 @@ public class CassandraTargetWriter implements AutoCloseable {
      * Returns the number of index entries added.
      */
     private int buildIndexStatements(DecodedVertex vertex, List<BoundStatement> stmts) {
-        String vertexId = vertex.getVertexId();
+        String vertexId = resolveVertexId(vertex);
         Map<String, Object> props = vertex.getProperties();
         int indexCount = 0;
 
@@ -441,6 +463,65 @@ public class CassandraTargetWriter implements AutoCloseable {
         }
 
         return indexCount;
+    }
+
+    private String resolveVertexId(DecodedVertex vertex) {
+        String computed = DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), config.getIdStrategy());
+        if (!config.isClaimEnabled()) {
+            return computed;
+        }
+
+        Object qnObj = vertex.getProperties().get("qualifiedName");
+        if (qnObj == null) {
+            qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
+        }
+        String identityKey = DeterministicIdUtil.buildIdentityKey(vertex.getTypeName(),
+                                                                   qnObj != null ? String.valueOf(qnObj) : null);
+        if (identityKey == null) {
+            return computed;
+        }
+
+        String claimedVertexId = claimVertexId(identityKey, computed);
+        if (!claimedVertexId.equals(computed)) {
+            vertexIdOverrides.put(vertex.getJgVertexId(), claimedVertexId);
+            LOG.info("Vertex claim redirect: jgVertexId={} computedId={} claimedId={} identityKey={}",
+                    vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+        }
+
+        return claimedVertexId;
+    }
+
+    private String resolveVertexId(long jgVertexId) {
+        String overridden = vertexIdOverrides.get(jgVertexId);
+        if (overridden != null) {
+            return overridden;
+        }
+        return DeterministicIdUtil.vertexIdFromJg(jgVertexId, config.getIdStrategy());
+    }
+
+    private String claimVertexId(String identityKey, String candidateVertexId) {
+        try {
+            Row appliedRow = targetSession.execute(insertClaimStmt.bind(
+                    identityKey, candidateVertexId, Instant.now(), "migrator")).one();
+            if (appliedRow != null && appliedRow.getBoolean("[applied]")) {
+                return candidateVertexId;
+            }
+        } catch (Exception e) {
+            LOG.warn("claimVertexId insert failed for identityKey={} candidateVertexId={}: {}",
+                    identityKey, candidateVertexId, e.getMessage());
+        }
+
+        try {
+            ResultSet rs = targetSession.execute(selectClaimStmt.bind(identityKey));
+            Row row = rs.one();
+            if (row != null && row.getString("vertex_id") != null) {
+                return row.getString("vertex_id");
+            }
+        } catch (Exception e) {
+            LOG.warn("claimVertexId select failed for identityKey={}: {}", identityKey, e.getMessage());
+        }
+
+        return candidateVertexId;
     }
 
     @Override

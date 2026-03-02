@@ -194,6 +194,16 @@ public class CassandraSessionProvider {
             ")"
         );
 
+        // Identity claims table: enforces one winner vertex_id per logical entity identity key
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS entity_claims (" +
+            "  identity_key text PRIMARY KEY," +
+            "  vertex_id text," +
+            "  claimed_at timestamp," +
+            "  source text" +
+            ")"
+        );
+
         // Schema registry for property keys
         session.execute(
             "CREATE TABLE IF NOT EXISTS schema_registry (" +
@@ -223,6 +233,46 @@ public class CassandraSessionProvider {
             "  vertex_id text," +
             "  PRIMARY KEY ((type_category), type_name)" +
             ") WITH CLUSTERING ORDER BY (type_name ASC)"
+        );
+
+        // ES outbox: tracks vertices that need ES sync. Partitioned by status so that
+        // "SELECT ... WHERE status = 'PENDING'" is a direct partition scan (no ALLOW FILTERING).
+        // This scales to millions of rows — scan cost is O(PENDING) not O(total).
+        // gc_grace_seconds=3600 (1 hour) keeps tombstones from completed entries short-lived.
+        // All rows are written with a 7-day TTL for auto-cleanup of stuck entries.
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS es_outbox (" +
+            "  status text," +
+            "  vertex_id text," +
+            "  es_action text," +
+            "  properties_json text," +
+            "  attempt_count int," +
+            "  created_at timestamp," +
+            "  last_attempted_at timestamp," +
+            "  PRIMARY KEY ((status), vertex_id)" +
+            ") WITH gc_grace_seconds = 3600"
+        );
+
+        // Distributed lease coordination: background jobs use LWT INSERT IF NOT EXISTS
+        // with TTL to acquire exclusive leases. Crashed pods auto-release via TTL expiry.
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS job_leases (" +
+            "  job_name text PRIMARY KEY," +
+            "  owner text," +
+            "  acquired_at timestamp" +
+            ")"
+        );
+
+        // Cursor tracking for progressive background scans. Stores the last processed
+        // Cassandra token so that orphan cleanup can resume after crash or restart.
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS repair_progress (" +
+            "  job_name text PRIMARY KEY," +
+            "  last_token bigint," +
+            "  last_run_at timestamp," +
+            "  rows_processed bigint," +
+            "  cycle_complete boolean" +
+            ")"
         );
 
         LOG.info("Cassandra graph tables created/verified.");

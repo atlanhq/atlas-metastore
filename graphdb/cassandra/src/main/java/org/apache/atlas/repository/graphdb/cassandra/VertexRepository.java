@@ -125,23 +125,31 @@ public class VertexRepository {
         BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.LOGGED);
 
         for (CassandraVertex vertex : vertices) {
-            Map<String, Object> props = vertex.getProperties();
-            String typeName = props.containsKey("__typeName") ? String.valueOf(props.get("__typeName")) : null;
-            String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
-            Instant now     = Instant.now();
-
-            batchBuilder.addStatement(insertVertexStmt.bind(
-                vertex.getIdString(),
-                AtlasType.toJson(props),
-                vertex.getVertexLabel(),
-                typeName,
-                state,
-                now,
-                now
-            ));
+            batchBuilder.addStatement(bindInsertVertex(vertex));
         }
 
         session.execute(batchBuilder.build());
+    }
+
+    /**
+     * Returns a bound INSERT statement for the given vertex without executing it.
+     * Used by CassandraGraph.commit() to combine vertex + index writes in a single LOGGED batch.
+     */
+    public BoundStatement bindInsertVertex(CassandraVertex vertex) {
+        Map<String, Object> props = vertex.getProperties();
+        String typeName = props.containsKey("__typeName") ? String.valueOf(props.get("__typeName")) : null;
+        String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
+        Instant now     = Instant.now();
+
+        return insertVertexStmt.bind(
+            vertex.getIdString(),
+            AtlasType.toJson(props),
+            vertex.getVertexLabel(),
+            typeName,
+            state,
+            now,
+            now
+        );
     }
 
     @SuppressWarnings("unchecked")
