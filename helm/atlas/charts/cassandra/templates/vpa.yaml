@@ -5,6 +5,10 @@ metadata:
   name: {{ template "cassandra.fullname" . }}-vpa
   namespace: {{ .Values.Namespace }}
 spec:
+  {{- if .Values.vpa.recommender.name }}
+  recommenders:
+    - name: {{ .Values.vpa.recommender.name | quote }}
+  {{- end }}
   targetRef:
     apiVersion: apps/v1
     kind: StatefulSet
