@@ -81,8 +81,14 @@ public class OpenLineageEventService {
             // Parse and validate OpenLineage event
             JsonNode rootNode = objectMapper.readTree(eventJson);
 
+            // Unwrap envelope if event is wrapped in metadata/payload structure
+            if (rootNode.has("payload") && rootNode.has("metadata")) {
+                LOG.debug("Detected envelope format, unwrapping payload");
+                rootNode = rootNode.get("payload");
+            }
+
             // Extract required fields according to OpenLineage spec
-            String eventType = getRequiredField(rootNode, "eventType");
+            String eventType = getFieldWithDefault(rootNode, "eventType", "GENERIC_OL");
             String eventTime = getRequiredField(rootNode, "eventTime");
 
             JsonNode runNode = rootNode.get("run");
@@ -113,7 +119,7 @@ public class OpenLineageEventService {
             event.setJobName(jobName);
             event.setRunId(runId);
             event.setEventTime(parsedEventTime);
-            event.setEvent(eventJson);
+            event.setEvent(rootNode.toString());
             event.setStatus(eventType);
 
             // Store event
@@ -192,6 +198,18 @@ public class OpenLineageEventService {
         String value = fieldNode.asText();
         if (StringUtils.isEmpty(value)) {
             throw new AtlasBaseException("Required field cannot be empty: " + fieldName);
+        }
+        return value;
+    }
+
+    private String getFieldWithDefault(JsonNode node, String fieldName, String defaultValue) {
+        JsonNode fieldNode = node.get(fieldName);
+        if (fieldNode == null || fieldNode.isNull()) {
+            return defaultValue;
+        }
+        String value = fieldNode.asText();
+        if (StringUtils.isEmpty(value)) {
+            return defaultValue;
         }
         return value;
     }
