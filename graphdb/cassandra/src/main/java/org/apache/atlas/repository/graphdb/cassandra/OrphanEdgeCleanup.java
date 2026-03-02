@@ -103,9 +103,10 @@ public class OrphanEdgeCleanup implements Runnable {
 
                 if (edgeId == null || outVertexId == null || inVertexId == null) continue;
 
-                // Check if both endpoint vertices exist
-                boolean outExists = vertexRepository.getVertex(outVertexId, graph) != null;
-                boolean inExists = vertexRepository.getVertex(inVertexId, graph) != null;
+                // Check if both endpoint vertices exist (using LOCAL_QUORUM to avoid
+                // false negatives from eventual consistency on recently-written vertices)
+                boolean outExists = vertexRepository.vertexExistsQuorum(outVertexId);
+                boolean inExists = vertexRepository.vertexExistsQuorum(inVertexId);
 
                 if (!outExists || !inExists) {
                     orphansFound++;

@@ -607,24 +607,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
         try {
             List<CassandraVertex> originalNewVertices = buffer.getNewVertices();
-            Map<String, String> vertexIdRewrite = resolveClaimedVertexIds(originalNewVertices);
 
-            List<CassandraVertex> newVertices = new ArrayList<>();
-            for (CassandraVertex v : originalNewVertices) {
-                String rewritten = vertexIdRewrite.get(v.getIdString());
-                if (rewritten == null || rewritten.equals(v.getIdString())) {
-                    newVertices.add(v);
-                } else {
-                    LOG.info("commit: duplicate logical vertex detected; skipping insert for tempVertexId={} claimedVertexId={}",
-                            v.getIdString(), rewritten);
-                }
-            }
-
-            List<CassandraEdge> newEdges = rewriteEdgesForClaimedVertices(buffer.getNewEdges(), vertexIdRewrite);
-
-            // Flush new vertices + their index entries in a single LOGGED batch.
-            // This eliminates the W2 window where a vertex could exist without its indexes
-            // (making the entity unreachable via GUID or QN lookup).
+            // Phase 1: Write ALL new vertices + their index entries in a single LOGGED batch.
+            // Claims are resolved AFTER this batch so that the vertex exists before the claim
+            // references it — prevents ghost claims pointing to non-existent vertices on crash.
+            List<CassandraVertex> newVertices = originalNewVertices;
             if (!newVertices.isEmpty()) {
                 com.datastax.oss.driver.api.core.cql.BatchStatementBuilder atomicBatch =
                         com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
@@ -648,6 +635,28 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 session.execute(atomicBatch.build());
                 LOG.info("commit: atomic batch wrote {} new vertices with their index entries", newVertices.size());
             }
+
+            // Phase 2: Resolve claims AFTER vertex commit — claim now points to an existing vertex.
+            // If another pod already claimed this identity, we get back their vertex_id and rewrite
+            // our edges to point there. The now-orphaned temp vertex will be cleaned by OrphanVertexCleanup.
+            Map<String, String> vertexIdRewrite = resolveClaimedVertexIds(originalNewVertices);
+
+            // Filter out duplicate vertices that lost the claim race
+            if (!vertexIdRewrite.isEmpty()) {
+                List<CassandraVertex> keptVertices = new ArrayList<>();
+                for (CassandraVertex v : newVertices) {
+                    String rewritten = vertexIdRewrite.get(v.getIdString());
+                    if (rewritten == null || rewritten.equals(v.getIdString())) {
+                        keptVertices.add(v);
+                    } else {
+                        LOG.info("commit: duplicate logical vertex detected; temp vertex will become orphan. tempVertexId={} claimedVertexId={}",
+                                v.getIdString(), rewritten);
+                    }
+                }
+                newVertices = keptVertices;
+            }
+
+            List<CassandraEdge> newEdges = rewriteEdgesForClaimedVertices(buffer.getNewEdges(), vertexIdRewrite);
 
             // Update dirty vertices (these already have indexes; index updates are idempotent overwrites)
             List<CassandraVertex> dirtyVertices = buffer.getDirtyVertices();
@@ -852,7 +861,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             String edgeId = idStrategy == RuntimeIdStrategy.DETERMINISTIC
                     ? GraphIdUtil.deterministicEdgeId(outVertexId, edge.getLabel(), inVertexId)
-                    : edge.getIdString();
+                    : UUID.randomUUID().toString();
 
             Map<String, Object> props = new LinkedHashMap<>(edge.getProperties());
             CassandraEdge re = new CassandraEdge(edgeId, outVertexId, inVertexId, edge.getLabel(), props, this);

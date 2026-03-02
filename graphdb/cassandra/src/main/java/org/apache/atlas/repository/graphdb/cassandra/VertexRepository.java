@@ -76,6 +76,19 @@ public class VertexRepository {
     }
 
     /**
+     * Reads a vertex using LOCAL_QUORUM consistency. Use this for correctness-critical
+     * checks (e.g., orphan edge cleanup) where a recently-written vertex must be visible.
+     */
+    public boolean vertexExistsQuorum(String vertexId) {
+        SimpleStatement stmt = SimpleStatement.builder("SELECT vertex_id FROM vertices WHERE vertex_id = ?")
+                .addPositionalValue(vertexId)
+                .setConsistencyLevel(com.datastax.oss.driver.api.core.ConsistencyLevel.LOCAL_QUORUM)
+                .build();
+        ResultSet rs = session.execute(stmt);
+        return rs.one() != null;
+    }
+
+    /**
      * Fetch multiple vertices concurrently using async Cassandra queries.
      * All queries are fired in parallel and results collected, reducing
      * wall-clock time from N sequential round-trips to ~1 round-trip.

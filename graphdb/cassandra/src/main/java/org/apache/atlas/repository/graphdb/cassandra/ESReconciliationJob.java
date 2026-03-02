@@ -101,9 +101,10 @@ public class ESReconciliationJob implements Runnable {
                     String propsJson = row.getString("properties");
                     if (vertexId == null || propsJson == null) continue;
 
-                    // Extract __guid from properties
+                    // Extract __guid from properties, skip soft-deleted vertices
                     String guid = extractGuid(propsJson);
                     if (guid == null) continue;
+                    if (isDeleted(propsJson)) continue;
 
                     guidBatch.add(guid);
                     guidToVertexId.put(guid, vertexId);
@@ -157,6 +158,20 @@ public class ESReconciliationJob implements Runnable {
             return guid != null ? String.valueOf(guid) : null;
         } catch (Exception e) {
             return null;
+        }
+    }
+
+    private boolean isDeleted(String propsJson) {
+        try {
+            // Fast string check before full parse
+            if (!propsJson.contains("DELETED")) return false;
+            @SuppressWarnings("unchecked")
+            Map<String, Object> props = AtlasType.fromJson(propsJson, Map.class);
+            if (props == null) return false;
+            Object state = props.get("__state");
+            return state != null && "DELETED".equals(String.valueOf(state));
+        } catch (Exception e) {
+            return false;
         }
     }
 

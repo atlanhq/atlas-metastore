@@ -194,14 +194,15 @@ public class CassandraSessionProvider {
             ")"
         );
 
-        // Identity claims table: enforces one winner vertex_id per logical entity identity key
+        // Identity claims table: enforces one winner vertex_id per logical entity identity key.
+        // TTL of 30 days prevents unbounded growth and allows re-creation of deleted entities.
         session.execute(
             "CREATE TABLE IF NOT EXISTS entity_claims (" +
             "  identity_key text PRIMARY KEY," +
             "  vertex_id text," +
             "  claimed_at timestamp," +
             "  source text" +
-            ")"
+            ") WITH default_time_to_live = 2592000"
         );
 
         // Schema registry for property keys

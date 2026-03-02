@@ -125,7 +125,7 @@ public class JobLeaseManager {
         if (hostname != null && !hostname.isEmpty()) {
             return hostname;
         }
-        // Fallback for local dev: use PID
-        return "local-" + ProcessHandle.current().pid();
+        // Fallback for local dev: use UUID fragment (PID collides in containers where it's always 1)
+        return "local-" + java.util.UUID.randomUUID().toString().substring(0, 8);
     }
 }

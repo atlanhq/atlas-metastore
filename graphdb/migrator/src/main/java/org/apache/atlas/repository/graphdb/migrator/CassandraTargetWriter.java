@@ -350,7 +350,7 @@ public class CassandraTargetWriter implements AutoCloseable {
         if (edges.size() <= maxEdges) {
             // Everything fits in one batch
             for (DecodedEdge edge : edges) {
-            buildEdgeStatements(edge, now, stmts);
+                buildEdgeStatements(edge, now, stmts);
             }
             return Collections.singletonList(
                 BatchStatement.newInstance(BatchType.UNLOGGED,

@@ -103,6 +103,10 @@ public class OrphanVertexCleanup implements Runnable {
                     Object guidObj = props.get("__guid");
                     if (guidObj == null) continue;
 
+                    // Skip soft-deleted vertices — repairing their index would resurrect them
+                    Object stateObj = props.get("__state");
+                    if (stateObj != null && "DELETED".equals(String.valueOf(stateObj))) continue;
+
                     String guid = String.valueOf(guidObj);
 
                     // Check if __guid_idx entry exists
