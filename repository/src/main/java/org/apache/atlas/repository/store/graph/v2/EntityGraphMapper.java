@@ -1990,12 +1990,7 @@ public class EntityGraphMapper {
                 AtlasRelationship relationship = new AtlasRelationship(relationshipName, relationshipAttributes);
 
                 if (createEdge) {
-                    MetricRecorder getOrCreateMetric = RequestContext.get().startMetricRecord("getEdgeUsingRelationship.getOrCreate");
-                    try {
-                        newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
-                    } finally {
-                        RequestContext.get().endMetricRecord(getOrCreateMetric);
-                    }
+                    newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
                     boolean isCreated = graphHelper.getCreatedTime(newEdge) == RequestContext.get().getRequestTime();
 
                     if (isCreated) {
