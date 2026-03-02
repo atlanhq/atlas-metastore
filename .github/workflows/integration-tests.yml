@@ -86,36 +86,33 @@ jobs:
 
       - name: Run integration tests
         id: tests
-        continue-on-error: true
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
-          set -o pipefail
-          mvn verify -pl webapp -am \
+          set +e
+          mvn verify \
             -Drat.skip=true \
             2>&1 | tee test-output.log
 
           # Capture exit code from mvn (not tee)
-          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit "${exit_code}"
 
       - name: Discover test reports
         id: discover-test-reports
         if: always() && steps.tests.outcome != 'skipped'
         run: |
-          shopt -s nullglob
-          reports=(
-            webapp/target/failsafe-reports/TEST-*.xml
-            webapp/target/surefire-reports/TEST-*.xml
-          )
+          mapfile -t reports < <(find . -type f \( -path "*/target/failsafe-reports/TEST-*.xml" -o -path "*/target/surefire-reports/TEST-*.xml" \))
 
           if [ ${#reports[@]} -gt 0 ]; then
             echo "has_reports=true" >> "$GITHUB_OUTPUT"
             echo "Found ${#reports[@]} test report file(s)."
           else
             echo "has_reports=false" >> "$GITHUB_OUTPUT"
-            echo "No JUnit XML files found under webapp/target/{failsafe,surefire}-reports."
+            echo "No JUnit XML files found under */target/{failsafe,surefire}-reports."
           fi
 
       - name: Publish test results
@@ -124,8 +121,8 @@ jobs:
         with:
           name: Integration Test Results
           path: |
-            webapp/target/failsafe-reports/TEST-*.xml
-            webapp/target/surefire-reports/TEST-*.xml
+            **/target/failsafe-reports/TEST-*.xml
+            **/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
 
@@ -133,8 +130,12 @@ jobs:
         if: always() && steps.tests.outcome != 'skipped'
         run: |
           echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
-          if [ -f webapp/target/failsafe-reports/failsafe-summary.xml ]; then
-            cat webapp/target/failsafe-reports/failsafe-summary.xml >> $GITHUB_STEP_SUMMARY
+          mapfile -t summaries < <(find . -type f -path "*/target/failsafe-reports/failsafe-summary.xml")
+          if [ ${#summaries[@]} -gt 0 ]; then
+            for summary in "${summaries[@]}"; do
+              echo "### ${summary}" >> $GITHUB_STEP_SUMMARY
+              cat "${summary}" >> $GITHUB_STEP_SUMMARY
+            done
           else
             echo "No failsafe summary found. Check artifacts for raw reports." >> $GITHUB_STEP_SUMMARY
           fi
@@ -145,13 +146,7 @@ jobs:
         with:
           name: integration-test-reports-${{ github.run_id }}
           path: |
-            webapp/target/failsafe-reports/
-            webapp/target/surefire-reports/
+            **/target/failsafe-reports/
+            **/target/surefire-reports/
             test-output.log
           retention-days: 14
-
-      - name: Fail if tests failed
-        if: steps.tests.outputs.exit_code != '0'
-        run: |
-          echo "Integration tests failed with exit code ${{ steps.tests.outputs.exit_code }}"
-          exit 1

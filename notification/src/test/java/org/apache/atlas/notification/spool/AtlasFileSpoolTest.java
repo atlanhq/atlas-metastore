@@ -135,8 +135,14 @@ public class AtlasFileSpoolTest extends BaseTest {
 
         indexManagement = new IndexManagement(cfg);
         indexManagement.init();
-        List<IndexRecord> records = indexManagement.getIndexFileManager().getRecords();
-        TimeUnit.SECONDS.sleep(4);
+        List<IndexRecord> records = new ArrayList<>();
+        for (int i = 0; i < 20; i++) { // wait up to ~10s for index records to be visible
+            records = indexManagement.getIndexFileManager().getRecords();
+            if (!records.isEmpty()) {
+                break;
+            }
+            TimeUnit.MILLISECONDS.sleep(500);
+        }
         Assertions.assertFalse(records.isEmpty(), "Expected at least one spool record to publish");
 
         MessageHandlerSpy messageHandler = new MessageHandlerSpy();
@@ -146,7 +152,7 @@ public class AtlasFileSpoolTest extends BaseTest {
         publisher.setDrain();
         Assertions.assertTrue(ret);
         TimeUnit.SECONDS.sleep(4);
-        assertTrue(messageHandler.getMessages().size() >= 0);
+        assertTrue(messageHandler.getMessages().size() > 0, "Expected at least one published message");
     }
 
     @Test

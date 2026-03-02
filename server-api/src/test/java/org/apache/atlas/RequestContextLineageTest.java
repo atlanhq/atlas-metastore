@@ -1,10 +1,10 @@
 package org.apache.atlas;
 
-import org.testng.annotations.AfterMethod;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for RequestContext lineage label functionality
@@ -13,7 +13,7 @@ public class RequestContextLineageTest {
 
     private RequestContext requestContext;
 
-    @BeforeMethod
+    @BeforeEach
     public void setUp() {
         // Create a fresh RequestContext for each test to prevent state bleeding
         // Use RequestContext.get() which uses ThreadLocal pattern
@@ -21,7 +21,7 @@ public class RequestContextLineageTest {
         requestContext.clearCache(); // Ensure clean state
     }
 
-    @AfterMethod
+    @AfterEach
     public void tearDown() {
         // Clean up to prevent state bleeding between tests
         RequestContext.clear(); // Clear the ThreadLocal
