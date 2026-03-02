@@ -175,38 +175,25 @@ public class AtlasEntityComparator {
                 }
             }
 
-            if (context.isReplaceClassifications()) {
-                if (!Objects.equals(currVal, newVal)) {
-                    diffEntity.setClassifications(newVal);
+            Map<String, List<AtlasClassification>> diff;
 
-                    sectionsWithDiff++;
-
-                    if (findOnlyFirstDiff) {
-                        return new AtlasEntityDiffResult(diffEntity, true, false, false);
-                    }
-                }
+            if (context.isReplaceClassifications() || context.isReplaceTags()) {
+                diff = AtlasEntityUtils.getTagsDiffForReplace(updatedEntity.getGuid(),
+                        updatedEntity.getClassifications(),
+                        currVal);
             } else {
+                diff = AtlasEntityUtils.getTagsDiffForAppend(updatedEntity.getGuid(),
+                        updatedEntity.getAddOrUpdateClassifications(),
+                        currVal,
+                        updatedEntity.getRemoveClassifications());
+            }
 
-                Map<String, List<AtlasClassification>> diff;
+            if (MapUtils.isNotEmpty(diff) && (diff.containsKey(PROCESS_DELETE) || diff.containsKey(PROCESS_UPDATE) || diff.containsKey(PROCESS_ADD))) {
+                sectionsWithDiff++;
+                RequestContext.get().addTagsDiff(updatedEntity.getGuid(), diff);
 
-                if (context.isReplaceTags()) {
-                    diff = AtlasEntityUtils.getTagsDiffForReplace(updatedEntity.getGuid(),
-                            updatedEntity.getClassifications(),
-                            currVal);
-                } else {
-                    diff = AtlasEntityUtils.getTagsDiffForAppend(updatedEntity.getGuid(),
-                            updatedEntity.getAddOrUpdateClassifications(),
-                            currVal,
-                            updatedEntity.getRemoveClassifications());
-                }
-
-                if (MapUtils.isNotEmpty(diff) && (diff.containsKey(PROCESS_DELETE) || diff.containsKey(PROCESS_UPDATE) || diff.containsKey(PROCESS_ADD))) {
-                    sectionsWithDiff++;
-                    RequestContext.get().addTagsDiff(updatedEntity.getGuid(), diff);
-
-                    if (findOnlyFirstDiff) {
-                        return new AtlasEntityDiffResult(diffEntity, true, false, false);
-                    }
+                if (findOnlyFirstDiff) {
+                    return new AtlasEntityDiffResult(diffEntity, true, false, false);
                 }
             }
         }

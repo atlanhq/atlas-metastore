@@ -470,37 +470,31 @@ public class EntityGraphMapper {
 
                     setCustomAttributes(vertex, updatedEntity);
 
-                    if (bulkRequestContext.isReplaceClassifications()) {
-                        deleteClassifications(guid);
-                        handleAddClassifications(context, guid, updatedEntity.getClassifications());
+                    Map<String, List<AtlasClassification>> diff = RequestContext.get().getAndRemoveTagsDiff(guid);
 
-                    } else {
-                        Map<String, List<AtlasClassification>> diff = RequestContext.get().getAndRemoveTagsDiff(guid);
-
-                        if (MapUtils.isNotEmpty(diff)) {
-                            List<AtlasClassification> finalTags = new ArrayList<>();
-                            if (diff.containsKey(PROCESS_DELETE)) {
-                                for (AtlasClassification tag : diff.get(PROCESS_DELETE)) {
-                                    handleDirectDeleteClassification(updatedEntity.getGuid(), tag.getTypeName());
-                                }
+                    if (MapUtils.isNotEmpty(diff)) {
+                        List<AtlasClassification> finalTags = new ArrayList<>();
+                        if (diff.containsKey(PROCESS_DELETE)) {
+                            for (AtlasClassification tag : diff.get(PROCESS_DELETE)) {
+                                handleDirectDeleteClassification(updatedEntity.getGuid(), tag.getTypeName());
                             }
-
-                            if (diff.containsKey(PROCESS_UPDATE)) {
-                                finalTags.addAll(diff.get(PROCESS_UPDATE));
-                                handleUpdateClassifications(context, updatedEntity.getGuid(), diff.get(PROCESS_UPDATE));
-                            }
-
-                            if (diff.containsKey(PROCESS_ADD)) {
-                                finalTags.addAll(diff.get(PROCESS_ADD));
-                                handleAddClassifications(context, updatedEntity.getGuid(), diff.get(PROCESS_ADD));
-                            }
-
-                            if (diff.containsKey(PROCESS_NOOP)) {
-                                finalTags.addAll(diff.get(PROCESS_NOOP));
-                            }
-
-                            RequestContext.get().getDifferentialEntity(guid).setClassifications(finalTags);  // For notifications
                         }
+
+                        if (diff.containsKey(PROCESS_UPDATE)) {
+                            finalTags.addAll(diff.get(PROCESS_UPDATE));
+                            handleUpdateClassifications(context, updatedEntity.getGuid(), diff.get(PROCESS_UPDATE));
+                        }
+
+                        if (diff.containsKey(PROCESS_ADD)) {
+                            finalTags.addAll(diff.get(PROCESS_ADD));
+                            handleAddClassifications(context, updatedEntity.getGuid(), diff.get(PROCESS_ADD));
+                        }
+
+                        if (diff.containsKey(PROCESS_NOOP)) {
+                            finalTags.addAll(diff.get(PROCESS_NOOP));
+                        }
+
+                        RequestContext.get().getDifferentialEntity(guid).setClassifications(finalTags);  // For notifications
                     }
 
                     if (bulkRequestContext.isReplaceBusinessAttributes()) {
