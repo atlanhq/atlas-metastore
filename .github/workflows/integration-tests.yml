@@ -84,7 +84,7 @@ jobs:
           docker --version
           docker info
 
-      - name: Run integration tests
+      - name: Run Tests
         id: tests
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
