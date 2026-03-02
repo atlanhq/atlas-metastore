@@ -125,7 +125,9 @@ jobs:
         if: always() && steps.tests.outcome != 'skipped' && steps.discover-test-reports.outputs.has_reports == 'true'
         with:
           name: Integration Test Results
-          path: ${{ steps.discover-test-reports.outputs.report_paths }}
+          path: |
+            **/target/failsafe-reports/TEST-*.xml
+            **/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
           fail-on-empty: false
