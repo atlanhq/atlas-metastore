@@ -69,6 +69,11 @@ public class RangerBasePlugin {
 	private final DownloadTrigger             accessTrigger  = new DownloadTrigger();
 	private       PolicyRefresher             refresher;
 	private       RangerPolicyEngine          policyEngine;
+
+	public PolicyRefresher getRefresher() {
+		return refresher;
+	}
+
 	private       RangerAuthContext           currentAuthContext;
 	private       RangerAccessResultProcessor resultProcessor;
 	private       RangerRoles                 roles;

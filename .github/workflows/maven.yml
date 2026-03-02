@@ -29,6 +29,7 @@ on:
       - lg-async-producer
       - ms-428-delete-by-conn
       - ms-664-fix-audit-search
+      - ms-699-policy-refresh-race-condition
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
@@ -682,6 +683,7 @@ jobs:
     if: |
       always() &&
       !startsWith(github.ref_name, 'ring-') &&
+      github.ref_name != 'ms-699-policy-refresh-race-condition' &&
       needs.helm-lint.result == 'success' && (
         (needs.build.result == 'success' && (needs.smoke-test.result == 'success' || needs.smoke-test.result == 'skipped')) ||
         (needs.build.result == 'skipped' && needs.changes.outputs.helm == 'true')

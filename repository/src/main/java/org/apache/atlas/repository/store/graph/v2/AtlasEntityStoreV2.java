@@ -105,6 +105,10 @@ import org.springframework.stereotype.Component;
 import javax.inject.Inject;
 import java.io.InputStream;
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversalSource;
@@ -137,6 +141,12 @@ import static org.apache.atlas.type.Constants.*;
 public class AtlasEntityStoreV2 implements AtlasEntityStore {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasEntityStoreV2.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("store.EntityStore");
+
+    private static final ScheduledExecutorService POLICY_REFRESH_EXECUTOR = Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread t = new Thread(r, "policy-refresh-trigger");
+        t.setDaemon(true);
+        return t;
+    });
 
     static final boolean DEFERRED_ACTION_ENABLED = AtlasConfiguration.TASKS_USE_ENABLED.getBoolean();
 
@@ -2453,6 +2463,24 @@ public class AtlasEntityStoreV2 implements AtlasEntityStore {
 
             case POLICY_ENTITY_TYPE:
                 preProcessors.add(new AuthPolicyPreProcessor(graph, typeRegistry, entityRetriever));
+
+                AtomicBoolean policyRefreshScheduled = new AtomicBoolean(false);
+                new GraphTransactionInterceptor.PostTransactionHook() {
+                    @Override
+                    public void onComplete(boolean isSuccess) {
+                        if (isSuccess && policyRefreshScheduled.compareAndSet(false, true)) {
+                            POLICY_REFRESH_EXECUTOR.schedule(() -> {
+                                try {
+                                    LOG.info("PostTransactionHook: triggering async policy refresh after AuthPolicy commit");
+                                    Class<?> authorizerClass = Class.forName("org.apache.atlas.authorization.atlas.authorizer.RangerAtlasAuthorizer");
+                                    authorizerClass.getMethod("triggerPolicyRefresh").invoke(null);
+                                } catch (Exception e) {
+                                    LOG.warn("PostTransactionHook: failed to trigger policy refresh", e);
+                                }
+                            }, 2, TimeUnit.SECONDS);
+                        }
+                    }
+                };
                 break;
 
             case STAKEHOLDER_ENTITY_TYPE:

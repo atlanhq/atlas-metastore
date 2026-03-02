@@ -53,6 +53,8 @@ import org.apache.atlas.plugin.policyengine.RangerAccessResourceImpl;
 import org.apache.atlas.plugin.policyengine.RangerAccessResult;
 import org.apache.atlas.plugin.policyresourcematcher.RangerPolicyResourceMatcher;
 import org.apache.atlas.plugin.service.RangerBasePlugin;
+import org.apache.atlas.plugin.util.DownloadTrigger;
+import org.apache.atlas.plugin.util.PolicyRefresher;
 import org.apache.atlas.plugin.util.RangerPerfTracer;
 
 import java.util.Collection;
@@ -142,6 +144,30 @@ public class RangerAtlasAuthorizer implements AtlasAuthorizer {
     public void cleanUp() {
         if (LOG.isDebugEnabled()) {
             LOG.debug("==> cleanUp ");
+        }
+    }
+
+    public static void triggerPolicyRefresh() {
+        RangerBasePlugin plugin = atlasPlugin;
+        if (plugin == null) {
+            LOG.debug("triggerPolicyRefresh: atlasPlugin not initialized yet, skipping");
+            return;
+        }
+
+        PolicyRefresher refresher = plugin.getRefresher();
+        if (refresher == null) {
+            LOG.debug("triggerPolicyRefresh: PolicyRefresher not initialized yet, skipping");
+            return;
+        }
+
+        try {
+            LOG.info("triggerPolicyRefresh: triggering immediate policy refresh after AuthPolicy commit");
+            refresher.syncPoliciesWithAdmin(new DownloadTrigger());
+        } catch (InterruptedException e) {
+            LOG.warn("triggerPolicyRefresh: interrupted while waiting for policy refresh", e);
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            LOG.warn("triggerPolicyRefresh: failed to trigger policy refresh", e);
         }
     }
 

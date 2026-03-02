@@ -370,8 +370,22 @@ public class PolicyRefresher extends Thread {
 				}
 			}
 		} catch (Exception excp) {
-			LOG.error("PolicyRefresher(serviceName=" + serviceName + "): failed to refresh policies. Will continue to use last known version of policies (" + lastKnownVersion + ")", excp);
-			svcPolicies = null;
+			if (isConnectException(excp) && policiesSetInPlugin && plugIn.getTypeRegistry() != null) {
+				LOG.info("PolicyRefresher(serviceName=" + serviceName + "): ConnectException during delta load (expected during startup). Falling back to full policy load from cache.", excp);
+				try {
+					CachePolicyTransformerImpl transformer = new CachePolicyTransformerImpl(plugIn.getTypeRegistry());
+					RangerRESTUtils restUtils = new RangerRESTUtils();
+					svcPolicies = transformer.getPoliciesAll(serviceName,
+							restUtils.getPluginId(serviceName, plugIn.getAppId()),
+							lastUpdatedTimeInMillis);
+				} catch (Exception fallbackExcp) {
+					LOG.error("PolicyRefresher(serviceName=" + serviceName + "): fallback full load also failed.", fallbackExcp);
+					svcPolicies = null;
+				}
+			} else {
+				LOG.error("PolicyRefresher(serviceName=" + serviceName + "): failed to refresh policies. Will continue to use last known version of policies (" + lastKnownVersion + ")", excp);
+				svcPolicies = null;
+			}
 		}
 
 		RangerPerfTracer.log(perf);
@@ -542,6 +556,16 @@ public class PolicyRefresher extends Thread {
 		if(LOG.isDebugEnabled()) {
 			LOG.debug("<== PolicyRefresher(serviceName=" + serviceName + ").loadRoles()");
 		}
+	}
+
+	private static boolean isConnectException(Throwable t) {
+		while (t != null) {
+			if (t instanceof java.net.ConnectException) {
+				return true;
+			}
+			t = t.getCause();
+		}
+		return false;
 	}
 
 	private void loadUserStore() {
