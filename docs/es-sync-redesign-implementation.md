@@ -154,6 +154,14 @@ The existing `ATLAS_ES_DLQ` carries JanusGraph vertex index mutations with a dif
 
 `getAllAttributesForAllTagsForRepair` requires the entity GUID to separate direct vs propagated tags. The GUID cannot be reliably derived from the tag list alone (propagated tags have the source entity's GUID, not the target entity's). Including the GUID in the DLQ message ensures the consumer can repair without graph lookups.
 
+### Why `Tag.isPropagated()` instead of `entityGuid` comparison?
+
+The old `getAllAttributesForAllTagsForRepair` method used `sourceAssetGuid.equals(tag.getEntityGuid())` to separate direct vs propagated tags. This depends on `entityGuid` being correctly deserialized from `tag_meta_json` — which can fail if the JSON is incomplete or malformed. The new `reconcileDenormAttributes` method uses `Tag.isPropagated()`, which reads the `is_propagated` boolean column stored directly in Cassandra's `tags_by_id` table. This is always set correctly at write time and doesn't depend on JSON deserialization.
+
+### Why batch async Cassandra reads?
+
+The old approach made N sequential Cassandra point reads (one `getAllClassificationsForVertex` per vertex). For a batch of 200 vertices, that's 200 sequential round-trips. The new `getAllTagsByVertexIds` uses `CqlSession.executeAsync()` to fire all reads concurrently, resolving in ~1 round-trip time. This significantly reduces latency for propagation tasks processing large batches.
+
 ### Why parse ES bulk response for partial failures?
 
 ES bulk API returns HTTP 200 even when some documents fail. The previous code treated 200 as success and silently dropped per-doc failures. Now we parse the `items` array in the bulk response to identify which specific documents failed, enabling targeted DLQ emission and accurate success/failure counts.

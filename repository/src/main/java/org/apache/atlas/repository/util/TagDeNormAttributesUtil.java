@@ -3,6 +3,8 @@ package org.apache.atlas.repository.util;
 import joptsimple.internal.Strings;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.model.Tag;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.repository.graph.IFullTextMapper;
 import org.apache.atlas.type.AtlasClassificationType;
@@ -82,6 +84,69 @@ public class TagDeNormAttributesUtil {
         return deNormAttrs;
     }
 
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    /**
+     * Computes all 5 denorm attributes from Tag objects read directly from Cassandra.
+     * Uses Tag.isPropagated() (the is_propagated boolean column in Cassandra) to determine
+     * direct vs propagated, avoiding the fragile entityGuid comparison that can fail when
+     * entityGuid is not set during JSON deserialization.
+     *
+     * @param tags The complete list of non-deleted tags for a vertex, as read from Cassandra
+     * @param typeRegistry The type registry for classification text computation
+     * @param fullTextMapperV2 The full text mapper for classification text computation
+     * @return A map of all 5 denorm attributes
+     */
+    public static Map<String, Object> reconcileDenormAttributes(List<Tag> tags,
+                                                                AtlasTypeRegistry typeRegistry,
+                                                                IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
+        Map<String, Object> deNormAttrs = new HashMap<>();
+
+        String classificationTextKey = Strings.EMPTY;
+        String classificationNamesKey = Strings.EMPTY;
+        String propagatedClassificationNamesKey = Strings.EMPTY;
+
+        List<String> traitNames = Collections.EMPTY_LIST;
+        List<String> propagatedTraitNames = Collections.EMPTY_LIST;
+
+        if (CollectionUtils.isNotEmpty(tags)) {
+            traitNames = new ArrayList<>();
+            propagatedTraitNames = new ArrayList<>();
+            List<AtlasClassification> allClassifications = new ArrayList<>(tags.size());
+
+            for (Tag tag : tags) {
+                AtlasClassification classification = OBJECT_MAPPER.convertValue(tag.getTagMetaJson(), AtlasClassification.class);
+                allClassifications.add(classification);
+
+                if (tag.isPropagated()) {
+                    propagatedTraitNames.add(tag.getTagTypeName());
+                } else {
+                    traitNames.add(tag.getTagTypeName());
+                }
+            }
+
+            classificationTextKey = getClassificationTextKey(allClassifications, typeRegistry, fullTextMapperV2);
+
+            if (!traitNames.isEmpty()) {
+                classificationNamesKey = getDelimitedClassificationNames(traitNames);
+            }
+
+            if (!propagatedTraitNames.isEmpty()) {
+                StringBuilder sb = new StringBuilder();
+                propagatedTraitNames.forEach(tagName -> sb.append(CLASSIFICATION_NAME_DELIMITER).append(tagName));
+                propagatedClassificationNamesKey = sb.toString();
+            }
+        }
+
+        deNormAttrs.put(CLASSIFICATION_TEXT_KEY, classificationTextKey);
+        deNormAttrs.put(TRAIT_NAMES_PROPERTY_KEY, traitNames);
+        deNormAttrs.put(CLASSIFICATION_NAMES_KEY, classificationNamesKey);
+        deNormAttrs.put(PROPAGATED_TRAIT_NAMES_PROPERTY_KEY, propagatedTraitNames);
+        deNormAttrs.put(PROPAGATED_CLASSIFICATION_NAMES_KEY, propagatedClassificationNamesKey);
+
+        return deNormAttrs;
+    }
+
     private static String getClassificationTextKey(List<AtlasClassification> tags, AtlasTypeRegistry typeRegistry, IFullTextMapper fullTextMapperV2) throws AtlasBaseException {
         if (typeRegistry == null) {
             LOG.error("typeRegistry can not be null");
@@ -97,7 +162,11 @@ public class TagDeNormAttributesUtil {
             final AtlasClassificationType classificationType = typeRegistry.getClassificationTypeByName(currentTag.getTypeName());
 
             sb.append(currentTag.getTypeName()).append(FULL_TEXT_DELIMITER);
-            fullTextMapperV2.mapAttributes(classificationType, currentTag.getAttributes(), null, sb, null, new HashSet<>(), true);
+            if (classificationType != null) {
+                fullTextMapperV2.mapAttributes(classificationType, currentTag.getAttributes(), null, sb, null, new HashSet<>(), true);
+            } else {
+                LOG.warn("Classification type not found in registry: {}. Skipping attribute mapping.", currentTag.getTypeName());
+            }
         }
 
         return sb.toString();
