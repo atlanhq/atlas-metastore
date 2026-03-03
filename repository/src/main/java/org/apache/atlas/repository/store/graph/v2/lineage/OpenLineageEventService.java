@@ -224,8 +224,29 @@ public class OpenLineageEventService {
 
     protected Date parseEventTime(String eventTimeStr) throws AtlasBaseException {
         try {
-            // Try ISO 8601 format
-            return ISO_DATE_FORMAT.parse(eventTimeStr);
+            // Normalize: replace timezone offset (+00:00) with Z and truncate microseconds to milliseconds
+            String normalized = eventTimeStr;
+
+            // Handle timezone offset format: +00:00 or -05:00 -> convert to Z (UTC only) or parse with offset
+            if (normalized.matches(".*[+-]\\d{2}:\\d{2}$")) {
+                if (normalized.endsWith("+00:00")) {
+                    normalized = normalized.substring(0, normalized.length() - 6) + "Z";
+                } else {
+                    // For non-UTC offsets, use java.time to parse and convert
+                    java.time.OffsetDateTime odt = java.time.OffsetDateTime.parse(normalized);
+                    return Date.from(odt.toInstant());
+                }
+            }
+
+            // Truncate microseconds (6 digits) to milliseconds (3 digits) before Z
+            if (normalized.matches(".*\\.\\d{4,}Z$")) {
+                int dotIdx = normalized.lastIndexOf('.');
+                String fractional = normalized.substring(dotIdx + 1, normalized.length() - 1);
+                String millis = fractional.length() >= 3 ? fractional.substring(0, 3) : fractional;
+                normalized = normalized.substring(0, dotIdx + 1) + millis + "Z";
+            }
+
+            return ISO_DATE_FORMAT.parse(normalized);
         } catch (ParseException e) {
             // Try alternative format without milliseconds
             try {
