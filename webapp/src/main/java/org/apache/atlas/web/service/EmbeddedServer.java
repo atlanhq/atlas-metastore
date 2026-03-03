@@ -5,6 +5,7 @@ import io.micrometer.core.instrument.binder.jetty.JettyServerThreadPoolMetrics;
 import org.apache.atlas.AtlasConfiguration;
 import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.exception.AtlasBaseException;
+import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -79,8 +80,8 @@ public class EmbeddedServer {
         }
     }
 
-    public EmbeddedServer(String host, int port, String atlasPath) throws IOException {
-          int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
+    public EmbeddedServer(String host, int port, String path) throws IOException {
+        int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
         LinkedBlockingQueue<Runnable> queue         = new LinkedBlockingQueue<>(queueSize);
         int                           minThreads    = AtlasConfiguration.WEBSERVER_MIN_THREADS.getInt();
         int                           maxThreads    = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
@@ -109,7 +110,22 @@ public class EmbeddedServer {
         return webAppContext;
     }
 
-     public static EmbeddedServer newServer(String host, int port, String path, boolean secure)
+    protected Connector getConnector(String host, int port) throws IOException {
+        HttpConfiguration http_config = new HttpConfiguration();
+        // this is to enable large header sizes when Kerberos is enabled with AD
+        final int bufferSize = AtlasConfiguration.WEBSERVER_REQUEST_BUFFER_SIZE.getInt();;
+        http_config.setResponseHeaderSize(bufferSize);
+        http_config.setRequestHeaderSize(bufferSize);
+        http_config.setSendServerVersion(false);
+
+        ServerConnector connector = new ServerConnector(server, new HttpConnectionFactory(http_config));
+        connector.setPort(port);
+        connector.setHost(host);
+        return connector;
+    }
+
+
+    public static EmbeddedServer newServer(String host, int port, String path, boolean secure)
             throws IOException {
         if (secure) {
             return new SecureEmbeddedServer(host, port, path);
@@ -118,7 +134,7 @@ public class EmbeddedServer {
         }
     }
 
-public void start() throws AtlasBaseException {
+    public void start() throws AtlasBaseException {
         try {
             final WebAppContext mainAppContext = getWebAppContext(atlasPath);
             LOG.info("Start method called for setting up fast lane slim stack servlet and context...");
