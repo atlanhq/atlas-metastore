@@ -217,6 +217,8 @@ public void start() throws AtlasBaseException {
                         Log.info("Fast-Lane ServletHolder configured with Jersey and Spring integration.");
 
                         // Health Check
+                        fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
+//                      @Override
                         protected void doGet(javax.servlet.http.HttpServletRequest req, javax.servlet.http.HttpServletResponse resp) 
                                 throws java.io.IOException {
                                 resp.setContentType("application/json");
