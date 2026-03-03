@@ -105,7 +105,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      app: {{ template "name" . }}
+      app: {{ .Values.vpa.recommender.name }}
       app.kubernetes.io/component: recommender
       release: {{ .Release.Name }}
 {{- end }}
@@ -130,13 +130,13 @@ spec:
   revisionHistoryLimit: 2
   selector:
     matchLabels:
-      app: {{ template "name" . }}
+      app: {{ .Values.vpa.recommender.name }}
       app.kubernetes.io/component: recommender
       release: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: {{ template "name" . }}
+        app: {{ .Values.vpa.recommender.name }}
         app.kubernetes.io/component: recommender
         release: {{ .Release.Name }}
       {{- with .Values.vpa.recommender.podAnnotations }}
