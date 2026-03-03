@@ -97,6 +97,9 @@ public class OpenLineageEventService {
             }
             String runId = getRequiredField(runNode, "runId");
 
+            // Extract root run ID from parent facet; fall back to runId if no parent
+            String rootRunId = extractRootRunId(runNode, runId);
+
             JsonNode jobNode = rootNode.get("job");
             String jobName = null;
             String producer = null;
@@ -112,12 +115,13 @@ public class OpenLineageEventService {
             Date parsedEventTime = parseEventTime(eventTime);
             UUID eventId = buildTimeUuidFromEventTime(parsedEventTime);
 
-            // Create OpenLineageEvent object
+            // Create OpenLineageEvent object — partition by rootRunId so all events
+            // in a DAG run can be fetched together
             OpenLineageEvent event = new OpenLineageEvent();
             event.setEventId(eventId);
             event.setSource(producer);
             event.setJobName(jobName);
-            event.setRunId(runId);
+            event.setRunId(rootRunId);
             event.setEventTime(parsedEventTime);
             event.setEvent(rootNode.toString());
             event.setStatus(eventType);
@@ -125,8 +129,8 @@ public class OpenLineageEventService {
             // Store event
             eventDAO.storeEvent(event);
 
-            LOG.info("Successfully processed OpenLineage event: runId={}, eventType={}, jobName={}",
-                    runId, eventType, jobName);
+            LOG.info("Successfully processed OpenLineage event: runId={}, rootRunId={}, eventType={}, jobName={}",
+                    runId, rootRunId, eventType, jobName);
         } catch (AtlasBaseException e) {
             throw e;
         } catch (Exception e) {
@@ -188,6 +192,52 @@ public class OpenLineageEventService {
      */
     public boolean isHealthy() {
         return eventDAO.isHealthy();
+    }
+
+    /**
+     * Extract root run ID from the parent run facet.
+     * Hierarchy: run.facets.parent.root.runId > run.facets.parent.run.runId > runId
+     */
+    private String extractRootRunId(JsonNode runNode, String fallbackRunId) {
+        try {
+            JsonNode facetsNode = runNode.get("facets");
+            if (facetsNode == null) {
+                return fallbackRunId;
+            }
+
+            JsonNode parentNode = facetsNode.get("parent");
+            if (parentNode == null) {
+                return fallbackRunId;
+            }
+
+            // Try root.runId first (top-level DAG run)
+            JsonNode rootNode = parentNode.get("root");
+            if (rootNode != null) {
+                JsonNode rootRunNode = rootNode.get("runId");
+                if (rootRunNode != null && !rootRunNode.isNull()) {
+                    String rootRunId = rootRunNode.asText();
+                    if (StringUtils.isNotEmpty(rootRunId)) {
+                        return rootRunId;
+                    }
+                }
+            }
+
+            // Fall back to parent.run.runId (direct parent)
+            JsonNode parentRunNode = parentNode.get("run");
+            if (parentRunNode != null) {
+                JsonNode parentRunId = parentRunNode.get("runId");
+                if (parentRunId != null && !parentRunId.isNull()) {
+                    String pRunId = parentRunId.asText();
+                    if (StringUtils.isNotEmpty(pRunId)) {
+                        return pRunId;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            LOG.warn("Failed to extract root run ID from parent facet, using runId as fallback", e);
+        }
+
+        return fallbackRunId;
     }
 
     private String getRequiredField(JsonNode node, String fieldName) throws AtlasBaseException {
