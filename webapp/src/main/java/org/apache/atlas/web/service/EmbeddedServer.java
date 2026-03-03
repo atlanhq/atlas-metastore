@@ -364,6 +364,7 @@ public class EmbeddedServer {
                 "org.apache.atlas.web.rest.MeshEntityAssetLinkREST;" +
                 "org.apache.atlas.web.rest.MigrationREST;" +
                 "org.apache.atlas.web.rest.ModelREST;" +
+                "org.apache.atlas.web.rest.PurposeDiscoveryREST;" +
                 "org.apache.atlas.web.rest.RelationshipREST;" +
                 "org.apache.atlas.web.rest.RepairREST;" +
                 "org.apache.atlas.web.rest.TaskREST;" +
@@ -386,9 +387,9 @@ public class EmbeddedServer {
                             if ("jersey-servlet".equals(holder.getName()) || 
                                (holder.getClassName() != null && holder.getClassName().contains("SpringServlet"))) {
                                 LOG.info("Injecting Java 17 ASM workaround into Main App Context: " + holder.getName());
-                                holder.setInitParameter("com.sun.jersey.config.property.packages", "");
-                                holder.setInitParameter("com.sun.jersey.config.property.classnames", jerseyClassNames);
-                                holder.setInitParameter("com.sun.jersey.config.feature.DisableWadl", "true");
+                                // holder.setInitParameter("com.sun.jersey.config.property.packages", "");
+                                // holder.setInitParameter("com.sun.jersey.config.property.classnames", jerseyClassNames);
+                                // holder.setInitParameter("com.sun.jersey.config.feature.DisableWadl", "true");
                             }
                         }
                     } catch (Exception e) {
@@ -496,7 +497,7 @@ public class EmbeddedServer {
             Object mainSpringContext = null;
             try {
                 server.start(); 
-                LOG.info("Server started. Main initialization and Context handlers sync block ");
+                LOG.info("Server started. Entering main initialization and Context handlers sync block ");
                 int attempts = 0;
                 while (mainSpringContext == null && attempts < 10) {
                     mainSpringContext = mainAppContext.getServletContext().getAttribute(
@@ -588,8 +589,8 @@ public class EmbeddedServer {
                                 // ** TARGETED MAPPINGS - ALL FROM ORIGINAL FILE INCLUDED **
                                 fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
                                 fastLaneContext.addServlet(v2Holder, "/meta/*");
-                                fastLaneContext.addServlet(v2Holder, "/atlas/v1/search/*");
-                                fastLaneContext.addServlet(v2Holder, "/atlas/lineage/*");
+                                //fastLaneContext.addServlet(v2Holder, "/atlas/v1/search/*");
+                                //fastLaneContext.addServlet(v2Holder, "/atlas/lineage/*");
                                 fastLaneContext.addServlet(v2Holder, "/atlas/admin/*"); // Restored Mapping
 
                                 LOG.info("Fast-Lane ClassLoader synchronized with Main App.");
