@@ -33,6 +33,7 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 
 public class EmbeddedServer {
     public static final Logger LOG = LoggerFactory.getLogger(EmbeddedServer.class);
+    public static final String ATLAS_DEFAULT_BIND_ADDRESS = "0.0.0.0";
     protected final Server server;
     protected String atlasPath;
 
@@ -79,27 +80,26 @@ public class EmbeddedServer {
     }
 
     public EmbeddedServer(String host, int port, String atlasPath) throws IOException {
-        int queueSize = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
-        int minThreads = AtlasConfiguration.WEBSERVER_MIN_THREADS.getInt();
-        int maxThreads = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
-        long keepAlive = AtlasConfiguration.WEBSERVER_KEEPALIVE_SECONDS.getLong();
-        
-        ThreadPoolExecutor executor = new ThreadPoolExecutor(minThreads, maxThreads, keepAlive, TimeUnit.SECONDS, new LinkedBlockingQueue<>(queueSize));
-        executor.allowCoreThreadTimeOut(true);
+          int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
+        LinkedBlockingQueue<Runnable> queue         = new LinkedBlockingQueue<>(queueSize);
+        int                           minThreads    = AtlasConfiguration.WEBSERVER_MIN_THREADS.getInt();
+        int                           maxThreads    = AtlasConfiguration.WEBSERVER_MAX_THREADS.getInt();
+        int                           reservedThreads    = AtlasConfiguration.WEBSERVER_RESERVED_THREADS.getInt();
+        long                          keepAliveTime = AtlasConfiguration.WEBSERVER_KEEPALIVE_SECONDS.getLong();
+        ThreadPoolExecutor            executor      = new ThreadPoolExecutor(maxThreads, maxThreads, keepAliveTime, TimeUnit.SECONDS, queue);
+        ExecutorThreadPool            pool          = new ExecutorThreadPool(executor, reservedThreads);
 
-        this.server = new Server(new ExecutorThreadPool(executor));
-        this.atlasPath = atlasPath;
+        server = new Server(pool);
+        atlasPath = path;
 
-        HttpConfiguration http_config = new HttpConfiguration();
-        http_config.setSendServerVersion(false);
-        ServerConnector connector = new ServerConnector(server, new HttpConnectionFactory(http_config));
-        connector.setPort(port);
-        connector.setHost(host);
+        Connector connector = getConnector(host, port);
+        connector.addBean(new JettyConnectionMetrics(getMeterRegistry()));
+        new JettyServerThreadPoolMetrics(pool, Collections.emptyList()).bindTo(getMeterRegistry());
         server.addConnector(connector);
 
-        getMeterRegistry().bindTo(server);
-        new JettyServerThreadPoolMetrics(executor, Collections.emptyList()).bindTo(getMeterRegistry());
-        new JettyConnectionMetrics(server).bindTo(getMeterRegistry());
+        WebAppContext application = getWebAppContext(path);
+        server.setHandler(application);
+
     }
 
     protected WebAppContext getWebAppContext(String path) {
@@ -107,6 +107,15 @@ public class EmbeddedServer {
         webAppContext.setContextPath("/");
         webAppContext.setWar(path);
         return webAppContext;
+    }
+
+     public static EmbeddedServer newServer(String host, int port, String path, boolean secure)
+            throws IOException {
+        if (secure) {
+            return new SecureEmbeddedServer(host, port, path);
+        } else {
+            return new EmbeddedServer(host, port, path);
+        }
     }
 
 public void start() throws AtlasBaseException {
@@ -162,7 +171,7 @@ public void start() throws AtlasBaseException {
             // Start Server with ONLY the Main Context
             ContextHandlerCollection contexts = new ContextHandlerCollection();
             contexts.setHandlers(new Handler[] {mainAppContext});
-            LoG.info("Configuring Jetty with Main App Context...");
+            LOG.info("Configuring Jetty with Main App Context...");
             server.setHandler(contexts);
 
             LOG.info("Starting Jetty with Main App Context...");
@@ -186,7 +195,7 @@ public void start() throws AtlasBaseException {
                         
                         WebApplicationContext spring = (WebApplicationContext) mainSpringContext;
                         ClassLoader webAppClassLoader = spring.getClassLoader();
-                        Log.info("Fast-Lane will use main context's WebApp ClassLoader: {}", webAppClassLoader);
+                        LOG.info("Fast-Lane will use main context's WebApp ClassLoader: {}", webAppClassLoader);
                         // Create and Configure Fast-Lane AFTER Spring is ready
                         ServletContextHandler fastLaneContext = new ServletContextHandler(ServletContextHandler.SESSIONS);
                         fastLaneContext.setContextPath("/api");
@@ -214,7 +223,7 @@ public void start() throws AtlasBaseException {
                         fastLaneContext.addServlet(v2Holder, "/atlas/v1/search/*");
                         fastLaneContext.addServlet(v2Holder, "/atlas/lineage/*");
                         fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
-                        Log.info("Fast-Lane ServletHolder configured with Jersey and Spring integration.");
+                        LOG.info("Fast-Lane ServletHolder configured with Jersey and Spring integration.");
 
                         // Health Check
                         fastLaneContext.addServlet(new org.eclipse.jetty.servlet.ServletHolder(new javax.servlet.http.HttpServlet() {
@@ -229,7 +238,7 @@ public void start() throws AtlasBaseException {
 
                         // STEP 4: Add to collection and start the new context
                         contexts.addHandler(fastLaneContext);
-                        Log.info("Fast-Lane context added to Jetty. Starting Fast-Lane context...");
+                        LOG.info("Fast-Lane context added to Jetty. Starting Fast-Lane context...");
                         fastLaneContext.start();
                         
                         LOG.info("V2 Fast-Lane Optimization Path Successfully Injected and Started.");
@@ -243,6 +252,10 @@ public void start() throws AtlasBaseException {
         } catch (Exception e) {
             throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         }
+    }
+
+    public Server getServer() {
+        return this.server;
     }
 
     public void stop() {
