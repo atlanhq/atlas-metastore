@@ -35,6 +35,7 @@ import static org.apache.atlas.service.metrics.MetricUtils.getMeterRegistry;
 public class EmbeddedServer {
     public static final Logger LOG = LoggerFactory.getLogger(EmbeddedServer.class);
     public static final String ATLAS_DEFAULT_BIND_ADDRESS = "0.0.0.0";
+    private static final String SPRING_CONTEXT_KEY = "org.springframework.web.context.WebApplicationContext.ROOT";
     protected final Server server;
     protected String atlasPath;
 
@@ -243,7 +244,7 @@ public class EmbeddedServer {
             throw new AtlasBaseException(AtlasErrorCode.EMBEDDED_SERVER_START, e);
         }
     }
-    
+
     public Server getServer() {
         return this.server;
     }
