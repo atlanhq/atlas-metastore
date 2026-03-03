@@ -3803,26 +3803,16 @@ public class EntityGraphMapper {
 
 
     private AtlasEntityHeader constructHeader(AtlasEntity entity, AtlasVertex vertex, AtlasEntityType entityType) throws AtlasBaseException {
-        Set<String> writtenAttrs = getWrittenAttributeNames(entity, entityType);
-
-        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, writtenAttrs);
+        // Always read ALL attributes from the vertex for the response header, regardless of
+        // SKIP_OPTIONAL_ATTRIBUTES. The skip optimization only applies to the write path —
+        // the response must reflect the full persisted state of the entity.
+        Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
+        AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, attributeMap.keySet());
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
         }
 
         return header;
-    }
-
-    private Set<String> getWrittenAttributeNames(AtlasEntity entity, AtlasEntityType entityType) {
-        Set<String> names = new HashSet<>();
-        Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
-        for (Map.Entry<String, AtlasAttribute> entry : attributeMap.entrySet()) {
-            if (!shouldSkipAttributeMapping(entry.getValue(), entity)) {
-                names.add(entry.getKey());
-            }
-        }
-
-        return names;
     }
 
     private void updateInConsistentOwnedMapVertices(AttributeMutationContext ctx, AtlasMapType mapType, Object val) {
