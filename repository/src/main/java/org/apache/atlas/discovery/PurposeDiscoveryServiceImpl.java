@@ -139,29 +139,51 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
                     request.getUsername(), request.getGroups());
 
             // Step 1: Get unique Purpose GUIDs from AuthPolicies
+<<<<<<< HEAD
             PurposeGuidsResult guidsResult = getUniquePurposeGuids(request);
 
             if (CollectionUtils.isEmpty(guidsResult.guids)) {
+=======
+            Set<String> purposeGuids = getUniquePurposeGuids(request);
+
+            if (CollectionUtils.isEmpty(purposeGuids)) {
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
                 LOG.debug("No purposes found for user: {}", request.getUsername());
                 return PurposeUserResponse.empty();
             }
 
+<<<<<<< HEAD
             long totalCount = guidsResult.guids.size();
             LOG.debug("Found {} unique purpose GUIDs for user: {}", totalCount, request.getUsername());
 
             // Step 2: Apply pagination to GUIDs
             List<String> paginatedGuids = applyPagination(new ArrayList<>(guidsResult.guids),
+=======
+            long totalCount = purposeGuids.size();
+            LOG.debug("Found {} unique purpose GUIDs for user: {}", totalCount, request.getUsername());
+
+            // Step 2: Apply pagination to GUIDs
+            List<String> paginatedGuids = applyPagination(new ArrayList<>(purposeGuids),
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
                     request.getOffset(), request.getLimit());
 
             if (paginatedGuids.isEmpty()) {
                 return new PurposeUserResponse(Collections.emptyList(), totalCount,
+<<<<<<< HEAD
                         request.getLimit(), request.getOffset(), guidsResult.approximateCount);
+=======
+                        request.getLimit(), request.getOffset());
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             }
 
             // Step 3: Fetch Purpose details
             List<AtlasEntityHeader> purposes = fetchPurposeDetails(paginatedGuids, request.getAttributes());
 
+<<<<<<< HEAD
             return new PurposeUserResponse(purposes, totalCount, request.getLimit(), request.getOffset(), guidsResult.approximateCount);
+=======
+            return new PurposeUserResponse(purposes, totalCount, request.getLimit(), request.getOffset());
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
 
         } finally {
             RequestContext.get().endMetricRecord(metric);
@@ -169,6 +191,7 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
     }
 
     /**
+<<<<<<< HEAD
      * Internal result holder for Purpose GUIDs query.
      */
     private static class PurposeGuidsResult {
@@ -186,14 +209,23 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
      * and extracts unique Purpose GUIDs from the accessControl relationship.
      */
     private PurposeGuidsResult getUniquePurposeGuids(PurposeUserRequest request) throws AtlasBaseException {
+=======
+     * Queries AuthPolicies with policyCategory="purpose" filtered by user/groups
+     * and extracts unique Purpose GUIDs from the accessControl relationship.
+     */
+    private Set<String> getUniquePurposeGuids(PurposeUserRequest request) throws AtlasBaseException {
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
         AtlasPerfMetrics.MetricRecorder metric = RequestContext.get().startMetricRecord("getUniquePurposeGuids");
         boolean wasInvokedByIndexSearch = RequestContext.get().isInvokedByIndexSearch();
 
         try {
+<<<<<<< HEAD
             // Set index search context flag first (required for relationship attribute processing)
             // This ensures the flag is always restored in the finally block even if query building throws
             RequestContext.get().setIsInvokedByIndexSearch(true);
 
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             // Build the DSL query for AuthPolicies
             Map<String, Object> dsl = buildAuthPolicyQuery(request);
 
@@ -206,20 +238,35 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setIncludeRelationshipAttributes(true);
             searchParams.setSuppressLogs(true);
 
+<<<<<<< HEAD
+=======
+            // Set index search context flag (required for relationship attribute processing)
+            RequestContext.get().setIsInvokedByIndexSearch(true);
+
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             // Execute the query with bulk fetching enabled to populate relationship attributes
             AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 
             if (searchResult == null || CollectionUtils.isEmpty(searchResult.getEntities())) {
                 LOG.info("No AuthPolicies found for user: {}, groups: {}", request.getUsername(), request.getGroups());
+<<<<<<< HEAD
                 return new PurposeGuidsResult(Collections.emptySet(), false);
+=======
+                return Collections.emptySet();
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             }
 
             int resultCount = searchResult.getEntities().size();
             LOG.info("Found {} AuthPolicies for user: {}", resultCount, request.getUsername());
 
+<<<<<<< HEAD
             // Check if we hit the fetch limit - results may be incomplete
             boolean approximateCount = resultCount >= getMaxPolicyFetchSize();
             if (approximateCount) {
+=======
+            // Warn if we hit the fetch limit - results may be incomplete
+            if (resultCount >= getMaxPolicyFetchSize()) {
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
                 LOG.warn("AuthPolicy fetch hit limit of {} for user: {}. Results may be incomplete. " +
                         "Consider increasing 'atlas.discovery.purpose.max-policy-fetch-size' configuration.",
                         getMaxPolicyFetchSize(), request.getUsername());
@@ -234,7 +281,11 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
                 }
             }
 
+<<<<<<< HEAD
             return new PurposeGuidsResult(purposeGuids, approximateCount);
+=======
+            return purposeGuids;
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
         } finally {
             RequestContext.get().setIsInvokedByIndexSearch(wasInvokedByIndexSearch);
             RequestContext.get().endMetricRecord(metric);
@@ -297,14 +348,22 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
      */
     @SuppressWarnings("unchecked")
     private String extractPurposeGuid(AtlasEntityHeader policy) {
+<<<<<<< HEAD
         if (policy == null || policy.getAttributes() == null) {
+=======
+        if (policy == null) {
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             return null;
         }
 
         Object accessControl = policy.getAttribute(ATTR_ACCESS_CONTROL);
         if (accessControl == null) {
             LOG.debug("accessControl is null for policy: {}, available attrs: {}",
+<<<<<<< HEAD
                     policy.getGuid(), policy.getAttributes().keySet());
+=======
+                    policy.getGuid(), policy.getAttributes() != null ? policy.getAttributes().keySet() : "null");
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             return null;
         }
 
@@ -345,10 +404,13 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
         boolean wasInvokedByIndexSearch = RequestContext.get().isInvokedByIndexSearch();
 
         try {
+<<<<<<< HEAD
             // Set index search context flag first (required for proper attribute processing)
             // This ensures the flag is always restored in the finally block even if query building throws
             RequestContext.get().setIsInvokedByIndexSearch(true);
 
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             // Build the DSL query for Purposes
             Map<String, Object> dsl = buildPurposeQuery(guids);
 
@@ -363,6 +425,12 @@ public class PurposeDiscoveryServiceImpl implements PurposeDiscoveryService {
             searchParams.setAttributes(attributes);
             searchParams.setSuppressLogs(true);
 
+<<<<<<< HEAD
+=======
+            // Set index search context flag (required for proper attribute processing)
+            RequestContext.get().setIsInvokedByIndexSearch(true);
+
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
             // Execute the query with bulk fetching enabled
             AtlasSearchResult searchResult = discoveryService.directIndexSearch(searchParams, true);
 

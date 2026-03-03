@@ -32,10 +32,15 @@ import org.apache.atlas.web.util.Servlets;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationContext;
+<<<<<<< HEAD
 import org.springframework.stereotype.Service;
 import org.springframework.web.context.support.WebApplicationContextUtils;
 
 import javax.inject.Singleton;
+=======
+import org.springframework.web.context.support.WebApplicationContextUtils;
+
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
 import javax.servlet.ServletContext;
 import javax.servlet.http.HttpServletRequest;
 import javax.ws.rs.*;
@@ -50,15 +55,24 @@ import javax.ws.rs.core.MediaType;
  * the need for frontend aggregation of AuthPolicy entities.
  * </p>
  * <p>
+<<<<<<< HEAD
  * Note: This class uses lazy initialization for PurposeDiscoveryService to avoid
  * initialization order issues with AtlasDiscoveryService during Spring context startup.
+=======
+ * Note: This class is NOT Spring-managed to avoid initialization order issues.
+ * It looks up AtlasDiscoveryService from Spring context on first use.
+ * Jersey discovers this class via @Path annotation.
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
  * </p>
  *
  * @see PurposeDiscoveryService
  */
 @Path("purposes")
+<<<<<<< HEAD
 @Singleton
 @Service
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
 @Consumes({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 @Produces({Servlets.JSON_MEDIA_TYPE, MediaType.APPLICATION_JSON})
 public class PurposeDiscoveryREST {
@@ -66,7 +80,10 @@ public class PurposeDiscoveryREST {
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("rest.PurposeDiscoveryREST");
 
     private volatile PurposeDiscoveryService purposeDiscoveryService;
+<<<<<<< HEAD
     private volatile RuntimeException initializationException;
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
 
     @Context
     private HttpServletRequest httpServletRequest;
@@ -74,6 +91,7 @@ public class PurposeDiscoveryREST {
     @Context
     private ServletContext servletContext;
 
+<<<<<<< HEAD
     private PurposeDiscoveryService getPurposeDiscoveryService() throws AtlasBaseException {
         // Fast path: check if already initialized or failed
         if (initializationException != null) {
@@ -101,6 +119,16 @@ public class PurposeDiscoveryREST {
                         throw new AtlasBaseException(AtlasErrorCode.INTERNAL_ERROR,
                                 "PurposeDiscoveryService initialization failed: " + e.getMessage());
                     }
+=======
+    private PurposeDiscoveryService getPurposeDiscoveryService() {
+        if (purposeDiscoveryService == null) {
+            synchronized (this) {
+                if (purposeDiscoveryService == null) {
+                    // Look up AtlasDiscoveryService from Spring context on first use
+                    ApplicationContext ctx = WebApplicationContextUtils.getWebApplicationContext(servletContext);
+                    AtlasDiscoveryService atlasDiscoveryService = ctx.getBean(AtlasDiscoveryService.class);
+                    purposeDiscoveryService = new PurposeDiscoveryServiceImpl(atlasDiscoveryService);
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
                 }
             }
         }

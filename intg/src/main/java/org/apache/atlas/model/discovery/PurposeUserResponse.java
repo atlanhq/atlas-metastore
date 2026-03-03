@@ -44,21 +44,30 @@ public class PurposeUserResponse implements Serializable {
     private int count;
     private long totalCount;
     private boolean hasMore;
+<<<<<<< HEAD
     private boolean approximateCount;
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
 
     public PurposeUserResponse() {
     }
 
     public PurposeUserResponse(List<AtlasEntityHeader> purposes, long totalCount, int limit, int offset) {
+<<<<<<< HEAD
         this(purposes, totalCount, limit, offset, false);
     }
 
     public PurposeUserResponse(List<AtlasEntityHeader> purposes, long totalCount, int limit, int offset, boolean approximateCount) {
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
         this.purposes = purposes != null ? purposes : Collections.emptyList();
         this.count = this.purposes.size();
         this.totalCount = totalCount;
         this.hasMore = (offset + this.count) < totalCount;
+<<<<<<< HEAD
         this.approximateCount = approximateCount;
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
     }
 
     /**
@@ -101,6 +110,7 @@ public class PurposeUserResponse implements Serializable {
         this.hasMore = hasMore;
     }
 
+<<<<<<< HEAD
     /**
      * Returns true if the totalCount is approximate due to hitting internal query limits.
      * When true, there may be more purposes accessible to the user than indicated by totalCount.
@@ -113,6 +123,8 @@ public class PurposeUserResponse implements Serializable {
         this.approximateCount = approximateCount;
     }
 
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -121,13 +133,20 @@ public class PurposeUserResponse implements Serializable {
         return count == that.count &&
                 totalCount == that.totalCount &&
                 hasMore == that.hasMore &&
+<<<<<<< HEAD
                 approximateCount == that.approximateCount &&
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
                 Objects.equals(purposes, that.purposes);
     }
 
     @Override
     public int hashCode() {
+<<<<<<< HEAD
         return Objects.hash(purposes, count, totalCount, hasMore, approximateCount);
+=======
+        return Objects.hash(purposes, count, totalCount, hasMore);
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
     }
 
     @Override
@@ -136,7 +155,10 @@ public class PurposeUserResponse implements Serializable {
                 "count=" + count +
                 ", totalCount=" + totalCount +
                 ", hasMore=" + hasMore +
+<<<<<<< HEAD
                 ", approximateCount=" + approximateCount +
+=======
+>>>>>>> cb154ef9be (MS-546: Add Purpose Discovery API for whoami optimization)
                 ", purposes=" + purposes +
                 '}';
     }
