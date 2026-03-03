@@ -1103,6 +1103,10 @@ public class EntityGraphMapper {
                 }
 
             } else if (op.equals(UPDATE) || op.equals(PARTIAL_UPDATE)) {
+                if (LOG.isDebugEnabled() || struct.getAttributes().containsKey("announcementType")) {
+                    LOG.info("mapAttributes({}): op={}, attrKeys={}, announcementType={}", struct.getTypeName(), op,
+                            struct.getAttributes().keySet(), struct.getAttribute("announcementType"));
+                }
                 for (String attrName : struct.getAttributes().keySet()) {
                     AtlasAttribute attribute = structType.getAttribute(attrName);
 
@@ -3808,6 +3812,14 @@ public class EntityGraphMapper {
         // the response must reflect the full persisted state of the entity.
         Map<String, AtlasAttribute> attributeMap = entityType.getAllAttributes();
         AtlasEntityHeader header = entityRetriever.toAtlasEntityHeaderWithClassifications(vertex, attributeMap.keySet());
+
+        if (attributeMap.containsKey("announcementType")) {
+            Object vertexVal = vertex.getProperty("Asset.announcementType", String.class);
+            Object headerVal = header.getAttribute("announcementType");
+            LOG.info("constructHeader({}): vertex.announcementType={}, header.announcementType={}, allAttrCount={}",
+                    entity.getTypeName(), vertexVal, headerVal, attributeMap.size());
+        }
+
         if (entity.getClassifications() == null) {
             entity.setClassifications(header.getClassifications());
         }
