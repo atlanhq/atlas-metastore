@@ -171,6 +171,23 @@ resources:
     memory: 5Gi
     cpu: 3000m
 
+vpa:
+  enabled: false
+  updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+  # minReplicas is always computed as (config.cluster_size - 1), floored at 2.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsOnly"
+  minAllowed:
+    cpu: "800m"
+    memory: "5Gi"
+  maxAllowed:
+    cpu: "3000m"
+    memory: "10Gi"
+
 # Persistence changes for cassandra
 persistence:
   enabled: true
@@ -203,20 +220,6 @@ custom_deployment:
 affinity:
   nodeAffinity:
     preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 1
-      preference:
-        matchExpressions:
-        - key: eks.amazonaws.com/capacityType   #AWS
-          operator: In
-          values:
-          - ON_DEMAND
-    - weight: 1
-      preference:
-        matchExpressions:
-        - key: lifecycle     #Azure
-          operator: In
-          values:
-          - ondemand
     - weight: 1
       preference:
         matchExpressions:

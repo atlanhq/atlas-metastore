@@ -36,6 +36,23 @@ hpa:
   memory:
     averageUtilization: 85
 
+vpa:
+  enabled: false
+  updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+  # minReplicas is always computed as (atlas.replicaCount - 1), floored at 1.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsAndLimits"
+  minAllowed:
+    cpu: "1000m"
+    memory: "8Gi"
+  maxAllowed:
+    cpu: "4000m"
+    memory: "10Gi"
+
 Namespace: atlas
 sentry_flag: disable
 albTenant: false
@@ -142,20 +159,6 @@ atlas:
   affinity:
     nodeAffinity:
       preferredDuringSchedulingIgnoredDuringExecution:
-      - weight: 1
-        preference:
-          matchExpressions:
-          - key: eks.amazonaws.com/capacityType   #AWS
-            operator: In
-            values:
-            - ON_DEMAND
-      - weight: 1
-        preference:
-          matchExpressions:
-          - key: lifecycle     #Azure
-            operator: In
-            values:
-            - ondemand
       - weight: 1
         preference:
           matchExpressions:

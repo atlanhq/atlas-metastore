@@ -2014,7 +2014,6 @@ public class EntityGraphMapper {
         if (type instanceof AtlasEntityType) {
             AtlasEntityType entityType = (AtlasEntityType) type;
             AtlasAttribute  attribute     = ctx.getAttribute();
-            AtlasType atlasType = attribute.getAttributeType();
             String          attributeName = attribute.getName();
 
             if (entityType.hasRelationshipAttribute(attributeName)) {
@@ -2040,31 +2039,14 @@ public class EntityGraphMapper {
 
                 Map<String, Object> relationshipAttributes = getRelationshipAttributes(ctx.getValue());
                 AtlasRelationship relationship = new AtlasRelationship(relationshipName, relationshipAttributes);
-                String relationshipLabel = StringUtils.EMPTY;
 
                 if (createEdge) {
-                    // hard delete the edge if it exists and is  soft deleted
-                    if (relationshipStore instanceof  AtlasRelationshipStoreV2){
-                        relationshipLabel = ((AtlasRelationshipStoreV2)relationshipStore).getRelationshipEdgeLabel(fromVertex, toVertex,  relationship.getTypeName());
+                    MetricRecorder getOrCreateMetric = RequestContext.get().startMetricRecord("getEdgeUsingRelationship.getOrCreate");
+                    try {
+                        newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
+                    } finally {
+                        RequestContext.get().endMetricRecord(getOrCreateMetric);
                     }
-                    if (StringUtils.isNotEmpty(relationshipLabel)) {
-                        Iterator<AtlasEdge> edges = fromVertex.getEdges(AtlasEdgeDirection.OUT, relationshipLabel).iterator();
-                        while (edges.hasNext()) {
-                            AtlasEdge edge = edges.next();
-                            if (edge.getInVertex().equals(toVertex) && getStatus(edge) == DELETED) {
-                                // Hard delete the newEdge
-                                if (atlasType instanceof AtlasArrayType) {
-                                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, ((AtlasArrayType) atlasType).getElementType().getTypeCategory(), attribute.isOwnedRef(),
-                                            true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                                } else {
-                                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, attribute.getAttributeType().getTypeCategory(), attribute.isOwnedRef(),
-                                            true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                                }
-
-                            }
-                        }
-                    }
-                    newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
                     boolean isCreated = graphHelper.getCreatedTime(newEdge) == RequestContext.get().getRequestTime();
 
                     if (isCreated) {
@@ -5651,7 +5633,7 @@ public class EntityGraphMapper {
 
                 // compute fresh classification‑text de‑norm attributes for this batch
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap);
+                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap, true);
                 // push them to ES
                 if (MapUtils.isNotEmpty(deNormMap)) {
                     ESConnector.writeTagProperties(deNormMap);
@@ -6225,7 +6207,7 @@ public class EntityGraphMapper {
                 if (CollectionUtils.isEmpty(finalClassifications)) {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
                 } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2, false);
                 }
 
                 deNormAttributesMap.put(vertex.getDocId(), deNormAttributes);
@@ -6239,7 +6221,8 @@ public class EntityGraphMapper {
     void updateClassificationTextV2(AtlasClassification currentTag,
                                                  List<String> propagatedVertexIds,
                                                  List<Tag> propagatedTags,
-                                                 Map<String, Map<String, Object>> deNormAttributesMap) throws AtlasBaseException {
+                                                 Map<String, Map<String, Object>> deNormAttributesMap,
+                                                 boolean isDelete) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
 
@@ -6272,7 +6255,7 @@ public class EntityGraphMapper {
                 if (CollectionUtils.isEmpty(finalClassifications)) {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
                 } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2, isDelete);
                 }
 
                 deNormAttributesMap.put(vertexIdstoDocIdMap.get(tagAttachment.getVertexId()), deNormAttributes);
@@ -6755,7 +6738,7 @@ public class EntityGraphMapper {
 
                 // compute fresh classification‑text de‑norm attributes for this batch
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToUpdate, deNormMap);
+                updateClassificationTextV2(originalClassification, vertexIds, batchToUpdate, deNormMap, false);
 
                 // push them to ES
                 if (MapUtils.isNotEmpty(deNormMap)) {
@@ -6989,7 +6972,7 @@ public class EntityGraphMapper {
                 .toList();
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap);
+        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap, true);
         if (MapUtils.isNotEmpty(deNormMap)) {
             ESConnector.writeTagProperties(deNormMap);
         }
