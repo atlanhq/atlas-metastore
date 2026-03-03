@@ -282,8 +282,14 @@ public final class Constants {
     public static final String FULLTEXT_INDEX = "fulltext_index";
 
     /**
-     * elasticsearch index prefix.
-     * Configurable via atlas.graph.index.search.es.prefix (default: "janusgraph_")
+     * Elasticsearch index prefix.
+     *
+     * Derived automatically from atlas.graphdb.backend:
+     *   - "cassandra" → "atlas_graph_"
+     *   - "janus" (default) → "janusgraph_"
+     *
+     * Can be overridden explicitly via atlas.graph.index.search.es.prefix,
+     * but normally you should just set the backend and let this follow.
      */
     public static final String ES_INDEX_PREFIX_PROPERTY = "atlas.graph.index.search.es.prefix";
     public static final String INDEX_PREFIX;
@@ -291,10 +297,20 @@ public final class Constants {
     public static final String EDGE_INDEX_NAME;
 
     static {
-        String prefix = "janusgraph_";
+        String prefix;
         try {
-            prefix = ApplicationProperties.get().getString(ES_INDEX_PREFIX_PROPERTY, "janusgraph_");
+            Configuration config = ApplicationProperties.get();
+
+            // Derive default prefix from the graphdb backend
+            String backend = config.getString(ApplicationProperties.GRAPHDB_BACKEND_CONF,
+                                              ApplicationProperties.DEFAULT_GRAPHDB_BACKEND);
+            String backendDefault = ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA.equalsIgnoreCase(backend)
+                                    ? "atlas_graph_" : "janusgraph_";
+
+            // Allow explicit override, but default follows the backend
+            prefix = config.getString(ES_INDEX_PREFIX_PROPERTY, backendDefault);
         } catch (Exception e) {
+            prefix = "janusgraph_";
             LOG.warn("Failed to read ES index prefix from config, using default: {}", prefix);
         }
         INDEX_PREFIX = prefix;

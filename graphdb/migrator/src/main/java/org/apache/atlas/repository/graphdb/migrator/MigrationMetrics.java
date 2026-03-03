@@ -18,6 +18,7 @@ public class MigrationMetrics {
     private final AtomicLong verticesWritten  = new AtomicLong(0);
     private final AtomicLong edgesWritten     = new AtomicLong(0);
     private final AtomicLong indexesWritten   = new AtomicLong(0);
+    private final AtomicLong typeDefsWritten  = new AtomicLong(0);
     private final AtomicLong esDocsIndexed    = new AtomicLong(0);
     private final AtomicLong decodeErrors     = new AtomicLong(0);
     private final AtomicLong writeErrors      = new AtomicLong(0);
@@ -47,6 +48,7 @@ public class MigrationMetrics {
     public void incrVerticesWritten()            { verticesWritten.incrementAndGet(); }
     public void incrEdgesWritten(long count)     { edgesWritten.addAndGet(count); }
     public void incrIndexesWritten(long count)   { indexesWritten.addAndGet(count); }
+    public void incrTypeDefsWritten()            { typeDefsWritten.incrementAndGet(); }
     public void incrEsDocsIndexed(long count)    { esDocsIndexed.addAndGet(count); }
     public void incrDecodeErrors()               { decodeErrors.incrementAndGet(); }
     public void incrWriteErrors()                { writeErrors.incrementAndGet(); }
@@ -61,6 +63,7 @@ public class MigrationMetrics {
     public long getVerticesWritten()  { return verticesWritten.get(); }
     public long getEdgesWritten()     { return edgesWritten.get(); }
     public long getIndexesWritten()   { return indexesWritten.get(); }
+    public long getTypeDefsWritten()  { return typeDefsWritten.get(); }
     public long getEsDocsIndexed()    { return esDocsIndexed.get(); }
     public long getDecodeErrors()     { return decodeErrors.get(); }
     public long getWriteErrors()      { return writeErrors.get(); }
@@ -141,11 +144,11 @@ public class MigrationMetrics {
         long skipped = verticesSkipped.get();
         String skipSuffix = skipped > 0 ? String.format(", Skipped: %s", format(skipped)) : "";
         return String.format(
-            "Migration complete in %s — Vertices: %s%s, Edges: %s, Indexes: %s, ES docs: %s | " +
+            "Migration complete in %s — Vertices: %s%s, Edges: %s, Indexes: %s, TypeDefs: %s, ES docs: %s | " +
             "Avg rate: %s vertices/s | Decode errors: %d, Write errors: %d | CQL rows: %s",
             formatDuration((long) elapsed),
             format(verticesWritten.get()), skipSuffix, format(edgesWritten.get()),
-            format(indexesWritten.get()), format(esDocsIndexed.get()),
+            format(indexesWritten.get()), format(typeDefsWritten.get()), format(esDocsIndexed.get()),
             format((long) vertexRate),
             decodeErrors.get(), writeErrors.get(),
             format(cqlRowsRead.get()));

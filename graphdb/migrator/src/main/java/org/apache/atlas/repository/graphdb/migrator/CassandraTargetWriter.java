@@ -48,6 +48,8 @@ public class CassandraTargetWriter implements AutoCloseable {
     private PreparedStatement insertPropertyIndexStmt;
     private PreparedStatement insertClaimStmt;
     private PreparedStatement selectClaimStmt;
+    private PreparedStatement insertTypeDefStmt;
+    private PreparedStatement insertTypeDefByCategoryStmt;
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
     private final BlockingQueue<DecodedVertex> queue;
@@ -171,6 +173,22 @@ public class CassandraTargetWriter implements AutoCloseable {
             "  claimed_at timestamp," +
             "  source text)");
 
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".type_definitions (" +
+            "  type_name text PRIMARY KEY," +
+            "  type_category text," +
+            "  vertex_id text," +
+            "  created_at timestamp," +
+            "  modified_at timestamp)");
+
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".type_definitions_by_category (" +
+            "  type_category text," +
+            "  type_name text," +
+            "  vertex_id text," +
+            "  PRIMARY KEY ((type_category), type_name)" +
+            ") WITH CLUSTERING ORDER BY (type_name ASC)");
+
         LOG.info("Target schema created/verified in keyspace '{}'", ks);
     }
 
@@ -206,6 +224,14 @@ public class CassandraTargetWriter implements AutoCloseable {
 
         selectClaimStmt = targetSession.prepare(
             "SELECT vertex_id FROM " + ks + ".entity_claims WHERE identity_key = ?");
+
+        insertTypeDefStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".type_definitions " +
+            "(type_name, type_category, vertex_id, created_at, modified_at) VALUES (?, ?, ?, ?, ?)");
+
+        insertTypeDefByCategoryStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".type_definitions_by_category " +
+            "(type_category, type_name, vertex_id) VALUES (?, ?, ?)");
     }
 
     /**
@@ -324,9 +350,13 @@ public class CassandraTargetWriter implements AutoCloseable {
         String vertexId = resolveVertexId(vertex);
         Instant now = Instant.now();
 
+        // JanusGraph already stores the correct TypeCategory values (CLASS, TRAIT, ENUM, STRUCT, etc.)
+        // that match DataTypes.TypeCategory — no translation needed.
+        Map<String, Object> props = vertex.getProperties();
+
         String propsJson;
         try {
-            propsJson = MAPPER.writeValueAsString(vertex.getProperties());
+            propsJson = MAPPER.writeValueAsString(props);
         } catch (Exception e) {
             propsJson = "{}";
             LOG.warn("Failed to serialize properties for vertex {}", vertexId, e);
@@ -343,7 +373,17 @@ public class CassandraTargetWriter implements AutoCloseable {
         int indexCount = buildIndexStatements(vertex, stmts);
         metrics.incrIndexesWritten(indexCount);
 
-        // 3. Edge INSERTs (3 statements per edge: out, in, by_id)
+        // 3. TypeDef table INSERTs (if this is a TypeDef vertex)
+        String typeName = (String) props.get("__type_name");
+        Object rawCategory = props.get("__type_category");
+        String typeCategory = rawCategory != null ? String.valueOf(rawCategory) : null;
+        if ("typeSystem".equals(vertex.getVertexLabel()) && typeName != null && typeCategory != null) {
+            stmts.add(insertTypeDefStmt.bind(typeName, typeCategory, vertexId, now, now));
+            stmts.add(insertTypeDefByCategoryStmt.bind(typeCategory, typeName, vertexId));
+            metrics.incrTypeDefsWritten();
+        }
+
+        // 4. Edge INSERTs (3 statements per edge: out, in, by_id)
         List<DecodedEdge> edges = vertex.getOutEdges();
         int maxEdges = config.getMaxEdgesPerBatch();
 
@@ -474,6 +514,14 @@ public class CassandraTargetWriter implements AutoCloseable {
         Object qnObj = vertex.getProperties().get("qualifiedName");
         if (qnObj == null) {
             qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
+        }
+        // Fallback: JanusGraph property key mapping may not produce "qualifiedName" directly.
+        // The __qualifiedNameHierarchy array's first element is always the entity's own QN.
+        if (qnObj == null) {
+            Object hierarchy = vertex.getProperties().get("__qualifiedNameHierarchy");
+            if (hierarchy instanceof List && !((List<?>) hierarchy).isEmpty()) {
+                qnObj = ((List<?>) hierarchy).get(0);
+            }
         }
         String identityKey = DeterministicIdUtil.buildIdentityKey(vertex.getTypeName(),
                                                                    qnObj != null ? String.valueOf(qnObj) : null);

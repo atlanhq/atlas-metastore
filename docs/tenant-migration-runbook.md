@@ -110,6 +110,8 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
 [migrator]   ES:        http://atlas-elasticsearch-master:9200
 [migrator]   Source keyspace: atlas (table: edgestore)
 [migrator]   Target keyspace: atlas_graph
+[migrator]   Source ES index: janusgraph_vertex_index (copy mappings from)
+[migrator]   Target ES index: atlas_graph_vertex_index (write docs to)
 [migrator] Running preflight checks...
 [migrator]   Cassandra reachable at atlas-cassandra:9042
 [migrator]   ES reachable at http://atlas-elasticsearch-master:9200
@@ -148,14 +150,14 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
 
 ```
 Migration complete in 12m 30s — Vertices: 2,345,678, Edges: 5,678,901,
-Indexes: 3,456,789, ES docs: 2,345,000 | Avg rate: 3,127 vertices/s |
+Indexes: 3,456,789, TypeDefs: 953, ES docs: 2,345,000 | Avg rate: 3,127 vertices/s |
 Decode errors: 0, Write errors: 0 | CQL rows: 8,900,000
 
 === Validation Results ===
   Vertex count:     PASS  (target: 2,345,678, expected: 2,345,678)
   Edge count:       PASS  (edges_out: 5,678,901, edges_by_id: 5,678,901)
   GUID index:       PASS  (1000/1000 sampled vertices found in index)
-  TypeDef presence: PASS  (found typeSystem vertices in type_category_idx)
+  TypeDef table:    PASS  (953 entries in type_definitions)
   Sample properties:PASS  (100/100 sampled vertices have non-empty properties)
 ```
 
@@ -202,19 +204,18 @@ atlas.cassandra.graph.port=9042
 atlas.cassandra.graph.keyspace=atlas_graph
 atlas.cassandra.graph.datacenter=<datacenter-name>
 
-# ES index prefix — MUST match the backend
-atlas.graph.index.search.es.prefix=atlas_graph_
+# ES index prefix auto-derives from backend:
+#   cassandra → atlas_graph_
+#   janus     → janusgraph_
+# Only set this if you need a non-standard prefix:
+# atlas.graph.index.search.es.prefix=atlas_graph_
 ```
 
 **Replace:**
 - `<cassandra-host>` with the Cassandra service hostname (e.g., `atlas-cassandra`)
 - `<datacenter-name>` with the Cassandra datacenter (usually `datacenter1`)
 
-> **IMPORTANT — ES index prefix:** The `atlas.graph.index.search.es.prefix` property controls which Elasticsearch index Atlas and downstream services (Heka, PolicyRefresher, etc.) read from. It **must** match the backend:
-> - Cassandra backend: `atlas.graph.index.search.es.prefix=atlas_graph_`
-> - JanusGraph backend: `atlas.graph.index.search.es.prefix=janusgraph_` (default)
->
-> If this is wrong, services like Heka will query the old ES index and fail to find policies — causing "invalid connection" errors for data queries.
+> **ES index prefix:** The ES index prefix now **auto-derives from `atlas.graphdb.backend`**: `cassandra` → `atlas_graph_`, `janus` → `janusgraph_`. You no longer need to set `atlas.graph.index.search.es.prefix` explicitly — it just works. You can still override it if needed for non-standard setups.
 
 ### 3.2 How to apply the config change
 
@@ -237,7 +238,7 @@ kubectl edit configmap atlas-config -n atlas
 # Add: atlas.cassandra.graph.port=9042
 # Add: atlas.cassandra.graph.keyspace=atlas_graph
 # Add: atlas.cassandra.graph.datacenter=datacenter1
-# Add: atlas.graph.index.search.es.prefix=atlas_graph_
+# ES prefix auto-derives from backend — no need to set explicitly
 
 # Restart the pod (if auto rollout restart doesn't happen)
 kubectl delete pod atlas-0 -n atlas
@@ -382,10 +383,10 @@ Change the config properties back:
 
 ```properties
 atlas.graphdb.backend=janus
-atlas.graph.index.search.es.prefix=janusgraph_
+# ES prefix auto-derives: janus → janusgraph_ (no need to set explicitly)
 ```
 
-Or simply remove the `atlas.graphdb.backend` and `atlas.graph.index.search.es.prefix` lines — the defaults are `janus` and `janusgraph_` respectively.
+Or simply remove the `atlas.graphdb.backend` line — the default backend is `janus` and the ES prefix auto-derives to `janusgraph_`.
 
 ### 5.2 Restart the pod
 
@@ -433,10 +434,15 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
   env SCANNER_THREADS=32 WRITER_THREADS=16 \
   /opt/apache-atlas/bin/atlas_migrate.sh
 
-# Custom ES index name
+# Custom ES index names (source = copy mappings from, target = write docs to)
 kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
-  env ES_INDEX=custom_vertex_index \
+  env SOURCE_ES_INDEX=custom_source_index TARGET_ES_INDEX=custom_target_index \
   /opt/apache-atlas/bin/atlas_migrate.sh
+
+# Deterministic IDs + LWT dedup claims
+kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
+  /opt/apache-atlas/bin/atlas_migrate.sh --fresh
 ```
 
 | Variable | Default | Description |
@@ -444,11 +450,13 @@ kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
 | `SOURCE_KEYSPACE` | `atlas` | JanusGraph keyspace (where `edgestore` lives) |
 | `SOURCE_EDGESTORE_TABLE` | `edgestore` | JanusGraph edge store table name |
 | `TARGET_KEYSPACE` | `atlas_graph` | New Cassandra schema keyspace |
-| `ES_INDEX` | `janusgraph_vertex_index` | Elasticsearch index name |
+| `SOURCE_ES_INDEX` | `janusgraph_vertex_index` | Source ES index (copy mappings from) |
+| `TARGET_ES_INDEX` | `atlas_graph_vertex_index` | Target ES index (write migrated docs to) |
 | `SCANNER_THREADS` | `16` | Parallel CQL scan threads |
 | `WRITER_THREADS` | `8` | Parallel write threads |
-| `BATCH_SIZE` | `500` | Vertices per write batch |
 | `ES_BULK_SIZE` | `1000` | Documents per ES bulk request |
+| `ID_STRATEGY` | `legacy` | ID generation: `legacy` (UUID) or `deterministic` (SHA-256) |
+| `CLAIM_ENABLED` | `false` | LWT dedup claims during migration: `true`/`false` |
 
 ---
 
@@ -523,7 +531,7 @@ Or set conservative tuning:
 
 ```bash
 kubectl exec -it atlas-0 -n atlas -c atlas-main -- \
-  env SCANNER_THREADS=8 WRITER_THREADS=4 BATCH_SIZE=200 \
+  env SCANNER_THREADS=8 WRITER_THREADS=4 ES_BULK_SIZE=500 \
   /opt/apache-atlas/bin/atlas_migrate.sh
 ```
 
@@ -540,7 +548,7 @@ kubectl exec -it atlas-0 -n $NS -c atlas-main -- /opt/apache-atlas/bin/atlas_mig
 # 2. Migrate data
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- /opt/apache-atlas/bin/atlas_migrate.sh
 
-# 3. Switch backend config (add atlas.graphdb.backend=cassandra + cassandra.graph.* + ES prefix)
+# 3. Switch backend config (add atlas.graphdb.backend=cassandra + cassandra.graph.* — ES prefix auto-derives)
 # ... via your config management tool ...
 
 # 4. Restart pod
@@ -550,3 +558,21 @@ kubectl rollout restart statefulset/atlas -n $NS
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- curl -s http://localhost:21000/api/atlas/admin/status
 kubectl exec -it atlas-0 -n $NS -c atlas-main -- curl -s -u admin:admin http://localhost:21000/api/atlas/v2/search/basic?typeName=Table\&limit=5
 ```
+
+---
+
+## Appendix: Legacy vs Deterministic ID Strategy
+
+When migrating with `ID_STRATEGY=deterministic`, the ID format changes from random UUIDs to content-addressed SHA-256 hashes. This makes migrations idempotent and enables dedup claims.
+
+| Aspect | Legacy (UUID) | Deterministic (SHA-256) |
+|--------|--------------|------------------------|
+| Vertex ID | `UUID.randomUUID()` (36 chars) | `SHA-256("v\|" + typeName + "\|" + qualifiedName)` (32-char hex) |
+| Edge ID | `UUID.randomUUID()` | `SHA-256("e\|" + outId + "\|" + label + "\|" + inId)` |
+| ES doc ID | UUID string | 32-char hex string |
+| entity_claims | Not populated | Populated (one claim per entity) |
+| Dedup safety | None at migration time | LWT `INSERT IF NOT EXISTS` prevents duplicate vertices |
+| Idempotent re-run | No (generates new UUIDs each time) | Yes (same input = same IDs) |
+| Runtime new entities | UUID (always) | UUID (addVertex always uses UUID) |
+| Runtime edge creation | UUID | Deterministic SHA-256 |
+| Runtime claim check | Disabled | Enabled — concurrent pods race on claims |

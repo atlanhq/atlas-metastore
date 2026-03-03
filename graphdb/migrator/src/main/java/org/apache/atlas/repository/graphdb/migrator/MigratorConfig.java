@@ -103,7 +103,7 @@ public class MigratorConfig {
         this.targetEsHostname = get("target.elasticsearch.hostname", "localhost");
         this.targetEsPort     = getInt("target.elasticsearch.port", 9200);
         this.targetEsProtocol = get("target.elasticsearch.protocol", "http");
-        this.targetEsIndex    = get("target.elasticsearch.index", "janusgraph_vertex_index");
+        this.targetEsIndex    = get("target.elasticsearch.index", "atlas_graph_vertex_index");
         this.targetEsUsername = get("target.elasticsearch.username", "");
         this.targetEsPassword = get("target.elasticsearch.password", "");
 

@@ -1,5 +1,5 @@
 ---
-description: Migrate an Atlas tenant from JanusGraph to Cassandra (Zero Graph) — runs migrator, reindexes ES, switches backend, validates
+description: Migrate or remigrate an Atlas tenant from JanusGraph to Cassandra (Zero Graph) — supports first-time migration and remigration with cleanup
 argument-hint: <vcluster-name>
 allowed-tools: [Bash, Read, Grep, Glob, Task, AskUserQuestion, Skill]
 ---
@@ -48,7 +48,18 @@ If "ArgoCD is disabled for this tenant" is NOT selected:
 
 If any prerequisite is not met, STOP.
 
-### 0.3 Ask user: migration pod strategy
+### 0.3 Ask user: migration mode
+
+Use AskUserQuestion:
+- Question: "Is this a first-time migration or a remigration (tenant was previously migrated to Cassandra)?"
+- Header: "Mode"
+- Options:
+  - "First-time migration (Recommended)" — fresh tenant, no existing `atlas_graph` keyspace. Standard migration flow.
+  - "Remigration" — tenant was previously migrated (e.g., switching from legacy UUIDs to deterministic IDs, or re-doing a failed migration). Will drop existing `atlas_graph` keyspace and ES index before migrating.
+
+Store the choice as `MIGRATION_MODE` (`first-time` or `remigration`). The remigration path adds cleanup steps and uses `--fresh` flag.
+
+### 0.4 Ask user: migration pod strategy
 
 Use AskUserQuestion:
 - Question: "Where should the migrator run? For large tenants (>10M assets), a dedicated pod avoids competing with Atlas for CPU/memory."
@@ -59,7 +70,7 @@ Use AskUserQuestion:
 
 Store the choice for later phases.
 
-### 0.4 Verify kubectl access and atlas pod health
+### 0.5 Verify kubectl access and atlas pod health
 
 ```bash
 # Connect to the vcluster context
@@ -76,7 +87,7 @@ Expected: `{"Status":"ACTIVE"}`
 
 If the pod is not running or not healthy, STOP and report the issue.
 
-### 0.5 Verify migrator is available
+### 0.6 Verify migrator is available
 
 ```bash
 # Check migration script
@@ -215,12 +226,121 @@ MIGRATE_CONTAINER="migrator"
 
 ---
 
+## Phase 1B: Clean Existing Migration Data (REMIGRATION ONLY)
+
+**Skip this entire phase if `MIGRATION_MODE` is `first-time`.**
+
+This phase drops the existing `atlas_graph` keyspace and ES index so the migration starts clean. This is required when changing the ID strategy (e.g., legacy UUID → deterministic SHA-256) because every vertex_id changes.
+
+### 1B.1 Check if tenant is currently running on Cassandra backend
+
+```bash
+CURRENT_BACKEND=$(kubectl exec -n $NS $POD -c $CONTAINER -- bash -c \
+  'grep "^atlas.graphdb.backend=" /opt/apache-atlas/conf/atlas-application.properties 2>/dev/null | cut -d= -f2 | tr -d "[:space:]"')
+echo "Current backend: ${CURRENT_BACKEND:-janus (default)}"
+```
+
+If `CURRENT_BACKEND` is `cassandra`, the tenant is **live on the Cassandra backend**. It must be switched back to JanusGraph before dropping the keyspace:
+
+```bash
+# ONLY if currently running on cassandra — switch back to janus first
+if [ "$CURRENT_BACKEND" = "cassandra" ]; then
+  echo "Tenant is live on Cassandra. Switching to JanusGraph before cleanup..."
+
+  # Back up ConfigMap
+  kubectl get configmap atlas-config -n $NS -o yaml > /tmp/atlas-config-pre-remigration-backup.yaml
+
+  # Read current properties, replace backend to janus
+  kubectl exec -n $NS $POD -c $CONTAINER -- cat /opt/apache-atlas/conf/atlas-application.properties \
+    > /tmp/atlas-application-current.properties
+
+  grep -v "^atlas.graphdb.backend=" /tmp/atlas-application-current.properties | \
+  grep -v "^atlas.graph.index.search.es.prefix=" | \
+  grep -v "^atlas.graph.id.strategy=" | \
+  grep -v "^atlas.graph.claim.enabled=" > /tmp/atlas-application-janus.properties
+
+  cat >> /tmp/atlas-application-janus.properties <<PROPEOF
+
+# ---- Temporarily reverted to JanusGraph for remigration ----
+atlas.graphdb.backend=janus
+atlas.graph.index.search.es.prefix=janusgraph_
+PROPEOF
+
+  kubectl create configmap atlas-config -n $NS \
+    --from-file=atlas-application.properties=/tmp/atlas-application-janus.properties \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  echo "ConfigMap switched to janus. Restarting pod..."
+  kubectl delete pod $POD -n $NS
+  kubectl wait --for=condition=Ready pod/$POD -n $NS --timeout=300s
+
+  # Verify it's back on JanusGraph
+  kubectl exec -n $NS $POD -c $CONTAINER -- curl -s http://localhost:21000/api/atlas/admin/status
+  echo "Pod restarted on JanusGraph backend."
+fi
+```
+
+### 1B.2 Drop the existing atlas_graph keyspace
+
+```bash
+# Find the cassandra pod
+CASS_POD=$(kubectl get pods -n $NS -l app=cassandra -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "atlas-cassandra-0")
+CASS_CONTAINER=$(kubectl get pod $CASS_POD -n $NS -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || echo "atlas-cassandra")
+
+# Show current keyspace state
+echo "Current atlas_graph tables:"
+kubectl exec -n $NS $CASS_POD -c $CASS_CONTAINER -- cqlsh -e \
+  "DESCRIBE KEYSPACE atlas_graph;" 2>/dev/null || echo "(keyspace does not exist)"
+
+# Drop it
+kubectl exec -n $NS $CASS_POD -c $CASS_CONTAINER -- cqlsh -e \
+  "DROP KEYSPACE IF EXISTS atlas_graph;"
+echo "atlas_graph keyspace dropped."
+```
+
+### 1B.3 Delete the existing ES index
+
+```bash
+# Check which ES indexes exist
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  'http://atlas-elasticsearch-master:9200/_cat/indices?v' 2>/dev/null | grep -E "atlas_graph|vertex_index"
+
+# Delete the migrated ES index
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s -X DELETE \
+  'http://atlas-elasticsearch-master:9200/atlas_graph_vertex_index' 2>/dev/null
+echo "atlas_graph_vertex_index ES index deleted."
+
+# Also delete the old index name variant if it exists
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s -X DELETE \
+  'http://atlas-elasticsearch-master:9200/janusgraph_vertex_index' 2>/dev/null
+echo "janusgraph_vertex_index ES index deleted (if it existed)."
+```
+
+### 1B.4 Verify cleanup
+
+```bash
+# Verify keyspace is gone
+kubectl exec -n $NS $CASS_POD -c $CASS_CONTAINER -- cqlsh -e \
+  "DESCRIBE KEYSPACES;" 2>/dev/null
+echo "Verify: atlas_graph should NOT appear in the list above."
+
+# Verify ES index is gone
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  'http://atlas-elasticsearch-master:9200/_cat/indices?v' 2>/dev/null | grep -E "atlas_graph|vertex_index" || \
+  echo "No atlas_graph/vertex_index ES indexes found (good)."
+```
+
+**Report to user**: Confirm that both the keyspace and ES index have been removed before proceeding.
+
+---
+
 ## Phase 2: Run Migration (Scan + Write + ES Reindex + Validate)
 
 ### 2.1 Dry run — verify config
 
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
   /opt/apache-atlas/bin/atlas_migrate.sh --dry-run
 ```
 
@@ -228,15 +348,25 @@ kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
 - Cassandra host, port, datacenter
 - ES host, port
 - Source keyspace and target keyspace
+- ID strategy and claim enabled status
 - Preflight connectivity results
 
 If connectivity fails, STOP and report the issue.
 
 ### 2.2 Run full migration
 
+**For first-time migration:**
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
   /opt/apache-atlas/bin/atlas_migrate.sh 2>&1
+```
+
+**For remigration** (use `--fresh` to clear any stale migration_state from previous run):
+```bash
+kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
+  /opt/apache-atlas/bin/atlas_migrate.sh --fresh 2>&1
 ```
 
 **IMPORTANT**: This can take minutes to hours. Run it and monitor output. The migration logs progress every 10 seconds with:
@@ -273,6 +403,7 @@ If there are FAILED or PENDING token ranges, rerun the migration. It is **resuma
 
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
   /opt/apache-atlas/bin/atlas_migrate.sh 2>&1
 ```
 
@@ -301,6 +432,7 @@ If ES doc counts are significantly different (>5% discrepancy), run ES-only rein
 
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
   /opt/apache-atlas/bin/atlas_migrate.sh --es-only 2>&1
 ```
 
@@ -308,6 +440,7 @@ kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
 
 ```bash
 kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
+  env ID_STRATEGY=deterministic CLAIM_ENABLED=true \
   /opt/apache-atlas/bin/atlas_migrate.sh --validate-only 2>&1
 ```
 
@@ -319,6 +452,41 @@ kubectl exec -n $NS $MIGRATE_POD -c $MIGRATE_CONTAINER -- \
 - Sample properties: PASS/FAIL
 
 If ANY validation check fails, STOP and report details. Use AskUserQuestion to decide whether to proceed or investigate.
+
+### 2.7 Verify deterministic IDs and claims (REMIGRATION ONLY)
+
+**Skip this step if `MIGRATION_MODE` is `first-time`.**
+
+Confirm that the migration used deterministic SHA-256 IDs (32-char hex) instead of legacy UUIDs (36-char with dashes):
+
+```bash
+# Find cassandra pod if not already set
+CASS_POD=${CASS_POD:-$(kubectl get pods -n $NS -l app=cassandra -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "atlas-cassandra-0")}
+CASS_CONTAINER=${CASS_CONTAINER:-$(kubectl get pod $CASS_POD -n $NS -o jsonpath='{.spec.containers[0].name}' 2>/dev/null || echo "atlas-cassandra")}
+
+# Check vertex ID format — should be 32-char hex (no dashes), NOT UUID format
+kubectl exec -n $NS $CASS_POD -c $CASS_CONTAINER -- cqlsh -e \
+  "SELECT vertex_id FROM atlas_graph.vertices LIMIT 5;"
+```
+
+**Expected**: Vertex IDs should be 32-char hex strings like `a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4`.
+**NOT**: UUID format like `550e8400-e29b-41d4-a716-446655440000` (36 chars with dashes).
+
+If IDs are still UUIDs, the `ID_STRATEGY=deterministic` env var was not picked up. Check the migration log for `ID strategy: DETERMINISTIC`.
+
+```bash
+# Check entity_claims table was populated (one claim per entity)
+kubectl exec -n $NS $CASS_POD -c $CASS_CONTAINER -- cqlsh -e \
+  "SELECT COUNT(*) FROM atlas_graph.entity_claims;"
+
+# Spot-check a claim: identity_key = "typeName|qualifiedName", vertex_id = deterministic hash
+kubectl exec -n $NS $CASS_POD -c $CASS_CONTAINER -- cqlsh -e \
+  "SELECT * FROM atlas_graph.entity_claims LIMIT 3;"
+```
+
+**Expected**: `entity_claims` count > 0. Each row has `identity_key` in the format `typeName|qualifiedName` and `vertex_id` matching the deterministic 32-char hex format.
+
+**Report to user**: Confirm deterministic IDs and claims are correct before proceeding to backend switch.
 
 ---
 
@@ -344,7 +512,42 @@ CASS_DC=$(kubectl exec -n $NS $POD -c $CONTAINER -- bash -c \
 echo "Cassandra host: $CASS_HOST, datacenter: $CASS_DC"
 ```
 
-### 3.3 Edit the ConfigMap to switch backend
+### 3.3 Ask user: how to apply the backend switch
+
+Use AskUserQuestion:
+- Question: "How should we apply the backend switch?"
+- Header: "Apply method"
+- Options:
+  - "ConfigMap edit (Recommended)" — directly patch the ConfigMap (good for testing, vcluster migrations)
+  - "Helm upgrade" — use `helm upgrade` with `--set` flags (good for production, persists through ArgoCD syncs)
+
+### 3.4 Option A: Helm upgrade
+
+If user chose Helm:
+
+```bash
+echo "Switching backend via Helm upgrade..."
+helm upgrade atlas ./helm/atlas -n $NS --reuse-values \
+  --set global.graphdbBackend=cassandra \
+  --set global.graphIdStrategy=deterministic \
+  --set global.graphClaimEnabled=true
+```
+
+The Helm chart sets these properties in `atlas-application.properties`:
+```yaml
+global:
+  graphdbBackend: cassandra
+  graphIdStrategy: deterministic
+  graphClaimEnabled: true
+```
+
+ES index prefix auto-derives from backend (`cassandra` → `atlas_graph_`), no need to set it explicitly.
+
+Skip to step 3.6 (Wait for pod restart).
+
+### 3.5 Option B: ConfigMap edit
+
+If user chose ConfigMap:
 
 ```bash
 # Show what we're about to add/change
@@ -355,6 +558,8 @@ echo "  atlas.cassandra.graph.port=9042"
 echo "  atlas.cassandra.graph.keyspace=atlas_graph"
 echo "  atlas.cassandra.graph.datacenter=$CASS_DC"
 echo "  atlas.graph.index.search.es.prefix=atlas_graph_"
+echo "  atlas.graph.id.strategy=deterministic"
+echo "  atlas.graph.claim.enabled=true"
 ```
 
 Use AskUserQuestion to confirm:
@@ -389,7 +594,9 @@ grep -v "^atlas.cassandra.graph.hostname=" | \
 grep -v "^atlas.cassandra.graph.port=" | \
 grep -v "^atlas.cassandra.graph.keyspace=" | \
 grep -v "^atlas.cassandra.graph.datacenter=" | \
-grep -v "^atlas.graph.index.search.es.prefix=" > /tmp/atlas-application-new.properties
+grep -v "^atlas.graph.index.search.es.prefix=" | \
+grep -v "^atlas.graph.id.strategy=" | \
+grep -v "^atlas.graph.claim.enabled=" > /tmp/atlas-application-new.properties
 
 cat >> /tmp/atlas-application-new.properties <<PROPEOF
 
@@ -400,6 +607,8 @@ atlas.cassandra.graph.port=9042
 atlas.cassandra.graph.keyspace=atlas_graph
 atlas.cassandra.graph.datacenter=$CASS_DC
 atlas.graph.index.search.es.prefix=atlas_graph_
+atlas.graph.id.strategy=deterministic
+atlas.graph.claim.enabled=true
 PROPEOF
 
 # Update ConfigMap with the new properties file
@@ -415,9 +624,9 @@ echo "ConfigMap updated."
 kubectl get configmap atlas-config -n $NS -o jsonpath='{.data}' | python3 -c "import json,sys; print('\n'.join(json.load(sys.stdin).keys()))"
 ```
 
-### 3.4 Wait for pod restart (may be implicit from ConfigMap change)
+### 3.6 Wait for pod restart (may be implicit from ConfigMap/Helm change)
 
-ConfigMap changes may trigger an automatic pod restart if the ConfigMap is mounted as a volume. Check if the pod is already restarting:
+ConfigMap changes or Helm upgrades may trigger an automatic pod restart. Check if the pod is already restarting:
 
 ```bash
 sleep 5
@@ -435,19 +644,20 @@ kubectl wait --for=condition=Ready pod/$POD -n $NS --timeout=300s
 echo "Pod is ready."
 ```
 
-### 3.5 Verify Cassandra backend loaded
+### 3.7 Verify Cassandra backend loaded
 
 ```bash
 # Check Atlas status
 kubectl exec -n $NS $POD -c $CONTAINER -- curl -s http://localhost:21000/api/atlas/admin/status
 
 # Check startup logs for Cassandra backend confirmation
-kubectl logs $POD -n $NS -c $CONTAINER 2>/dev/null | grep -iE "graphdb|cassandra|backend|CassandraGraph" | head -10
+kubectl logs $POD -n $NS -c $CONTAINER 2>/dev/null | grep -iE "graphdb|cassandra|backend|CassandraGraph|id.strategy|claim" | head -15
 ```
 
 Expected:
 - `{"Status":"ACTIVE"}`
 - Log lines showing `CassandraGraphDatabase` initialized
+- `id.strategy=DETERMINISTIC`, `claim.enabled=true` in logs
 - No JanusGraph/TinkerPop/RepairIndex initialization
 
 ---
@@ -640,6 +850,88 @@ print(f'TypeDef headers returned: {len(headers)} types')
 "
 ```
 
+### 4.9 Lineage test
+
+```bash
+# Pick a Process entity GUID from search results, then test lineage traversal
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  'http://localhost:21000/api/atlas/v2/search/basic?typeName=Process&limit=1' | \
+  python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+entities = data.get('entities', [])
+if entities:
+    guid = entities[0]['guid']
+    print(f'Process entity GUID for lineage test: {guid}')
+else:
+    print('No Process entities found — skip lineage test')
+"
+```
+
+If a Process GUID was found:
+```bash
+PROCESS_GUID="<guid-from-above>"
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  "http://localhost:21000/api/atlas/v2/lineage/${PROCESS_GUID}?direction=BOTH&depth=3" | \
+  python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+nodes = data.get('guidEntityMap', {})
+relations = data.get('relations', [])
+print(f'Lineage: {len(nodes)} nodes, {len(relations)} relations')
+if len(nodes) == 0:
+    print('WARNING: Lineage returned no nodes — check edges_out/edges_in tables')
+else:
+    print('Lineage traversal OK')
+"
+```
+
+### 4.10 Write test — create + delete a test entity
+
+```bash
+# Create a test entity
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -X POST 'http://localhost:21000/api/atlas/v2/entity' \
+  -d '{"entity":{"typeName":"Table","attributes":{"qualifiedName":"zerograph-migration-test-DELETE-ME","name":"migration-test"}}}' | \
+  python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+guids = data.get('guidAssignments', {})
+if guids:
+    guid = list(guids.values())[0]
+    print(f'Test entity created: guid={guid}')
+    print(f'Delete it: curl -X DELETE .../api/atlas/v2/entity/guid/{guid}')
+else:
+    mutated = data.get('mutatedEntities', {})
+    creates = mutated.get('CREATE', [])
+    if creates:
+        guid = creates[0].get('guid', '?')
+        print(f'Test entity created: guid={guid}')
+    else:
+        print(f'Unexpected response: {json.dumps(data)[:200]}')
+"
+```
+
+If entity was created, delete it:
+```bash
+TEST_GUID="<guid-from-above>"
+kubectl exec -n $NS $POD -c $CONTAINER -- curl -s \
+  -H "Authorization: Bearer $TOKEN" \
+  -X DELETE "http://localhost:21000/api/atlas/v2/entity/guid/${TEST_GUID}" | \
+  python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+deletes = data.get('mutatedEntities', {}).get('DELETE', [])
+print(f'Test entity deleted: {len(deletes)} entities removed')
+"
+```
+
+Write test confirms both Cassandra writes and ES indexing are working end-to-end.
+
 ---
 
 ## Phase 5: Cleanup
@@ -677,15 +969,18 @@ Present a summary table to the user:
 === Zero Graph Migration Report ===
 
 Vcluster:        <name>
-Migration mode:  <atlas pod / dedicated pod>
+Migration mode:  <first-time / remigration>
+Pod strategy:    <atlas pod / dedicated pod>
 
-| Phase                        | Status | Detail                              |
-|------------------------------|--------|-------------------------------------|
+| Phase                        | Status  | Detail                              |
+|------------------------------|---------|-------------------------------------|
 | Prerequisites                | OK/FAIL | Build verified, migrator found      |
-| ArgoCD disabled              | OK     | Confirmed by user                   |
+| ArgoCD disabled              | OK      | Confirmed by user                   |
+| Cleanup (remigration only)   | OK/SKIP | Keyspace dropped, ES index deleted  |
 | Migration (Scan+Write)       | OK/FAIL | X vertices, Y edges, Z token ranges |
 | ES Reindex                   | OK/FAIL | N docs indexed                      |
 | Validation                   | OK/FAIL | All checks PASS/FAIL                |
+| Deterministic IDs verified   | OK/SKIP | 32-char hex IDs, N claims           |
 | Backend switch (ConfigMap)   | OK/FAIL | ConfigMap updated, pod restarted    |
 | Atlas health                 | OK/FAIL | {"Status":"ACTIVE"}                 |
 | Search works                 | OK/FAIL | N entities returned, no lock icons  |
@@ -711,7 +1006,7 @@ Throughout execution, if any phase fails:
 1. **Do NOT proceed to the next phase** — stop and report
 2. **Always offer rollback** if backend was already switched:
    - Restore ConfigMap from backup (`kubectl apply -f /tmp/atlas-config-backup.yaml`)
-   - Or manually set `atlas.graphdb.backend=janus` and `atlas.graph.index.search.es.prefix=janusgraph_`
+   - Or manually set `atlas.graphdb.backend=janus`, `atlas.graph.index.search.es.prefix=janusgraph_`, and remove `atlas.graph.id.strategy` + `atlas.graph.claim.enabled`
    - Pod will restart (auto or manual `kubectl delete pod`)
    - JanusGraph data is never modified, so rollback is instant
 3. **Clean up dedicated pod + PDB** even on failure — don't leave orphaned pods
