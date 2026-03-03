@@ -34,7 +34,11 @@ import javax.inject.Inject;
 import javax.inject.Singleton;
 import javax.ws.rs.*;
 import javax.ws.rs.core.MediaType;
+import javax.ws.rs.core.Response;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * REST API for OpenLineage event ingestion and retrieval.
@@ -153,6 +157,100 @@ public class OpenLineageREST {
             return OpenLineageEventsResponse.error("Internal server error: " + e.getMessage());
         } finally {
             AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Batch-fetch events for a parent run and optional child runs in a single request.
+     *
+     * Always queries the parent partition. When childRunIds are provided, also queries
+     * each child partition (for orphaned events stored under the child's own run_id).
+     *
+     * @param parentRunId    The root/parent run ID (required)
+     * @param childRunIdsParam Comma-separated child run IDs whose partitions to also fetch (optional)
+     * @param pageSize       Page size for each partition query (default 100)
+     * @return JSON with runs grouped by runId, each containing events and eventCount
+     */
+    @GET
+    @Path("/runs/batch")
+    @Timed
+    public Response getEventsBatch(
+            @QueryParam("parentRunId") String parentRunId,
+            @QueryParam("childRunIds") String childRunIdsParam,
+            @QueryParam("pageSize") @DefaultValue("100") int pageSize) {
+
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "OpenLineageREST.getEventsBatch(" + parentRunId + ")");
+            }
+
+            if (StringUtils.isEmpty(parentRunId)) {
+                return Response.status(Response.Status.BAD_REQUEST)
+                        .entity(Map.of("success", false, "error", "parentRunId is required"))
+                        .build();
+            }
+
+            Servlets.validateQueryParamLength("parentRunId", parentRunId);
+
+            Map<String, Object> runsMap = new LinkedHashMap<>();
+
+            // Always fetch parent partition
+            fetchAndAddRun(runsMap, parentRunId, pageSize);
+
+            // Optionally fetch child partitions
+            if (StringUtils.isNotEmpty(childRunIdsParam)) {
+                for (String childRunId : childRunIdsParam.split(",")) {
+                    String trimmed = childRunId.trim();
+                    if (!trimmed.isEmpty()) {
+                        Servlets.validateQueryParamLength("childRunId", trimmed);
+                        fetchAndAddRun(runsMap, trimmed, pageSize);
+                    }
+                }
+            }
+
+            int totalEvents = 0;
+            for (Object v : runsMap.values()) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> runEntry = (Map<String, Object>) v;
+                Object cnt = runEntry.get("eventCount");
+                if (cnt instanceof Integer) {
+                    totalEvents += (int) cnt;
+                }
+            }
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("success", true);
+            response.put("totalEventCount", totalEvents);
+            response.put("runs", runsMap);
+
+            return Response.ok(response).build();
+
+        } catch (Exception e) {
+            LOG.error("Failed to batch-fetch events for parentRunId={}", parentRunId, e);
+            return Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                    .entity(Map.of("success", false, "error", "Internal server error: " + e.getMessage()))
+                    .build();
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    private void fetchAndAddRun(Map<String, Object> runsMap, String runId, int pageSize) {
+        try {
+            List<OpenLineageEvent> allEvents = new ArrayList<>();
+            String pagingState = null;
+            do {
+                OpenLineageEventPage page = eventService.getEventsByRunId(runId, pageSize, pagingState);
+                allEvents.addAll(page.getEvents());
+                pagingState = page.getPagingState();
+            } while (pagingState != null);
+
+            runsMap.put(runId, Map.of("events", allEvents, "eventCount", allEvents.size()));
+        } catch (Exception e) {
+            LOG.warn("Failed to fetch events for runId={}: {}", runId, e.getMessage());
+            runsMap.put(runId, Map.of("events", List.of(), "eventCount", 0, "error", e.getMessage()));
         }
     }
 

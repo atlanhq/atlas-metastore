@@ -547,3 +547,6 @@ data:
 
     ######### OpenLineage Kafka Consumer #########
     atlas.kafka.openlineage.enabled={{ .Values.atlas.kafka.openlineage.enabled }}
+
+    ######### OpenLineage Enriched Kafka Consumer #########
+    atlas.kafka.openlineage.enriched.enabled={{ .Values.atlas.kafka.openlineage.enriched.enabled }}
