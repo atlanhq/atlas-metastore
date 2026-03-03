@@ -26,6 +26,7 @@ public final class KeycloakAuthenticationService {
     private static final String CLIENT_ID = "client_id";
     private static final String CLIENT_SECRET = "client_secret";
     private static final int EXPIRY_OFFSET_SEC = 600;
+    private static final double EXPIRY_OFFSET_RATIO = 0.2; // refresh at 80% of TTL if TTL < EXPIRY_OFFSET_SEC
     private static final int TIMEOUT_IN_SECS = 60;
 
     private final RetrofitKeycloakClient retrofit;
@@ -72,8 +73,10 @@ public final class KeycloakAuthenticationService {
                     retrofit2.Response<AccessTokenResponse> resp = this.retrofit.grantToken(this.authConfig.getRealmId(), getTokenRequest()).execute();
                     if (resp.isSuccessful()) {
                         currentAccessToken = resp.body();
-                        expirationTime = currentTime() + currentAccessToken.getExpiresIn() - EXPIRY_OFFSET_SEC;
-                        LOG.info("Auth Client: Auth token fetched with expiry:{} sec", expirationTime);
+                        long ttl = currentAccessToken.getExpiresIn();
+                        long safeOffset = (long) Math.min(EXPIRY_OFFSET_SEC, ttl * EXPIRY_OFFSET_RATIO);
+                        expirationTime = currentTime() + ttl - safeOffset;
+                        LOG.info("Auth Client: Auth token fetched with ttl:{} sec, offset:{} sec, expiresAt:{}", ttl, safeOffset, expirationTime);
                     } else {
                         throw new AtlasBaseException(BAD_REQUEST, resp.errorBody().string());
                     }

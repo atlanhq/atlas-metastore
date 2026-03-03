@@ -34,6 +34,7 @@ import org.keycloak.representations.idm.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -87,6 +88,10 @@ public class KeycloakUserStore {
             return true;
         }
 
+        // Pass dateFrom so Keycloak filters server-side — prevents unbounded pagination
+        // when cacheLastUpdatedTime is old and many irrelevant events have accumulated.
+        String dateFrom = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").format(new Date(cacheLastUpdatedTime));
+
         long latestKeycloakEventTime = -1L;
 
         try {
@@ -95,7 +100,7 @@ public class KeycloakUserStore {
             for (int from = 0; ; from += size) {
 
                 List<AdminEventRepresentation> adminEvents = getKeycloakClient().getAdminEvents(OPERATION_TYPES,
-                        null, null, null, null, null, null, null,
+                        null, null, null, null, null, dateFrom, null,
                         from, size);
 
                 if (CollectionUtils.isEmpty(adminEvents) || cacheLastUpdatedTime > adminEvents.get(0).getTime()) {
@@ -118,7 +123,7 @@ public class KeycloakUserStore {
             for (int from = 0; ; from += size) {
 
                 List<EventRepresentation> events = getKeycloakClient().getEvents(EVENT_TYPES,
-                        null, null, null, null, null, from, size);
+                        null, null, dateFrom, null, null, from, size);
 
                 if (CollectionUtils.isEmpty(events) || cacheLastUpdatedTime > events.get(0).getTime()) {
                     break;
