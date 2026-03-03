@@ -1461,14 +1461,29 @@ public class EntityGraphMapper {
 
                 case ARRAY:
                     if (isAppendOp){
-                        return appendArrayValue(ctx, context);
+                        MetricRecorder appendMetric = RequestContext.get().startMetricRecord("mapToVertexByTypeCategory.array.append");
+                        try {
+                            return appendArrayValue(ctx, context);
+                        } finally {
+                            RequestContext.get().endMetricRecord(appendMetric);
+                        }
                     }
 
                     if (isRemoveOp){
-                        return removeArrayValue(ctx, context);
+                        MetricRecorder removeMetric = RequestContext.get().startMetricRecord("mapToVertexByTypeCategory.array.remove");
+                        try {
+                            return removeArrayValue(ctx, context);
+                        } finally {
+                            RequestContext.get().endMetricRecord(removeMetric);
+                        }
                     }
 
-                    return mapArrayValue(ctx, context);
+                    MetricRecorder replaceMetric = RequestContext.get().startMetricRecord("mapToVertexByTypeCategory.array.replace");
+                    try {
+                        return mapArrayValue(ctx, context);
+                    } finally {
+                        RequestContext.get().endMetricRecord(replaceMetric);
+                    }
 
                 default:
                     throw new AtlasBaseException(AtlasErrorCode.TYPE_CATEGORY_INVALID, ctx.getAttrType().getTypeCategory().name());
@@ -1922,21 +1937,26 @@ public class EntityGraphMapper {
             LOG.debug("==> getEdgeUsingRelationship({})", ctx);
         }
 
+        MetricRecorder resolveAttributeVertexMetric = RequestContext.get().startMetricRecord("getEdgeUsingRelationship.resolveAttributeVertex");
         String      guid            = getGuid(ctx.getValue());
         AtlasVertex attributeVertex = context.getDiscoveryContext().getResolvedEntityVertex(guid);
         AtlasVertex entityVertex    = ctx.getReferringVertex();
         AtlasEdge   ret = null;
 
-        if (attributeVertex == null) {
-            if (AtlasTypeUtil.isAssignedGuid(guid)) {
-                attributeVertex = context.getVertex(guid);
-            }
-
+        try {
             if (attributeVertex == null) {
-                AtlasObjectId objectId = getObjectId(ctx.getValue());
+                if (AtlasTypeUtil.isAssignedGuid(guid)) {
+                    attributeVertex = context.getVertex(guid);
+                }
 
-                attributeVertex = (objectId != null) ? context.getDiscoveryContext().getResolvedEntityVertex(objectId) : null;
+                if (attributeVertex == null) {
+                    AtlasObjectId objectId = getObjectId(ctx.getValue());
+
+                    attributeVertex = (objectId != null) ? context.getDiscoveryContext().getResolvedEntityVertex(objectId) : null;
+                }
             }
+        } finally {
+            RequestContext.get().endMetricRecord(resolveAttributeVertexMetric);
         }
 
 
@@ -1963,7 +1983,6 @@ public class EntityGraphMapper {
         if (type instanceof AtlasEntityType) {
             AtlasEntityType entityType = (AtlasEntityType) type;
             AtlasAttribute  attribute     = ctx.getAttribute();
-            AtlasType atlasType = attribute.getAttributeType();
             String          attributeName = attribute.getName();
 
             if (entityType.hasRelationshipAttribute(attributeName)) {
@@ -1989,31 +2008,14 @@ public class EntityGraphMapper {
 
                 Map<String, Object> relationshipAttributes = getRelationshipAttributes(ctx.getValue());
                 AtlasRelationship relationship = new AtlasRelationship(relationshipName, relationshipAttributes);
-                String relationshipLabel = StringUtils.EMPTY;
 
                 if (createEdge) {
-                    // hard delete the edge if it exists and is  soft deleted
-                    if (relationshipStore instanceof  AtlasRelationshipStoreV2){
-                        relationshipLabel = ((AtlasRelationshipStoreV2)relationshipStore).getRelationshipEdgeLabel(fromVertex, toVertex,  relationship.getTypeName());
+                    MetricRecorder getOrCreateMetric = RequestContext.get().startMetricRecord("getEdgeUsingRelationship.getOrCreate");
+                    try {
+                        newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
+                    } finally {
+                        RequestContext.get().endMetricRecord(getOrCreateMetric);
                     }
-                    if (StringUtils.isNotEmpty(relationshipLabel)) {
-                        Iterator<AtlasEdge> edges = fromVertex.getEdges(AtlasEdgeDirection.OUT, relationshipLabel).iterator();
-                        while (edges.hasNext()) {
-                            AtlasEdge edge = edges.next();
-                            if (edge.getInVertex().equals(toVertex) && getStatus(edge) == DELETED) {
-                                // Hard delete the newEdge
-                                if (atlasType instanceof AtlasArrayType) {
-                                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, ((AtlasArrayType) atlasType).getElementType().getTypeCategory(), attribute.isOwnedRef(),
-                                            true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                                } else {
-                                    deleteDelegate.getHandler(DeleteType.HARD).deleteEdgeReference(edge, attribute.getAttributeType().getTypeCategory(), attribute.isOwnedRef(),
-                                            true, attribute.getRelationshipEdgeDirection(), entityVertex);
-                                }
-
-                            }
-                        }
-                    }
-                    newEdge = relationshipStore.getOrCreate(fromVertex, toVertex, relationship, false);
                     boolean isCreated = graphHelper.getCreatedTime(newEdge) == RequestContext.get().getRequestTime();
 
                     if (isCreated) {
@@ -2026,7 +2028,12 @@ public class EntityGraphMapper {
                     }
 
                 } else {
-                    newEdge = relationshipStore.getRelationship(fromVertex, toVertex, relationship);
+                    MetricRecorder getRelationshipMetric = RequestContext.get().startMetricRecord("getEdgeUsingRelationship.getRelationship");
+                    try {
+                        newEdge = relationshipStore.getRelationship(fromVertex, toVertex, relationship);
+                    } finally {
+                        RequestContext.get().endMetricRecord(getRelationshipMetric);
+                    }
                     if (newEdge != null) {
                         recordEntityUpdate(toVertex, ctx, false);
                     }
@@ -2306,83 +2313,103 @@ public class EntityGraphMapper {
         }
 
 
-        for (int index = 0; index < newElements.size(); index++) {
-            AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
-                    ctx.getVertexProperty(), elementType);
+        MetricRecorder resolveEntriesMetric = RequestContext.get().startMetricRecord("appendArrayValue.resolveEntries");
+        try {
+            for (int index = 0; index < newElements.size(); index++) {
+                AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), newElements.get(index),
+                        ctx.getVertexProperty(), elementType);
 
 
-            Object newEntry = getEdgeUsingRelationship(arrCtx, context, true);
+                Object newEntry = getEdgeUsingRelationship(arrCtx, context, true);
 
-            if (isReference && newEntry != null && newEntry instanceof AtlasEdge && inverseRefAttribute != null) {
-                // Update the inverse reference value.
-                AtlasEdge newEdge = (AtlasEdge) newEntry;
+                if (isReference && newEntry != null && newEntry instanceof AtlasEdge && inverseRefAttribute != null) {
+                    // Update the inverse reference value.
+                    AtlasEdge newEdge = (AtlasEdge) newEntry;
 
-                addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
+                    addInverseReference(context, inverseRefAttribute, newEdge, getRelationshipAttributes(ctx.getValue()));
+                }
+
+                if(newEntry != null) {
+                    newElementsCreated.add(newEntry);
+                }
             }
-
-            if(newEntry != null) {
-                newElementsCreated.add(newEntry);
-            }
+        } finally {
+            RequestContext.get().endMetricRecord(resolveEntriesMetric);
         }
 
         // add index to attributes of array type
-        for (int index = 0; newElements != null && index < newElements.size(); index++) {
-            Object element = newElements.get(index);
+        MetricRecorder persistArrayMetric = RequestContext.get().startMetricRecord("appendArrayValue.persistArray");
+        try {
+            for (int index = 0; newElements != null && index < newElements.size(); index++) {
+                Object element = newElements.get(index);
 
-            if (element instanceof AtlasEdge) {
-                AtlasGraphUtilsV2.setEncodedProperty((AtlasEdge) element, ATTRIBUTE_INDEX_PROPERTY_KEY, index);
-            }
-        }
-
-        if (isNewElementsNull) {
-            setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(),  new ArrayList<>(0),  new ArrayList<>(0), cardinality);
-        } else {
-            setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), newElements,  new ArrayList<>(0), cardinality);
-        }
-
-        if (CollectionUtils.isNotEmpty(newElementsCreated)
-                && newElementsCreated.get(0) instanceof AtlasEdge
-                ) {
-            List<Map<String, String>> attrValues = new ArrayList<>();
-
-            for (Object newItem : newElementsCreated) {
-                if (getCreatedTime((AtlasEdge) newItem) == RequestContext.get().getRequestTime()) {
-                    // Only process newly created edges
-                    AtlasVertex inverseVertex = ((AtlasEdge) newItem).getInVertex();
-                    Map<String, String> objectId = new HashMap<>();
-                    objectId.put("typeName", getTypeName(inverseVertex));
-                    objectId.put("guid", GraphHelper.getGuid(inverseVertex));
-                    attrValues.add(objectId);
+                if (element instanceof AtlasEdge) {
+                    AtlasGraphUtilsV2.setEncodedProperty((AtlasEdge) element, ATTRIBUTE_INDEX_PROPERTY_KEY, index);
                 }
             }
 
-            AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(ctx.getReferringVertex());
-            diffEntity.setAddedRelationshipAttribute(attribute.getName(), attrValues);
+            if (isNewElementsNull) {
+                setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(),  new ArrayList<>(0),  new ArrayList<>(0), cardinality);
+            } else {
+                setArrayElementsProperty(elementType, isSoftReference, ctx.getReferringVertex(), ctx.getVertexProperty(), newElements,  new ArrayList<>(0), cardinality);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(persistArrayMetric);
         }
 
-        switch (ctx.getAttribute().getRelationshipEdgeLabel()) {
-            case TERM_ASSIGNMENT_LABEL:
-                addMeaningsToEntity(ctx, newElementsCreated, new ArrayList<>(0), true);
-                break;
+        MetricRecorder diffEntityMetric = RequestContext.get().startMetricRecord("appendArrayValue.diffEntity");
+        try {
+            if (CollectionUtils.isNotEmpty(newElementsCreated)
+                    && newElementsCreated.get(0) instanceof AtlasEdge
+                    ) {
+                List<Map<String, String>> attrValues = new ArrayList<>();
 
-            case CATEGORY_TERMS_EDGE_LABEL: addCategoriesToTermEntity(ctx, newElementsCreated, new ArrayList<>(0));
-                break;
+                for (Object newItem : newElementsCreated) {
+                    if (getCreatedTime((AtlasEdge) newItem) == RequestContext.get().getRequestTime()) {
+                        // Only process newly created edges
+                        AtlasVertex inverseVertex = ((AtlasEdge) newItem).getInVertex();
+                        Map<String, String> objectId = new HashMap<>();
+                        objectId.put("typeName", getTypeName(inverseVertex));
+                        objectId.put("guid", GraphHelper.getGuid(inverseVertex));
+                        attrValues.add(objectId);
+                    }
+                }
 
-            case CATEGORY_PARENT_EDGE_LABEL: addCatParentAttr(ctx, newElementsCreated, new ArrayList<>(0));
-                break;
+                AtlasEntity diffEntity = entityRetriever.getOrInitializeDiffEntity(ctx.getReferringVertex());
+                diffEntity.setAddedRelationshipAttribute(attribute.getName(), attrValues);
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(diffEntityMetric);
+        }
 
-            case PROCESS_INPUTS:
-            case PROCESS_OUTPUTS: addEdgesToContext(GraphHelper.getGuid(ctx.referringVertex), newElementsCreated,  new ArrayList<>(0));
-                break;
+        MetricRecorder postProcessMetric = RequestContext.get().startMetricRecord("appendArrayValue.postProcess");
+        try {
+            switch (ctx.getAttribute().getRelationshipEdgeLabel()) {
+                case TERM_ASSIGNMENT_LABEL:
+                    addMeaningsToEntity(ctx, newElementsCreated, new ArrayList<>(0), true);
+                    break;
 
-            case INPUT_PORT_PRODUCT_EDGE_LABEL:
-            case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
-                addInternalProductAttr(ctx, newElementsCreated, null, null);
-                break;
+                case CATEGORY_TERMS_EDGE_LABEL: addCategoriesToTermEntity(ctx, newElementsCreated, new ArrayList<>(0));
+                    break;
 
-            case UD_RELATIONSHIP_EDGE_LABEL:
-                validateCustomRelationship(ctx, newElementsCreated, true);
-                break;
+                case CATEGORY_PARENT_EDGE_LABEL: addCatParentAttr(ctx, newElementsCreated, new ArrayList<>(0));
+                    break;
+
+                case PROCESS_INPUTS:
+                case PROCESS_OUTPUTS: addEdgesToContext(GraphHelper.getGuid(ctx.referringVertex), newElementsCreated,  new ArrayList<>(0));
+                    break;
+
+                case INPUT_PORT_PRODUCT_EDGE_LABEL:
+                case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
+                    addInternalProductAttr(ctx, newElementsCreated, null, null);
+                    break;
+
+                case UD_RELATIONSHIP_EDGE_LABEL:
+                    validateCustomRelationship(ctx, newElementsCreated, true);
+                    break;
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(postProcessMetric);
         }
 
         if (LOG.isDebugEnabled()) {
@@ -2418,23 +2445,32 @@ public class EntityGraphMapper {
             elementsDeleted = (List) elementsDeleted.stream().distinct().collect(Collectors.toList());
         }
 
-        for (int index = 0; index < elementsDeleted.size(); index++) {
-            AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), elementsDeleted.get(index),
-                    ctx.getVertexProperty(), elementType);
+        MetricRecorder resolveEntriesMetric = RequestContext.get().startMetricRecord("removeArrayValue.resolveEntries");
+        try {
+            for (int index = 0; index < elementsDeleted.size(); index++) {
+                AttributeMutationContext arrCtx      = new AttributeMutationContext(ctx.getOp(), ctx.getReferringVertex(), ctx.getAttribute(), elementsDeleted.get(index),
+                        ctx.getVertexProperty(), elementType);
 
-            Object deleteEntry =  getEdgeUsingRelationship(arrCtx, context, false);
+                Object deleteEntry =  getEdgeUsingRelationship(arrCtx, context, false);
 
-            // avoid throwing error if relation does not exist but requested to remove
-            if (deleteEntry == null) {
-                LOG.warn("Relation does not exist for attribute {} for entity {}", attribute.getName(),
-                        ctx.getReferringVertex());
-            } else {
-                entityRelationsDeleted.add(deleteEntry);
+                // avoid throwing error if relation does not exist but requested to remove
+                if (deleteEntry == null) {
+                    LOG.warn("Relation does not exist for attribute {} for entity {}", attribute.getName(),
+                            ctx.getReferringVertex());
+                } else {
+                    entityRelationsDeleted.add(deleteEntry);
+                }
             }
-
+        } finally {
+            RequestContext.get().endMetricRecord(resolveEntriesMetric);
         }
 
-        removedElements = removeArrayEntries(attribute, (List)entityRelationsDeleted, ctx);
+        MetricRecorder removeEntriesMetric = RequestContext.get().startMetricRecord("removeArrayValue.removeEntries");
+        try {
+            removedElements = removeArrayEntries(attribute, (List)entityRelationsDeleted, ctx);
+        } finally {
+            RequestContext.get().endMetricRecord(removeEntriesMetric);
+        }
 
         if (CollectionUtils.isNotEmpty(removedElements)
                 && removedElements.get(0) instanceof AtlasEdge) {
@@ -2454,24 +2490,29 @@ public class EntityGraphMapper {
         }
 
 
-        switch (ctx.getAttribute().getRelationshipEdgeLabel()) {
-            case TERM_ASSIGNMENT_LABEL:
-                addMeaningsToEntity(ctx, new ArrayList<>(0), removedElements, true);
-                break;
-            case CATEGORY_TERMS_EDGE_LABEL: addCategoriesToTermEntity(ctx, new ArrayList<>(0), removedElements);
-                break;
+        MetricRecorder postProcessMetric = RequestContext.get().startMetricRecord("removeArrayValue.postProcess");
+        try {
+            switch (ctx.getAttribute().getRelationshipEdgeLabel()) {
+                case TERM_ASSIGNMENT_LABEL:
+                    addMeaningsToEntity(ctx, new ArrayList<>(0), removedElements, true);
+                    break;
+                case CATEGORY_TERMS_EDGE_LABEL: addCategoriesToTermEntity(ctx, new ArrayList<>(0), removedElements);
+                    break;
 
-            case CATEGORY_PARENT_EDGE_LABEL: addCatParentAttr(ctx, new ArrayList<>(0), removedElements);
-                break;
+                case CATEGORY_PARENT_EDGE_LABEL: addCatParentAttr(ctx, new ArrayList<>(0), removedElements);
+                    break;
 
-            case PROCESS_INPUTS:
-            case PROCESS_OUTPUTS: addEdgesToContext(GraphHelper.getGuid(ctx.referringVertex), new ArrayList<>(0),  removedElements);
-                break;
+                case PROCESS_INPUTS:
+                case PROCESS_OUTPUTS: addEdgesToContext(GraphHelper.getGuid(ctx.referringVertex), new ArrayList<>(0),  removedElements);
+                    break;
 
-            case INPUT_PORT_PRODUCT_EDGE_LABEL:
-            case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
-                addInternalProductAttr(ctx, null , removedElements, null);
-                break;
+                case INPUT_PORT_PRODUCT_EDGE_LABEL:
+                case OUTPUT_PORT_PRODUCT_EDGE_LABEL:
+                    addInternalProductAttr(ctx, null , removedElements, null);
+                    break;
+            }
+        } finally {
+            RequestContext.get().endMetricRecord(postProcessMetric);
         }
 
         if (LOG.isDebugEnabled()) {
@@ -5620,7 +5661,7 @@ public class EntityGraphMapper {
 
                 // compute fresh classification‑text de‑norm attributes for this batch
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap);
+                updateClassificationTextV2(originalClassification, vertexIds, batchToDelete, deNormMap, true);
                 // push them to ES
                 if (MapUtils.isNotEmpty(deNormMap)) {
                     ESConnector.writeTagProperties(deNormMap);
@@ -6188,7 +6229,7 @@ public class EntityGraphMapper {
                 if (CollectionUtils.isEmpty(finalClassifications)) {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
                 } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, finalPropagatedClassifications, typeRegistry, fullTextMapperV2, false);
                 }
 
                 deNormAttributesMap.put(vertex.getIdForDisplay(), deNormAttributes);
@@ -6202,7 +6243,8 @@ public class EntityGraphMapper {
     void updateClassificationTextV2(AtlasClassification currentTag,
                                                  List<String> propagatedVertexIds,
                                                  List<Tag> propagatedTags,
-                                                 Map<String, Map<String, Object>> deNormAttributesMap) throws AtlasBaseException {
+                                                 Map<String, Map<String, Object>> deNormAttributesMap,
+                                                 boolean isDelete) throws AtlasBaseException {
         AtlasPerfMetrics.MetricRecorder metricRecorder = RequestContext.get().startMetricRecord("updateClassificationTextV2");
 
         if(CollectionUtils.isNotEmpty(propagatedVertexIds)) {
@@ -6219,7 +6261,7 @@ public class EntityGraphMapper {
                 if (CollectionUtils.isEmpty(finalClassifications)) {
                     deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForNoTags();
                 } else {
-                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2);
+                    deNormAttributes = TagDeNormAttributesUtil.getPropagatedAttributesForTags(currentTag, finalClassifications, propagatedClassifications, typeRegistry, fullTextMapperV2, isDelete);
                 }
 
                 deNormAttributesMap.put(tagAttachment.getVertexId(), deNormAttributes);
@@ -6702,7 +6744,7 @@ public class EntityGraphMapper {
 
                 // compute fresh classification‑text de‑norm attributes for this batch
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-                updateClassificationTextV2(originalClassification, vertexIds, batchToUpdate, deNormMap);
+                updateClassificationTextV2(originalClassification, vertexIds, batchToUpdate, deNormMap, false);
 
                 // push them to ES
                 if (MapUtils.isNotEmpty(deNormMap)) {
@@ -6936,7 +6978,7 @@ public class EntityGraphMapper {
                 .toList();
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
-        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap);
+        updateClassificationTextV2(sourceTag, vertexIdsToDelete, tagsToDelete, deNormMap, true);
         if (MapUtils.isNotEmpty(deNormMap)) {
             ESConnector.writeTagProperties(deNormMap);
         }
