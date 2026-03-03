@@ -19,8 +19,8 @@ import org.eclipse.jetty.util.thread.ExecutorThreadPool;
 import org.eclipse.jetty.webapp.WebAppContext;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.web.context.WebApplicationContext;
-import org.springframework.web.filter.DelegatingFilterProxy;
+//import org.springframework.web.context.WebApplicationContext;
+//import org.springframework.web.filter.DelegatingFilterProxy;
 
 import javax.servlet.DispatcherType;
 import java.io.IOException;
@@ -43,43 +43,43 @@ public class EmbeddedServer {
      * LazySpringContext acts as a bridge between the Fast-Lane Jersey Servlet 
      * and the main Spring WebApplicationContext which is loaded later.
      */
-    private static class LazySpringContext extends org.springframework.web.context.support.GenericWebApplicationContext {
-        private Object delegate;
-        private boolean synchronizedDone = false;
+    // private static class LazySpringContext extends org.springframework.web.context.support.GenericWebApplicationContext {
+    //     private Object delegate;
+    //     private boolean synchronizedDone = false;
 
-        public LazySpringContext(ServletContextHandler fastLane) {
-            super(fastLane.getServletContext());
-            setDisplayName("FastLane-Bridge-Context");
-        }
+    //     public LazySpringContext(ServletContextHandler fastLane) {
+    //         super(fastLane.getServletContext());
+    //         setDisplayName("FastLane-Bridge-Context");
+    //     }
 
-        public void setDelegate(Object delegate) {
-            this.delegate = delegate;
-            LOG.info("LazySpringContext: Main Spring Context delegate linked.");
-        }
+    //     public void setDelegate(Object delegate) {
+    //         this.delegate = delegate;
+    //         LOG.info("LazySpringContext: Main Spring Context delegate linked.");
+    //     }
 
-        public synchronized boolean isSynchronized() { return synchronizedDone; }
-        public synchronized void markSynchronized() { this.synchronizedDone = true; }
+    //     public synchronized boolean isSynchronized() { return synchronizedDone; }
+    //     public synchronized void markSynchronized() { this.synchronizedDone = true; }
 
-        @Override
-        public Object getBean(String name) {
-            if (delegate != null) {
-                try {
-                    return delegate.getClass().getMethod("getBean", String.class).invoke(delegate, name);
-                } catch (Exception e) { LOG.error("Bridge failed for bean: " + name); }
-            }
-            return super.getBean(name);
-        }
+    //     @Override
+    //     public Object getBean(String name) {
+    //         if (delegate != null) {
+    //             try {
+    //                 return delegate.getClass().getMethod("getBean", String.class).invoke(delegate, name);
+    //             } catch (Exception e) { LOG.error("Bridge failed for bean: " + name); }
+    //         }
+    //         return super.getBean(name);
+    //     }
 
-        @Override
-        public <T> T getBean(Class<T> requiredType) {
-            if (delegate != null) {
-                try {
-                    return (T) delegate.getClass().getMethod("getBean", Class.class).invoke(delegate, requiredType);
-                } catch (Exception e) { LOG.error("Bridge failed for type: " + requiredType.getName()); }
-            }
-            return super.getBean(requiredType);
-        }
-    }
+    //     @Override
+    //     public <T> T getBean(Class<T> requiredType) {
+    //         if (delegate != null) {
+    //             try {
+    //                 return (T) delegate.getClass().getMethod("getBean", Class.class).invoke(delegate, requiredType);
+    //             } catch (Exception e) { LOG.error("Bridge failed for type: " + requiredType.getName()); }
+    //         }
+    //         return super.getBean(requiredType);
+    //     }
+    // }
 
     public EmbeddedServer(String host, int port, String path) throws IOException {
         int                           queueSize     = AtlasConfiguration.WEBSERVER_QUEUE_SIZE.getInt();
@@ -139,6 +139,7 @@ public class EmbeddedServer {
         try {
             final WebAppContext mainAppContext = getWebAppContext(atlasPath);
 
+            // Complete list of Atlas REST resources for the Fast-Lane
             final String jerseyClassNames = 
                 "org.apache.atlas.web.resources.AdminResource;" +
                 "org.apache.atlas.web.rest.AttributeREST;" +
@@ -170,74 +171,72 @@ public class EmbeddedServer {
                 "org.apache.atlas.web.errors.NotFoundExceptionMapper;" +
                 "org.apache.atlas.web.filters.AtlasAuthenticationFilter";
 
-            // STEP 1: Initialize server with only the Main App
             ContextHandlerCollection contexts = new ContextHandlerCollection();
             contexts.setHandlers(new Handler[] {mainAppContext});
             server.setHandler(contexts);
 
-            LOG.info("Starting Jetty with Main App Context...");
+            LOG.info("Starting Main Atlas Engine...");
             server.start();
 
-            // STEP 2: Wait and Inject Fast-Lane using Reflection
+            // Use a thread to avoid blocking the main server join
             new Thread(() -> {
                 try {
                     Object springContext = null;
                     int attempts = 0;
-                    
-                    // Wait until Main Spring is fully initialized inside the WebAppClassLoader
-                    while (springContext == null && attempts < 30) {
-                        springContext = mainAppContext.getServletContext().getAttribute(SPRING_CONTEXT_KEY);
+                    String contextKey = "org.springframework.web.context.WebApplicationContext.ROOT";
+
+                    // Wait for the WAR's Spring Context to be initialized inside the Jetty ClassLoader
+                    while (springContext == null && attempts < 60) {
+                        springContext = mainAppContext.getServletContext().getAttribute(contextKey);
                         if (springContext == null) {
-                            LOG.info("Fast-Lane: Waiting for Main Spring (Attempt {}/30)...", ++attempts);
-                            Thread.sleep(10000); // 10s wait for heavy Atlas startup
+                            if (attempts % 5 == 0) LOG.info("Fast-Lane: Waiting for Spring Context (Attempt {}/60)...", attempts);
+                            Thread.sleep(5000);
+                            attempts++;
                         }
                     }
 
                     if (springContext != null) {
-                        LOG.info("Fast-Lane: Main Spring detected. Beginning reflection-based injection...");
+                        LOG.info("Fast-Lane: Spring Context found. Injecting optimization path...");
                         
-                        // Use Jetty's loader directly to ensure class alignment
-                        ClassLoader webAppClassLoader = mainAppContext.getClassLoader();
-
+                        // Create context using the same ClassLoader as the WAR
                         ServletContextHandler fastLaneContext = new ServletContextHandler(ServletContextHandler.SESSIONS);
                         fastLaneContext.setContextPath("/api");
-                        fastLaneContext.setClassLoader(webAppClassLoader);
-                        fastLaneContext.setSessionHandler(mainAppContext.getSessionHandler());
+                        fastLaneContext.setClassLoader(mainAppContext.getClassLoader());
+                        
+                        // Hand over the Spring Context as a generic Object to avoid ClassCastException
+                        fastLaneContext.getServletContext().setAttribute(contextKey, springContext);
 
-                        // Inject the active Spring Context as a generic Object
-                        fastLaneContext.getServletContext().setAttribute(SPRING_CONTEXT_KEY, springContext);
-
-                        // Configure Servlet by Class Name (Jetty will load it using webAppClassLoader)
-                        ServletHolder v2Holder = new ServletHolder();
-                        v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
-                        v2Holder.setInitOrder(1);
-                        v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", jerseyClassNames);
-                        v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWadl", "true");
-
-                        // Configure Security Filter by Class Name
+                        // Configure Filter by class name string
                         FilterHolder securityFilter = new FilterHolder();
                         securityFilter.setClassName("org.springframework.web.filter.DelegatingFilterProxy");
                         securityFilter.setInitParameter("targetBeanName", "springSecurityFilterChain");
                         fastLaneContext.addFilter(securityFilter, "/*", EnumSet.allOf(DispatcherType.class));
 
-                        // Mappings
+                        // Configure Jersey Servlet by class name string
+                        ServletHolder v2Holder = new ServletHolder();
+                        v2Holder.setClassName("com.sun.jersey.spi.spring.container.servlet.SpringServlet");
+                        v2Holder.setInitParameter("com.sun.jersey.config.property.classnames", jerseyClassNames);
+                        v2Holder.setInitParameter("com.sun.jersey.config.feature.DisableWadl", "true");
+                        v2Holder.setInitOrder(1);
+
+                        // Map optimized endpoints
                         fastLaneContext.addServlet(v2Holder, "/atlas/v2/*");
                         fastLaneContext.addServlet(v2Holder, "/meta/*");
                         fastLaneContext.addServlet(v2Holder, "/atlas/lineage/*");
                         fastLaneContext.addServlet(v2Holder, "/atlas/admin/*");
 
-                        // STEP 3: Dynamic Attachment
+                        // Dynamically add to the running server
                         contexts.addHandler(fastLaneContext);
                         fastLaneContext.start();
                         
-                        LOG.info("V2 Fast-Lane Optimization Path Successfully Injected (ClassLoader-Agnostic).");
+                        LOG.info("V2 Fast-Lane Optimization Path ACTIVE.");
                     } else {
-                        LOG.error("Fast-Lane failed: Main Spring context was never initialized.");
+                        LOG.error("Fast-Lane failed: Spring context timeout.");
                     }
                 } catch (Exception e) {
-                    LOG.error("Critical error during Fast-Lane injection", e);
+                    LOG.error("Error during Fast-Lane injection", e);
                 }
-            }).start();
+            }, "FastLane-Injector").start();
 
             server.join();
         } catch (Exception e) {
