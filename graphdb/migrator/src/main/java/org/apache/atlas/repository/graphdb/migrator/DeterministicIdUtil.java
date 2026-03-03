@@ -33,7 +33,7 @@ public final class DeterministicIdUtil {
             return null;
         }
 
-        return t + "\0" + q;
+        return t + "\u001F" + q;
     }
 
     static String hash32(String s) {
