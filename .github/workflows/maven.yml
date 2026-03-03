@@ -28,6 +28,7 @@ on:
       - switchable-graph-provider
       - ring-*
       - ms-635
+      - sgp-consistency-improvements
 
     paths-ignore:
       - '.claude/**'
