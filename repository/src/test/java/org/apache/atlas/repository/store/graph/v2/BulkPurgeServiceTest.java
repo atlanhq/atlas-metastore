@@ -1368,34 +1368,34 @@ class BulkPurgeServiceTest {
                 anyInt());
     }
 
-    // ======================== P3: Force Cancel via Redis Tests ========================
+    // ======================== P3: Cancel via Redis Tests ========================
 
     @Test
-    void testForceCancelPurge_writesRedisSignal() throws Exception {
+    void testCancelPurge_writesRedisSignalThenLocalCancel() throws Exception {
         // Set up: a requestId that exists in Redis
         Map<String, Object> purgeStatus = new LinkedHashMap<>();
-        purgeStatus.put("requestId", "force-cancel-req");
-        purgeStatus.put("purgeKey", "default/snowflake/force-cancel-conn");
+        purgeStatus.put("requestId", "cancel-req");
+        purgeStatus.put("purgeKey", "default/snowflake/cancel-conn");
         purgeStatus.put("status", "RUNNING");
 
-        when(mockRedisService.getValue("bulk_purge_request:force-cancel-req"))
+        when(mockRedisService.getValue("bulk_purge_request:cancel-req"))
                 .thenReturn(MAPPER.writeValueAsString(purgeStatus));
         when(mockRedisService.putValue(anyString(), anyString(), anyInt())).thenReturn("OK");
 
-        boolean result = bulkPurgeService.forceCancelPurge("force-cancel-req");
+        boolean result = bulkPurgeService.cancelPurge("cancel-req");
         assertTrue(result);
 
         // Verify cancel signal was written to Redis
         verify(mockRedisService).putValue(
-                eq("bulk_purge_cancel:default/snowflake/force-cancel-conn"),
+                eq("bulk_purge_cancel:default/snowflake/cancel-conn"),
                 eq("CANCEL_REQUESTED"),
                 anyInt());
     }
 
     @Test
-    void testForceCancelPurge_unknownRequestId_returnsFalse() {
+    void testCancelPurge_unknownRequestId_returnsFalse() {
         when(mockRedisService.getValue(anyString())).thenReturn(null);
-        assertFalse(bulkPurgeService.forceCancelPurge("nonexistent-req"));
+        assertFalse(bulkPurgeService.cancelPurge("nonexistent-req"));
     }
 
     // ======================== P4: Admission Control Tests ========================

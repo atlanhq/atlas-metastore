@@ -206,8 +206,11 @@ public class BulkPurgeREST {
     }
 
     /**
-     * Cancel an in-progress bulk purge.
-     * The cancel is best-effort — some batches may complete after cancel is requested.
+     * Cancel an in-progress bulk purge. Works from any pod — writes cancel signal
+     * to Redis (durable, cross-pod) then attempts local in-memory cancel for instant
+     * effect if this pod is running the purge.
+     *
+     * <p>Best-effort: some batches may complete after cancel is requested.</p>
      *
      * @param requestId the requestId of the purge to cancel
      */
@@ -225,7 +228,6 @@ public class BulkPurgeREST {
                 throw new AtlasBaseException("Query parameter 'requestId' is required");
             }
 
-            // Authorization check
             AtlasAuthorizationUtils.verifyAccess(
                     new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_PURGE),
                     "Bulk purge cancel: " + requestId);
@@ -238,49 +240,6 @@ public class BulkPurgeREST {
             if (cancelled) {
                 response.put("message", "Cancel requested. The purge will stop after the current batch completes.");
                 LOG.info("BulkPurge: Cancel requested for requestId={}", requestId);
-                return Response.ok(response).build();
-            } else {
-                response.put("message", "No active purge found with requestId: " + requestId);
-                return Response.status(Response.Status.NOT_FOUND).entity(response).build();
-            }
-        } finally {
-            AtlasPerfTracer.log(perf);
-        }
-    }
-
-    /**
-     * Force-cancel a purge via Redis signal. Works from any pod — does not require
-     * the request to hit the same pod that is running the purge.
-     *
-     * @param requestId the requestId of the purge to cancel
-     */
-    @POST
-    @Path("/force-cancel")
-    public Response forceCancelPurge(@QueryParam("requestId") String requestId) throws AtlasBaseException {
-        AtlasPerfTracer perf = null;
-
-        try {
-            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
-                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "BulkPurgeREST.forceCancelPurge(" + requestId + ")");
-            }
-
-            if (StringUtils.isBlank(requestId)) {
-                throw new AtlasBaseException("Query parameter 'requestId' is required");
-            }
-
-            // Authorization check
-            AtlasAuthorizationUtils.verifyAccess(
-                    new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_PURGE),
-                    "Bulk purge force-cancel: " + requestId);
-
-            boolean signalWritten = bulkPurgeService.forceCancelPurge(requestId);
-
-            Map<String, Object> response = new LinkedHashMap<>();
-            response.put("requestId", requestId);
-
-            if (signalWritten) {
-                response.put("message", "Force-cancel signal written to Redis. The purge will stop within 2-3 minutes.");
-                LOG.info("BulkPurge: Force-cancel signal written for requestId={}", requestId);
                 return Response.ok(response).build();
             } else {
                 response.put("message", "No purge request found with requestId: " + requestId);

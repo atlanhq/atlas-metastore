@@ -322,24 +322,13 @@ public class BulkPurgeService {
     /**
      * Cancel an in-progress purge. Interrupts worker threads if they are blocked.
      */
-    public boolean cancelPurge(String requestId) {
-        for (PurgeContext ctx : activePurges.values()) {
-            if (ctx.requestId.equals(requestId)) {
-                LOG.info("BulkPurge: Cancel requested for requestId={}, purgeKey={}", requestId, ctx.purgeKey);
-                ctx.cancelRequested = true;
-                interruptWorkers(ctx);
-                return true;
-            }
-        }
-        return false;
-    }
-
     /**
-     * Force-cancel a purge via Redis signal. Works from any pod.
-     * Returns true if the signal was written successfully.
+     * Cancel a purge by requestId. Writes cancel signal to Redis first (durable,
+     * works cross-pod), then attempts local in-memory cancel for instant effect
+     * if this pod happens to be running the purge.
      */
-    public boolean forceCancelPurge(String requestId) {
-        // Look up purgeKey from requestId
+    public boolean cancelPurge(String requestId) {
+        // Look up purgeKey from Redis — this is the durable source of truth
         String redisValue = redisService.getValue("bulk_purge_request:" + requestId);
         if (redisValue == null) {
             return false;
@@ -352,16 +341,24 @@ public class BulkPurgeService {
                 return false;
             }
 
-            // Also try local cancel first
-            cancelPurge(requestId);
-
-            // Write cancel signal to Redis so any pod can pick it up
+            // 1. Redis first — ensures durability even if this pod crashes
             int redisTtl = AtlasConfiguration.BULK_PURGE_REDIS_TTL_SECONDS.getInt();
             redisService.putValue(REDIS_CANCEL_PREFIX + purgeKey, "CANCEL_REQUESTED", redisTtl);
-            LOG.info("BulkPurge: Force-cancel signal written to Redis for requestId={}, purgeKey={}", requestId, purgeKey);
+            LOG.info("BulkPurge: Cancel signal written to Redis for requestId={}, purgeKey={}", requestId, purgeKey);
+
+            // 2. Local cancel — instant effect if this pod is running the purge
+            for (PurgeContext ctx : activePurges.values()) {
+                if (ctx.requestId.equals(requestId)) {
+                    ctx.cancelRequested = true;
+                    interruptWorkers(ctx);
+                    LOG.info("BulkPurge: Local cancel applied for requestId={}, purgeKey={}", requestId, purgeKey);
+                    break;
+                }
+            }
+
             return true;
         } catch (Exception e) {
-            LOG.error("BulkPurge: Failed to write force-cancel signal for requestId={}", requestId, e);
+            LOG.error("BulkPurge: Failed to cancel purge for requestId={}", requestId, e);
             return false;
         }
     }
