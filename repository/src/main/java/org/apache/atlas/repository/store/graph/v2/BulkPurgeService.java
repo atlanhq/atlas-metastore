@@ -626,6 +626,13 @@ public class BulkPurgeService {
             if ("COMPLETED".equals(ctx.status) || "CANCELLED".equals(ctx.status) || "FAILED".equals(ctx.status)) {
                 removeFromActivePurgeKeys(ctx.purgeKey);
             }
+            // Clean up any stale cancel signal so a re-triggered purge for the
+            // same purgeKey does not get immediately cancelled.
+            try {
+                redisService.removeValue(REDIS_CANCEL_PREFIX + ctx.purgeKey);
+            } catch (Exception e) {
+                LOG.warn("BulkPurge: Failed to remove cancel signal for {}", ctx.purgeKey, e);
+            }
             try {
                 redisService.releaseDistributedLock(lockKey);
             } catch (Exception e) {
