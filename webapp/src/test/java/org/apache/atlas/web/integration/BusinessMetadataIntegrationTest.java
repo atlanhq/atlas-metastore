@@ -54,11 +54,15 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
 
     private final long testId = System.currentTimeMillis();
     private String bmName;
+    private String bmStringAttrName;
+    private String bmIntAttrName;
+    private String bmBoolAttrName;
     private String entityGuid;
     private boolean bmCreated = false;
 
     private AtlasAttributeDef createAttrDef(String name, String typeName) {
         AtlasAttributeDef attr = new AtlasAttributeDef(name, typeName);
+        attr.setDisplayName(name);
         attr.setIsOptional(true);
         attr.setCardinality(AtlasAttributeDef.Cardinality.SINGLE);
         // Each attribute needs applicableEntityTypes in its options
@@ -80,9 +84,12 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         AtlasAttributeDef intAttr = createAttrDef("bm_int_attr", "int");
         AtlasAttributeDef boolAttr = createAttrDef("bm_bool_attr", "boolean");
 
-        AtlasBusinessMetadataDef bmDef = new AtlasBusinessMetadataDef(
-                bmName, "Test business metadata", "1.0",
-                Arrays.asList(strAttr, intAttr, boolAttr));
+        AtlasBusinessMetadataDef bmDef = new AtlasBusinessMetadataDef();
+        bmDef.setName(bmName);
+        bmDef.setDisplayName(bmName);
+        bmDef.setDescription("Test business metadata");
+        bmDef.setTypeVersion("1.0");
+        bmDef.setAttributeDefs(Arrays.asList(strAttr, intAttr, boolAttr));
 
         Map<String, String> options = new HashMap<>();
         options.put("applicableEntityTypes", "[\"Table\",\"View\",\"Column\"]");
@@ -97,7 +104,25 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         assertFalse(created.getBusinessMetadataDefs().isEmpty());
 
         // Use the actual name from the response (may have been modified by Atlas)
-        bmName = created.getBusinessMetadataDefs().get(0).getName();
+        AtlasBusinessMetadataDef createdBmDef = created.getBusinessMetadataDefs().get(0);
+        bmName = createdBmDef.getName();
+        bmStringAttrName = createdBmDef.getAttributeDefs().stream()
+                .filter(a -> "bm_string_attr".equals(a.getDisplayName()))
+                .map(AtlasAttributeDef::getName)
+                .findFirst()
+                .orElse("bm_string_attr");
+        bmIntAttrName = createdBmDef.getAttributeDefs().stream()
+                .filter(a -> "bm_int_attr".equals(a.getDisplayName()))
+                .map(AtlasAttributeDef::getName)
+                .findFirst()
+                .orElse("bm_int_attr");
+        bmBoolAttrName = createdBmDef.getAttributeDefs().stream()
+                .filter(a -> "bm_bool_attr".equals(a.getDisplayName()))
+                .map(AtlasAttributeDef::getName)
+                .findFirst()
+                .orElse("bm_bool_attr");
+        LOG.info("Resolved BM typedef/attr names: bm={} string={} int={} bool={}",
+                bmName, bmStringAttrName, bmIntAttrName, bmBoolAttrName);
         bmCreated = true;
 
         LOG.info("Created business metadata typedef: {}", bmName);
@@ -140,12 +165,13 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         assertNotNull(entityGuid);
 
         Map<String, Object> bmAttrs = new HashMap<>();
-        bmAttrs.put("bm_string_attr", "test-value");
-        bmAttrs.put("bm_int_attr", 42);
-        bmAttrs.put("bm_bool_attr", true);
+        bmAttrs.put(bmStringAttrName, "test-value");
+        bmAttrs.put(bmIntAttrName, 42);
+        bmAttrs.put(bmBoolAttrName, true);
 
         Map<String, Map<String, Object>> businessAttributes = new HashMap<>();
         businessAttributes.put(bmName, bmAttrs);
+        LOG.info("Applying BM attributes to entity {} with keys {}", entityGuid, bmAttrs.keySet());
 
         atlasClient.addOrUpdateBusinessAttributes(entityGuid, false, businessAttributes);
 
@@ -168,7 +194,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
 
         @SuppressWarnings("unchecked")
         Map<String, Object> bmAttrs = (Map<String, Object>) entity.getBusinessAttributes().get(bmName);
-        assertEquals("test-value", bmAttrs.get("bm_string_attr"));
+        assertEquals("test-value", bmAttrs.get(bmStringAttrName));
 
         LOG.info("Verified business metadata on entity: {}", entity.getBusinessAttributes().keySet());
     }
@@ -180,12 +206,13 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         assertNotNull(entityGuid);
 
         Map<String, Object> bmAttrs = new HashMap<>();
-        bmAttrs.put("bm_string_attr", "updated-value");
-        bmAttrs.put("bm_int_attr", 99);
-        bmAttrs.put("bm_bool_attr", false);
+        bmAttrs.put(bmStringAttrName, "updated-value");
+        bmAttrs.put(bmIntAttrName, 99);
+        bmAttrs.put(bmBoolAttrName, false);
 
         Map<String, Map<String, Object>> businessAttributes = new HashMap<>();
         businessAttributes.put(bmName, bmAttrs);
+        LOG.info("Updating BM attributes on entity {} with keys {}", entityGuid, bmAttrs.keySet());
 
         atlasClient.addOrUpdateBusinessAttributes(entityGuid, true, businessAttributes);
 
@@ -194,7 +221,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         @SuppressWarnings("unchecked")
         Map<String, Object> fetchedAttrs = (Map<String, Object>) result.getEntity()
                 .getBusinessAttributes().get(bmName);
-        assertEquals("updated-value", fetchedAttrs.get("bm_string_attr"));
+        assertEquals("updated-value", fetchedAttrs.get(bmStringAttrName));
 
         LOG.info("Updated business metadata on entity: guid={}", entityGuid);
     }
@@ -207,10 +234,11 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
 
         // Only update one attribute
         Map<String, Object> bmAttrs = new HashMap<>();
-        bmAttrs.put("bm_string_attr", "partial-update");
+        bmAttrs.put(bmStringAttrName, "partial-update");
 
         Map<String, Map<String, Object>> businessAttributes = new HashMap<>();
         businessAttributes.put(bmName, bmAttrs);
+        LOG.info("Partially updating BM attributes on entity {} with keys {}", entityGuid, bmAttrs.keySet());
 
         atlasClient.addOrUpdateBusinessAttributes(entityGuid, false, businessAttributes);
 
@@ -219,7 +247,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         @SuppressWarnings("unchecked")
         Map<String, Object> fetchedAttrs = (Map<String, Object>) result.getEntity()
                 .getBusinessAttributes().get(bmName);
-        assertEquals("partial-update", fetchedAttrs.get("bm_string_attr"));
+        assertEquals("partial-update", fetchedAttrs.get(bmStringAttrName));
 
         LOG.info("Partially updated business metadata: guid={}", entityGuid);
     }
@@ -231,12 +259,13 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         assertNotNull(entityGuid);
 
         Map<String, Object> bmAttrs = new HashMap<>();
-        bmAttrs.put("bm_string_attr", "");
-        bmAttrs.put("bm_int_attr", 0);
-        bmAttrs.put("bm_bool_attr", false);
+        bmAttrs.put(bmStringAttrName, "");
+        bmAttrs.put(bmIntAttrName, 0);
+        bmAttrs.put(bmBoolAttrName, false);
 
         Map<String, Map<String, Object>> businessAttributes = new HashMap<>();
         businessAttributes.put(bmName, bmAttrs);
+        LOG.info("Removing BM attributes from entity {} with keys {}", entityGuid, bmAttrs.keySet());
 
         atlasClient.removeBusinessAttributes(entityGuid, businessAttributes);
 
@@ -270,7 +299,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         String bogusGuid = "00000000-0000-0000-0000-000000000000";
 
         Map<String, Object> bmAttrs = new HashMap<>();
-        bmAttrs.put("bm_string_attr", "test");
+        bmAttrs.put(bmStringAttrName, "test");
 
         Map<String, Map<String, Object>> businessAttributes = new HashMap<>();
         businessAttributes.put(bmName, bmAttrs);

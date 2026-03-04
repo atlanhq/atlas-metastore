@@ -75,9 +75,12 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     private static final int ES_SYNC_WAIT_MS = 5000;
 
     private final long testId = System.currentTimeMillis();
-    private final String tagName1 = "BatchFetchTag1_" + testId;
-    private final String tagName2 = "BatchFetchTag2_" + testId;
-    private final String tagName3 = "BatchFetchTag3_" + testId;
+    private final String tagDisplayName1 = "BatchFetchTag1_" + testId;
+    private final String tagDisplayName2 = "BatchFetchTag2_" + testId;
+    private final String tagDisplayName3 = "BatchFetchTag3_" + testId;
+    private String tagName1;
+    private String tagName2;
+    private String tagName3;
 
     private boolean typedefsCreated = false;
     private final List<String> entityGuids = new ArrayList<>();
@@ -87,15 +90,21 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     @Test
     @Order(1)
     void testSetupClassificationTypes() throws Exception {
-        AtlasClassificationDef def1 = new AtlasClassificationDef(tagName1);
+        AtlasClassificationDef def1 = new AtlasClassificationDef();
+        def1.setName(tagDisplayName1);
+        def1.setDisplayName(tagDisplayName1);
         def1.setDescription("Batch fetch test tag 1");
         def1.setServiceType("atlas_core");
 
-        AtlasClassificationDef def2 = new AtlasClassificationDef(tagName2);
+        AtlasClassificationDef def2 = new AtlasClassificationDef();
+        def2.setName(tagDisplayName2);
+        def2.setDisplayName(tagDisplayName2);
         def2.setDescription("Batch fetch test tag 2");
         def2.setServiceType("atlas_core");
 
-        AtlasClassificationDef def3 = new AtlasClassificationDef(tagName3);
+        AtlasClassificationDef def3 = new AtlasClassificationDef();
+        def3.setName(tagDisplayName3);
+        def3.setDisplayName(tagDisplayName3);
         def3.setDescription("Batch fetch test tag 3");
         def3.setServiceType("atlas_core");
 
@@ -105,6 +114,26 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
         AtlasTypesDef created = atlasClient.createAtlasTypeDefs(typesDef);
         assertNotNull(created);
         assertEquals(3, created.getClassificationDefs().size());
+
+        tagName1 = created.getClassificationDefs().stream()
+                .filter(d -> tagDisplayName1.equals(d.getDisplayName()))
+                .map(AtlasClassificationDef::getName)
+                .findFirst()
+                .orElse(created.getClassificationDefs().get(0).getName());
+        tagName2 = created.getClassificationDefs().stream()
+                .filter(d -> tagDisplayName2.equals(d.getDisplayName()))
+                .map(AtlasClassificationDef::getName)
+                .findFirst()
+                .orElse(created.getClassificationDefs().get(1).getName());
+        tagName3 = created.getClassificationDefs().stream()
+                .filter(d -> tagDisplayName3.equals(d.getDisplayName()))
+                .map(AtlasClassificationDef::getName)
+                .findFirst()
+                .orElse(created.getClassificationDefs().get(2).getName());
+        LOG.info("Resolved batch-fetch tag names: {} -> {}, {} -> {}, {} -> {}",
+                tagDisplayName1, tagName1,
+                tagDisplayName2, tagName2,
+                tagDisplayName3, tagName3);
 
         Thread.sleep(2000);
 
@@ -214,7 +243,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
                 .put("includeClassificationNames", true)
                 .put("excludeClassifications", true)
                 .put("limit", 10)
-                .set("query", MAPPER.createObjectNode()
+                .set("dsl", MAPPER.createObjectNode()
                         .put("size", 10)
                         .set("query", MAPPER.createObjectNode()
                                 .set("bool", MAPPER.createObjectNode()
@@ -229,7 +258,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
         HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
 
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:21000/api/atlas/v2/search/indexsearch"))
+                .uri(URI.create(getAtlasBaseUrl() + "/api/atlas/v2/search/indexsearch"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Basic " + auth)
                 .POST(HttpRequest.BodyPublishers.ofString(searchPayload))
