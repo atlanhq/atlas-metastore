@@ -210,8 +210,13 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
     public static JanusGraph getBulkLoadingGraphInstance() {
         try {
-            Configuration cfg = getConfiguration();
-            cfg.setProperty("storage.batch-loading", true);
+            // Clone the shared configuration before mutating it — the shared config
+            // is a singleton and concurrent setProperty calls from multiple threads
+            // cause "true,true" values (Apache Commons Configuration is not thread-safe).
+            Configuration sharedCfg = getConfiguration();
+            Properties props = ConfigurationConverter.getProperties(sharedCfg);
+            props.setProperty("storage.batch-loading", "true");
+            Configuration cfg = ConfigurationConverter.getConfiguration(props);
 
             org.apache.commons.configuration2.Configuration conf2 = createConfiguration2(cfg);
             return JanusGraphFactory.open(conf2);
