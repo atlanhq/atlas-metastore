@@ -248,6 +248,75 @@ public class BulkPurgeREST {
         }
     }
 
+    /**
+     * Force-cancel a purge via Redis signal. Works from any pod — does not require
+     * the request to hit the same pod that is running the purge.
+     *
+     * @param requestId the requestId of the purge to cancel
+     */
+    @POST
+    @Path("/force-cancel")
+    public Response forceCancelPurge(@QueryParam("requestId") String requestId) throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "BulkPurgeREST.forceCancelPurge(" + requestId + ")");
+            }
+
+            if (StringUtils.isBlank(requestId)) {
+                throw new AtlasBaseException("Query parameter 'requestId' is required");
+            }
+
+            // Authorization check
+            AtlasAuthorizationUtils.verifyAccess(
+                    new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_PURGE),
+                    "Bulk purge force-cancel: " + requestId);
+
+            boolean signalWritten = bulkPurgeService.forceCancelPurge(requestId);
+
+            Map<String, Object> response = new LinkedHashMap<>();
+            response.put("requestId", requestId);
+
+            if (signalWritten) {
+                response.put("message", "Force-cancel signal written to Redis. The purge will stop within 2-3 minutes.");
+                LOG.info("BulkPurge: Force-cancel signal written for requestId={}", requestId);
+                return Response.ok(response).build();
+            } else {
+                response.put("message", "No purge request found with requestId: " + requestId);
+                return Response.status(Response.Status.NOT_FOUND).entity(response).build();
+            }
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
+    /**
+     * Get system-level status of the bulk purge coordinator.
+     * Shows active/queued/max coordinators and active purge summaries.
+     */
+    @GET
+    @Path("/system-status")
+    public Response getSystemStatus() throws AtlasBaseException {
+        AtlasPerfTracer perf = null;
+
+        try {
+            if (AtlasPerfTracer.isPerfTraceEnabled(PERF_LOG)) {
+                perf = AtlasPerfTracer.getPerfTracer(PERF_LOG, "BulkPurgeREST.getSystemStatus()");
+            }
+
+            // Authorization check
+            AtlasAuthorizationUtils.verifyAccess(
+                    new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_PURGE),
+                    "Bulk purge system status");
+
+            Map<String, Object> status = bulkPurgeService.getSystemStatus();
+            return Response.ok(status).build();
+        } finally {
+            AtlasPerfTracer.log(perf);
+        }
+    }
+
     private void validateWorkerCount(int workerCount) throws AtlasBaseException {
         if (workerCount < 0) {
             throw new AtlasBaseException("workerCount must be non-negative");

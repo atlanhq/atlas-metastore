@@ -204,13 +204,19 @@ public enum AtlasConfiguration {
 
     // Bulk purge configuration
     BULK_PURGE_BATCH_SIZE("atlas.bulk.purge.batch.size", 500),
-    BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 10),
+    BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 4),
     BULK_PURGE_ES_PAGE_SIZE("atlas.bulk.purge.es.page.size", 5000),
     BULK_PURGE_COMMIT_MAX_RETRIES("atlas.bulk.purge.commit.max.retries", 3),
+    BULK_PURGE_COMMIT_TIMEOUT_MS("atlas.bulk.purge.commit.timeout.ms", 120000),
+    BULK_PURGE_GET_VERTICES_TIMEOUT_MS("atlas.bulk.purge.get.vertices.timeout.ms", 60000),
     BULK_PURGE_HEARTBEAT_INTERVAL_MS("atlas.bulk.purge.heartbeat.interval.ms", 30000),
     BULK_PURGE_REDIS_TTL_SECONDS("atlas.bulk.purge.redis.ttl.seconds", 86400),
     BULK_PURGE_KAFKA_NOTIFY_INTERVAL("atlas.bulk.purge.kafka.notify.interval", 10),
     BULK_PURGE_SCROLL_TIMEOUT_MINUTES("atlas.bulk.purge.scroll.timeout.minutes", 30),
+    BULK_PURGE_STALL_THRESHOLD_MS("atlas.bulk.purge.stall.threshold.ms", 600000),
+    BULK_PURGE_FORCE_CANCEL_CHECK_INTERVAL("atlas.bulk.purge.force.cancel.check.interval", 5),
+    BULK_PURGE_INCREMENTAL_ES_CLEANUP_INTERVAL("atlas.bulk.purge.incremental.es.cleanup.interval", 50),
+    BULK_PURGE_COORDINATOR_POOL_SIZE("atlas.bulk.purge.coordinator.pool.size", 2),
     BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true),
     BULK_PURGE_ORPHAN_CHECK_INTERVAL_MS("atlas.bulk.purge.orphan.check.interval.ms", 300000),
     BULK_PURGE_ORPHAN_MAX_RESUBMITS("atlas.bulk.purge.orphan.max.resubmits", 3);
