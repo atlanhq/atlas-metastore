@@ -37,14 +37,14 @@ public class RepairJobScheduler {
     private final AtomicBoolean running = new AtomicBoolean(false);
 
     public RepairJobScheduler(CqlSession session, CassandraGraph graph,
-                               JobLeaseManager leaseManager) {
+                               JobLeaseManager leaseManager, ESOutboxRepository outboxRepository) {
         this.scheduler = Executors.newSingleThreadScheduledExecutor(r -> {
             Thread t = new Thread(r, "repair-scheduler");
             t.setDaemon(true);
             return t;
         });
 
-        this.esReconciliationJob = new ESReconciliationJob(session, graph, leaseManager);
+        this.esReconciliationJob = new ESReconciliationJob(session, graph, leaseManager, outboxRepository);
     }
 
     public void start() {

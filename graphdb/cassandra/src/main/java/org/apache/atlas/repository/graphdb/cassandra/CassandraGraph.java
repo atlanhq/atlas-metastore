@@ -88,7 +88,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         this.esOutboxRepository  = new ESOutboxRepository(session);
         this.leaseManager        = new JobLeaseManager(session);
         this.esOutboxProcessor   = new ESOutboxProcessor(esOutboxRepository, leaseManager);
-        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager);
+        this.repairJobScheduler  = new RepairJobScheduler(session, this, leaseManager, esOutboxRepository);
         this.multiProperties     = ConcurrentHashMap.newKeySet();
         this.idStrategy          = idStrategy != null ? idStrategy : RuntimeIdStrategy.LEGACY;
         this.claimEnabled        = claimEnabled;
@@ -663,10 +663,17 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 LOG.info("commit: atomic batch wrote {} new vertices with their index entries", newVertices.size());
             }
 
-            // Update dirty vertices (these already have indexes; index updates are idempotent overwrites)
+            // Update dirty vertices in a LOGGED batch (atomic — all-or-nothing on crash)
             List<CassandraVertex> dirtyVertices = buffer.getDirtyVertices();
-            for (CassandraVertex v : dirtyVertices) {
-                vertexRepository.updateVertex(v);
+            if (!dirtyVertices.isEmpty()) {
+                com.datastax.oss.driver.api.core.cql.BatchStatementBuilder dirtyBatch =
+                        com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+                                com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
+                for (CassandraVertex v : dirtyVertices) {
+                    dirtyBatch.addStatement(vertexRepository.bindInsertVertex(v));
+                }
+                session.execute(dirtyBatch.build());
+                LOG.info("commit: atomic batch updated {} dirty vertices", dirtyVertices.size());
             }
 
             // Flush new edges
@@ -1626,6 +1633,18 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
     @Override
     public void shutdown() {
+        LOG.info("CassandraGraph shutdown initiated — stopping background processors");
+        try {
+            esOutboxProcessor.stop();
+        } catch (Exception e) {
+            LOG.warn("Error stopping ESOutboxProcessor: {}", e.getMessage());
+        }
+        try {
+            repairJobScheduler.stop();
+        } catch (Exception e) {
+            LOG.warn("Error stopping RepairJobScheduler: {}", e.getMessage());
+        }
+        LOG.info("Background processors stopped — closing Cassandra session");
         CassandraSessionProvider.shutdown();
     }
 

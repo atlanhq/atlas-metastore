@@ -160,6 +160,32 @@ public class ESOutboxRepository {
         return entries;
     }
 
+    /**
+     * Returns all vertex_ids in the FAILED partition. Used by ESReconciliationJob
+     * to deterministically drain entries that the outbox processor gave up on.
+     */
+    public List<String> getFailedVertexIds(int limit) {
+        ResultSet rs = session.execute(
+            selectPendingStmt.bind(STATUS_FAILED).setPageSize(limit)
+        );
+
+        List<String> ids = new ArrayList<>();
+        int count = 0;
+        for (Row row : rs) {
+            if (count >= limit) break;
+            ids.add(row.getString("vertex_id"));
+            count++;
+        }
+        return ids;
+    }
+
+    /**
+     * Delete a single entry from the FAILED partition after successful reindex.
+     */
+    public void deleteFailedEntry(String vertexId) {
+        session.execute(deletePendingStmt.bind(STATUS_FAILED, vertexId));
+    }
+
     private OutboxEntry rowToEntry(Row row) {
         return new OutboxEntry(
             row.getString("vertex_id"),

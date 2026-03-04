@@ -99,6 +99,17 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
             LOG.info("CassandraGraph config: idStrategy={}, claimEnabled={}", idStrategy, claimEnabled);
             CassandraGraph graph = new CassandraGraph(session, idStrategy, claimEnabled);
             LOG.info("CassandraGraph created successfully.");
+
+            // Register JVM shutdown hook for graceful cleanup
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                LOG.info("JVM shutdown hook: shutting down CassandraGraph gracefully");
+                try {
+                    graph.shutdown();
+                } catch (Exception e) {
+                    LOG.warn("Error during CassandraGraph shutdown: {}", e.getMessage());
+                }
+            }, "cassandra-graph-shutdown"));
+
             return graph;
         } catch (AtlasException e) {
             throw new RuntimeException("Failed to create CassandraGraph", e);

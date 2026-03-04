@@ -18,11 +18,18 @@ import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
- * Background reconciliation job that audits Cassandra↔ES consistency via random sampling.
+ * Background reconciliation job that repairs Cassandra↔ES consistency in two phases:
  *
- * The ES outbox provides deterministic coverage of recent failures. This job catches edge
- * cases where the outbox entry itself was lost (e.g., Cassandra write of outbox failed).
- * A random sample of ~1000 GUIDs is checked each cycle — no full scan needed.
+ * <b>Phase 1 — Deterministic:</b> Drains the FAILED partition of the es_outbox table.
+ * These are vertices that the ESOutboxProcessor gave up on after 10 attempts (e.g.,
+ * ES mapping errors, field limit exceeded). The job reads each vertex_id from Cassandra,
+ * extracts the GUID, and reindexes to ES. On success, the FAILED entry is deleted.
+ * This phase is bounded (only processes known failures) and self-healing — once the
+ * root cause is fixed (e.g., ES field limit raised), the next cycle clears the backlog.
+ *
+ * <b>Phase 2 — Probabilistic:</b> Random sampling of ~1000 vertices across the Cassandra
+ * ring to catch edge cases where the outbox entry itself was lost (e.g., Cassandra
+ * write of outbox row failed after vertex was committed).
  *
  * Runs every 6 hours, lease-guarded so only one pod executes at a time.
  */
@@ -39,14 +46,19 @@ public class ESReconciliationJob implements Runnable {
     private static final int REINDEX_BATCH_SIZE = 50;
     private static final double CRITICAL_MISS_RATE = 0.05; // 5%
 
+    private static final int FAILED_DRAIN_BATCH_SIZE = 50; // reindex batch size for failed entries
+
     private final CqlSession session;
     private final CassandraGraph graph;
     private final JobLeaseManager leaseManager;
+    private final ESOutboxRepository outboxRepository;
 
-    public ESReconciliationJob(CqlSession session, CassandraGraph graph, JobLeaseManager leaseManager) {
+    public ESReconciliationJob(CqlSession session, CassandraGraph graph,
+                               JobLeaseManager leaseManager, ESOutboxRepository outboxRepository) {
         this.session = session;
         this.graph = graph;
         this.leaseManager = leaseManager;
+        this.outboxRepository = outboxRepository;
     }
 
     @Override
@@ -64,8 +76,6 @@ public class ESReconciliationJob implements Runnable {
     }
 
     private void runAudit() {
-        LOG.info("ESReconciliationJob: starting sample-based ES audit ({} probes x {} rows)",
-                SAMPLE_PROBES, ROWS_PER_PROBE);
         long startTime = System.currentTimeMillis();
 
         try {
@@ -74,6 +84,13 @@ public class ESReconciliationJob implements Runnable {
                 LOG.warn("ESReconciliationJob: ES client not available, skipping");
                 return;
             }
+
+            // ---- Phase 1: Drain FAILED outbox entries (deterministic repair) ----
+            int failedDrained = drainFailedOutboxEntries();
+
+            // ---- Phase 2: Random sample audit (probabilistic repair) ----
+            LOG.info("ESReconciliationJob: starting sample-based ES audit ({} probes x {} rows)",
+                    SAMPLE_PROBES, ROWS_PER_PROBE);
 
             int totalSampled = 0;
             int totalMissing = 0;
@@ -140,8 +157,11 @@ public class ESReconciliationJob implements Runnable {
                         (int)(CRITICAL_MISS_RATE * 100));
             }
 
-            LOG.info("ESReconciliationJob: completed in {}ms — sampled {} GUIDs, {} missing from ES, {} reindexed (miss rate: {})",
-                    elapsed, totalSampled, totalMissing, totalReindexed, String.format("%.2f%%", missRate * 100));
+            LOG.info("ESReconciliationJob: completed in {}ms — " +
+                            "phase1: {} failed outbox entries drained, " +
+                            "phase2: sampled {} GUIDs, {} missing from ES, {} reindexed (miss rate: {})",
+                    elapsed, failedDrained, totalSampled, totalMissing, totalReindexed,
+                    String.format("%.2f%%", missRate * 100));
 
         } catch (Exception e) {
             LOG.error("ESReconciliationJob: failed", e);
@@ -209,6 +229,81 @@ public class ESReconciliationJob implements Runnable {
                     guids.size(), e.getMessage());
         }
         return missing;
+    }
+
+    /**
+     * Phase 1: Read all FAILED outbox vertex_ids, look up each vertex in Cassandra,
+     * extract the GUID, reindex to ES, and delete the FAILED entry on success.
+     *
+     * This is deterministic — processes exactly the known failures, not a random sample.
+     * Bounded by the FAILED partition size (typically small after the root cause is fixed).
+     */
+    private int drainFailedOutboxEntries() {
+        List<String> failedVertexIds = outboxRepository.getFailedVertexIds(5000);
+        if (failedVertexIds.isEmpty()) {
+            LOG.info("ESReconciliationJob phase 1: no FAILED outbox entries");
+            return 0;
+        }
+
+        LOG.info("ESReconciliationJob phase 1: draining {} FAILED outbox entries", failedVertexIds.size());
+
+        int reindexed = 0;
+        int notFound = 0;
+
+        // Batch the GUIDs for reindexVertices
+        List<String> guidBatch = new ArrayList<>(FAILED_DRAIN_BATCH_SIZE);
+        // Track vertex_id → guid so we can delete FAILED entries on success
+        Map<String, String> vertexIdToGuid = new LinkedHashMap<>();
+
+        for (String vertexId : failedVertexIds) {
+            // Read vertex from Cassandra, extract GUID
+            CassandraVertex vertex = graph.getVertexRepository().getVertex(vertexId, graph);
+            if (vertex == null) {
+                // Vertex was deleted — clean up the stale FAILED entry
+                outboxRepository.deleteFailedEntry(vertexId);
+                notFound++;
+                continue;
+            }
+
+            String guid = vertex.getProperty(Constants.GUID_PROPERTY_KEY, String.class);
+            if (guid == null) {
+                // Non-entity vertex (e.g., system vertex) — clean up
+                outboxRepository.deleteFailedEntry(vertexId);
+                notFound++;
+                continue;
+            }
+
+            guidBatch.add(guid);
+            vertexIdToGuid.put(vertexId, guid);
+
+            if (guidBatch.size() >= FAILED_DRAIN_BATCH_SIZE) {
+                int count = graph.reindexVertices(guidBatch);
+                reindexed += count;
+                // Delete FAILED entries for successfully reindexed vertices
+                if (count == guidBatch.size()) {
+                    for (String vid : vertexIdToGuid.keySet()) {
+                        outboxRepository.deleteFailedEntry(vid);
+                    }
+                }
+                guidBatch.clear();
+                vertexIdToGuid.clear();
+            }
+        }
+
+        // Process remaining batch
+        if (!guidBatch.isEmpty()) {
+            int count = graph.reindexVertices(guidBatch);
+            reindexed += count;
+            if (count == guidBatch.size()) {
+                for (String vid : vertexIdToGuid.keySet()) {
+                    outboxRepository.deleteFailedEntry(vid);
+                }
+            }
+        }
+
+        LOG.info("ESReconciliationJob phase 1: drained {} FAILED entries — {} reindexed, {} not found/cleaned up",
+                failedVertexIds.size(), reindexed, notFound);
+        return reindexed;
     }
 
     private int reindexMissing(Set<String> guids) {
