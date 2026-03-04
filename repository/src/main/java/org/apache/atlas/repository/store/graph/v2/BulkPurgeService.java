@@ -704,7 +704,10 @@ public class BulkPurgeService {
             // Stream ES scroll into queue (coordinator role)
             streamESScrollIntoBatchQueue(ctx, batchQueue, batchSize);
         } finally {
-            // ALWAYS send poison pills + wait for workers, even on ES scroll failure
+            // Drain the queue first so poison pills can be enqueued even if
+            // workers exited early (cancel/interrupt) and left unconsumed batches.
+            batchQueue.clear();
+
             for (int i = 0; i < workerCount; i++) {
                 batchQueue.put(BatchWork.POISON_PILL);
             }
@@ -712,6 +715,8 @@ public class BulkPurgeService {
             for (Future<?> f : workerFutures) {
                 try {
                     f.get(2, TimeUnit.MINUTES);
+                } catch (CancellationException e) {
+                    // Expected when interruptWorkers() cancelled this future
                 } catch (TimeoutException e) {
                     LOG.warn("BulkPurge: Worker timed out during shutdown for purgeKey={}", ctx.purgeKey);
                 } catch (ExecutionException e) {
