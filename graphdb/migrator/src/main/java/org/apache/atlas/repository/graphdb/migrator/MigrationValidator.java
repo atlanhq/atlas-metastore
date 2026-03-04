@@ -122,27 +122,20 @@ public class MigrationValidator {
     }
 
     /**
-     * Verify that TypeDef vertices are present (they have __type = "typeSystem").
+     * Verify that TypeDef entries are present in the dedicated type_definitions table.
      */
     private boolean validateTypeDefPresence(String ks) {
-        LOG.info("Validating TypeDef vertex presence...");
+        LOG.info("Validating TypeDef table population...");
 
-        ResultSet rs = targetSession.execute(
-            "SELECT vertex_id FROM " + ks + ".vertex_property_index " +
-            "WHERE index_name = 'type_category_idx' AND index_value = 'typeSystem:1'");
+        long count = countTable(ks + ".type_definitions");
+        LOG.info("TypeDef entries in type_definitions table: {}", count);
 
-        int count = 0;
-        for (Row row : rs) {
-            count++;
+        if (count <= 0) {
+            LOG.error("FAIL: type_definitions table is empty. Atlas startup will fail (TypeDefCache " +
+                      "relies on this table for O(1) TypeDef loading).");
+            return false;
         }
-
-        LOG.info("TypeDef vertices found: {} (via type_category_idx)", count);
-
-        if (count == 0) {
-            LOG.warn("WARN: No TypeDef vertices found. This may indicate incomplete migration " +
-                     "or different __type_category encoding.");
-        }
-        return true; // Non-fatal: TypeDef encoding may vary
+        return true;
     }
 
     /**

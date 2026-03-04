@@ -93,8 +93,23 @@ public class CassandraGraphDatabase implements GraphDatabase<CassandraVertex, Ca
             LOG.info("Creating CassandraGraph...");
             Configuration configuration = ApplicationProperties.get();
             CqlSession session = CassandraSessionProvider.getSession(configuration);
-            CassandraGraph graph = new CassandraGraph(session);
+            RuntimeIdStrategy idStrategy = RuntimeIdStrategy.from(
+                    configuration.getString("atlas.graph.id.strategy", "legacy"));
+            boolean claimEnabled = configuration.getBoolean("atlas.graph.claim.enabled", false);
+            LOG.info("CassandraGraph config: idStrategy={}, claimEnabled={}", idStrategy, claimEnabled);
+            CassandraGraph graph = new CassandraGraph(session, idStrategy, claimEnabled);
             LOG.info("CassandraGraph created successfully.");
+
+            // Register JVM shutdown hook for graceful cleanup
+            Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                LOG.info("JVM shutdown hook: shutting down CassandraGraph gracefully");
+                try {
+                    graph.shutdown();
+                } catch (Exception e) {
+                    LOG.warn("Error during CassandraGraph shutdown: {}", e.getMessage());
+                }
+            }, "cassandra-graph-shutdown"));
+
             return graph;
         } catch (AtlasException e) {
             throw new RuntimeException("Failed to create CassandraGraph", e);

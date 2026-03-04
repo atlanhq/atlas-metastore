@@ -76,6 +76,19 @@ public class VertexRepository {
     }
 
     /**
+     * Checks vertex existence using LOCAL_QUORUM consistency. Use for correctness-critical
+     * checks (e.g., orphan edge cleanup) where a recently-written vertex must be visible.
+     */
+    public boolean vertexExistsQuorum(String vertexId) {
+        SimpleStatement stmt = SimpleStatement.builder("SELECT vertex_id FROM vertices WHERE vertex_id = ?")
+                .addPositionalValue(vertexId)
+                .setConsistencyLevel(com.datastax.oss.driver.api.core.ConsistencyLevel.LOCAL_QUORUM)
+                .build();
+        ResultSet rs = session.execute(stmt);
+        return rs.one() != null;
+    }
+
+    /**
      * Fetch multiple vertices concurrently using async Cassandra queries.
      * All queries are fired in parallel and results collected, reducing
      * wall-clock time from N sequential round-trips to ~1 round-trip.
@@ -125,23 +138,31 @@ public class VertexRepository {
         BatchStatementBuilder batchBuilder = BatchStatement.builder(DefaultBatchType.LOGGED);
 
         for (CassandraVertex vertex : vertices) {
-            Map<String, Object> props = vertex.getProperties();
-            String typeName = props.containsKey("__typeName") ? String.valueOf(props.get("__typeName")) : null;
-            String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
-            Instant now     = Instant.now();
-
-            batchBuilder.addStatement(insertVertexStmt.bind(
-                vertex.getIdString(),
-                AtlasType.toJson(props),
-                vertex.getVertexLabel(),
-                typeName,
-                state,
-                now,
-                now
-            ));
+            batchBuilder.addStatement(bindInsertVertex(vertex));
         }
 
         session.execute(batchBuilder.build());
+    }
+
+    /**
+     * Returns a bound INSERT statement for the given vertex without executing it.
+     * Used by CassandraGraph.commit() to combine vertex + index writes in a single LOGGED batch.
+     */
+    public BoundStatement bindInsertVertex(CassandraVertex vertex) {
+        Map<String, Object> props = vertex.getProperties();
+        String typeName = props.containsKey("__typeName") ? String.valueOf(props.get("__typeName")) : null;
+        String state    = props.containsKey("__state") ? String.valueOf(props.get("__state")) : "ACTIVE";
+        Instant now     = Instant.now();
+
+        return insertVertexStmt.bind(
+            vertex.getIdString(),
+            AtlasType.toJson(props),
+            vertex.getVertexLabel(),
+            typeName,
+            state,
+            now,
+            now
+        );
     }
 
     @SuppressWarnings("unchecked")

@@ -82,6 +82,22 @@ public class IndexRepository {
 
     // ---- 1:1 unique index (vertex_index) ----
 
+    /**
+     * Returns a bound INSERT statement for a 1:1 vertex index entry without executing it.
+     * Used by CassandraGraph.commit() to combine vertex + index writes in a single LOGGED batch.
+     */
+    public BoundStatement bindInsertIndex(String indexName, String indexValue, String vertexId) {
+        return insertIndexStmt.bind(indexName, indexValue, vertexId);
+    }
+
+    /**
+     * Returns a bound INSERT statement for a 1:N property index entry without executing it.
+     * Used by CassandraGraph.commit() to combine vertex + index writes in a single LOGGED batch.
+     */
+    public BoundStatement bindInsertPropertyIndex(String indexName, String indexValue, String vertexId) {
+        return insertPropertyIndexStmt.bind(indexName, indexValue, vertexId);
+    }
+
     public void addIndex(String indexName, String indexValue, String vertexId) {
         session.execute(insertIndexStmt.bind(indexName, indexValue, vertexId));
     }

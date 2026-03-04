@@ -66,6 +66,7 @@ public class MigratorMain {
         LOG.info("Async writes: maxInflight/thread={}, edgesOutOnly={}, maxEdges/batch={}",
                  config.getMaxInflightPerThread(), config.isEdgesOutOnly(), config.getMaxEdgesPerBatch());
         LOG.info("Resume: {}", config.isResume());
+        LOG.info("ID strategy: {}, claim enabled: {}", config.getIdStrategy(), config.isClaimEnabled());
         LOG.info("Skip flags: esReindex={}, classifications={}, tasks={}",
                  config.isSkipEsReindex(), config.isSkipClassifications(), config.isSkipTasks());
 

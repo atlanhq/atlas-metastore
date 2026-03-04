@@ -6,6 +6,8 @@ import com.datastax.oss.driver.api.core.cql.BatchType;
 import com.datastax.oss.driver.api.core.cql.BatchableStatement;
 import com.datastax.oss.driver.api.core.cql.BoundStatement;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
+import com.datastax.oss.driver.api.core.cql.ResultSet;
+import com.datastax.oss.driver.api.core.cql.Row;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -44,6 +46,10 @@ public class CassandraTargetWriter implements AutoCloseable {
     private PreparedStatement insertEdgeByIdStmt;
     private PreparedStatement insertIndexStmt;
     private PreparedStatement insertPropertyIndexStmt;
+    private PreparedStatement insertClaimStmt;
+    private PreparedStatement selectClaimStmt;
+    private PreparedStatement insertTypeDefStmt;
+    private PreparedStatement insertTypeDefByCategoryStmt;
 
     // Pipeline: scanner threads enqueue, writer threads dequeue
     private final BlockingQueue<DecodedVertex> queue;
@@ -54,6 +60,7 @@ public class CassandraTargetWriter implements AutoCloseable {
     private final AtomicLong writeAttempts = new AtomicLong(0);
     private final AtomicLong writeErrors   = new AtomicLong(0);
     private static final int WRITE_SAMPLE_LOG_LIMIT = 10;
+    private final ConcurrentMap<Long, String> vertexIdOverrides = new ConcurrentHashMap<>();
 
     public CassandraTargetWriter(MigratorConfig config, MigrationMetrics metrics, CqlSession targetSession) {
         this.config        = config;
@@ -159,6 +166,29 @@ public class CassandraTargetWriter implements AutoCloseable {
             "  cardinality text," +
             "  created_at timestamp)");
 
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".entity_claims (" +
+            "  identity_key text PRIMARY KEY," +
+            "  vertex_id text," +
+            "  claimed_at timestamp," +
+            "  source text)");
+
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".type_definitions (" +
+            "  type_name text PRIMARY KEY," +
+            "  type_category text," +
+            "  vertex_id text," +
+            "  created_at timestamp," +
+            "  modified_at timestamp)");
+
+        targetSession.execute(
+            "CREATE TABLE IF NOT EXISTS " + ks + ".type_definitions_by_category (" +
+            "  type_category text," +
+            "  type_name text," +
+            "  vertex_id text," +
+            "  PRIMARY KEY ((type_category), type_name)" +
+            ") WITH CLUSTERING ORDER BY (type_name ASC)");
+
         LOG.info("Target schema created/verified in keyspace '{}'", ks);
     }
 
@@ -188,6 +218,20 @@ public class CassandraTargetWriter implements AutoCloseable {
 
         insertPropertyIndexStmt = targetSession.prepare(
             "INSERT INTO " + ks + ".vertex_property_index (index_name, index_value, vertex_id) VALUES (?, ?, ?)");
+
+        insertClaimStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".entity_claims (identity_key, vertex_id, claimed_at, source) VALUES (?, ?, ?, ?) IF NOT EXISTS");
+
+        selectClaimStmt = targetSession.prepare(
+            "SELECT vertex_id FROM " + ks + ".entity_claims WHERE identity_key = ?");
+
+        insertTypeDefStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".type_definitions " +
+            "(type_name, type_category, vertex_id, created_at, modified_at) VALUES (?, ?, ?, ?, ?)");
+
+        insertTypeDefByCategoryStmt = targetSession.prepare(
+            "INSERT INTO " + ks + ".type_definitions_by_category " +
+            "(type_category, type_name, vertex_id) VALUES (?, ?, ?)");
     }
 
     /**
@@ -303,12 +347,16 @@ public class CassandraTargetWriter implements AutoCloseable {
      * For high-edge vertices, edges are chunked to stay under batch_size_fail_threshold.
      */
     private List<BatchStatement> buildVertexBatches(DecodedVertex vertex) {
-        String vertexId = vertex.getVertexId();
+        String vertexId = resolveVertexId(vertex);
         Instant now = Instant.now();
+
+        // JanusGraph already stores the correct TypeCategory values (CLASS, TRAIT, ENUM, STRUCT, etc.)
+        // that match DataTypes.TypeCategory — no translation needed.
+        Map<String, Object> props = vertex.getProperties();
 
         String propsJson;
         try {
-            propsJson = MAPPER.writeValueAsString(vertex.getProperties());
+            propsJson = MAPPER.writeValueAsString(props);
         } catch (Exception e) {
             propsJson = "{}";
             LOG.warn("Failed to serialize properties for vertex {}", vertexId, e);
@@ -325,14 +373,24 @@ public class CassandraTargetWriter implements AutoCloseable {
         int indexCount = buildIndexStatements(vertex, stmts);
         metrics.incrIndexesWritten(indexCount);
 
-        // 3. Edge INSERTs (3 statements per edge: out, in, by_id)
+        // 3. TypeDef table INSERTs (if this is a TypeDef vertex)
+        String typeName = (String) props.get("__type_name");
+        Object rawCategory = props.get("__type_category");
+        String typeCategory = rawCategory != null ? String.valueOf(rawCategory) : null;
+        if ("typeSystem".equals(vertex.getVertexLabel()) && typeName != null && typeCategory != null) {
+            stmts.add(insertTypeDefStmt.bind(typeName, typeCategory, vertexId, now, now));
+            stmts.add(insertTypeDefByCategoryStmt.bind(typeCategory, typeName, vertexId));
+            metrics.incrTypeDefsWritten();
+        }
+
+        // 4. Edge INSERTs (3 statements per edge: out, in, by_id)
         List<DecodedEdge> edges = vertex.getOutEdges();
         int maxEdges = config.getMaxEdgesPerBatch();
 
         if (edges.size() <= maxEdges) {
             // Everything fits in one batch
             for (DecodedEdge edge : edges) {
-                buildEdgeStatements(edge, now, stmts);
+            buildEdgeStatements(edge, now, stmts);
             }
             return Collections.singletonList(
                 BatchStatement.newInstance(BatchType.UNLOGGED,
@@ -378,14 +436,23 @@ public class CassandraTargetWriter implements AutoCloseable {
         Object edgeState = edge.getProperties().get("__state");
         String state = edgeState != null ? edgeState.toString() : "ACTIVE";
 
+        String outVertexId = resolveVertexId(edge.getOutVertexJgId());
+        String inVertexId = resolveVertexId(edge.getInVertexJgId());
+        String edgeId;
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            edgeId = DeterministicIdUtil.edgeIdFromIdentity(outVertexId, edge.getLabel(), inVertexId);
+        } else {
+            edgeId = DeterministicIdUtil.edgeIdFromJg(edge.getJgRelationId(), config.getIdStrategy());
+        }
+
         stmts.add(insertEdgeOutStmt.bind(
-            edge.getOutVertexId(), edge.getLabel(), edge.getEdgeId(),
-            edge.getInVertexId(), edgePropsJson, state, now, now));
+            outVertexId, edge.getLabel(), edgeId,
+            inVertexId, edgePropsJson, state, now, now));
         stmts.add(insertEdgeInStmt.bind(
-            edge.getInVertexId(), edge.getLabel(), edge.getEdgeId(),
-            edge.getOutVertexId(), edgePropsJson, state, now, now));
+            inVertexId, edge.getLabel(), edgeId,
+            outVertexId, edgePropsJson, state, now, now));
         stmts.add(insertEdgeByIdStmt.bind(
-            edge.getEdgeId(), edge.getOutVertexId(), edge.getInVertexId(),
+            edgeId, outVertexId, inVertexId,
             edge.getLabel(), edgePropsJson, state, now, now));
     }
 
@@ -394,7 +461,7 @@ public class CassandraTargetWriter implements AutoCloseable {
      * Returns the number of index entries added.
      */
     private int buildIndexStatements(DecodedVertex vertex, List<BoundStatement> stmts) {
-        String vertexId = vertex.getVertexId();
+        String vertexId = resolveVertexId(vertex);
         Map<String, Object> props = vertex.getProperties();
         int indexCount = 0;
 
@@ -441,6 +508,99 @@ public class CassandraTargetWriter implements AutoCloseable {
         }
 
         return indexCount;
+    }
+
+    private String resolveVertexId(DecodedVertex vertex) {
+        String computed;
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            // Try identity-based ID (matches runtime GraphIdUtil)
+            Object qnObj = vertex.getProperties().get("qualifiedName");
+            if (qnObj == null) qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
+            if (qnObj == null) {
+                Object hierarchy = vertex.getProperties().get("__qualifiedNameHierarchy");
+                if (hierarchy instanceof List && !((List<?>) hierarchy).isEmpty()) {
+                    qnObj = ((List<?>) hierarchy).get(0);
+                }
+            }
+            String identityId = DeterministicIdUtil.vertexIdFromIdentity(
+                    vertex.getTypeName(), qnObj != null ? String.valueOf(qnObj) : null);
+            computed = identityId != null ? identityId
+                    : DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), IdStrategy.HASH_JG);
+        } else {
+            computed = DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), config.getIdStrategy());
+        }
+
+        // Always populate the override map so edge endpoint resolution works
+        vertexIdOverrides.put(vertex.getJgVertexId(), computed);
+
+        if (!config.isClaimEnabled()) {
+            return computed;
+        }
+
+        Object qnObj = vertex.getProperties().get("qualifiedName");
+        if (qnObj == null) {
+            qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
+        }
+        if (qnObj == null) {
+            Object hierarchy = vertex.getProperties().get("__qualifiedNameHierarchy");
+            if (hierarchy instanceof List && !((List<?>) hierarchy).isEmpty()) {
+                qnObj = ((List<?>) hierarchy).get(0);
+            }
+        }
+        String identityKey = DeterministicIdUtil.buildIdentityKey(vertex.getTypeName(),
+                                                                   qnObj != null ? String.valueOf(qnObj) : null);
+        if (identityKey == null) {
+            return computed;
+        }
+
+        String claimedVertexId = claimVertexId(identityKey, computed);
+        if (!claimedVertexId.equals(computed)) {
+            vertexIdOverrides.put(vertex.getJgVertexId(), claimedVertexId);
+            LOG.info("Vertex claim redirect: jgVertexId={} computedId={} claimedId={} identityKey={}",
+                    vertex.getJgVertexId(), computed, claimedVertexId, identityKey);
+        }
+
+        return claimedVertexId;
+    }
+
+    private String resolveVertexId(long jgVertexId) {
+        String overridden = vertexIdOverrides.get(jgVertexId);
+        if (overridden != null) {
+            return overridden;
+        }
+        // Fallback: for HASH_IDENTITY, the in-vertex may not be processed yet.
+        // Use HASH_JG as a stable fallback — the edge will still land on a deterministic ID,
+        // just not the identity-based one. Log a warning so we can track how often this happens.
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            LOG.warn("Edge endpoint jgVertexId={} not in override map; falling back to HASH_JG", jgVertexId);
+        }
+        return DeterministicIdUtil.vertexIdFromJg(jgVertexId,
+                config.getIdStrategy() == IdStrategy.HASH_IDENTITY ? IdStrategy.HASH_JG : config.getIdStrategy());
+    }
+
+    private String claimVertexId(String identityKey, String candidateVertexId) {
+        try {
+            Row appliedRow = targetSession.execute(insertClaimStmt.bind(
+                    identityKey, candidateVertexId, Instant.now(), "migrator")).one();
+            if (appliedRow != null && appliedRow.getBoolean("[applied]")) {
+                return candidateVertexId;
+            }
+        } catch (Exception e) {
+            LOG.warn("claimVertexId insert failed for identityKey={} candidateVertexId={}: {}",
+                    identityKey, candidateVertexId, e.getMessage());
+        }
+
+        try {
+            ResultSet rs = targetSession.execute(selectClaimStmt.bind(identityKey));
+            Row row = rs.one();
+            if (row != null && row.getString("vertex_id") != null) {
+                return row.getString("vertex_id");
+            }
+        } catch (Exception e) {
+            LOG.warn("claimVertexId select failed for identityKey={}: {}", identityKey, e.getMessage());
+        }
+
+        return candidateVertexId;
     }
 
     @Override

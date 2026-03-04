@@ -87,7 +87,7 @@ public class TaskRegistry {
     private static final Logger LOG = LoggerFactory.getLogger(TaskRegistry.class);
     public static final int TASK_FETCH_BATCH_SIZE = 100;
     public static final List<Map<String, Object>> SORT_ARRAY = Collections.singletonList(mapOf(Constants.TASK_CREATED_TIME, mapOf("order", "asc")));
-    public static final String JANUSGRAPH_VERTEX_INDEX = "janusgraph_vertex_index";
+    public static final String JANUSGRAPH_VERTEX_INDEX = Constants.VERTEX_INDEX_NAME;
     public static final String TASK_MISMATCH_TAG = "mismatchTask";
 
     private AtlasGraph graph;

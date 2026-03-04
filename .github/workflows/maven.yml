@@ -28,6 +28,7 @@ on:
       - switchable-graph-provider
       - ring-*
       - ms-635
+      - sgp-consistency-improvements
 
     paths-ignore:
       - '.claude/**'
@@ -37,6 +38,9 @@ on:
       - 'README.txt'
       - 'README.md'
 
+permissions:
+  id-token: write
+  contents: write
 
 jobs:
   # Detect what changed to optimize workflow execution
