@@ -155,7 +155,7 @@ public class ClassificationPropagationFlagIntegrationTest extends AtlasInProcess
     @Order(2)
     @DisplayName("GET API should reflect updated propagate=true (Cassandra is correct)")
     void testUpdatePropagateTrue_GetApiShowsCorrectValue() throws Exception {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         // Update: propagate false → true
         AtlasClassification update = new AtlasClassification(classificationName);
@@ -191,7 +191,7 @@ public class ClassificationPropagationFlagIntegrationTest extends AtlasInProcess
     @Order(3)
     @DisplayName("MS-595: entity audit CLASSIFICATION_UPDATE detail must have propagate=true after update")
     void testUpdatePropagateTrue_AuditMustReflectNewValue() throws Exception {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         // Query ES audit for CLASSIFICATION_UPDATE events on this entity
         // The audit detail format is: "Updated classification: {json}"
@@ -223,7 +223,7 @@ public class ClassificationPropagationFlagIntegrationTest extends AtlasInProcess
     @Order(4)
     @DisplayName("MS-595: after second update (propagate=false), audit must show false not the previous true")
     void testUpdatePropagateFalse_AuditMustReflectNewValue() throws Exception {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         // Update: propagate true → false
         AtlasClassification update = new AtlasClassification(classificationName);
@@ -264,7 +264,7 @@ public class ClassificationPropagationFlagIntegrationTest extends AtlasInProcess
     @Order(5)
     @DisplayName("MS-595: audit must reflect updated restrictPropagationThroughLineage=true")
     void testUpdateRestrictLineage_AuditMustReflectNewValue() throws Exception {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         // Update: restrictPropagationThroughLineage false → true
         AtlasClassification update = new AtlasClassification(classificationName);
@@ -310,7 +310,7 @@ public class ClassificationPropagationFlagIntegrationTest extends AtlasInProcess
     @Order(6)
     @DisplayName("MS-595: switching restrict flags must be reflected in audit")
     void testSwitchRestrictFlag_AuditMustReflectAllChanges() throws Exception {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         // After Test 5: propagate=true, restrictLineage=true, restrictHierarchy=false
         // Update: switch from restrictLineage to restrictHierarchy

@@ -27,7 +27,6 @@ import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -109,20 +108,15 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
 
         Thread.sleep(2000);
 
-        try {
-            atlasClient.getClassificationDefByName(tagName1);
-            typedefsCreated = true;
-            LOG.info("Created 3 classification typedefs for batch fetch test");
-        } catch (AtlasServiceException e) {
-            typedefsCreated = false;
-            LOG.warn("Classification typedef not retrievable: {}", e.getMessage());
-        }
+        atlasClient.getClassificationDefByName(tagName1);
+        typedefsCreated = true;
+        LOG.info("Created 3 classification typedefs for batch fetch test");
     }
 
     @Test
     @Order(2)
     void testSetupEntitiesWithClassifications() throws Exception {
-        Assumptions.assumeTrue(typedefsCreated, "Typedefs not created");
+        assertTrue(typedefsCreated, "Typedefs not created");
 
         // Entity 1: has tagName1
         AtlasEntity entity1 = createTableEntity("batch-fetch-entity1-" + testId);
@@ -161,7 +155,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     @Test
     @Order(3)
     void testBulkGetEntitiesReturnsCorrectClassifications() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuids.size() == 4, "Entities not created");
+        assertEquals(4, entityGuids.size(), "Entities not created");
 
         AtlasEntitiesWithExtInfo result = atlasClient.getEntitiesByGuids(entityGuids);
 
@@ -211,7 +205,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     @Test
     @Order(4)
     void testSearchNamesOnlyReturnsClassificationNames() throws Exception {
-        Assumptions.assumeTrue(entityGuids.size() == 4, "Entities not created");
+        assertEquals(4, entityGuids.size(), "Entities not created");
 
         // Use index search with excludeClassifications=true, includeClassificationNames=true
         String searchPayload = MAPPER.writeValueAsString(MAPPER.createObjectNode()
@@ -283,7 +277,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     @Test
     @Order(5)
     void testAddClassificationThenBulkFetch() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuids.size() == 4, "Entities not created");
+        assertEquals(4, entityGuids.size(), "Entities not created");
 
         // Add tagName3 to entity 4 (previously had no classifications)
         atlasClient.addClassifications(entityGuids.get(3),
@@ -311,7 +305,7 @@ public class ClassificationBatchFetchIntegrationTest extends AtlasInProcessBaseI
     @Test
     @Order(6)
     void testRemoveClassificationThenBulkFetch() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuids.size() == 4, "Entities not created");
+        assertEquals(4, entityGuids.size(), "Entities not created");
 
         // Remove tagName3 from entity 4
         atlasClient.deleteClassification(entityGuids.get(3), tagName3);

@@ -25,7 +25,6 @@ import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.typedef.AtlasBusinessMetadataDef;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -92,27 +91,22 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
         AtlasTypesDef typesDef = new AtlasTypesDef();
         typesDef.setBusinessMetadataDefs(Collections.singletonList(bmDef));
 
-        try {
-            AtlasTypesDef created = atlasClient.createAtlasTypeDefs(typesDef);
-            assertNotNull(created);
-            assertNotNull(created.getBusinessMetadataDefs());
-            assertFalse(created.getBusinessMetadataDefs().isEmpty());
+        AtlasTypesDef created = atlasClient.createAtlasTypeDefs(typesDef);
+        assertNotNull(created);
+        assertNotNull(created.getBusinessMetadataDefs());
+        assertFalse(created.getBusinessMetadataDefs().isEmpty());
 
-            // Use the actual name from the response (may have been modified by Atlas)
-            bmName = created.getBusinessMetadataDefs().get(0).getName();
-            bmCreated = true;
+        // Use the actual name from the response (may have been modified by Atlas)
+        bmName = created.getBusinessMetadataDefs().get(0).getName();
+        bmCreated = true;
 
-            LOG.info("Created business metadata typedef: {}", bmName);
-        } catch (AtlasServiceException e) {
-            LOG.warn("Business metadata typedef creation failed: {}", e.getMessage());
-            bmCreated = false;
-        }
+        LOG.info("Created business metadata typedef: {}", bmName);
     }
 
     @Test
     @Order(2)
     void testGetBusinessMetadataDef() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
 
         AtlasBusinessMetadataDef bmDef = atlasClient.getBusinessMetadataDefByName(bmName);
 
@@ -142,7 +136,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(4)
     void testAddBusinessMetadataToEntity() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
         assertNotNull(entityGuid);
 
         Map<String, Object> bmAttrs = new HashMap<>();
@@ -161,7 +155,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(5)
     void testGetEntityWithBusinessMetadata() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
         assertNotNull(entityGuid);
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(entityGuid);
@@ -182,7 +176,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(6)
     void testUpdateBusinessMetadata() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
         assertNotNull(entityGuid);
 
         Map<String, Object> bmAttrs = new HashMap<>();
@@ -208,7 +202,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(7)
     void testPartialUpdateBusinessMetadata() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
         assertNotNull(entityGuid);
 
         // Only update one attribute
@@ -233,7 +227,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(8)
     void testRemoveBusinessMetadata() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
         assertNotNull(entityGuid);
 
         Map<String, Object> bmAttrs = new HashMap<>();
@@ -252,7 +246,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(9)
     void testVerifyBusinessMetadataRemoved() throws AtlasServiceException {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
         assertNotNull(entityGuid);
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(entityGuid);
@@ -271,7 +265,7 @@ public class BusinessMetadataIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(10)
     void testAddBusinessMetadataToNonExistentEntity() {
-        Assumptions.assumeTrue(bmCreated, "BM typedef not created");
+        assertTrue(bmCreated, "BM typedef not created");
 
         String bogusGuid = "00000000-0000-0000-0000-000000000000";
 

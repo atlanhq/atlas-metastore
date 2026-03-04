@@ -21,6 +21,7 @@ import org.apache.atlas.AtlasServiceException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
+import org.apache.atlas.model.instance.AtlasObjectId;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.junit.jupiter.api.*;
 import org.slf4j.Logger;
@@ -60,31 +61,26 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
         // Set a qualifiedName; the preprocessor may override it
         domain.setAttribute("qualifiedName", "default/domain/test-" + testId + "/super");
 
-        try {
-            EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(domain));
-            AtlasEntityHeader created = response.getFirstEntityCreated();
+        EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(domain));
+        AtlasEntityHeader created = response.getFirstEntityCreated();
 
-            assertNotNull(created);
-            assertEquals("DataDomain", created.getTypeName());
-            domainGuid = created.getGuid();
+        assertNotNull(created);
+        assertEquals("DataDomain", created.getTypeName());
+        domainGuid = created.getGuid();
 
-            // Fetch to get the actual qualifiedName (may be auto-generated)
-            AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(domainGuid);
-            domainQN = (String) result.getEntity().getAttribute("qualifiedName");
-            assertNotNull(domainQN, "Domain qualifiedName should exist");
-            domainCreated = true;
+        // Fetch to get the actual qualifiedName (may be auto-generated)
+        AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(domainGuid);
+        domainQN = (String) result.getEntity().getAttribute("qualifiedName");
+        assertNotNull(domainQN, "Domain qualifiedName should exist");
+        domainCreated = true;
 
-            LOG.info("Created DataDomain: guid={}, qn={}", domainGuid, domainQN);
-        } catch (AtlasServiceException e) {
-            LOG.warn("DataDomain creation failed (preprocessor may need Keycloak): {}", e.getMessage());
-            domainCreated = false;
-        }
+        LOG.info("Created DataDomain: guid={}, qn={}", domainGuid, domainQN);
     }
 
     @Test
     @Order(2)
     void testGetDomain() throws AtlasServiceException {
-        Assumptions.assumeTrue(domainCreated, "DataDomain not created");
+        assertTrue(domainCreated, "DataDomain not created");
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(domainGuid);
         AtlasEntity entity = result.getEntity();
@@ -100,13 +96,14 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(3)
     void testCreateSubDomain() throws AtlasServiceException {
-        Assumptions.assumeTrue(domainCreated, "DataDomain not created");
+        assertTrue(domainCreated, "DataDomain not created");
 
         AtlasEntity subDomain = new AtlasEntity("DataDomain");
         subDomain.setAttribute("name", "test-subdomain-" + testId);
         subDomain.setAttribute("qualifiedName", domainQN + "/domain/sub-" + testId);
         subDomain.setAttribute("parentDomainQualifiedName", domainQN);
         subDomain.setAttribute("superDomainQualifiedName", domainQN);
+        subDomain.setRelationshipAttribute("parentDomain", new AtlasObjectId(domainGuid, "DataDomain"));
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(subDomain));
         AtlasEntityHeader created = response.getFirstEntityCreated();
@@ -123,9 +120,8 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
 
     @Test
     @Order(4)
-    @Disabled//broken in build
     void testGetDomainHierarchy() throws AtlasServiceException {
-        Assumptions.assumeTrue(domainCreated && subDomainGuid != null, "Domain hierarchy not created");
+        assertTrue(domainCreated && subDomainGuid != null, "Domain hierarchy not created");
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(domainGuid, false, false);
         AtlasEntity parent = result.getEntity();
@@ -143,14 +139,15 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
 
     @Test
     @Order(5)
-    @Disabled//broken in build
     void testCreateDataProduct() throws AtlasServiceException {
-        Assumptions.assumeTrue(domainCreated, "DataDomain not created");
+        assertTrue(domainCreated, "DataDomain not created");
 
         AtlasEntity product = new AtlasEntity("DataProduct");
         product.setAttribute("name", "test-product-" + testId);
         product.setAttribute("qualifiedName", domainQN + "/product/test-" + testId);
         product.setAttribute("domainQualifiedName", domainQN);
+        product.setAttribute("dataProductAssetsDSL", "{\"query\":{\"match_all\":{}}}");
+        product.setRelationshipAttribute("dataDomain", new AtlasObjectId(domainGuid, "DataDomain"));
 
         EntityMutationResponse response = atlasClient.createEntity(new AtlasEntityWithExtInfo(product));
         AtlasEntityHeader created = response.getFirstEntityCreated();
@@ -165,7 +162,7 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(6)
     void testGetProductWithDomain() throws AtlasServiceException {
-        Assumptions.assumeTrue(productGuid != null, "DataProduct not created");
+        assertNotNull(productGuid, "DataProduct not created");
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(productGuid, false, false);
         AtlasEntity product = result.getEntity();
@@ -180,7 +177,7 @@ public class DataMeshIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(7)
     void testUpdateDomain() throws AtlasServiceException {
-        Assumptions.assumeTrue(domainCreated, "DataDomain not created");
+        assertTrue(domainCreated, "DataDomain not created");
 
         AtlasEntityWithExtInfo current = atlasClient.getEntityByGuid(domainGuid);
         AtlasEntity entity = current.getEntity();

@@ -26,7 +26,6 @@ import org.apache.atlas.model.instance.AtlasEntityHeader;
 import org.apache.atlas.model.instance.EntityMutationResponse;
 import org.apache.atlas.model.typedef.AtlasClassificationDef;
 import org.apache.atlas.model.typedef.AtlasTypesDef;
-import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -83,20 +82,15 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
         Thread.sleep(2000);
 
         // Verify the typedef can be retrieved
-        try {
-            atlasClient.getClassificationDefByName(classificationName1);
-            typedefsCreated = true;
-            LOG.info("Created and verified 2 classification typedefs");
-        } catch (AtlasServiceException e) {
-            LOG.warn("Classification typedef created but not retrievable: {}", e.getMessage());
-            typedefsCreated = false;
-        }
+        atlasClient.getClassificationDefByName(classificationName1);
+        typedefsCreated = true;
+        LOG.info("Created and verified 2 classification typedefs");
     }
 
     @Test
     @Order(2)
     void testGetClassificationType() throws AtlasServiceException {
-        Assumptions.assumeTrue(typedefsCreated, "Classification typedefs not available");
+        assertTrue(typedefsCreated, "Classification typedefs not available");
 
         AtlasClassificationDef classDef = atlasClient.getClassificationDefByName(classificationName1);
 
@@ -109,7 +103,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(3)
     void testCreateEntityWithClassification() throws AtlasServiceException {
-        Assumptions.assumeTrue(typedefsCreated, "Classification typedefs not available");
+        assertTrue(typedefsCreated, "Classification typedefs not available");
 
         AtlasEntity entity = new AtlasEntity("Table");
         entity.setAttribute("name", "classified-table-" + testId);
@@ -128,7 +122,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(4)
     void testGetClassificationsOnEntity() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         AtlasClassifications classifications = atlasClient.getClassifications(entityGuid);
 
@@ -143,7 +137,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(5)
     void testAddClassificationToExistingEntity() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         atlasClient.addClassifications(entityGuid,
                 Collections.singletonList(new AtlasClassification(classificationName2)));
@@ -154,7 +148,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(6)
     void testGetEntityWithMultipleClassifications() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         AtlasClassifications classifications = atlasClient.getClassifications(entityGuid);
 
@@ -168,7 +162,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(7)
     void testRemoveClassification() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         atlasClient.deleteClassification(entityGuid, classificationName2);
 
@@ -178,7 +172,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(8)
     void testVerifyClassificationRemoved() throws AtlasServiceException {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         AtlasClassifications classifications = atlasClient.getClassifications(entityGuid);
 
@@ -193,7 +187,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(9)
     void testDeleteClassificationType() throws AtlasServiceException {
-        Assumptions.assumeTrue(typedefsCreated, "Classification typedefs not available");
+        assertTrue(typedefsCreated, "Classification typedefs not available");
 
         // First remove classification from entity
         if (entityGuid != null) {
@@ -215,7 +209,7 @@ public class ClassificationIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(10)
     void testAddNonExistentClassification() {
-        Assumptions.assumeTrue(entityGuid != null, "Entity not created");
+        assertNotNull(entityGuid, "Entity not created");
 
         assertThrows(AtlasServiceException.class,
                 () -> atlasClient.addClassifications(entityGuid,

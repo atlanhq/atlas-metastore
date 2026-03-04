@@ -14,14 +14,6 @@
   },
   "analysis": {
     "analyzer": {
-      "atlan_path_analyzer": {
-        "filter": [
-          "trim",
-          "remove_duplicates"
-        ],
-        "type": "custom",
-        "tokenizer": "atlan_path_tokenizer"
-      },
       "atlan_glossary_analyzer": {
         "type": "custom",
         "tokenizer": "atlan_glossary_tokenizer",
@@ -90,10 +82,6 @@
       }
     },
     "tokenizer": {
-      "atlan_path_tokenizer": {
-        "type": "path_hierarchy",
-        "delimiter": "/"
-      },
       "atlan_glossary_tokenizer": {
         "type": "char_group",
         "tokenize_on_chars": [
