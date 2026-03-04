@@ -3948,8 +3948,11 @@ public class EntityGraphMapper {
         for (AtlasVertex entityVertex : entityVertices) {
             List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
 
-
             try {
+                // Normalize classifications to fill in missing struct attributes from type definition.
+                // Cassandra may have incomplete data (e.g., tagAttachmentKey dropped by older write path),
+                // so we normalize before generating __classificationsText for ES.
+                currentTags = mapClassificationsV2(currentTags);
                 Map<String, Map<String, Object>> deNormMap = new HashMap<>();
 
                 deNormMap.put(entityVertex.getDocId(),
@@ -4211,6 +4214,7 @@ public class EntityGraphMapper {
 
                 //addToClassificationNames(entityVertex, classificationName);
                 List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+                currentTags = mapClassificationsV2(currentTags);
                 currentTags.add(classification);
 
                 // add a new AtlasVertex for the struct or trait instance
@@ -4288,12 +4292,15 @@ public class EntityGraphMapper {
     private List<AtlasClassification> mapClassificationsV2(List<AtlasClassification> classifications) throws AtlasBaseException {
         List<AtlasClassification> mappedClassifications = new ArrayList<>(classifications.size());
         for (AtlasClassification c : classifications) {
+            if (MapUtils.isEmpty(c.getAttributes())) {
+                mappedClassifications.add(c);
+                continue;
+            }
             // Apply attribute mapping to ensure schema compatibility with v1
             AtlasClassification mappedClassification = tagAttributeMapper.mapClassificationAttributes(c);
             mappedClassifications.add(mappedClassification);
         }
-        classifications = mappedClassifications;
-        return classifications;
+        return mappedClassifications;
     }
 
     public int propagateClassification(String entityGuid, String classificationVertexId, String relationshipGuid, Boolean previousRestrictPropagationThroughLineage,Boolean previousRestrictPropagationThroughHierarchy) throws AtlasBaseException {
@@ -4899,6 +4906,7 @@ public class EntityGraphMapper {
         );
 
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+        currentTags = mapClassificationsV2(currentTags);
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
         deNormMap.put(entityVertex.getDocId(), TagDeNormAttributesUtil.getDirectTagAttachmentAttributesForDeleteTag(currentClassification, currentTags, typeRegistry, fullTextMapperV2));
@@ -4925,6 +4933,7 @@ public class EntityGraphMapper {
     private void addEsDeferredOperation(AtlasVertex entityVertex, String classificationName) throws AtlasBaseException {
         LOG.info("Adding ES deferred operation for Entity not found in cassandra. id : [{}]", entityVertex.getId());
         List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+        currentTags = mapClassificationsV2(currentTags);
 
         Map<String, Map<String, Object>> deNormMap = new HashMap<>();
         var atlasClassification = new AtlasClassification(classificationName);
@@ -5283,6 +5292,7 @@ public class EntityGraphMapper {
             }
 
             List<AtlasClassification> currentTags = tagDAO.getAllClassificationsForVertex(entityVertex.getIdForDisplay());
+            currentTags = mapClassificationsV2(currentTags);
             currentTags = currentTags.stream()
                     .filter(tag -> !(tag.getEntityGuid().equals(classification.getEntityGuid()) && tag.getTypeName().equals(classification.getTypeName())))
                     .collect(Collectors.toList());
@@ -6175,6 +6185,7 @@ public class EntityGraphMapper {
                 List<AtlasClassification> finalClassifications = tags.stream().map(t -> {
                     return TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson());
                 }).collect(Collectors.toList());
+                finalClassifications = mapClassificationsV2(finalClassifications);
 
                 tags = tags.stream().filter(Tag::isPropagated).toList();
                 List<AtlasClassification> finalPropagatedClassifications = tags.stream().map(t -> {
@@ -6247,6 +6258,7 @@ public class EntityGraphMapper {
                 List<Tag> tags = tagDAO.getAllTagsByVertexId(tagAttachment.getVertexId());
 
                 List<AtlasClassification> finalClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
+                finalClassifications = mapClassificationsV2(finalClassifications);
 
                 tags = tags.stream().filter(Tag::isPropagated).toList();
                 List<AtlasClassification> propagatedClassifications = tags.stream().map(t -> TagDAOCassandraImpl.toAtlasClassification(t.getTagMetaJson())).collect(Collectors.toList());
