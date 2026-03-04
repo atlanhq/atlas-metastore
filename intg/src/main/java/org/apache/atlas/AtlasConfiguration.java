@@ -181,6 +181,14 @@ public enum AtlasConfiguration {
     ES_MAX_RETRIES("atlas.es.max.retries", 5),
     ES_RETRY_DELAY_MS("atlas.es.retry.delay.ms", 1000),
 
+    // Entity audit: async retry with backoff, then publish to Kafka DLQ if still failing (main request never fails)
+    ENTITY_AUDIT_DLQ_ENABLED("atlas.entity.audit.dlq.enabled", true),
+    ENTITY_AUDIT_DLQ_QUEUE_CAPACITY("atlas.entity.audit.dlq.queue.capacity", 10000),
+    ENTITY_AUDIT_DLQ_MAX_RETRIES("atlas.entity.audit.dlq.max.retries", 3),
+    ENTITY_AUDIT_DLQ_BACKOFF_BASE_MS("atlas.entity.audit.dlq.backoff.base.ms", 1000),
+    ENTITY_AUDIT_DLQ_BACKOFF_MAX_MS("atlas.entity.audit.dlq.backoff.max.ms", 60000),
+    ENTITY_AUDIT_DLQ_TOPIC("atlas.entity.audit.dlq.topic", "ENTITY_AUDIT_DLQ"),
+    ENTITY_AUDIT_DLQ_PUBLISH_TO_KAFKA_ENABLED("atlas.entity.audit.dlq.publish.to.kafka.enabled", true),
 
     MIN_EDGES_SUPER_VERTEX("atlas.jg.super.vertex.min.edge.count", 100),
 
@@ -192,7 +200,20 @@ public enum AtlasConfiguration {
     // Batch sizes for various delete operations
     DELETE_BATCH_LOOKUP_SIZE("atlas.delete.batch.lookup.size", 500),
     DELETE_UNIQUEATTR_BATCH_SIZE("atlas.delete.uniqueattr.batch.size", 200),
-    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100);
+    DELETE_OWNED_BATCH_SIZE("atlas.delete.owned.batch.size", 100),
+
+    // Bulk purge configuration
+    BULK_PURGE_BATCH_SIZE("atlas.bulk.purge.batch.size", 500),
+    BULK_PURGE_WORKER_COUNT("atlas.bulk.purge.worker.count", 10),
+    BULK_PURGE_ES_PAGE_SIZE("atlas.bulk.purge.es.page.size", 5000),
+    BULK_PURGE_COMMIT_MAX_RETRIES("atlas.bulk.purge.commit.max.retries", 3),
+    BULK_PURGE_HEARTBEAT_INTERVAL_MS("atlas.bulk.purge.heartbeat.interval.ms", 30000),
+    BULK_PURGE_REDIS_TTL_SECONDS("atlas.bulk.purge.redis.ttl.seconds", 86400),
+    BULK_PURGE_KAFKA_NOTIFY_INTERVAL("atlas.bulk.purge.kafka.notify.interval", 10),
+    BULK_PURGE_SCROLL_TIMEOUT_MINUTES("atlas.bulk.purge.scroll.timeout.minutes", 30),
+    BULK_PURGE_ORPHAN_CHECK_ENABLED("atlas.bulk.purge.orphan.check.enabled", true),
+    BULK_PURGE_ORPHAN_CHECK_INTERVAL_MS("atlas.bulk.purge.orphan.check.interval.ms", 300000),
+    BULK_PURGE_ORPHAN_MAX_RESUBMITS("atlas.bulk.purge.orphan.max.resubmits", 3);
 
     private static final Configuration APPLICATION_PROPERTIES;
 
