@@ -19,7 +19,7 @@ public final class GraphIdUtil {
             return null;
         }
 
-        return t + "|" + q;
+        return t + "\u001F" + q;
     }
 
     public static String deterministicVertexId(String identityKey) {
