@@ -704,12 +704,24 @@ public class BulkPurgeService {
             // Stream ES scroll into queue (coordinator role)
             streamESScrollIntoBatchQueue(ctx, batchQueue, batchSize);
         } finally {
-            // Drain the queue first so poison pills can be enqueued even if
-            // workers exited early (cancel/interrupt) and left unconsumed batches.
-            batchQueue.clear();
+            // Only clear the queue on cancel/interrupt — in the normal path, workers
+            // must drain remaining batches before seeing their poison pills.
+            // Without this guard, batchQueue.clear() discards unconsumed batches
+            // whose entities never get deleted from graph (counter under-reports too).
+            if (ctx.cancelRequested || Thread.currentThread().isInterrupted()) {
+                batchQueue.clear();
+            }
 
             for (int i = 0; i < workerCount; i++) {
-                batchQueue.put(BatchWork.POISON_PILL);
+                // Use offer with timeout instead of put to avoid blocking forever
+                // if workers already exited (cancel path) and queue is full.
+                if (!batchQueue.offer(BatchWork.POISON_PILL, 30, TimeUnit.SECONDS)) {
+                    LOG.warn("BulkPurge: Timed out enqueuing poison pill for worker {} (purgeKey={}). " +
+                            "Queue may be full with unconsumed batches.", i, ctx.purgeKey);
+                    // Force clear and retry — workers are likely dead
+                    batchQueue.clear();
+                    batchQueue.put(BatchWork.POISON_PILL);
+                }
             }
 
             for (Future<?> f : workerFutures) {
