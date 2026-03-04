@@ -27,7 +27,6 @@ import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.audit.EntityAuditEventV2;
 import org.apache.atlas.model.audit.EntityAuditEventV2.EntityAuditActionV2;
 import org.apache.atlas.notification.task.AtlasDistributedTaskNotificationSender;
-import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.audit.EntityAuditRepository;
 import org.apache.atlas.repository.graph.IAtlasGraphProvider;
 import org.apache.atlas.repository.graphdb.AtlasEdge;
@@ -86,6 +85,19 @@ public class BulkPurgeService {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     private static final String HOSTNAME = getHostname();
 
+    // Internal defaults (not externally configurable — change here if needed)
+    private static final int    COORDINATOR_POOL_SIZE           = 2;
+    private static final int    ES_PAGE_SIZE                    = 5000;
+    private static final int    COMMIT_MAX_RETRIES              = 3;
+    private static final long   COMMIT_TIMEOUT_MS               = 120_000;
+    private static final long   GET_VERTICES_TIMEOUT_MS         = 60_000;
+    private static final int    HEARTBEAT_INTERVAL_MS           = 30_000;
+    private static final int    SCROLL_TIMEOUT_MINUTES          = 30;
+    private static final long   STALL_THRESHOLD_MS              = 900_000; // 15 minutes
+    private static final int    INCREMENTAL_ES_CLEANUP_INTERVAL = 50;
+    private static final long   ORPHAN_CHECK_INTERVAL_MS        = 300_000;
+    private static final int    ORPHAN_MAX_RESUBMITS            = 3;
+
     private final AtlasGraph graph;
     private final IAtlasGraphProvider graphProvider;
     private final RedisService redisService;
@@ -123,10 +135,9 @@ public class BulkPurgeService {
         this.taskNotificationSender = taskNotificationSender;
         this.taskManagement = taskManagement;
 
-        int poolSize = AtlasConfiguration.BULK_PURGE_COORDINATOR_POOL_SIZE.getInt();
         this.coordinatorExecutor = new ThreadPoolExecutor(
-                poolSize, poolSize, 0L, TimeUnit.MILLISECONDS,
-                new LinkedBlockingQueue<>(poolSize),  // bounded queue = pool size
+                COORDINATOR_POOL_SIZE, COORDINATOR_POOL_SIZE, 0L, TimeUnit.MILLISECONDS,
+                new LinkedBlockingQueue<>(COORDINATOR_POOL_SIZE),  // bounded queue = pool size
                 new ThreadFactoryBuilder()
                         .setDaemon(true)
                         .setNameFormat("bulk-purge-coordinator-%d")
@@ -146,17 +157,15 @@ public class BulkPurgeService {
             return;
         }
 
-        long intervalMs = AtlasConfiguration.BULK_PURGE_ORPHAN_CHECK_INTERVAL_MS.getLong();
-
         orphanCheckerExecutor = Executors.newSingleThreadScheduledExecutor(
                 new ThreadFactoryBuilder().setDaemon(true)
                         .setNameFormat("bulk-purge-orphan-checker").build());
 
         orphanCheckerExecutor.scheduleAtFixedRate(
                 this::checkAndRecoverOrphanedPurges,
-                intervalMs, intervalMs, TimeUnit.MILLISECONDS);
+                ORPHAN_CHECK_INTERVAL_MS, ORPHAN_CHECK_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
-        LOG.info("BulkPurge: Orphan checker started with interval={}ms", intervalMs);
+        LOG.info("BulkPurge: Orphan checker started with interval={}ms", ORPHAN_CHECK_INTERVAL_MS);
     }
 
     @PreDestroy
@@ -476,15 +485,13 @@ public class BulkPurgeService {
             // Start heartbeat with stall detection (P7) and force-cancel check (P3)
             heartbeatExecutor = Executors.newSingleThreadScheduledExecutor(
                     new ThreadFactoryBuilder().setDaemon(true).setNameFormat("bulk-purge-heartbeat-" + ctx.purgeKey).build());
-            int heartbeatInterval = AtlasConfiguration.BULK_PURGE_HEARTBEAT_INTERVAL_MS.getInt();
-            long stallThresholdMs = AtlasConfiguration.BULK_PURGE_STALL_THRESHOLD_MS.getLong();
             heartbeatExecutor.scheduleAtFixedRate(() -> {
                 try {
                     ctx.lastHeartbeat = System.currentTimeMillis();
 
                     // P7: Progress-based stall detection
                     long lastProgress = ctx.lastProgressTimestamp.get();
-                    if (lastProgress > 0 && (System.currentTimeMillis() - lastProgress) > stallThresholdMs) {
+                    if (lastProgress > 0 && (System.currentTimeMillis() - lastProgress) > STALL_THRESHOLD_MS) {
                         LOG.error("BulkPurge: STALLED — no progress for {}ms, purgeKey={}, completedBatches={}",
                                 System.currentTimeMillis() - lastProgress, ctx.purgeKey, ctx.completedBatches.get());
                         ctx.stalled = true;
@@ -503,7 +510,7 @@ public class BulkPurgeService {
                 } catch (Exception e) {
                     LOG.warn("BulkPurge: Heartbeat failed for {}", ctx.purgeKey, e);
                 }
-            }, heartbeatInterval, heartbeatInterval, TimeUnit.MILLISECONDS);
+            }, HEARTBEAT_INTERVAL_MS, HEARTBEAT_INTERVAL_MS, TimeUnit.MILLISECONDS);
 
             long startTime = System.currentTimeMillis();
             ctx.currentPhase = "VERTEX_DELETION";
@@ -637,8 +644,6 @@ public class BulkPurgeService {
      */
     private void streamAndDelete(PurgeContext ctx) throws Exception {
         int batchSize = AtlasConfiguration.BULK_PURGE_BATCH_SIZE.getInt();
-        int esPageSize = AtlasConfiguration.BULK_PURGE_ES_PAGE_SIZE.getInt();
-        int scrollTimeoutMin = AtlasConfiguration.BULK_PURGE_SCROLL_TIMEOUT_MINUTES.getInt();
 
         // Determine worker count
         int configuredWorkerCount = AtlasConfiguration.BULK_PURGE_WORKER_COUNT.getInt();
@@ -693,7 +698,7 @@ public class BulkPurgeService {
 
         try {
             // Stream ES scroll into queue (coordinator role)
-            streamESScrollIntoBatchQueue(ctx, batchQueue, batchSize, esPageSize, scrollTimeoutMin);
+            streamESScrollIntoBatchQueue(ctx, batchQueue, batchSize);
         } finally {
             // ALWAYS send poison pills + wait for workers, even on ES scroll failure
             for (int i = 0; i < workerCount; i++) {
@@ -769,9 +774,8 @@ public class BulkPurgeService {
         Set<AtlasVertex> vertexSet;
         Future<Set<AtlasVertex>> getVerticesFuture = null;
         try {
-            long getVerticesTimeoutMs = AtlasConfiguration.BULK_PURGE_GET_VERTICES_TIMEOUT_MS.getLong();
             getVerticesFuture = timeoutExecutor.submit(() -> workerGraph.getVertices(ids));
-            vertexSet = getVerticesFuture.get(getVerticesTimeoutMs, TimeUnit.MILLISECONDS);
+            vertexSet = getVerticesFuture.get(GET_VERTICES_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             LOG.error("BulkPurge: getVertices TIMED OUT for batch {} (purgeKey={})", work.batchIndex, ctx.purgeKey);
             if (getVerticesFuture != null) getVerticesFuture.cancel(true);
@@ -877,26 +881,22 @@ public class BulkPurgeService {
         }
 
         // P6: Incremental ES cleanup every N committed batches
-        int esCleanupInterval = AtlasConfiguration.BULK_PURGE_INCREMENTAL_ES_CLEANUP_INTERVAL.getInt();
-        if (esCleanupInterval > 0 && batches % esCleanupInterval == 0 && committed) {
+        if (INCREMENTAL_ES_CLEANUP_INTERVAL > 0 && batches % INCREMENTAL_ES_CLEANUP_INTERVAL == 0 && committed) {
             triggerIncrementalEsCleanup(ctx);
         }
     }
 
     private boolean commitWithRetry(AtlasGraph workerGraph, int batchIndex) {
-        int maxRetries = AtlasConfiguration.BULK_PURGE_COMMIT_MAX_RETRIES.getInt();
-        long commitTimeoutMs = AtlasConfiguration.BULK_PURGE_COMMIT_TIMEOUT_MS.getLong();
-
-        for (int attempt = 1; attempt <= maxRetries; attempt++) {
+        for (int attempt = 1; attempt <= COMMIT_MAX_RETRIES; attempt++) {
             Future<?> commitFuture = null;
             try {
                 // P1: Commit with timeout to prevent indefinite blocking
                 commitFuture = timeoutExecutor.submit(() -> workerGraph.commit());
-                commitFuture.get(commitTimeoutMs, TimeUnit.MILLISECONDS);
+                commitFuture.get(COMMIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
                 return true;
             } catch (TimeoutException e) {
                 LOG.error("BulkPurge: Commit TIMED OUT for batch {} (attempt {}/{}, timeout={}ms)",
-                        batchIndex, attempt, maxRetries, commitTimeoutMs);
+                        batchIndex, attempt, COMMIT_MAX_RETRIES, COMMIT_TIMEOUT_MS);
                 // Cancel the still-running commit to prevent race with rollback
                 if (commitFuture != null) commitFuture.cancel(true);
                 // Don't retry on timeout — Cassandra is likely under pressure
@@ -906,8 +906,8 @@ public class BulkPurgeService {
                 Thread.currentThread().interrupt();
                 return false;
             } catch (ExecutionException e) {
-                LOG.warn("BulkPurge: Commit failed for batch {} (attempt {}/{})", batchIndex, attempt, maxRetries, e.getCause());
-                if (attempt < maxRetries) {
+                LOG.warn("BulkPurge: Commit failed for batch {} (attempt {}/{})", batchIndex, attempt, COMMIT_MAX_RETRIES, e.getCause());
+                if (attempt < COMMIT_MAX_RETRIES) {
                     try {
                         Thread.sleep((long) Math.pow(2, attempt - 1) * 500); // 500ms, 1s, 2s
                     } catch (InterruptedException ie) {
@@ -916,8 +916,8 @@ public class BulkPurgeService {
                     }
                 }
             } catch (Exception e) {
-                LOG.warn("BulkPurge: Commit failed for batch {} (attempt {}/{})", batchIndex, attempt, maxRetries, e);
-                if (attempt < maxRetries) {
+                LOG.warn("BulkPurge: Commit failed for batch {} (attempt {}/{})", batchIndex, attempt, COMMIT_MAX_RETRIES, e);
+                if (attempt < COMMIT_MAX_RETRIES) {
                     try {
                         Thread.sleep((long) Math.pow(2, attempt - 1) * 500);
                     } catch (InterruptedException ie) {
@@ -997,14 +997,12 @@ public class BulkPurgeService {
      */
     private void streamESScrollIntoBatchQueue(PurgeContext ctx,
                                               BlockingQueue<BatchWork> batchQueue,
-                                              int batchSize,
-                                              int esPageSize,
-                                              int scrollTimeoutMin) throws Exception {
+                                              int batchSize) throws Exception {
         RestClient esClient = getEsClient();
-        String scrollTimeout = scrollTimeoutMin + "m";
+        String scrollTimeout = SCROLL_TIMEOUT_MINUTES + "m";
 
         // Build scroll request — only fetch _id field (vertex ID)
-        String scrollQuery = buildScrollQuery(ctx.esQuery, esPageSize);
+        String scrollQuery = buildScrollQuery(ctx.esQuery, ES_PAGE_SIZE);
 
         // Initial search with scroll
         String endpoint = "/" + VERTEX_INDEX_NAME + "/_search?scroll=" + scrollTimeout;
@@ -1971,9 +1969,8 @@ public class BulkPurgeService {
 
                     // P7: Also detect stalled purges (heartbeat alive but no progress)
                     long lastProgressTs = status.has("lastProgressTimestamp") ? status.get("lastProgressTimestamp").asLong() : 0;
-                    long stallThresholdMs = AtlasConfiguration.BULK_PURGE_STALL_THRESHOLD_MS.getLong();
                     boolean isStalled = "RUNNING".equals(purgeStatus) && lastProgressTs > 0
-                            && (System.currentTimeMillis() - lastProgressTs) > stallThresholdMs;
+                            && (System.currentTimeMillis() - lastProgressTs) > STALL_THRESHOLD_MS;
 
                     if ("RUNNING".equals(purgeStatus) && (lastHeartbeat < fiveMinutesAgo || isStalled)) {
                         if (isStalled) {
@@ -1995,7 +1992,7 @@ public class BulkPurgeService {
                             markOrphanedPurgeCompleted(purgeKey, status);
                         } else {
                             int resubmitCount = status.has("resubmitCount") ? status.get("resubmitCount").asInt() : 0;
-                            int maxResubmits = AtlasConfiguration.BULK_PURGE_ORPHAN_MAX_RESUBMITS.getInt();
+                            int maxResubmits = ORPHAN_MAX_RESUBMITS;
 
                             if (resubmitCount < maxResubmits) {
                                 LOG.info("BulkPurge: Auto-recovering orphaned purge for {} (remaining={}, attempt={})",
@@ -2014,7 +2011,7 @@ public class BulkPurgeService {
                         // due to stale lock or transient issue during recovery, not legitimately failed).
                         boolean isOrphanRecovery = status.has("orphanRecovery") && status.get("orphanRecovery").asBoolean();
                         int resubmitCount = status.has("resubmitCount") ? status.get("resubmitCount").asInt() : 0;
-                        int maxResubmits = AtlasConfiguration.BULK_PURGE_ORPHAN_MAX_RESUBMITS.getInt();
+                        int maxResubmits = ORPHAN_MAX_RESUBMITS;
                         String esQuery = status.has("esQuery") ? status.get("esQuery").asText() : null;
 
                         if (isOrphanRecovery && esQuery != null && resubmitCount < maxResubmits) {

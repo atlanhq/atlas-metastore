@@ -12,10 +12,6 @@ public interface RedisService {
 
   void releaseDistributedLock(String key);
 
-  /**
-   * Force-release a distributed lock regardless of which thread/process holds it.
-   * Used by orphan recovery to release locks held by dead processes.
-   */
   void forceReleaseDistributedLock(String key);
 
   void releaseDistributedLockV2(Lock lock, String key);
