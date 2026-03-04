@@ -607,16 +607,30 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
         try {
             List<CassandraVertex> originalNewVertices = buffer.getNewVertices();
-            Map<String, String> vertexIdRewrite = resolveClaimedVertexIds(originalNewVertices);
+            Set<String> claimLostIds = new LinkedHashSet<>();
+            Map<String, String> vertexIdRewrite = resolveClaimedVertexIds(originalNewVertices, claimLostIds);
 
             List<CassandraVertex> newVertices = new ArrayList<>();
             for (CassandraVertex v : originalNewVertices) {
-                String rewritten = vertexIdRewrite.get(v.getIdString());
-                if (rewritten == null || rewritten.equals(v.getIdString())) {
-                    newVertices.add(v);
-                } else {
+                if (claimLostIds.contains(v.getIdString())) {
+                    // Case 1: Claim lost — skip this vertex entirely (duplicate)
                     LOG.info("commit: duplicate logical vertex detected; skipping insert for tempVertexId={} claimedVertexId={}",
-                            v.getIdString(), rewritten);
+                            v.getIdString(), vertexIdRewrite.get(v.getIdString()));
+                    continue;
+                }
+
+                String newId = vertexIdRewrite.get(v.getIdString());
+                if (newId != null && !newId.equals(v.getIdString())) {
+                    // Case 2: Deterministic ID remap — create replacement vertex with new ID
+                    CassandraVertex replacement = new CassandraVertex(newId, v.getVertexLabel(),
+                            new LinkedHashMap<>(v.getProperties()), this);
+                    newVertices.add(replacement);
+                    vertexCache.get().remove(v.getIdString());
+                    vertexCache.get().put(newId, replacement);
+                    LOG.info("commit: remapped vertex {} -> {} (deterministic)", v.getIdString(), newId);
+                } else {
+                    // Case 3: No change — use as-is
+                    newVertices.add(v);
                 }
             }
 
@@ -805,8 +819,10 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         vertexCache.get().clear();
     }
 
-    private Map<String, String> resolveClaimedVertexIds(List<CassandraVertex> newVertices) {
-        if (!claimEnabled || newVertices == null || newVertices.isEmpty()) {
+    private Map<String, String> resolveClaimedVertexIds(List<CassandraVertex> newVertices,
+                                                         Set<String> claimLostIds) {
+        if ((!claimEnabled && idStrategy != RuntimeIdStrategy.DETERMINISTIC)
+                || newVertices == null || newVertices.isEmpty()) {
             return Collections.emptyMap();
         }
 
@@ -820,14 +836,24 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             }
 
             String candidateVertexId = vertex.getIdString();
+
+            // Step 1: Compute deterministic vertex ID from typeName + qualifiedName
             if (idStrategy == RuntimeIdStrategy.DETERMINISTIC) {
-                // Deterministic identity mode currently uses claim-based convergence while preserving
-                // in-transaction generated vertex IDs. Full vertex-ID remapping is introduced separately.
+                String deterministicId = GraphIdUtil.deterministicVertexId(identityKey);
+                if (!deterministicId.equals(candidateVertexId)) {
+                    rewrites.put(candidateVertexId, deterministicId);
+                    candidateVertexId = deterministicId;
+                }
             }
 
-            String resolvedVertexId = claimRepository.claimOrGet(identityKey, candidateVertexId, "runtime");
-            if (!candidateVertexId.equals(resolvedVertexId)) {
-                rewrites.put(candidateVertexId, resolvedVertexId);
+            // Step 2: LWT claim (only for legacy UUID mode — deterministic IDs are their own dedup)
+            if (claimEnabled && idStrategy != RuntimeIdStrategy.DETERMINISTIC) {
+                String resolvedVertexId = claimRepository.claimOrGet(identityKey, candidateVertexId, "runtime");
+                if (!candidateVertexId.equals(resolvedVertexId)) {
+                    // Claim lost — another process already owns this entity
+                    claimLostIds.add(vertex.getIdString());
+                    rewrites.put(vertex.getIdString(), resolvedVertexId);
+                }
             }
         }
 

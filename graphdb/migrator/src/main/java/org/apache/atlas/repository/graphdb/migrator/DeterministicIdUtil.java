@@ -22,6 +22,18 @@ public final class DeterministicIdUtil {
         return String.valueOf(jgRelationId);
     }
 
+    public static String vertexIdFromIdentity(String typeName, String qualifiedName) {
+        String identityKey = buildIdentityKey(typeName, qualifiedName);
+        if (identityKey == null) {
+            return null;
+        }
+        return hash32("v|" + identityKey);
+    }
+
+    public static String edgeIdFromIdentity(String outVertexId, String label, String inVertexId) {
+        return hash32("e|" + outVertexId + "|" + label + "|" + inVertexId);
+    }
+
     public static String buildIdentityKey(String typeName, String qualifiedName) {
         if (typeName == null || qualifiedName == null) {
             return null;

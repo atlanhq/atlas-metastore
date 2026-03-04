@@ -55,7 +55,7 @@ WRITER_THREADS="${WRITER_THREADS:-8}"
 ES_BULK_SIZE="${ES_BULK_SIZE:-1000}"
 
 # ID strategy and dedup claims
-ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID) or "deterministic" (SHA-256)
+ID_STRATEGY="${ID_STRATEGY:-legacy}"          # "legacy" (UUID), "hash-jg" (SHA-256 of JG ID), or "deterministic" (identity-based SHA-256)
 CLAIM_ENABLED="${CLAIM_ENABLED:-false}"       # LWT dedup claims during migration
 
 # ---- Helpers ----
@@ -306,7 +306,7 @@ show_help() {
     echo "  TARGET_ES_INDEX        Target ES index to write docs to (default: atlas_graph_vertex_index)"
     echo "  SCANNER_THREADS        Scanner parallelism (default: 16)"
     echo "  WRITER_THREADS         Writer parallelism (default: 8)"
-    echo "  ID_STRATEGY            ID generation: legacy (UUID) or deterministic (SHA-256) (default: legacy)"
+    echo "  ID_STRATEGY            ID generation: legacy, hash-jg, or deterministic (identity-based SHA-256) (default: legacy)"
     echo "  CLAIM_ENABLED          LWT dedup claims during migration: true/false (default: false)"
     echo ""
     echo "Quick start (from kubectl):"

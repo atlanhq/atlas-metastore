@@ -438,7 +438,12 @@ public class CassandraTargetWriter implements AutoCloseable {
 
         String outVertexId = resolveVertexId(edge.getOutVertexJgId());
         String inVertexId = resolveVertexId(edge.getInVertexJgId());
-        String edgeId = DeterministicIdUtil.edgeIdFromJg(edge.getJgRelationId(), config.getIdStrategy());
+        String edgeId;
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            edgeId = DeterministicIdUtil.edgeIdFromIdentity(outVertexId, edge.getLabel(), inVertexId);
+        } else {
+            edgeId = DeterministicIdUtil.edgeIdFromJg(edge.getJgRelationId(), config.getIdStrategy());
+        }
 
         stmts.add(insertEdgeOutStmt.bind(
             outVertexId, edge.getLabel(), edgeId,
@@ -506,7 +511,28 @@ public class CassandraTargetWriter implements AutoCloseable {
     }
 
     private String resolveVertexId(DecodedVertex vertex) {
-        String computed = DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), config.getIdStrategy());
+        String computed;
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            // Try identity-based ID (matches runtime GraphIdUtil)
+            Object qnObj = vertex.getProperties().get("qualifiedName");
+            if (qnObj == null) qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
+            if (qnObj == null) {
+                Object hierarchy = vertex.getProperties().get("__qualifiedNameHierarchy");
+                if (hierarchy instanceof List && !((List<?>) hierarchy).isEmpty()) {
+                    qnObj = ((List<?>) hierarchy).get(0);
+                }
+            }
+            String identityId = DeterministicIdUtil.vertexIdFromIdentity(
+                    vertex.getTypeName(), qnObj != null ? String.valueOf(qnObj) : null);
+            computed = identityId != null ? identityId
+                    : DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), IdStrategy.HASH_JG);
+        } else {
+            computed = DeterministicIdUtil.vertexIdFromJg(vertex.getJgVertexId(), config.getIdStrategy());
+        }
+
+        // Always populate the override map so edge endpoint resolution works
+        vertexIdOverrides.put(vertex.getJgVertexId(), computed);
+
         if (!config.isClaimEnabled()) {
             return computed;
         }
@@ -515,8 +541,6 @@ public class CassandraTargetWriter implements AutoCloseable {
         if (qnObj == null) {
             qnObj = vertex.getProperties().get("Referenceable.qualifiedName");
         }
-        // Fallback: JanusGraph property key mapping may not produce "qualifiedName" directly.
-        // The __qualifiedNameHierarchy array's first element is always the entity's own QN.
         if (qnObj == null) {
             Object hierarchy = vertex.getProperties().get("__qualifiedNameHierarchy");
             if (hierarchy instanceof List && !((List<?>) hierarchy).isEmpty()) {
@@ -544,7 +568,14 @@ public class CassandraTargetWriter implements AutoCloseable {
         if (overridden != null) {
             return overridden;
         }
-        return DeterministicIdUtil.vertexIdFromJg(jgVertexId, config.getIdStrategy());
+        // Fallback: for HASH_IDENTITY, the in-vertex may not be processed yet.
+        // Use HASH_JG as a stable fallback — the edge will still land on a deterministic ID,
+        // just not the identity-based one. Log a warning so we can track how often this happens.
+        if (config.getIdStrategy() == IdStrategy.HASH_IDENTITY) {
+            LOG.warn("Edge endpoint jgVertexId={} not in override map; falling back to HASH_JG", jgVertexId);
+        }
+        return DeterministicIdUtil.vertexIdFromJg(jgVertexId,
+                config.getIdStrategy() == IdStrategy.HASH_IDENTITY ? IdStrategy.HASH_JG : config.getIdStrategy());
     }
 
     private String claimVertexId(String identityKey, String candidateVertexId) {
