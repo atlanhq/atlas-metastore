@@ -210,11 +210,16 @@ public class AtlasJanusGraphDatabase implements GraphDatabase<AtlasJanusVertex, 
 
     public static JanusGraph getBulkLoadingGraphInstance() {
         try {
-            // Clone the shared configuration before mutating it — the shared config
-            // is a singleton and concurrent setProperty calls from multiple threads
-            // cause "true,true" values (Apache Commons Configuration is not thread-safe).
-            Configuration sharedCfg = getConfiguration();
-            Properties props = ConfigurationConverter.getProperties(sharedCfg);
+            // Snapshot the shared config into a Properties under the class lock.
+            // getConfiguration() returns a singleton backed by a LinkedHashMap that is
+            // not thread-safe.  Concurrent calls (e.g. two bulk-purge coordinators)
+            // race on iteration vs mutation, causing ConcurrentModificationException
+            // or "true,true" property corruption.
+            Properties props;
+            synchronized (AtlasJanusGraphDatabase.class) {
+                Configuration sharedCfg = getConfiguration();
+                props = ConfigurationConverter.getProperties(sharedCfg);
+            }
             props.setProperty("storage.batch-loading", "true");
             Configuration cfg = ConfigurationConverter.getConfiguration(props);
 

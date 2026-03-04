@@ -1235,6 +1235,9 @@ public class BulkPurgeService {
                 return;
             }
 
+            // Capture the GUID before deleting the graph vertex — needed for ES cleanup
+            String connGuid = connVertex.getProperty(GUID_PROPERTY_KEY, String.class);
+
             // removeVertex() handles edge removal internally via JanusGraph's
             // AbstractVertex.remove() — no need for explicit edge iteration
             graph.removeVertex(connVertex);
@@ -1244,6 +1247,11 @@ public class BulkPurgeService {
             ctx.totalDeleted.incrementAndGet();
 
             LOG.info("BulkPurge: Connection entity deleted for purgeKey={}", ctx.purgeKey);
+
+            // Delete the Connection entity's ES document.
+            // The main esCleanup uses prefix "connectionQN/" which only matches children,
+            // not the Connection entity itself (its __qualifiedNameHierarchy has no trailing "/").
+            deleteConnectionFromES(ctx, connGuid);
         } catch (Exception e) {
             LOG.error("BulkPurge: Failed to delete Connection entity for purgeKey={}", ctx.purgeKey, e);
             ctx.error = "Child assets purged but Connection deletion failed: " + e.getMessage();
@@ -1252,6 +1260,25 @@ public class BulkPurgeService {
             } catch (Exception re) {
                 LOG.warn("BulkPurge: Rollback failed after connection deletion failure", re);
             }
+        }
+    }
+
+    private void deleteConnectionFromES(PurgeContext ctx, String connGuid) {
+        try {
+            RestClient esClient = getEsClient();
+            String query = buildTermQuery(GUID_PROPERTY_KEY, connGuid);
+            String endpoint = "/" + VERTEX_INDEX_NAME + "/_delete_by_query?conflicts=proceed&refresh=true";
+
+            Request request = new Request("POST", endpoint);
+            request.setEntity(new NStringEntity(query, ContentType.APPLICATION_JSON));
+
+            Response response = esClient.performRequest(request);
+            String responseBody = readResponseBody(response);
+            LOG.info("BulkPurge: Connection ES document deleted for purgeKey={}, guid={}, response={}",
+                    ctx.purgeKey, connGuid, responseBody);
+        } catch (Exception e) {
+            LOG.warn("BulkPurge: Failed to delete Connection ES document for purgeKey={}, guid={}. " +
+                    "Document will be orphaned in ES.", ctx.purgeKey, connGuid, e);
         }
     }
 
