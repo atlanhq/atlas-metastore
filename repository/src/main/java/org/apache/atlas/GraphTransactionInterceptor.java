@@ -26,6 +26,8 @@ import org.apache.atlas.exception.NotFoundException;
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
+import org.apache.atlas.discovery.VertexEdgeCache;
+import org.apache.atlas.util.BeanUtil;
 import org.apache.atlas.utils.AtlasPerfMetrics.MetricRecorder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -249,6 +251,15 @@ public class GraphTransactionInterceptor implements MethodInterceptor {
         vertexGuidCache.get().clear();
         vertexStateCache.get().clear();
         edgeStateCache.get().clear();
+
+        try {
+            VertexEdgeCache vertexEdgeCache = BeanUtil.getBean(VertexEdgeCache.class);
+            if (vertexEdgeCache != null) {
+                vertexEdgeCache.clear();
+            }
+        } catch (Exception e) {
+            // BeanUtil may not be initialized during bootstrap
+        }
     }
 
     boolean logException(Throwable t) {

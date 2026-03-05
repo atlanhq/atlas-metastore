@@ -159,6 +159,7 @@ public class TaskQueueWatcher implements Runnable {
                 LOG.error("TaskQueueWatcher: Exception occurred " + e.getMessage(), e);
             } finally {
                 fetcher.clearTasks();
+                RequestContext.clear();
                 if (lockAcquired) {
                     redisService.releaseDistributedLock(ATLAS_TASK_LOCK);
                     LOG.info("TaskQueueWatcher: Released Task Lock in finally");
@@ -210,11 +211,8 @@ public class TaskQueueWatcher implements Runnable {
                         // Wait for memory to be freed
                         Thread.sleep(AtlasConfiguration.TASK_HIGH_MEMORY_PAUSE_MS.getLong());
                         
-                        // Suggest GC if memory is still high after initial wait
                         if (isMemoryTooHigh()) {
-                            LOG.info("Memory still high after pause, suggesting garbage collection");
-                            System.gc();
-                            Thread.sleep(1000); // Give GC time to work
+                            LOG.info("Memory still high after pause, will retry after next interval");
                         }
                     } catch (InterruptedException e) {
                         LOG.warn("Sleep interrupted while waiting for memory to free", e);
@@ -304,8 +302,7 @@ public class TaskQueueWatcher implements Runnable {
             }
 
             this.tasks = registry.getTasksForReQueue();
-            RequestContext requestContext = RequestContext.get();
-            requestContext.clearCache();
+            RequestContext.clear();
         }
 
         public List<AtlasTask> getTasks() {

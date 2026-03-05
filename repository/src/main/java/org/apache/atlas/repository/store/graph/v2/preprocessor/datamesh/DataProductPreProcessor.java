@@ -40,6 +40,7 @@ import static org.apache.atlas.v1.model.instance.Id.EntityState.DELETED;
 
 public class DataProductPreProcessor extends AbstractDomainPreProcessor {
     private static final Logger LOG = LoggerFactory.getLogger(DataProductPreProcessor.class);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String PRIVATE = "Private";
     private static final String PROTECTED = "Protected";
     private static final String PUBLIC = "Public";
@@ -485,8 +486,7 @@ public class DataProductPreProcessor extends AbstractDomainPreProcessor {
         String dslString = ((String) entity.getAttribute(DAAP_ASSET_DSL_ATTR)).trim();
 
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Object> dslMap = mapper.readValue(dslString, new TypeReference<>() {});
+            Map<String, Object> dslMap = OBJECT_MAPPER.readValue(dslString, new TypeReference<>() {});
 
             if (dslMap == null || dslMap.isEmpty()) {
                 throw new AtlasBaseException(AtlasErrorCode.BAD_REQUEST, "dataProductAssetsDSL attribute cannot be empty");
