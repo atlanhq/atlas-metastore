@@ -20,16 +20,18 @@ package org.apache.atlas.utils;
 
 import org.apache.atlas.model.instance.AtlasEntity;
 import org.apache.atlas.model.instance.AtlasEntity.AtlasEntityWithExtInfo;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 import org.apache.hadoop.fs.Path;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 public class AtlasPathExtractorUtilTest {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasPathExtractorUtilTest.class);
@@ -84,42 +86,42 @@ public class AtlasPathExtractorUtilTest {
     private static final String GCS_SCHEME                 = "gs" + SCHEME_SEPARATOR;
     private static final String GCS_PATH                   = GCS_SCHEME + "gcs_test_bucket1/1234567890/data";
 
-    @DataProvider(name = "ozonePathProvider")
-    private Object[][] ozonePathProvider(){
-        return new Object[][]{
-                { new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1.com/files/file.txt",
+    private static Stream<OzoneKeyValidator> ozonePathProvider() {
+        return Stream.of(
+                new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1.com/files/file.txt",
                         "files", "bucket1.volume1.ozone1.com/files",
-                        "file.txt", "bucket1.volume1.ozone1.com/files/file.txt")},
+                        "file.txt", "bucket1.volume1.ozone1.com/files/file.txt"),
 
-                { new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1:1234/file21.txt",
-                        "file21.txt", "bucket1.volume1.ozone1:1234/file21.txt") },
+                new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1:1234/file21.txt",
+                        "file21.txt", "bucket1.volume1.ozone1:1234/file21.txt"),
 
-                { new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales",
+                new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales",
                         "quarter_one", "bucket1.volume1.ozone1/quarter_one",
-                        "sales", "bucket1.volume1.ozone1/quarter_one/sales") },
+                        "sales", "bucket1.volume1.ozone1/quarter_one/sales"),
 
-                { new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales/",
+                new OzoneKeyValidator(OZONE_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales/",
                         "quarter_one", "bucket1.volume1.ozone1/quarter_one",
-                        "sales", "bucket1.volume1.ozone1/quarter_one/sales") },
+                        "sales", "bucket1.volume1.ozone1/quarter_one/sales"),
 
-                { new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/files/file.txt",
+                new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/files/file.txt",
                         "files", "bucket1.volume1.ozone1/files",
-                        "file.txt", "bucket1.volume1.ozone1/files/file.txt") },
+                        "file.txt", "bucket1.volume1.ozone1/files/file.txt"),
 
-                { new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/file21.txt",
-                        "file21.txt", "bucket1.volume1.ozone1/file21.txt") },
+                new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/file21.txt",
+                        "file21.txt", "bucket1.volume1.ozone1/file21.txt"),
 
-                { new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales",
+                new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales",
                         "quarter_one", "bucket1.volume1.ozone1/quarter_one",
-                        "sales", "bucket1.volume1.ozone1/quarter_one/sales") },
+                        "sales", "bucket1.volume1.ozone1/quarter_one/sales"),
 
-                { new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales/",
+                new OzoneKeyValidator(OZONE_3_SCHEME, "bucket1.volume1.ozone1/quarter_one/sales/",
                         "quarter_one", "bucket1.volume1.ozone1/quarter_one",
-                        "sales", "bucket1.volume1.ozone1/quarter_one/sales") },
-        };
+                        "sales", "bucket1.volume1.ozone1/quarter_one/sales")
+        );
     }
 
-    @Test(dataProvider = "ozonePathProvider")
+    @ParameterizedTest
+    @MethodSource("ozonePathProvider")
     public void testGetPathEntityOzone3Path(OzoneKeyValidator validator) {
         String scheme = validator.scheme;
         String ozonePath = scheme + validator.location;
@@ -471,7 +473,7 @@ public class AtlasPathExtractorUtilTest {
         assertEquals(entity.getAttribute(ATTRIBUTE_NAME), "gcs_test_bucket1");
     }
 
-    private class OzoneKeyValidator {
+    private static class OzoneKeyValidator {
         private final String              scheme;
         private final String              location;
         private final int                 knownEntitiesCount;

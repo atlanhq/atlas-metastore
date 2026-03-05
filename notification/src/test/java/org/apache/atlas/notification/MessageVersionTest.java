@@ -19,11 +19,11 @@
 package org.apache.atlas.notification;
 
 import org.apache.atlas.model.notification.MessageVersion;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * MessageVersion tests.

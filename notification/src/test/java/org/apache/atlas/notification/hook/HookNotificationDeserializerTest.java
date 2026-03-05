@@ -27,15 +27,15 @@ import org.apache.atlas.notification.AbstractNotification;
 import org.apache.atlas.v1.model.notification.HookNotificationV1.EntityUpdateRequest;
 import org.apache.atlas.type.AtlasType;
 import org.apache.commons.lang3.RandomStringUtils;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.assertNotNull;
-import static org.testng.Assert.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * HookMessageDeserializer tests.

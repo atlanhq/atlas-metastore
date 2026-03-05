@@ -1,6 +1,7 @@
 package org.apache.atlas.web.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
@@ -8,12 +9,11 @@ import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.*;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.net.URI;
+import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
@@ -32,13 +32,18 @@ import static org.junit.jupiter.api.Assertions.*;
  * 3. Attach tag to existing entity -> 2 events: 1st CLASSIFICATION_ADD, 2nd ENTITY_UPDATE
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@ExtendWith(TestcontainersExtension.class)
-public class ClassificationNotificationIntegrationTest extends AtlasDockerIntegrationTest {
+public class ClassificationNotificationIntegrationTest extends AtlasInProcessBaseIT {
     
     private static final Logger LOG = LoggerFactory.getLogger(ClassificationNotificationIntegrationTest.class);
     
     private static final String KAFKA_TOPIC = "ATLAS_ENTITIES";
     private static final int NOTIFICATION_TIMEOUT_MS = 15000;
+    private final ObjectMapper mapper = new ObjectMapper();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+
+    private String apiBase() {
+        return getAtlasBaseUrl() + "/api/atlas/v2";
+    }
     
     @Test
     @DisplayName("Test 1: Create New Entity with Tag - Should Send CLASSIFICATION_ADD then ENTITY_CREATE")
@@ -328,7 +333,7 @@ public class ClassificationNotificationIntegrationTest extends AtlasDockerIntegr
             }""", displayName);
         
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(ATLAS_BASE_URL + "/types/typedefs"))
+                .uri(URI.create(apiBase() + "/types/typedefs"))
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Basic " + encodedAuth)
                 .POST(HttpRequest.BodyPublishers.ofString(typedefPayload))
@@ -349,7 +354,7 @@ public class ClassificationNotificationIntegrationTest extends AtlasDockerIntegr
         String auth = "admin:admin";
         String encodedAuth = Base64.getEncoder().encodeToString(auth.getBytes());
         
-        String url = ATLAS_BASE_URL + "/entity/bulk";
+        String url = apiBase() + "/entity/bulk";
         if (queryParams != null && !queryParams.isEmpty()) {
             url += "?" + queryParams;
         }
@@ -377,8 +382,7 @@ public class ClassificationNotificationIntegrationTest extends AtlasDockerIntegr
      */
     private KafkaConsumer<String, String> createKafkaConsumer() {
         Properties props = new Properties();
-        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, 
-            "localhost:" + kafka.getFirstMappedPort());
+        props.put(ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, getKafkaBootstrapServers());
         props.put(ConsumerConfig.GROUP_ID_CONFIG, 
             "test-group-" + UUID.randomUUID());
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");

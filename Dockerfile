@@ -21,34 +21,36 @@ FROM ubuntu:22.04
 LABEL maintainer="engineering@atlan.com"
 ARG VERSION=3.0.0-SNAPSHOT
 
-COPY distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz  /apache-atlas-3.0.0-SNAPSHOT-server.tar.gz
-
 RUN apt-get update \
     && apt-get -y upgrade \
-    && apt-get -y install apt-utils \
-    && apt-get -y install \
+    && apt-get -y install --no-install-recommends \
+        apt-utils \
         wget \
         python2 \
         openjdk-17-jdk-headless \
         patch \
         netcat \
         curl \
-    && cd / \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN ln -s /usr/bin/python2 /usr/bin/python
+
+COPY distro/target/apache-atlas-3.0.0-SNAPSHOT-server.tar.gz /apache-atlas-3.0.0-SNAPSHOT-server.tar.gz
+
+RUN cd / \
     && export MAVEN_OPTS="-Xms2g -Xmx2g" \
     && export JAVA_HOME="/usr/lib/jvm/java-17-openjdk-amd64" \
     && tar -xzvf /apache-atlas-3.0.0-SNAPSHOT-server.tar.gz -C /opt \
     && mv /opt/apache-atlas-${VERSION} /opt/apache-atlas \
-    && apt-get clean \
     && rm -rf /apache-atlas-3.0.0-SNAPSHOT-server.tar.gz
-
-RUN ln -s /usr/bin/python2 /usr/bin/python
 
 COPY atlas-hub/atlas_start.py.patch atlas-hub/atlas_config.py.patch /opt/apache-atlas/bin/
 COPY atlas-hub/pre-conf/atlas-logback.xml /opt/apache-atlas/conf/
 COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
-RUN mkdir /opt/apache-atlas/libext
-RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
+RUN mkdir /opt/apache-atlas/libext \
+    && curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
 
 RUN cd /opt/apache-atlas/bin \
     && ./atlas_start.py -setup || true

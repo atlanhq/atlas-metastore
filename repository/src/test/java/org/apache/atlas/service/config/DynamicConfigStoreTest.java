@@ -189,6 +189,9 @@ class DynamicConfigStoreTest {
         Map<String, ConfigEntry> fullData = allDefaultConfigs();
 
         when(mockDAO.getAllConfigs()).thenReturn(fullData);
+        // DynamicConfigStore compares loaded rows against ConfigKey.values().length (including keys
+        // without defaults). If recovery path runs, return existing values so no default-seed writes occur.
+        when(mockDAO.getConfig(anyString())).thenAnswer(invocation -> fullData.get(invocation.getArgument(0)));
 
         DynamicConfigStoreConfig config = createConfig(true, true);
         DynamicConfigCacheStore cacheStore = new DynamicConfigCacheStore();

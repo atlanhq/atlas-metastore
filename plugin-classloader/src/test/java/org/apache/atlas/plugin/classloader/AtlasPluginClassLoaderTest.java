@@ -17,8 +17,8 @@
  */
 package org.apache.atlas.plugin.classloader;
 
-import org.testng.Assert;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 
 public class AtlasPluginClassLoaderTest {
@@ -29,7 +29,7 @@ public class AtlasPluginClassLoaderTest {
 
         try {
             loadClass(cls, null);
-            Assert.fail("Expected ClassNotFoundException");
+            Assertions.fail("Expected ClassNotFoundException");
         } catch (ClassNotFoundException e) {
             //expected
         }
@@ -51,7 +51,7 @@ public class AtlasPluginClassLoaderTest {
         //After disable, class loading should fail again
         try {
             loadClass(cls, null);
-            Assert.fail("Expected ClassNotFoundException");
+            Assertions.fail("Expected ClassNotFoundException");
         } catch (ClassNotFoundException e) {
             //expected
         }

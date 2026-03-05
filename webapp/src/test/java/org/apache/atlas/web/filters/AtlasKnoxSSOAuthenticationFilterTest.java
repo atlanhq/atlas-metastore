@@ -45,8 +45,6 @@ public class AtlasKnoxSSOAuthenticationFilterTest {
         ReflectionTestUtils.setField(filter, "ssoEnabled", true);
 
         when(request.getSession(false)).thenReturn(null);
-        when(request.getRequestURI()).thenReturn("/api/atlas/v2/search/basic");
-
         filter.doFilter(request, response, filterChain);
 
         verify(request).getSession(false);

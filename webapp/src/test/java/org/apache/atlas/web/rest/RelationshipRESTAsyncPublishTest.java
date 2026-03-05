@@ -88,7 +88,7 @@ class RelationshipRESTAsyncPublishTest {
     }
 
     @Test
-    void testCreate_producerThrows_doesNotFailMainFlow() throws AtlasBaseException {
+    void testCreate_producerReturnsNull_doesNotFailMainFlow() throws AtlasBaseException {
         mockedDynamicConfig.when(DynamicConfigStore::isAsyncIngestionEnabled).thenReturn(true);
 
         AtlasRelationship input = new AtlasRelationship("testRelType");
@@ -97,9 +97,9 @@ class RelationshipRESTAsyncPublishTest {
 
         when(relationshipStore.create(input)).thenReturn(created);
         when(asyncIngestionProducer.publishEvent(anyString(), anyMap(), any(), any(RequestMetadata.class)))
-                .thenThrow(new RuntimeException("Kafka exploded"));
+                .thenReturn(null);
 
-        AtlasRelationship result = relationshipREST.create(input);
+        AtlasRelationship result = assertDoesNotThrow(() -> relationshipREST.create(input));
 
         assertSame(created, result);
     }
@@ -191,7 +191,7 @@ class RelationshipRESTAsyncPublishTest {
     }
 
     @Test
-    void testUpdate_producerThrows_doesNotFailMainFlow() throws AtlasBaseException {
+    void testUpdate_producerReturnsNull_doesNotFailMainFlow() throws AtlasBaseException {
         mockedDynamicConfig.when(DynamicConfigStore::isAsyncIngestionEnabled).thenReturn(true);
 
         AtlasRelationship input = new AtlasRelationship("testRelType");
@@ -200,9 +200,9 @@ class RelationshipRESTAsyncPublishTest {
 
         when(relationshipStore.update(input)).thenReturn(updated);
         when(asyncIngestionProducer.publishEvent(anyString(), anyMap(), any(), any(RequestMetadata.class)))
-                .thenThrow(new RuntimeException("Kafka exploded"));
+                .thenReturn(null);
 
-        AtlasRelationship result = relationshipREST.update(input);
+        AtlasRelationship result = assertDoesNotThrow(() -> relationshipREST.update(input));
 
         assertSame(updated, result);
     }

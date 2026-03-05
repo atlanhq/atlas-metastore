@@ -137,7 +137,7 @@ public class PurposeDiscoveryIntegrationTest extends AtlasInProcessBaseIT {
     @Order(2)
     @DisplayName("Test Purpose Discovery API - Setup: Create AuthPolicy linking to Purpose")
     void testSetupCreateAuthPolicy() throws Exception {
-        Assumptions.assumeTrue(purposeGuid != null, "Skipping: Purpose creation failed");
+        assertNotNull(purposeGuid, "Purpose creation failed");
 
         LOG.info("Creating AuthPolicy with policyCategory=purpose...");
 
@@ -248,7 +248,7 @@ public class PurposeDiscoveryIntegrationTest extends AtlasInProcessBaseIT {
     @DisplayName("Test Purpose Discovery API - Discover purposes by username (requires AuthPolicy)")
     void testDiscoverPurposesByUsername() throws Exception {
         Assumptions.assumeTrue(authPolicyCreationSupported, "Skipping: AuthPolicy creation not supported");
-        Assumptions.assumeTrue(policyGuid != null, "Skipping: AuthPolicy not created");
+        assertNotNull(policyGuid, "AuthPolicy not created");
 
         LOG.info("Testing Purpose Discovery API with username filter...");
 

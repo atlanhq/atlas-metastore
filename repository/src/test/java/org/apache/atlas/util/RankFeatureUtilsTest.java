@@ -20,14 +20,17 @@ package org.apache.atlas.util;
 import org.apache.atlas.model.typedef.AtlasStructDef.AtlasAttributeDef;
 import org.apache.atlas.type.AtlasStructType.AtlasAttribute;
 import org.mockito.Mockito;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.DataProvider;
-import org.testng.annotations.Test;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.HashMap;
+import java.util.stream.Stream;
 
 import static org.mockito.Mockito.when;
-import static org.testng.Assert.*;
+import static org.junit.jupiter.api.Assertions.*;
 
 /**
  * Unit tests for RankFeatureUtils utility class.
@@ -41,7 +44,7 @@ public class RankFeatureUtilsTest {
     private AtlasAttributeDef nonRankFeatureAttrDef;
     private AtlasAttributeDef rankFeatureWithCustomDefault;
 
-    @BeforeMethod
+    @BeforeEach
     public void setup() {
         // Create a rank_feature attribute definition
         rankFeatureAttrDef = createRankFeatureAttributeDef("assetInternalPopularityScore", null);
@@ -355,21 +358,20 @@ public class RankFeatureUtilsTest {
         assertEquals(result, originalValue);
     }
 
-    @DataProvider(name = "atlasAttributeNormalizeValueTestCases")
-    public Object[][] atlasAttributeNormalizeValueTestCases() {
-        return new Object[][]{
-                // {inputValue, isRankFeature, minValue, expectedToBeNormalized}
-                {0.0f, true, Float.MIN_NORMAL, true},
-                {-1.0f, true, Float.MIN_NORMAL, true},
-                {0.5f, true, Float.MIN_NORMAL, false},
-                {1.0f, true, Float.MIN_NORMAL, false},
-                {0.0f, false, Float.MIN_NORMAL, false},
-                {0.0001f, true, 0.001f, true},  // Custom min value
-                {0.01f, true, 0.001f, false},   // Above custom min
-        };
+    public static Stream<Arguments> atlasAttributeNormalizeValueTestCases() {
+        return Stream.of(
+                Arguments.of(0.0f, true, Float.MIN_NORMAL, true),
+                Arguments.of(-1.0f, true, Float.MIN_NORMAL, true),
+                Arguments.of(0.5f, true, Float.MIN_NORMAL, false),
+                Arguments.of(1.0f, true, Float.MIN_NORMAL, false),
+                Arguments.of(0.0f, false, Float.MIN_NORMAL, false),
+                Arguments.of(0.0001f, true, 0.001f, true),
+                Arguments.of(0.01f, true, 0.001f, false)
+        );
     }
 
-    @Test(dataProvider = "atlasAttributeNormalizeValueTestCases")
+    @ParameterizedTest
+    @MethodSource("atlasAttributeNormalizeValueTestCases")
     public void testNormalizeValueWithAtlasAttribute_withDataProvider(
             float inputValue, boolean isRankFeature, float minValue, boolean shouldNormalize) {
         AtlasAttribute mockAttribute = Mockito.mock(AtlasAttribute.class);

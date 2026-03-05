@@ -399,21 +399,22 @@
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-core</artifactId>
-            <version>4.11.0</version>
             <scope>test</scope>
         </dependency>
 
         <dependency>
             <groupId>org.mockito</groupId>
             <artifactId>mockito-junit-jupiter</artifactId>
-            <version>4.11.0</version>
             <scope>test</scope>
         </dependency>
 
-        <!--<dependency>
-            <groupId>org.testng</groupId>
-            <artifactId>testng</artifactId>
-        </dependency>-->
+        <dependency>
+            <groupId>org.mockito</groupId>
+            <artifactId>mockito-inline</artifactId>
+            <scope>test</scope>
+        </dependency>
+
+        <!---->
 
         <dependency>
             <groupId>com.google.inject</groupId>
@@ -774,7 +775,7 @@
                     </systemProperties>
                     <forkCount>1</forkCount> <!--Default-->
                     <reuseForks>true</reuseForks> <!--Default-->
-                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                    <redirectTestOutputToFile>false</redirectTestOutputToFile>
                     <environmentVariables>
                         <!-- DOCKER_HOST: Use env var if set, otherwise use standard socket path for CI -->
                         <DOCKER_HOST>${env.DOCKER_HOST}</DOCKER_HOST>
@@ -816,6 +817,7 @@
                                 <exclude>**/*Base*.java</exclude>
                                 <exclude>**/*Secure*.java</exclude>
                                 <exclude>**/*Server*.java</exclude>
+                                <exclude>**/*IntegrationTest.java</exclude>
                                 <exclude>**/*$*.java</exclude>
                             </excludes>
                         </configuration>
@@ -864,11 +866,12 @@
                 </executions>
             </plugin>
 
+
             <plugin>
                 <groupId>org.eclipse.jetty</groupId>
                 <artifactId>jetty-maven-plugin</artifactId>
                 <configuration>
-                    <skip>${skipTests}</skip>
+                    <skip>${skipJettyMavenPlugin}</skip>
                     <!--only skip int tests -->
                     <httpConnector>
                         <port>31000</port>
@@ -992,6 +995,16 @@
                         </configuration>
                     </execution>
                 </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <configuration>
+                    <includes>
+                        <include>**/*IntegrationTest.java</include>
+                    </includes>
+                </configuration>
             </plugin>
 
             <plugin>

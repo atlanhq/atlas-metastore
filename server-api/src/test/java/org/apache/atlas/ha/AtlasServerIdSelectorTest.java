@@ -21,20 +21,20 @@ package org.apache.atlas.ha;
 import org.apache.atlas.AtlasConstants;
 import org.apache.atlas.AtlasException;
 import org.apache.commons.configuration.Configuration;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.testng.annotations.BeforeMethod;
-import org.testng.annotations.Test;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.when;
-import static org.testng.Assert.assertEquals;
-import static org.testng.Assert.fail;
 
 public class AtlasServerIdSelectorTest {
     @Mock
     private Configuration configuration;
 
-    @BeforeMethod
+    @BeforeEach
     public void setup() {
         MockitoAnnotations.initMocks(this);
         System.setProperty(AtlasConstants.SYSTEM_PROPERTY_APP_PORT, AtlasConstants.DEFAULT_APP_PORT_STR);
@@ -50,19 +50,17 @@ public class AtlasServerIdSelectorTest {
         assertEquals(atlasServerId, "id2");
     }
 
-    @Test(expectedExceptions = AtlasException.class)
+    @Test
     public void testShouldFailIfNoIDsConfiguration() throws AtlasException {
         when(configuration.getStringArray(HAConfiguration.ATLAS_SERVER_IDS)).thenReturn(new String[] {});
-        AtlasServerIdSelector.selectServerId(configuration);
-        fail("Should not return any server id if IDs not found in configurations");
+        assertThrows(AtlasException.class, () -> AtlasServerIdSelector.selectServerId(configuration));
     }
 
-    @Test(expectedExceptions = AtlasException.class)
+    @Test
     public void testShouldFailIfNoMatchingAddressForID() throws AtlasException {
         when(configuration.getStringArray(HAConfiguration.ATLAS_SERVER_IDS)).thenReturn(new String[] {"id1", "id2"});
         when(configuration.getString(HAConfiguration.ATLAS_SERVER_ADDRESS_PREFIX +"id1")).thenReturn("127.0.0.1:31000");
 
-        AtlasServerIdSelector.selectServerId(configuration);
-        fail("Should not return any server id if no matching address found for any ID");
+        assertThrows(AtlasException.class, () -> AtlasServerIdSelector.selectServerId(configuration));
     }
 }
