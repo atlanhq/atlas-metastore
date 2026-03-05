@@ -1398,23 +1398,20 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     }
 
     /**
-     * Returns true if this vertex represents an entity or type definition
-     * that should be indexed in Elasticsearch. System vertices (patches,
-     * index recovery, etc.) lack __typeName and __type and should NOT be
-     * indexed since they pollute search results.
+     * Returns true if this vertex represents a data entity that should be
+     * indexed in Elasticsearch. Only vertices with __typeName (e.g., "Table",
+     * "Column", "Connection") are entity vertices.
+     *
+     * TypeDef vertices (__type = "typeSystem") are NOT indexed — they have
+     * hundreds of unique properties across 952 types that would exceed ES's
+     * default 2000-field limit. TypeDef lookups go through Cassandra indexes.
+     *
+     * System vertices (patches, index recovery) lack both __typeName and __type
+     * and are also excluded.
      */
     private boolean isEntityVertex(CassandraVertex v) {
-        // Entity vertices always have __typeName (e.g., "Table", "Column", "Connection")
         Object typeName = v.getProperty(Constants.ENTITY_TYPE_PROPERTY_KEY, String.class);
-        if (typeName != null) {
-            return true;
-        }
-        // Type definition vertices have __type = "typeSystem" — these should also be indexed
-        Object vertexType = v.getProperty(Constants.VERTEX_TYPE_PROPERTY_KEY, String.class);
-        if (vertexType != null) {
-            return true;
-        }
-        return false;
+        return typeName != null;
     }
 
     // ---- Reindex (repair) operations ----
