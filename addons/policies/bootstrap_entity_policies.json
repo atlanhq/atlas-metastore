@@ -3876,8 +3876,8 @@
         {
             "typeName": "AuthPolicy",
             "attributes": {
-                "name": "CRUD_ASSET_GROUPING_COLLECTION_ENRICHMENT_STUDIO",
-                "qualifiedName": "CRUD_ASSET_GROUPING_COLLECTION_ENRICHMENT_STUDIO",
+                "name": "CRUD_ASSET_GROUPING_COLLECTION",
+                "qualifiedName": "CRUD_ASSET_GROUPING_COLLECTION",
                 "description": "Allows admins to perform CRUD operations on AssetGroupingCollection entities under default/critical_assets/*",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
