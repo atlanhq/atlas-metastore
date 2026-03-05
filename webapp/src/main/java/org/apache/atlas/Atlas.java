@@ -343,21 +343,23 @@ public final class Atlas {
         File elasticsearchMappingsFile  = new File(elasticsearchMappingsFilePath);
         String mappingsJson  = new String(Files.readAllBytes(elasticsearchMappingsFile.toPath()), StandardCharsets.UTF_8);
 
-        // Create the primary template for the configured index prefix (e.g., janusgraph_vertex_index)
+        // Create the primary template for the configured index prefix (e.g., janusgraph_vertex_index).
+        // This MUST succeed — Atlas cannot start without correct ES mappings/analyzers.
         String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
-        createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson);
+        createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson, true);
 
         // Also create a template for atlas_graph_* pattern so the Cassandra graph backend
         // gets the same analyzers, normalizers, and dynamic templates when its index is created.
-        // This ensures smooth migration — new tenants on Cassandra graph get correct mappings.
+        // This is best-effort — failure does not block startup.
         if (!INDEX_PREFIX.equals("atlas_graph_")) {
             createESTemplateIfNotExists(esClient, "atlas-graph-template",
-                    Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson);
+                    Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson, false);
         }
     }
 
     private static void createESTemplateIfNotExists(RestHighLevelClient esClient, String templateName,
-                                                     List<String> patterns, String settingsJson, String mappingsJson) {
+                                                     List<String> patterns, String settingsJson,
+                                                     String mappingsJson, boolean failOnError) throws IOException {
         boolean exists = false;
         try {
             IndexTemplatesExistRequest existsRequest = new IndexTemplatesExistRequest(templateName);
@@ -369,6 +371,9 @@ public final class Atlas {
             }
         } catch (Exception e) {
             LOG.error("Error checking template {}: {}", templateName, e.toString());
+            if (failOnError) {
+                throw (e instanceof IOException) ? (IOException) e : new IOException("Failed to check ES template: " + templateName, e);
+            }
         }
 
         if (!exists) {
@@ -386,6 +391,9 @@ public final class Atlas {
                 }
             } catch (Exception e) {
                 LOG.error("Failed to create {} index template: {}", templateName, e.toString());
+                if (failOnError) {
+                    throw (e instanceof IOException) ? (IOException) e : new IOException("Failed to create ES template: " + templateName, e);
+                }
             }
         }
     }

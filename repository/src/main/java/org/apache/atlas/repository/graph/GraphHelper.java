@@ -308,22 +308,27 @@ public final class GraphHelper {
 
         Iterator<AtlasEdge> ret = null;
         if (instanceVertex != null && edgeLabel != null) {
-            AtlasJanusVertex janusVertex = (AtlasJanusVertex) instanceVertex;
-            AtlasJanusGraph  janusGraph  = janusVertex.getAtlasJanusGraph();
-            var              g           = janusGraph.getGraph().traversal();
-            Stream<Edge>     edgeStream;
+            if (instanceVertex instanceof AtlasJanusVertex) {
+                AtlasJanusVertex janusVertex = (AtlasJanusVertex) instanceVertex;
+                AtlasJanusGraph  janusGraph  = janusVertex.getAtlasJanusGraph();
+                var              g           = janusGraph.getGraph().traversal();
+                Stream<Edge>     edgeStream;
 
-            if (direction == AtlasEdgeDirection.IN) {
-                edgeStream = g.V(instanceVertex.getId()).inE(edgeLabel).toStream();
-            } else if (direction == AtlasEdgeDirection.OUT) {
-                edgeStream = g.V(instanceVertex.getId()).outE(edgeLabel).toStream();
+                if (direction == AtlasEdgeDirection.IN) {
+                    edgeStream = g.V(instanceVertex.getId()).inE(edgeLabel).toStream();
+                } else if (direction == AtlasEdgeDirection.OUT) {
+                    edgeStream = g.V(instanceVertex.getId()).outE(edgeLabel).toStream();
+                } else {
+                    edgeStream = g.V(instanceVertex.getId()).bothE(edgeLabel).toStream();
+                }
+
+                ret = (Iterator<AtlasEdge>) (Iterator) edgeStream
+                        .map(e -> GraphDbObjectFactory.createEdge(janusGraph, e))
+                        .iterator();
             } else {
-                edgeStream = g.V(instanceVertex.getId()).bothE(edgeLabel).toStream();
+                // CassandraGraph and other backends — use the generic AtlasVertex API
+                ret = instanceVertex.getEdges(direction, edgeLabel).iterator();
             }
-
-            ret = (Iterator<AtlasEdge>) (Iterator) edgeStream
-                    .map(e -> GraphDbObjectFactory.createEdge(janusGraph, e))
-                    .iterator();
         }
 
         RequestContext.get().endMetricRecord(metric);
