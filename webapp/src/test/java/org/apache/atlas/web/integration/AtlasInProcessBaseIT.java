@@ -19,6 +19,7 @@ package org.apache.atlas.web.integration;
 
 import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.AtlasClientV2;
+import org.apache.atlas.model.typedef.AtlasTypesDef;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.TestInstance;
 import org.slf4j.Logger;
@@ -136,6 +137,7 @@ public abstract class AtlasInProcessBaseIT {
         startServer();
         waitForAtlasReady();
         createClient();
+        verifyBootstrapTypeDefs();
 
         // Register shutdown hook so the server is stopped when the JVM exits
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
@@ -466,6 +468,38 @@ public abstract class AtlasInProcessBaseIT {
                 new String[]{"admin", "admin"}
         );
         LOG.info("AtlasClientV2 created (http://localhost:{})", atlasPort);
+    }
+
+    /**
+     * Diagnostic: verify that TypeDefs were loaded during bootstrap.
+     * Logs counts of each TypeDef category so GHA logs show whether
+     * the bootstrap succeeded or silently failed.
+     */
+    private static void verifyBootstrapTypeDefs() {
+        try {
+            AtlasTypesDef allTypes = atlasClient.getAllTypeDefs();
+            int entityCount  = allTypes.getEntityDefs()         != null ? allTypes.getEntityDefs().size()         : 0;
+            int enumCount    = allTypes.getEnumDefs()           != null ? allTypes.getEnumDefs().size()           : 0;
+            int structCount  = allTypes.getStructDefs()         != null ? allTypes.getStructDefs().size()         : 0;
+            int classCount   = allTypes.getClassificationDefs() != null ? allTypes.getClassificationDefs().size() : 0;
+            int relCount     = allTypes.getRelationshipDefs()   != null ? allTypes.getRelationshipDefs().size()   : 0;
+
+            LOG.info("=== TypeDef Bootstrap Verification ===");
+            LOG.info("  Entity defs:         {}", entityCount);
+            LOG.info("  Enum defs:           {}", enumCount);
+            LOG.info("  Struct defs:         {}", structCount);
+            LOG.info("  Classification defs: {}", classCount);
+            LOG.info("  Relationship defs:   {}", relCount);
+            LOG.info("  Backend:             {}", isCassandraGraphBackend() ? "cassandra" : "janus");
+            LOG.info("======================================");
+
+            if (entityCount == 0) {
+                LOG.error("WARNING: Zero entity defs after bootstrap! TypeDef initialization likely failed. " +
+                        "Cassandra tests will fail with 'type not found' errors.");
+            }
+        } catch (Exception e) {
+            LOG.error("Failed to verify bootstrap TypeDefs via REST API: {}", e.getMessage(), e);
+        }
     }
 
     private static String resolveDeployDir() {

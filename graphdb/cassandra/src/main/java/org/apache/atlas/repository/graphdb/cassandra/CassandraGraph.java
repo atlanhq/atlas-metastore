@@ -811,8 +811,17 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 indexRepository.batchAddPropertyIndexes(dirtyPropertyIndexEntries);
             }
 
-            // Sync TypeDef vertices to the dedicated type_definitions tables
-            syncTypeDefsToCache(newVertices, dirtyVertices, removedVertices);
+            // Sync TypeDef vertices to the dedicated type_definitions tables.
+            // Wrapped in try-catch to prevent TypeDefCache write failures from crashing the
+            // entire commit() — which would cause TypeRegistryUpdateHook.onComplete(false) and
+            // discard the in-memory TypeRegistry. The TypeDef data is already persisted in the
+            // vertices table (written atomically above), so the generic index fallback path
+            // (vertex_index + vertex_property_index) will still work for TypeDef lookups.
+            try {
+                syncTypeDefsToCache(newVertices, dirtyVertices, removedVertices);
+            } catch (Exception e) {
+                LOG.error("Failed to sync TypeDefs to dedicated cache tables (TypeDef data is still in vertices table): {}", e.getMessage(), e);
+            }
 
             // Sync vertices to Elasticsearch (replaces JanusGraph's mixed index sync)
             syncVerticesToElasticsearch(newVertices, dirtyVertices, removedVertices);
@@ -831,6 +840,11 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 e.markPersisted();
             }
 
+        } catch (Exception e) {
+            LOG.error("CassandraGraph.commit() FAILED: {}. TypeRegistryUpdateHook will receive isSuccess=false, " +
+                    "discarding any transient type registry updates. Cassandra writes that already flushed " +
+                    "are NOT rolled back.", e.getMessage(), e);
+            throw e;
         } finally {
             buffer.clear();
             // Clear vertex cache so the next transaction on this thread reads fresh from Cassandra.

@@ -152,6 +152,17 @@ jobs:
             echo "Report generation failed. Check artifacts for raw XML reports." >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Collect Atlas server logs
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
+        run: |
+          mkdir -p /tmp/atlas-server-logs
+          # Atlas writes logs to a temp directory; find and copy them
+          find /tmp -maxdepth 3 -name "*.log" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          find /tmp -maxdepth 3 -name "*.out" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          # Also grab surefire test output files (contain server stdout/stderr)
+          find webapp/target/surefire-reports -name "*-output.txt" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          ls -la /tmp/atlas-server-logs/ || echo "No Atlas server logs found"
+
       - name: Upload test reports
         uses: actions/upload-artifact@v4
         if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
@@ -161,6 +172,7 @@ jobs:
             webapp/target/surefire-reports/
             webapp/target/site/test-report.html
             test-output.log
+            /tmp/atlas-server-logs/
           retention-days: 14
 
       - name: Fail if tests failed
