@@ -193,6 +193,23 @@ resources_lite:
     memory: 5Gi
     cpu: 2000m
 
+vpa:
+  enabled: true
+  updateMode: "Off"
+  recommender:
+    name: ""  # Set to use a custom VPA recommender; leave empty for the default recommender
+  # minReplicas is always computed as (config.cluster_size - 2), floored at 2.
+  controlledResources:
+    - cpu
+    - memory
+  controlledValues: "RequestsAndLimits"
+  minAllowed:
+    cpu: "800m"
+    memory: "5Gi"
+  maxAllowed:
+    cpu: "3000m"
+    memory: "10Gi"
+
 # Persistence changes for cassandra
 persistence:
   enabled: true
