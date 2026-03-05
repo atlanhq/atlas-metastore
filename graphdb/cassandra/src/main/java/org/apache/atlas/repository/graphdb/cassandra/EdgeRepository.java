@@ -335,7 +335,7 @@ public class EdgeRepository {
      */
     public void deleteEdgesForVertexPaginated(String vertexId, CassandraGraph graph) {
         int pageSize = 500;
-        int batchLimit = 150;  // matches existing BATCH_LIMIT in batchDeleteEdges
+        int batchLimit = 50;  // matches BATCH_LIMIT in batchDeleteEdges
 
         // Delete OUT edges
         deleteEdgesFromTable(vertexId, "edges_out", "out_vertex_id", "in_vertex_id",
@@ -735,9 +735,8 @@ public class EdgeRepository {
             return;
         }
 
-        // 3 statements per edge; keep batches under ~150 edges (450 statements)
-        // to avoid Cassandra batch_size_warn_threshold
-        int BATCH_LIMIT = 150;
+        // 3 statements per edge (delete out, in, by_id); keep below batch_size_fail_threshold
+        int BATCH_LIMIT = 50;
 
         for (int i = 0; i < edges.size(); i += BATCH_LIMIT) {
             BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
@@ -764,8 +763,9 @@ public class EdgeRepository {
             return;
         }
 
-        // 3 statements per edge; chunk to avoid Cassandra batch size limit
-        int BATCH_LIMIT = 150;
+        // 3 statements per edge (out, in, by_id); each ~350 bytes → 50 edges ≈ 52KB.
+        // Keep below Cassandra's batch_size_fail_threshold (default 50KB).
+        int BATCH_LIMIT = 50;
         for (int i = 0; i < edges.size(); i += BATCH_LIMIT) {
             BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
             Instant now = Instant.now();

@@ -192,11 +192,17 @@ public class IndexRepository {
             return;
         }
 
-        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
-        for (EdgeIndexEntry entry : entries) {
-            batch.addStatement(insertEdgeIndexStmt.bind(entry.indexName, entry.indexValue, entry.edgeId));
+        // Chunk to avoid Cassandra batch_size_fail_threshold (default 50KB).
+        int BATCH_LIMIT = 200;
+        for (int i = 0; i < entries.size(); i += BATCH_LIMIT) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+            int end = Math.min(i + BATCH_LIMIT, entries.size());
+            for (int j = i; j < end; j++) {
+                EdgeIndexEntry entry = entries.get(j);
+                batch.addStatement(insertEdgeIndexStmt.bind(entry.indexName, entry.indexValue, entry.edgeId));
+            }
+            session.execute(batch.build());
         }
-        session.execute(batch.build());
     }
 
     // ---- Batch remove methods ----
@@ -205,11 +211,16 @@ public class IndexRepository {
         if (entries.isEmpty()) {
             return;
         }
-        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
-        for (IndexEntry entry : entries) {
-            batch.addStatement(deleteIndexStmt.bind(entry.indexName, entry.indexValue));
+        int BATCH_LIMIT = 200;
+        for (int i = 0; i < entries.size(); i += BATCH_LIMIT) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+            int end = Math.min(i + BATCH_LIMIT, entries.size());
+            for (int j = i; j < end; j++) {
+                IndexEntry entry = entries.get(j);
+                batch.addStatement(deleteIndexStmt.bind(entry.indexName, entry.indexValue));
+            }
+            session.execute(batch.build());
         }
-        session.execute(batch.build());
     }
 
     public void batchRemovePropertyIndexes(List<IndexEntry> entries) {
