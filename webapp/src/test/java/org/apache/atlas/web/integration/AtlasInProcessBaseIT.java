@@ -80,7 +80,15 @@ public abstract class AtlasInProcessBaseIT {
         cassandra = new CassandraContainer<>(DockerImageName.parse("cassandra:3.11"))
                 .withStartupTimeout(Duration.ofMinutes(3))
                 .withEnv("CASSANDRA_CLUSTER_NAME", "atlas-test-cluster")
-                .withEnv("CASSANDRA_DC", "datacenter1");
+                .withEnv("CASSANDRA_DC", "datacenter1")
+                // TypeDef bootstrap writes 900+ vertices in one commit; entity-type vertices
+                // can have 30-60KB properties JSON, so raise the batch size fail threshold.
+                .withEnv("JVM_EXTRA_OPTS",
+                        "-Dcassandra.config.loader=org.apache.cassandra.config.YamlConfigurationLoader")
+                .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint(
+                        "/bin/bash", "-c",
+                        "sed -i 's/batch_size_fail_threshold_in_kb:.*/batch_size_fail_threshold_in_kb: 500/' /etc/cassandra/cassandra.yaml && " +
+                        "exec /docker-entrypoint.sh cassandra -f"));
 
         elasticsearch = new ElasticsearchContainer(
                 DockerImageName.parse("elasticsearch:7.17.27"))

@@ -42,10 +42,12 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * exceeds 50KB and Cassandra rejects it.
      *
      * Each vertex generates ~4 statements (1 INSERT + 2-3 index inserts).
-     * Entity-type vertices have large properties JSON (all attribute definitions),
-     * so even 5 entity-type vertices can approach 50KB.
+     * Entity-type TypeDef vertices (e.g. Asset with ~300 attributes) can have
+     * properties JSON of 30-60KB, so batching even 2 such vertices can exceed 50KB.
+     * Using 1 vertex per batch ensures the atomic vertex+indexes write stays within
+     * Cassandra's batch size limit for all vertex sizes.
      */
-    private static final int MAX_VERTICES_PER_BATCH = 5;
+    private static final int MAX_VERTICES_PER_BATCH = 1;
 
     /**
      * Cached set of property names eligible for ES indexing, built from the in-memory
