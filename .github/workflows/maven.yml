@@ -407,6 +407,7 @@ jobs:
           output: 'trivy-image-results.sarif'
 
       - name: Upload Trivy scan results to GitHub Security tab
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v2.1.33
         with:
           sarif_file: 'trivy-image-results.sarif'
@@ -418,9 +419,10 @@ jobs:
     needs: [build, changes]
     runs-on: ubuntu-latest
     # Run smoke tests on protected branches if build ran (i.e., not helm-only changes)
+    # beta excluded — zero-graph branch, smoke tests not yet configured for it
     if: |
       needs.build.result == 'success' &&
-      (github.ref_name == 'beta' || github.ref_name == 'staging' || github.ref_name == 'master')
+      (github.ref_name == 'staging' || github.ref_name == 'master')
     
     # Concurrency control: Only one smoke test at a time across all branches
     # Shared vClusters cannot handle concurrent deployments
