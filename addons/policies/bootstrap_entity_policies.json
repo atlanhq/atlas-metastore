@@ -3973,8 +3973,8 @@
         {
             "typeName": "AuthPolicy",
             "attributes": {
-                "name": "READ_ASSET_GROUPING_STRATEGY",
-                "qualifiedName": "READ_ASSET_GROUPING_STRATEGY",
+                "name": "READ_ASSET_GROUPING_STRATEGY_ENRICHMENT_STUDIO",
+                "qualifiedName": "READ_ASSET_GROUPING_STRATEGY_ENRICHMENT_STUDIO",
                 "description": "Allows admins to read all AssetGroupingStrategy entities",
                 "policyCategory": "bootstrap",
                 "policySubCategory": "default",
