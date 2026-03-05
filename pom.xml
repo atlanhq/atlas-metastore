@@ -760,7 +760,7 @@
         <projectBaseDir>${project.basedir}</projectBaseDir>
         <skipCheck>false</skipCheck>
         <skipDocs>true</skipDocs>
-        <skipEnunciate>true</skipEnunciate>
+        <skipEnunciate>false</skipEnunciate>
         <skipITs>false</skipITs>
         <skipJettyMavenPlugin>true</skipJettyMavenPlugin>
         <skipSite>true</skipSite>
