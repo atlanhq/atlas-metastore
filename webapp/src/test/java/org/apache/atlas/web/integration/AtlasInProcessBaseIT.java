@@ -252,6 +252,22 @@ public abstract class AtlasInProcessBaseIT {
                 throw new IOException("Failed to create ES index template 'atlas-graph-template' (HTTP " + cassResponseCode + "): " + cassError);
             }
             cassConn.disconnect();
+
+            // Pre-create the atlas_graph_vertex_index so CassandraGraphManagement can add
+            // field mappings (__timestamp, __modificationTimestamp, __typeName, etc.) at startup.
+            // Without this, the index doesn't exist until the first _bulk write, and all field
+            // mapping PUTs fail with 404.
+            URL createIndexUrl = new URL("http://" + esAddress + "/atlas_graph_vertex_index");
+            HttpURLConnection createConn = (HttpURLConnection) createIndexUrl.openConnection();
+            createConn.setRequestMethod("PUT");
+            createConn.setRequestProperty("Content-Type", "application/json");
+            createConn.setDoOutput(true);
+            try (OutputStream createOs = createConn.getOutputStream()) {
+                createOs.write("{}".getBytes(StandardCharsets.UTF_8));
+            }
+            int createCode = createConn.getResponseCode();
+            LOG.info("Pre-created atlas_graph_vertex_index: HTTP {}", createCode);
+            createConn.disconnect();
         }
     }
 

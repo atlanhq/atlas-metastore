@@ -122,7 +122,7 @@ public class CassandraGraphManagement implements AtlasGraphManagement {
             index.addFieldKey(key);
         }
         graph.getGraphIndexesMap().put(name, index);
-        // Use prefixed name (e.g., "janusgraph_vertex_index") matching what query callers expect
+        // Use prefixed name (e.g., "atlas_graph_vertex_index") matching what query callers expect
         String esIndexName = Constants.INDEX_PREFIX + name;
         ensureESIndexExists(esIndexName);
         LOG.info("Created vertex mixed index: {} (ES index: {}, backing: {})", name, esIndexName, backingIndex);

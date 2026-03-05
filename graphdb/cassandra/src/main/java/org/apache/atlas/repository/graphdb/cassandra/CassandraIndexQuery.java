@@ -428,7 +428,8 @@ public class CassandraIndexQuery implements AtlasIndexQuery<CassandraVertex, Cas
             // returns 400. Return an empty result instead of propagating the error.
             if (statusCode == 400 && responseBody != null && responseBody.contains("No mapping found for")) {
                 LOG.warn("ES query returned 400 due to unmapped sort field (index={}). " +
-                         "Returning empty result. This is expected on a fresh backend.", index);
+                         "Returning empty result. This is expected on a fresh backend. Response: {}",
+                         index, responseBody.substring(0, Math.min(500, responseBody.length())));
                 return "{\"hits\":{\"total\":{\"value\":0},\"hits\":[]}}";
             }
             LOG.error("ES query failed: status={}, index={}, response={}", statusCode, index, responseBody);
