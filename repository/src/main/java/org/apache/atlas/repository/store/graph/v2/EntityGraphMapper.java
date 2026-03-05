@@ -215,6 +215,12 @@ public class EntityGraphMapper {
     private static final Set<String> excludedTypes = new HashSet<>(Arrays.asList(TYPE_GLOSSARY, TYPE_CATEGORY, TYPE_TERM, TYPE_PRODUCT, TYPE_DOMAIN));
     public static final Set<String> CLASSIFICATION_ADD_EXCLUDE_LIST = new HashSet<>(Arrays.asList(ATLAS_GLOSSARY_ENTITY_TYPE, ATLAS_GLOSSARY_CATEGORY_ENTITY_TYPE, DATA_DOMAIN_ENTITY_TYPE));
 
+    // Column parent relationship attributes that are mutually exclusive.
+    // A Column can only have one parent: table, view, or materialisedView.
+    // When one is set, the others must be cleared to prevent stale references.
+    private static final String COLUMN_TYPE_NAME = "Column";
+    private static final Set<String> COLUMN_PARENT_ATTRIBUTES = new HashSet<>(Arrays.asList("table", "view", "materialisedView"));
+
     @Inject
     public EntityGraphMapper(DeleteHandlerDelegate deleteDelegate, RestoreHandlerV1 restoreHandlerV1, AtlasTypeRegistry typeRegistry, AtlasGraph graph,
                              AtlasRelationshipStore relationshipStore, IAtlasEntityChangeNotifier entityChangeNotifier,
@@ -1227,6 +1233,13 @@ public class EntityGraphMapper {
                     }
                 }
             }
+
+            // When a Column's parent relationship (table, view, materialisedView) is set,
+            // clear the other mutually exclusive parent relationships to prevent stale references.
+            // This handles the case where an asset's type changes (e.g., View -> Table) and
+            // columns end up with references to both the old and new parent types.
+            clearMutuallyExclusiveColumnParentRelationships(entity, entityType, vertex);
+
             updateModificationMetadata(vertex);
 
             RequestContext.get().endMetricRecord(metric);
@@ -1234,6 +1247,69 @@ public class EntityGraphMapper {
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("<== mapRelationshipAttributes({}, {})", op, entity.getTypeName());
+        }
+    }
+
+    /**
+     * Clears mutually exclusive parent relationship edges on Column entities.
+     *
+     * A Column can only have one parent: table, view, or materialisedView.
+     * When one parent relationship is set during upsert, the edges for the other
+     * parent relationships must be removed. This prevents stale references when
+     * an asset's type changes (e.g., a View is dropped and recreated as a Table
+     * with the same qualifiedName), which would otherwise leave the column with
+     * references to both the archived old parent and the active new parent.
+     */
+    private void clearMutuallyExclusiveColumnParentRelationships(AtlasEntity entity, AtlasEntityType entityType,
+                                                                 AtlasVertex vertex) throws AtlasBaseException {
+        // Only applies to Column entities (or subtypes of Column)
+        if (!COLUMN_TYPE_NAME.equals(entityType.getTypeName()) &&
+            !entityType.getAllSuperTypes().contains(COLUMN_TYPE_NAME)) {
+            return;
+        }
+
+        // Find which parent relationship attribute is being set in this update
+        String activeParentAttr = null;
+        for (String parentAttr : COLUMN_PARENT_ATTRIBUTES) {
+            if (entity.hasRelationshipAttribute(parentAttr) && entity.getRelationshipAttribute(parentAttr) != null) {
+                activeParentAttr = parentAttr;
+                break;
+            }
+        }
+
+        if (activeParentAttr == null) {
+            return;
+        }
+
+        // Clear edges for the other (now stale) parent relationship attributes
+        for (String otherParentAttr : COLUMN_PARENT_ATTRIBUTES) {
+            if (otherParentAttr.equals(activeParentAttr)) {
+                continue;
+            }
+
+            AtlasAttribute attribute = entityType.getRelationshipAttribute(otherParentAttr, null);
+            if (attribute == null) {
+                continue;
+            }
+
+            String                         edgeLabel     = attribute.getRelationshipEdgeLabel();
+            AtlasRelationshipEdgeDirection edgeDirection = attribute.getRelationshipEdgeDirection();
+
+            if (StringUtils.isEmpty(edgeLabel)) {
+                continue;
+            }
+
+            AtlasEdge existingEdge = graphHelper.getEdgeForLabel(vertex, edgeLabel, edgeDirection);
+            if (existingEdge != null) {
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug("Clearing stale Column parent relationship: attr={}, edgeLabel={}, vertex={}",
+                              otherParentAttr, edgeLabel, GraphHelper.getGuid(vertex));
+                }
+
+                deleteDelegate.getHandler().deleteEdgeReference(existingEdge,
+                        attribute.getAttributeType().getTypeCategory(),
+                        attribute.isOwnedRef(), true, edgeDirection, vertex);
+            }
         }
     }
 
