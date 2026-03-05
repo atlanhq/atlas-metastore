@@ -31,6 +31,11 @@ permissions:
 
 jobs:
   integration-tests:
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [janus, cassandra]
+    name: Integration Tests (${{ matrix.backend }})
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
@@ -113,6 +118,7 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
           mvn test -pl webapp \
+            -Datlas.graphdb.backend=${{ matrix.backend }} \
             -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest" \
             -Drat.skip=true \
             -Dsurefire.failIfNoSpecifiedTests=false \
@@ -125,7 +131,7 @@ jobs:
         uses: dorny/test-reporter@v1
         if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
-          name: Integration Test Results
+          name: Integration Test Results (${{ matrix.backend }})
           path: webapp/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
@@ -150,7 +156,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
-          name: integration-test-reports-${{ github.run_id }}
+          name: integration-test-reports-${{ matrix.backend }}-${{ github.run_id }}
           path: |
             webapp/target/surefire-reports/
             webapp/target/site/test-report.html

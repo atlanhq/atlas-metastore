@@ -76,7 +76,7 @@ public abstract class AtlasInProcessBaseIT {
         // Must be set before any testcontainers Docker client initialization (Docker 29+ requires API >= 1.44)
         System.setProperty("api.version", "1.44");
 
-        cassandra = new CassandraContainer<>(DockerImageName.parse("cassandra:2.1"))
+        cassandra = new CassandraContainer<>(DockerImageName.parse("cassandra:3.11"))
                 .withStartupTimeout(Duration.ofMinutes(3))
                 .withEnv("CASSANDRA_CLUSTER_NAME", "atlas-test-cluster")
                 .withEnv("CASSANDRA_DC", "datacenter1");
@@ -214,6 +214,35 @@ public abstract class AtlasInProcessBaseIT {
             throw new IOException("Failed to create ES index template (HTTP " + responseCode + "): " + error);
         }
         conn.disconnect();
+
+        // Create a second template for CassandraGraph's atlas_graph_* index pattern
+        if (isCassandraGraphBackend()) {
+            String cassandraTemplateBody = String.format(
+                    "{\"index_patterns\":[\"atlas_graph_*\"],\"settings\":%s,\"mappings\":%s}",
+                    settings, mappings);
+
+            URL cassUrl = new URL("http://" + esAddress + "/_template/atlas-graph-template");
+            HttpURLConnection cassConn = (HttpURLConnection) cassUrl.openConnection();
+            cassConn.setRequestMethod("PUT");
+            cassConn.setRequestProperty("Content-Type", "application/json");
+            cassConn.setDoOutput(true);
+
+            try (OutputStream cassOs = cassConn.getOutputStream()) {
+                cassOs.write(cassandraTemplateBody.getBytes(StandardCharsets.UTF_8));
+            }
+
+            int cassResponseCode = cassConn.getResponseCode();
+            if (cassResponseCode == 200) {
+                LOG.info("ES index template 'atlas-graph-template' created successfully for CassandraGraph");
+            } else {
+                InputStream cassErrorStream = cassConn.getErrorStream();
+                String cassError = cassErrorStream != null
+                        ? new String(cassErrorStream.readAllBytes(), StandardCharsets.UTF_8)
+                        : "(no error body)";
+                throw new IOException("Failed to create ES index template 'atlas-graph-template' (HTTP " + cassResponseCode + "): " + cassError);
+            }
+            cassConn.disconnect();
+        }
     }
 
     private static void setupConfiguration() throws Exception {
@@ -297,6 +326,9 @@ public abstract class AtlasInProcessBaseIT {
                 w.println("atlas.cassandra.graph.port=" + cassandraPort);
                 w.println("atlas.cassandra.graph.keyspace=atlas_graph");
                 w.println("atlas.cassandra.graph.datacenter=datacenter1");
+                w.println("atlas.graph.id.strategy=deterministic");
+                w.println("atlas.graph.claim.enabled=false");
+                w.println("atlas.graph.index.search.es.prefix=atlas_graph_");
             }
 
             // Notification - External Kafka container
