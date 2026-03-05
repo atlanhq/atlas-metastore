@@ -141,8 +141,8 @@ atlas:
     backup.velero.io/backup-volumes-excludes: master
 
   image:
-    repository: ghcr.io/atlanhq/atlas-metastore-ATLAS_BRANCH_NAME
-    tag: ATLAS_LATEST_IMAGE_TAG
+    repository: ghcr.io/atlanhq/atlas-metastore-ware-48-golc
+    tag: fd64d2fabcd
     pullPolicy: IfNotPresent
   imagePullSecrets: {}
   tolerations: []
