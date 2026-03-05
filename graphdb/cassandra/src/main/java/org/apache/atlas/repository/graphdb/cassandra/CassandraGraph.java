@@ -1,4 +1,5 @@
 package org.apache.atlas.repository.graphdb.cassandra;
+
 import com.datastax.oss.driver.api.core.CqlSession;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;

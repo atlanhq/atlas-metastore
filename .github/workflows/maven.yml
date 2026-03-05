@@ -896,6 +896,7 @@ jobs:
           echo "🏷️  Registry: oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }}"
 
       - name: Create GitHub Release
+        continue-on-error: true
         if: steps.can_publish.outputs.should_publish == 'true'
         uses: ncipollo/release-action@v1
         with:
