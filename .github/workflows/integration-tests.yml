@@ -21,7 +21,6 @@ on:
   pull_request:
     branches:
       - master
-      - beta
       - staging
 
 permissions:
