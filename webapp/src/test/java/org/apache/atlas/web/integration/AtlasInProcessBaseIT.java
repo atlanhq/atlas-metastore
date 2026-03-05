@@ -142,6 +142,7 @@ public abstract class AtlasInProcessBaseIT {
 
         setupConfiguration();
         initElasticsearchTemplate();
+        disableTagsV2ForCassandra();
         startServer();
         waitForAtlasReady();
         createClient();
@@ -282,6 +283,28 @@ public abstract class AtlasInProcessBaseIT {
             String settingsResp = new String(settingsConn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
             LOG.info("atlas_graph_vertex_index settings: {}", settingsResp);
             settingsConn.disconnect();
+        }
+    }
+
+    /**
+     * Disable Tags V2 for CassandraGraph backend tests.
+     *
+     * Tags V2 stores classifications via TagDAO using vertex IDs as keys.
+     * CassandraGraph with deterministic IDs remaps vertex IDs during commit()
+     * (temp UUID → SHA-256), causing a mismatch between the ID used at write
+     * time and read time. Force V1 classification path which uses graph edges.
+     */
+    private static void disableTagsV2ForCassandra() {
+        if (!isCassandraGraphBackend()) {
+            return;
+        }
+        try {
+            org.testcontainers.containers.Container.ExecResult result =
+                    redis.execInContainer("redis-cli", "SET", "ff:ENABLE_JANUS_OPTIMISATION", "false");
+            LOG.info("Set ff:ENABLE_JANUS_OPTIMISATION=false in Redis (Tags V2 disabled for CassandraGraph): exit={}, stdout={}",
+                    result.getExitCode(), result.getStdout().trim());
+        } catch (Exception e) {
+            LOG.warn("Failed to disable Tags V2 in Redis", e);
         }
     }
 
