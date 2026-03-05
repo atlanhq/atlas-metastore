@@ -138,6 +138,40 @@ public class CassandraVertex extends CassandraElement implements AtlasVertex<Cas
         markDirty();
     }
 
+    /**
+     * Override setProperty to eagerly compute deterministic vertex ID.
+     *
+     * When both qualifiedName and __typeName are set on a new vertex,
+     * the deterministic ID (SHA-256 of typeName + qualifiedName) is computed
+     * immediately. This ensures getIdForDisplay() returns the stable ID
+     * before commit(), fixing Tags V2 which writes to TagDAO using vertex ID
+     * as key during the same transaction as entity creation.
+     */
+    @Override
+    public <T> void setProperty(String propertyName, T value) {
+        super.setProperty(propertyName, value);
+        if (isNew() && graph.getIdStrategy() == RuntimeIdStrategy.DETERMINISTIC) {
+            tryEagerDeterministicId();
+        }
+    }
+
+    private void tryEagerDeterministicId() {
+        String typeName = (String) properties.get("__typeName");
+        String qn = (String) properties.get("qualifiedName");
+        if (qn == null) {
+            qn = (String) properties.get("Referenceable.qualifiedName");
+        }
+        String identityKey = GraphIdUtil.buildIdentityKey(typeName, qn);
+        if (identityKey != null) {
+            String deterministicId = GraphIdUtil.deterministicVertexId(identityKey);
+            if (!deterministicId.equals(this.id)) {
+                String oldId = this.id;
+                this.id = deterministicId;
+                graph.notifyVertexIdChanged(oldId, deterministicId, this);
+            }
+        }
+    }
+
     @Override
     public AtlasVertexQuery<CassandraVertex, CassandraEdge> query() {
         return new CassandraVertexQuery(graph, this);

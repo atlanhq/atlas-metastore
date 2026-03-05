@@ -9,7 +9,7 @@ import java.util.*;
 
 public abstract class CassandraElement implements AtlasElement {
 
-    protected final String id;
+    protected String id;  // non-final: eager deterministic ID rewrite may change it before commit
     protected final Map<String, Object> properties;
     protected final CassandraGraph graph;
     protected boolean isNew;

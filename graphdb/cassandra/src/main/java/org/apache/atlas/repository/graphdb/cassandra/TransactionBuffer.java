@@ -114,6 +114,19 @@ public class TransactionBuffer {
         removedEdges.clear();
     }
 
+    /**
+     * Re-keys a vertex in the buffer after its ID changed (e.g., eager deterministic ID).
+     * Moves the entry from oldId to newId in whichever map contains it.
+     */
+    void notifyVertexIdChanged(String oldId, String newId, CassandraVertex vertex) {
+        if (newVertices.remove(oldId) != null) {
+            newVertices.put(newId, vertex);
+        }
+        if (dirtyVertices.remove(oldId) != null) {
+            dirtyVertices.put(newId, vertex);
+        }
+    }
+
     public boolean isEmpty() {
         return newVertices.isEmpty() && dirtyVertices.isEmpty() && removedVertices.isEmpty()
                 && newEdges.isEmpty() && dirtyEdges.isEmpty() && removedEdges.isEmpty();
