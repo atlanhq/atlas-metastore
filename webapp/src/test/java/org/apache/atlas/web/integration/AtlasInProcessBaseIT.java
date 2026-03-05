@@ -484,21 +484,21 @@ public abstract class AtlasInProcessBaseIT {
             int classCount   = allTypes.getClassificationDefs() != null ? allTypes.getClassificationDefs().size() : 0;
             int relCount     = allTypes.getRelationshipDefs()   != null ? allTypes.getRelationshipDefs().size()   : 0;
 
-            LOG.info("=== TypeDef Bootstrap Verification ===");
-            LOG.info("  Entity defs:         {}", entityCount);
-            LOG.info("  Enum defs:           {}", enumCount);
-            LOG.info("  Struct defs:         {}", structCount);
-            LOG.info("  Classification defs: {}", classCount);
-            LOG.info("  Relationship defs:   {}", relCount);
-            LOG.info("  Backend:             {}", isCassandraGraphBackend() ? "cassandra" : "janus");
-            LOG.info("======================================");
+            System.out.println("=== TypeDef Bootstrap Verification ===");
+            System.out.println("  Entity defs:         " + entityCount);
+            System.out.println("  Enum defs:           " + enumCount);
+            System.out.println("  Struct defs:         " + structCount);
+            System.out.println("  Classification defs: " + classCount);
+            System.out.println("  Relationship defs:   " + relCount);
+            System.out.println("  Backend:             " + (isCassandraGraphBackend() ? "cassandra" : "janus"));
+            System.out.println("======================================");
 
             if (entityCount == 0) {
-                LOG.error("WARNING: Zero entity defs after bootstrap! TypeDef initialization likely failed. " +
-                        "Cassandra tests will fail with 'type not found' errors.");
+                System.out.println("WARNING: Zero entity defs after bootstrap! TypeDef initialization likely failed.");
             }
         } catch (Exception e) {
-            LOG.error("Failed to verify bootstrap TypeDefs via REST API: {}", e.getMessage(), e);
+            System.out.println("Failed to verify bootstrap TypeDefs: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 

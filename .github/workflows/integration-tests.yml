@@ -159,6 +159,8 @@ jobs:
           # Atlas writes logs to a temp directory; find and copy them
           find /tmp -maxdepth 3 -name "*.log" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
           find /tmp -maxdepth 3 -name "*.out" -path "*/atlas-test-*/logs/*" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
+          # Grab the Atlas application.log (FILE appender — has all LOG.info/LOG.error output)
+          cp webapp/target/logs/application.log /tmp/atlas-server-logs/application.log 2>/dev/null || true
           # Also grab surefire test output files (contain server stdout/stderr)
           find webapp/target/surefire-reports -name "*-output.txt" -exec cp {} /tmp/atlas-server-logs/ \; 2>/dev/null || true
           ls -la /tmp/atlas-server-logs/ || echo "No Atlas server logs found"

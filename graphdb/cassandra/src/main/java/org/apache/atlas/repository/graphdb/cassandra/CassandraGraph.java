@@ -612,6 +612,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     @Override
     public void commit() {
         TransactionBuffer buffer = txBuffer.get();
+        System.out.println("[CassandraGraph.commit] START: newVertices=" + buffer.getNewVertices().size()
+                + ", dirtyVertices=" + buffer.getDirtyVertices().size()
+                + ", newEdges=" + buffer.getNewEdges().size());
 
         try {
             List<CassandraVertex> originalNewVertices = buffer.getNewVertices();
@@ -677,6 +680,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                     batchCount++;
                 }
                 LOG.info("commit: wrote {} new vertices with their index entries in {} batch(es)", newVertices.size(), batchCount);
+                System.out.println("[CassandraGraph.commit] Wrote " + newVertices.size() + " new vertices in " + batchCount + " batches");
             }
 
             // Update dirty vertices in LOGGED batches (chunked to avoid batch size limits)
@@ -819,7 +823,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
             // (vertex_index + vertex_property_index) will still work for TypeDef lookups.
             try {
                 syncTypeDefsToCache(newVertices, dirtyVertices, removedVertices);
+                System.out.println("[CassandraGraph.commit] syncTypeDefsToCache completed OK");
             } catch (Exception e) {
+                System.out.println("[CassandraGraph.commit] syncTypeDefsToCache FAILED: " + e.getMessage());
                 LOG.error("Failed to sync TypeDefs to dedicated cache tables (TypeDef data is still in vertices table): {}", e.getMessage(), e);
             }
 
@@ -840,7 +846,9 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                 e.markPersisted();
             }
 
+            System.out.println("[CassandraGraph.commit] SUCCESS — all steps completed");
         } catch (Exception e) {
+            System.out.println("[CassandraGraph.commit] FAILED: " + e.getClass().getName() + ": " + e.getMessage());
             LOG.error("CassandraGraph.commit() FAILED: {}. TypeRegistryUpdateHook will receive isSuccess=false, " +
                     "discarding any transient type registry updates. Cassandra writes that already flushed " +
                     "are NOT rolled back.", e.getMessage(), e);
