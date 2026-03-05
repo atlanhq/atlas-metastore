@@ -11,6 +11,7 @@ import java.util.List;
 public class IndexRepository {
 
     private static final Logger LOG = LoggerFactory.getLogger(IndexRepository.class);
+    private static final int BATCH_CHUNK_SIZE = 100;
 
     private final CqlSession session;
 
@@ -120,11 +121,15 @@ public class IndexRepository {
             return;
         }
 
-        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
-        for (IndexEntry entry : entries) {
-            batch.addStatement(insertIndexStmt.bind(entry.indexName, entry.indexValue, entry.vertexId));
+        for (int i = 0; i < entries.size(); i += BATCH_CHUNK_SIZE) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+            int end = Math.min(i + BATCH_CHUNK_SIZE, entries.size());
+            for (int j = i; j < end; j++) {
+                IndexEntry entry = entries.get(j);
+                batch.addStatement(insertIndexStmt.bind(entry.indexName, entry.indexValue, entry.vertexId));
+            }
+            session.execute(batch.build());
         }
-        session.execute(batch.build());
     }
 
     // ---- 1:N property index (vertex_property_index) ----
@@ -155,11 +160,15 @@ public class IndexRepository {
             return;
         }
 
-        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
-        for (IndexEntry entry : entries) {
-            batch.addStatement(insertPropertyIndexStmt.bind(entry.indexName, entry.indexValue, entry.vertexId));
+        for (int i = 0; i < entries.size(); i += BATCH_CHUNK_SIZE) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+            int end = Math.min(i + BATCH_CHUNK_SIZE, entries.size());
+            for (int j = i; j < end; j++) {
+                IndexEntry entry = entries.get(j);
+                batch.addStatement(insertPropertyIndexStmt.bind(entry.indexName, entry.indexValue, entry.vertexId));
+            }
+            session.execute(batch.build());
         }
-        session.execute(batch.build());
     }
 
     // ---- 1:1 edge index (edge_index) ----

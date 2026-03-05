@@ -36,6 +36,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     private static final Set<String> VERIFIED_ES_INDEXES = ConcurrentHashMap.newKeySet();
 
     /**
+     * Max vertices per LOGGED batch in commit(). Prevents exceeding Cassandra's
+     * batch_size_fail_threshold (default 50KB). During TypeDef bootstrap, a single
+     * transaction can contain 900+ TypeDef vertices — without chunking, the batch
+     * exceeds 50KB and Cassandra rejects it.
+     */
+    private static final int MAX_VERTICES_PER_BATCH = 25;
+
+    /**
      * Cached set of property names eligible for ES indexing, built from the in-memory
      * vertex mixed index registry. Mirrors JanusGraph's mixed index — only properties
      * explicitly registered via addMixedIndex() during GraphBackedSearchIndexer initialization
@@ -636,44 +644,57 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
 
             List<CassandraEdge> newEdges = rewriteEdgesForClaimedVertices(buffer.getNewEdges(), vertexIdRewrite);
 
-            // Flush new vertices + their index entries in a single LOGGED batch.
-            // This eliminates the W2 window where a vertex could exist without its indexes
-            // (making the entity unreachable via GUID or QN lookup).
+            // Flush new vertices + their index entries in LOGGED batches.
+            // Each batch keeps per-vertex atomicity (vertex + its indexes together),
+            // eliminating the W2 window where a vertex could exist without its indexes.
+            // Batches are chunked to avoid exceeding Cassandra's batch_size_fail_threshold
+            // (default 50KB), which can happen during TypeDef bootstrap (952+ vertices).
             if (!newVertices.isEmpty()) {
-                com.datastax.oss.driver.api.core.cql.BatchStatementBuilder atomicBatch =
-                        com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
-                                com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
+                int batchCount = 0;
+                for (int i = 0; i < newVertices.size(); i += MAX_VERTICES_PER_BATCH) {
+                    com.datastax.oss.driver.api.core.cql.BatchStatementBuilder atomicBatch =
+                            com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+                                    com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
 
-                for (CassandraVertex v : newVertices) {
-                    atomicBatch.addStatement(vertexRepository.bindInsertVertex(v));
+                    int end = Math.min(i + MAX_VERTICES_PER_BATCH, newVertices.size());
+                    for (int j = i; j < end; j++) {
+                        CassandraVertex v = newVertices.get(j);
+                        atomicBatch.addStatement(vertexRepository.bindInsertVertex(v));
 
-                    List<IndexRepository.IndexEntry> uniqueEntries = new ArrayList<>();
-                    List<IndexRepository.IndexEntry> propertyEntries = new ArrayList<>();
-                    buildIndexEntries(v, uniqueEntries, propertyEntries);
+                        List<IndexRepository.IndexEntry> uniqueEntries = new ArrayList<>();
+                        List<IndexRepository.IndexEntry> propertyEntries = new ArrayList<>();
+                        buildIndexEntries(v, uniqueEntries, propertyEntries);
 
-                    for (IndexRepository.IndexEntry e : uniqueEntries) {
-                        atomicBatch.addStatement(indexRepository.bindInsertIndex(e.indexName, e.indexValue, e.vertexId));
+                        for (IndexRepository.IndexEntry e : uniqueEntries) {
+                            atomicBatch.addStatement(indexRepository.bindInsertIndex(e.indexName, e.indexValue, e.vertexId));
+                        }
+                        for (IndexRepository.IndexEntry e : propertyEntries) {
+                            atomicBatch.addStatement(indexRepository.bindInsertPropertyIndex(e.indexName, e.indexValue, e.vertexId));
+                        }
                     }
-                    for (IndexRepository.IndexEntry e : propertyEntries) {
-                        atomicBatch.addStatement(indexRepository.bindInsertPropertyIndex(e.indexName, e.indexValue, e.vertexId));
-                    }
+
+                    session.execute(atomicBatch.build());
+                    batchCount++;
                 }
-
-                session.execute(atomicBatch.build());
-                LOG.info("commit: atomic batch wrote {} new vertices with their index entries", newVertices.size());
+                LOG.info("commit: wrote {} new vertices with their index entries in {} batch(es)", newVertices.size(), batchCount);
             }
 
-            // Update dirty vertices in a LOGGED batch (atomic — all-or-nothing on crash)
+            // Update dirty vertices in LOGGED batches (chunked to avoid batch size limits)
             List<CassandraVertex> dirtyVertices = buffer.getDirtyVertices();
             if (!dirtyVertices.isEmpty()) {
-                com.datastax.oss.driver.api.core.cql.BatchStatementBuilder dirtyBatch =
-                        com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
-                                com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
-                for (CassandraVertex v : dirtyVertices) {
-                    dirtyBatch.addStatement(vertexRepository.bindInsertVertex(v));
+                int dirtyBatchCount = 0;
+                for (int i = 0; i < dirtyVertices.size(); i += MAX_VERTICES_PER_BATCH) {
+                    com.datastax.oss.driver.api.core.cql.BatchStatementBuilder dirtyBatch =
+                            com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+                                    com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
+                    int end = Math.min(i + MAX_VERTICES_PER_BATCH, dirtyVertices.size());
+                    for (int j = i; j < end; j++) {
+                        dirtyBatch.addStatement(vertexRepository.bindInsertVertex(dirtyVertices.get(j)));
+                    }
+                    session.execute(dirtyBatch.build());
+                    dirtyBatchCount++;
                 }
-                session.execute(dirtyBatch.build());
-                LOG.info("commit: atomic batch updated {} dirty vertices", dirtyVertices.size());
+                LOG.info("commit: updated {} dirty vertices in {} batch(es)", dirtyVertices.size(), dirtyBatchCount);
             }
 
             // Flush new edges
@@ -1184,20 +1205,28 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
                                      Map<String, String> vertexJsonMap,
                                      List<String> deleteIds) {
         try {
-            com.datastax.oss.driver.api.core.cql.BatchStatementBuilder outboxBatch =
-                    com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
-                            com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
-
+            // Collect all statements, then chunk to avoid exceeding Cassandra batch size limits
+            List<com.datastax.oss.driver.api.core.cql.BoundStatement> statements = new ArrayList<>();
             for (Map.Entry<String, String> entry : vertexJsonMap.entrySet()) {
-                outboxBatch.addStatement(esOutboxRepository.bindInsert(
+                statements.add(esOutboxRepository.bindInsert(
                         entry.getKey(), ESOutboxRepository.ACTION_INDEX, entry.getValue()));
             }
             for (String deleteId : deleteIds) {
-                outboxBatch.addStatement(esOutboxRepository.bindInsert(
+                statements.add(esOutboxRepository.bindInsert(
                         deleteId, ESOutboxRepository.ACTION_DELETE, null));
             }
 
-            session.execute(outboxBatch.build());
+            for (int i = 0; i < statements.size(); i += MAX_VERTICES_PER_BATCH) {
+                com.datastax.oss.driver.api.core.cql.BatchStatementBuilder outboxBatch =
+                        com.datastax.oss.driver.api.core.cql.BatchStatement.builder(
+                                com.datastax.oss.driver.api.core.cql.DefaultBatchType.LOGGED);
+                int end = Math.min(i + MAX_VERTICES_PER_BATCH, statements.size());
+                for (int j = i; j < end; j++) {
+                    outboxBatch.addStatement(statements.get(j));
+                }
+                session.execute(outboxBatch.build());
+            }
+
             LOG.info("writeOutboxEntries: wrote {} index + {} delete outbox entries",
                     vertexJsonMap.size(), deleteIds.size());
         } catch (Exception e) {

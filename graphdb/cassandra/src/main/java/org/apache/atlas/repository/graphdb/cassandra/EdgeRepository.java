@@ -764,30 +764,36 @@ public class EdgeRepository {
             return;
         }
 
-        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
-        Instant now = Instant.now();
+        // 3 statements per edge; chunk to avoid Cassandra batch size limit
+        int BATCH_LIMIT = 150;
+        for (int i = 0; i < edges.size(); i += BATCH_LIMIT) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.LOGGED);
+            Instant now = Instant.now();
+            int end = Math.min(i + BATCH_LIMIT, edges.size());
 
-        for (CassandraEdge edge : edges) {
-            String propsJson = AtlasType.toJson(edge.getProperties());
-            String state     = "ACTIVE";
+            for (int j = i; j < end; j++) {
+                CassandraEdge edge = edges.get(j);
+                String propsJson = AtlasType.toJson(edge.getProperties());
+                String state     = "ACTIVE";
 
-            batch.addStatement(insertEdgeOutStmt.bind(
-                edge.getOutVertexId(), edge.getLabel(), edge.getIdString(),
-                edge.getInVertexId(), propsJson, state, now, now
-            ));
+                batch.addStatement(insertEdgeOutStmt.bind(
+                    edge.getOutVertexId(), edge.getLabel(), edge.getIdString(),
+                    edge.getInVertexId(), propsJson, state, now, now
+                ));
 
-            batch.addStatement(insertEdgeInStmt.bind(
-                edge.getInVertexId(), edge.getLabel(), edge.getIdString(),
-                edge.getOutVertexId(), propsJson, state, now, now
-            ));
+                batch.addStatement(insertEdgeInStmt.bind(
+                    edge.getInVertexId(), edge.getLabel(), edge.getIdString(),
+                    edge.getOutVertexId(), propsJson, state, now, now
+                ));
 
-            batch.addStatement(insertEdgeByIdStmt.bind(
-                edge.getIdString(), edge.getOutVertexId(), edge.getInVertexId(),
-                edge.getLabel(), propsJson, state, now, now
-            ));
+                batch.addStatement(insertEdgeByIdStmt.bind(
+                    edge.getIdString(), edge.getOutVertexId(), edge.getInVertexId(),
+                    edge.getLabel(), propsJson, state, now, now
+                ));
+            }
+
+            session.execute(batch.build());
         }
-
-        session.execute(batch.build());
     }
 
     @SuppressWarnings("unchecked")

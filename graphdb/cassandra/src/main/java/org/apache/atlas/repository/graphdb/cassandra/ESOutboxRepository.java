@@ -113,11 +113,15 @@ public class ESOutboxRepository {
      */
     public void batchMarkDone(List<String> vertexIds) {
         if (vertexIds.isEmpty()) return;
-        BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.UNLOGGED);
-        for (String id : vertexIds) {
-            batch.addStatement(deletePendingStmt.bind(STATUS_PENDING, id));
+        int chunkSize = 100;
+        for (int i = 0; i < vertexIds.size(); i += chunkSize) {
+            BatchStatementBuilder batch = BatchStatement.builder(DefaultBatchType.UNLOGGED);
+            int end = Math.min(i + chunkSize, vertexIds.size());
+            for (int j = i; j < end; j++) {
+                batch.addStatement(deletePendingStmt.bind(STATUS_PENDING, vertexIds.get(j)));
+            }
+            session.execute(batch.build());
         }
-        session.execute(batch.build());
     }
 
     /**
