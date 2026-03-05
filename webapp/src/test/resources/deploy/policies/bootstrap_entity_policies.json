@@ -1693,6 +1693,42 @@
             "typeName": "AuthPolicy",
             "attributes":
             {
+                "name": "BM_UPDATE_CATALOG",
+                "qualifiedName": "BM_UPDATE_CATALOG",
+                "description": "Allows admin to update business metadata on Catalog entities.",
+                "policyCategory": "bootstrap",
+                "policySubCategory": "default",
+                "policyServiceName": "atlas",
+                "policyType": "allow",
+                "policyPriority": 0,
+                "policyUsers":
+                [],
+                "policyGroups":
+                [],
+                "policyRoles":
+                [
+                    "$admin",
+                    "$api-token-default-access"
+                ],
+                "policyResourceCategory": "ENTITY",
+                "isPolicyEnabled": true,
+                "policyResources":
+                [
+                    "entity-type:Catalog",
+                    "entity-classification:*",
+                    "entity:*",
+                    "entity-business-metadata:*"
+                ],
+                "policyActions":
+                [
+                    "entity-update-business-metadata"
+                ]
+            }
+        },
+        {
+            "typeName": "AuthPolicy",
+            "attributes":
+            {
                 "name": "CREATE_PROCESS_ASSET",
                 "qualifiedName": "CREATE_PROCESS_ASSET",
                 "policyCategory": "bootstrap",
