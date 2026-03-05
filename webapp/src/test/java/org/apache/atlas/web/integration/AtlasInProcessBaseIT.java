@@ -477,7 +477,7 @@ public abstract class AtlasInProcessBaseIT {
      */
     private static void verifyBootstrapTypeDefs() {
         try {
-            AtlasTypesDef allTypes = atlasClient.getAllTypeDefs();
+            AtlasTypesDef allTypes = atlasClient.getAllTypeDefs(new org.apache.atlas.model.SearchFilter());
             int entityCount  = allTypes.getEntityDefs()         != null ? allTypes.getEntityDefs().size()         : 0;
             int enumCount    = allTypes.getEnumDefs()           != null ? allTypes.getEnumDefs().size()           : 0;
             int structCount  = allTypes.getStructDefs()         != null ? allTypes.getStructDefs().size()         : 0;
