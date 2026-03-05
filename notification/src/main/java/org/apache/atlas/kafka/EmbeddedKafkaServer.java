@@ -145,12 +145,17 @@ public class EmbeddedKafkaServer implements Service {
 
         URL        kafkaAddress = getURL(kafkaValue);
         Properties brokerConfig = properties;
+        String     listener     = String.format("PLAINTEXT://%s:%d", kafkaAddress.getHost(), kafkaAddress.getPort());
 
         for (int attemptCount = 0; attemptCount < MAX_RETRY_TO_ACQUIRE_PORT; attemptCount++) {
             try {
                 brokerConfig.setProperty("broker.id", "1");
                 brokerConfig.setProperty("host.name", kafkaAddress.getHost());
                 brokerConfig.setProperty("port", String.valueOf(kafkaAddress.getPort()));
+                brokerConfig.setProperty("listeners", listener);
+                brokerConfig.setProperty("advertised.listeners", listener);
+                brokerConfig.setProperty("listener.security.protocol.map", "PLAINTEXT:PLAINTEXT");
+                brokerConfig.setProperty("inter.broker.listener.name", "PLAINTEXT");
                 brokerConfig.setProperty("log.dirs", constructDir("kafka").getAbsolutePath());
                 brokerConfig.setProperty("log.flush.interval.messages", String.valueOf(1));
 

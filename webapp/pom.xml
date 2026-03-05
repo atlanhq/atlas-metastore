@@ -207,6 +207,12 @@
         </dependency>
 
         <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-server-common</artifactId>
+            <version>${kafka.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.atlas</groupId>
             <artifactId>atlas-intg</artifactId>
             <version>${project.version}</version>

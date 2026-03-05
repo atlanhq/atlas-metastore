@@ -19,7 +19,6 @@ package org.apache.atlas.notification;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import kafka.utils.ShutdownableThread;
 import org.apache.atlas.*;
 import org.apache.atlas.annotation.EnableConditional;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -70,6 +69,7 @@ import org.apache.commons.collections4.map.PassiveExpiringMap;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.server.util.ShutdownableThread;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Conditional;
@@ -978,7 +978,12 @@ public class NotificationHookConsumer implements Service, ActiveStateChangeHandl
                 consumer.wakeup();
             }
 
-            super.awaitShutdown();
+            try {
+                super.awaitShutdown();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                LOG.warn("Interrupted while waiting for hook consumer shutdown", e);
+            }
 
             LOG.info("<== HookConsumer shutdown()");
         }
