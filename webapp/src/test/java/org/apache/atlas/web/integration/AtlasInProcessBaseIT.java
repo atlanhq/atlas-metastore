@@ -225,11 +225,16 @@ public abstract class AtlasInProcessBaseIT {
         }
         conn.disconnect();
 
-        // Create a second template for CassandraGraph's atlas_graph_* index pattern
+        // Create a second template for CassandraGraph's atlas_graph_* index pattern.
+        // CassandraGraph maps each entity property directly to an ES field (unlike JanusGraph
+        // which encodes properties into a small number of fields). With 952+ entity types
+        // from minimal.json, field mappings easily exceed ES's default 2000 limit.
         if (isCassandraGraphBackend()) {
+            // Raise the field limit from 2000 to 10000 for CassandraGraph
+            String cassSettings = settings.replace("\"limit\" : \"2000\"", "\"limit\" : \"10000\"");
             String cassandraTemplateBody = String.format(
                     "{\"index_patterns\":[\"atlas_graph_*\"],\"settings\":%s,\"mappings\":%s}",
-                    settings, mappings);
+                    cassSettings, mappings);
 
             URL cassUrl = new URL("http://" + esAddress + "/_template/atlas-graph-template");
             HttpURLConnection cassConn = (HttpURLConnection) cassUrl.openConnection();
@@ -257,6 +262,7 @@ public abstract class AtlasInProcessBaseIT {
             // field mappings (__timestamp, __modificationTimestamp, __typeName, etc.) at startup.
             // Without this, the index doesn't exist until the first _bulk write, and all field
             // mapping PUTs fail with 404.
+            // The template (atlas-graph-template) applies settings+mappings automatically.
             URL createIndexUrl = new URL("http://" + esAddress + "/atlas_graph_vertex_index");
             HttpURLConnection createConn = (HttpURLConnection) createIndexUrl.openConnection();
             createConn.setRequestMethod("PUT");
@@ -268,6 +274,14 @@ public abstract class AtlasInProcessBaseIT {
             int createCode = createConn.getResponseCode();
             LOG.info("Pre-created atlas_graph_vertex_index: HTTP {}", createCode);
             createConn.disconnect();
+
+            // Verify the field limit was applied from the template
+            URL settingsUrl = new URL("http://" + esAddress + "/atlas_graph_vertex_index/_settings");
+            HttpURLConnection settingsConn = (HttpURLConnection) settingsUrl.openConnection();
+            settingsConn.setRequestMethod("GET");
+            String settingsResp = new String(settingsConn.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            LOG.info("atlas_graph_vertex_index settings: {}", settingsResp);
+            settingsConn.disconnect();
         }
     }
 
