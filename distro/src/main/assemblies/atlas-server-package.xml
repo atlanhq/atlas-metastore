@@ -141,5 +141,10 @@
             <outputDirectory>tools</outputDirectory>
             <destName>atlas-graphdb-migrator.jar</destName>
         </file>
+        <file>
+            <source>../graphdb/migrator/migrator.properties</source>
+            <outputDirectory>tools</outputDirectory>
+            <destName>migrator.properties</destName>
+        </file>
     </files>
 </assembly>
