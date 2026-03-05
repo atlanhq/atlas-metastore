@@ -178,10 +178,15 @@ public abstract class AbstractRedisService implements RedisService {
                 lock.forceUnlock();
                 getLogger().info("Force-released distributed lock for {}", key);
             }
-            cleanupLockMonitoring(key);
-            keyLockMap.remove(key);
         } catch (Exception e) {
             getLogger().error("Failed to force-release distributed lock for {}", key, e);
+        } finally {
+            try {
+                cleanupLockMonitoring(key);
+            } catch (Exception ex) {
+                getLogger().warn("Failed to cleanup lock monitoring for {}", key, ex);
+            }
+            keyLockMap.remove(key);
         }
     }
 
