@@ -40,8 +40,12 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * batch_size_fail_threshold (default 50KB). During TypeDef bootstrap, a single
      * transaction can contain 900+ TypeDef vertices — without chunking, the batch
      * exceeds 50KB and Cassandra rejects it.
+     *
+     * Each vertex generates ~4 statements (1 INSERT + 2-3 index inserts).
+     * Entity-type vertices have large properties JSON (all attribute definitions),
+     * so even 5 entity-type vertices can approach 50KB.
      */
-    private static final int MAX_VERTICES_PER_BATCH = 25;
+    private static final int MAX_VERTICES_PER_BATCH = 5;
 
     /**
      * Cached set of property names eligible for ES indexing, built from the in-memory
