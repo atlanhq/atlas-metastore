@@ -17,8 +17,8 @@
  */
 package org.apache.atlas.web.filters;
 
-import javax.servlet.http.HttpServletResponse;
-import javax.servlet.http.HttpServletResponseWrapper;
+import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 
 
 public class AtlasResponseRequestWrapper extends HttpServletResponseWrapper {

@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.springframework.stereotype.Component;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.*;
 
 @Component
@@ -73,6 +73,19 @@ public class HeadersUtil {
     public static void setSecurityHeaders(AtlasResponseRequestWrapper responseWrapper) {
         for (Map.Entry<String, String> entry : headerMap.entrySet()) {
             responseWrapper.setHeader(entry.getKey(), entry.getValue());
+        }
+    }
+
+    public static void setRequestContextHeaders(javax.servlet.http.HttpServletRequest request) {
+        Enumeration<String> headerNames = request.getHeaderNames();
+        RequestContext context = RequestContext.get();
+
+        while (headerNames.hasMoreElements()) {
+            String headerName = headerNames.nextElement();
+            if (headerName.toLowerCase().startsWith(ATLAN_HEADER_PREFIX_PATTERN.toLowerCase()) || LOG_HEADER_NAMES.contains(headerName.toLowerCase())) {
+                MDC.put(headerName, request.getHeader(headerName));
+                context.addRequestContextHeader(headerName, request.getHeader(headerName));
+            }
         }
     }
 

@@ -20,7 +20,7 @@ package org.apache.atlas.web.setup;
 import org.apache.atlas.web.listeners.LoginProcessor;
 import org.springframework.web.context.ContextLoaderListener;
 
-import javax.servlet.ServletContextEvent;
+import jakarta.servlet.ServletContextEvent;
 
 public class KerberosAwareListener extends ContextLoaderListener {
     @Override

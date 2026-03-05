@@ -25,7 +25,7 @@ import java.util.ArrayList;
 import java.util.Properties;
 import java.util.List;
 import java.security.NoSuchAlgorithmException;
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import org.apache.atlas.web.security.AtlasAuthenticationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

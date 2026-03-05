@@ -34,7 +34,7 @@ import org.apache.http.client.utils.URLEncodedUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.io.IOException;
@@ -96,6 +96,10 @@ public final class Servlets {
 
     private static final Charset UTF8_CHARSET = Charset.forName("UTF-8");
     private static final String DO_AS = "doAs";
+
+    public static String getDoAsUser(javax.servlet.http.HttpServletRequest request) {
+        return request.getParameter("doAs");
+    }
 
     public static String getDoAsUser(HttpServletRequest request) {
         if (StringUtils.isNoneEmpty(request.getQueryString())) {

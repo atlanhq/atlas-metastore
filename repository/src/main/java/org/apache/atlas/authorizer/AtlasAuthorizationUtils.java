@@ -511,6 +511,16 @@ public class AtlasAuthorizationUtils {
         RequestContext.get().endMetricRecord(metric);
     }
 
+    public static java.util.List<String> getForwardedAddressesFromRequest(jakarta.servlet.http.HttpServletRequest httpServletRequest){
+        String ipAddress = httpServletRequest.getHeader("X-FORWARDED-FOR");
+        String[] forwardedAddresses = null ;
+
+        if(!StringUtils.isEmpty(ipAddress)){
+            forwardedAddresses = ipAddress.split(",");
+        }
+        return forwardedAddresses != null ? Arrays.asList(forwardedAddresses) : null;
+    }
+
     public static List<String> getForwardedAddressesFromRequest(HttpServletRequest httpServletRequest){
         String ipAddress = httpServletRequest.getHeader("X-FORWARDED-FOR");
         String[] forwardedAddresses = null ;
@@ -519,6 +529,20 @@ public class AtlasAuthorizationUtils {
             forwardedAddresses = ipAddress.split(",");
         }
         return forwardedAddresses != null ? Arrays.asList(forwardedAddresses) : null;
+    }
+
+    public static String getRequestIpAddress(jakarta.servlet.http.HttpServletRequest httpServletRequest) {
+        String ret = "";
+
+        try {
+            InetAddress inetAddr = InetAddress.getByName(httpServletRequest.getRemoteAddr());
+
+            ret = inetAddr.getHostAddress();
+        } catch (UnknownHostException ex) {
+            LOG.error("Failed to retrieve client IP address", ex);
+        }
+
+        return ret;
     }
 
     public static String getRequestIpAddress(HttpServletRequest httpServletRequest) {
