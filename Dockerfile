@@ -57,6 +57,6 @@ RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jv
 
 RUN cd /opt/apache-atlas/bin \
     && ./atlas_start.py -setup || true \
-    && java -jar /opt/context/context-engine.jar --server.port=22000
+    && java -jar /opt/context/context-engine.jar --server.port=22000 
 
 VOLUME ["/opt/apache-atlas/conf", "/opt/apache-atlas/logs"]
