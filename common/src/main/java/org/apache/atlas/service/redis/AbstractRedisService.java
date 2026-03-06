@@ -369,9 +369,9 @@ public abstract class AbstractRedisService implements RedisService {
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
                 .setTimeout(50) //Setting UP timeout to 50ms
-                .setRetryAttempts(10) //Retry 10 times
+                .setRetryAttempts(3) //Retry 3 times
                 // 2-node availability settings - allow operation with partial Redis cluster
-                .setConnectTimeout(connectTimeoutMs)
+                .setConnectTimeout(1000) // 1 second connection timeout
                 .setScanInterval(scanIntervalMs)
                 .setDnsMonitoringInterval(dnsMonitoringIntervalMs)
                 .setFailedSlaveCheckInterval(failedSlaveCheckIntervalMs)
