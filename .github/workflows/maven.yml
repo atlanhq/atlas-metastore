@@ -235,6 +235,15 @@ jobs:
 
       - uses: actions/checkout@v3
 
+   
+      - name: Checkout Experiments Repo
+        uses: actions/checkout@v4
+        with:
+          repository: atlanhq/mdlh-experiements
+          ref: slimcontext
+          path: experiments
+          token: ${{ secrets.METASTORE_EXPTS_TOKEN }}
+
       # Set up Docker
       - name: Set up Docker
         uses: docker/setup-buildx-action@v2
@@ -292,15 +301,7 @@ jobs:
         run: |
           echo "build without dashboard"
           chmod +x ./build.sh && ./build.sh
-      
-      - name: Checkout Experiments Repo
-        uses: actions/checkout@v4
-        with:
-          repository: atlanhq/mdlh-experiements
-          ref: slimcontext
-          path: experiments
-          token: ${{ secrets.METASTORE_EXPTS_TOKEN }}
-
+  
       - name: Build Context Engine
         run: |
           echo "===================================="
