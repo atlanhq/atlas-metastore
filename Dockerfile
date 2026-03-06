@@ -49,10 +49,14 @@ COPY atlas-hub/atlas_start.py.patch atlas-hub/atlas_config.py.patch /opt/apache-
 COPY atlas-hub/pre-conf/atlas-logback.xml /opt/apache-atlas/conf/
 COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
+# Copy Context Engine
+COPY experiments/context-engine/target/context-engine.jar /opt/context/context-engine.jar
+
 RUN mkdir /opt/apache-atlas/libext
 RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
 
 RUN cd /opt/apache-atlas/bin \
-    && ./atlas_start.py -setup || true
+    && ./atlas_start.py -setup || true \
+    && java -jar /opt/context/context-engine.jar --server.port=22000
 
 VOLUME ["/opt/apache-atlas/conf", "/opt/apache-atlas/logs"]
