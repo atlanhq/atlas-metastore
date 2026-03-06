@@ -86,7 +86,7 @@ public class BulkPurgeService {
     private static final String HOSTNAME = getHostname();
 
     // Internal defaults (not externally configurable — change here if needed)
-    private static final int    COORDINATOR_POOL_SIZE           = 2;
+    private static final int    COORDINATOR_POOL_SIZE           = 4;
     private static final int    ES_PAGE_SIZE                    = 5000;
     private static final int    COMMIT_MAX_RETRIES              = 3;
     private static final long   COMMIT_TIMEOUT_MS               = 120_000;
