@@ -5,7 +5,8 @@ import time
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
-    assert_field_equals, assert_field_not_empty,
+    assert_field_equals, assert_field_not_empty, assert_field_type,
+    assert_list_min_length,
 )
 from core.data_factory import (
     build_enum_def, build_classification_def, build_struct_def,
@@ -59,6 +60,13 @@ class TypeDefSuite:
         assert_status(resp, 200)
         ctx.set("test_enum_name", self.enum_name)
 
+        # Validate response structure
+        body = resp.json()
+        enum_defs = body.get("enumDefs", [])
+        assert len(enum_defs) > 0, "Expected enumDefs in response"
+        assert enum_defs[0].get("name") == self.enum_name, f"Expected name={self.enum_name}"
+        assert "elementDefs" in enum_defs[0], "Expected elementDefs in enum def"
+
     @test("get_enum_def_by_name", tags=["typedef"], order=11, depends_on=["create_enum_def"])
     def test_get_enum_def_by_name(self, client, ctx):
         resp = client.get(f"/types/enumdef/name/{self.enum_name}")
@@ -84,6 +92,12 @@ class TypeDefSuite:
         resp = client.post("/types/typedefs", json_data=payload)
         assert_status(resp, 200)
         ctx.set("test_classification_name", self.classification_name)
+
+        # Validate response structure
+        body = resp.json()
+        cls_defs = body.get("classificationDefs", [])
+        assert len(cls_defs) > 0, "Expected classificationDefs in response"
+
         # Classification/BM types need time to propagate through type cache on staging
         time.sleep(5)
 
@@ -102,6 +116,12 @@ class TypeDefSuite:
         assert_status(resp, 200)
         ctx.set("test_entity_type_name", self.entity_type_name)
 
+        # Validate response structure
+        body = resp.json()
+        entity_defs = body.get("entityDefs", [])
+        assert len(entity_defs) > 0, "Expected entityDefs in response"
+        assert "attributeDefs" in entity_defs[0], "Expected attributeDefs in entity def"
+
     @test("get_entity_def_by_name", tags=["typedef"], order=17, depends_on=["create_entity_def"])
     def test_get_entity_def_by_name(self, client, ctx):
         resp = client.get(f"/types/entitydef/name/{self.entity_type_name}")
@@ -114,6 +134,12 @@ class TypeDefSuite:
         resp = client.post("/types/typedefs", json_data=payload)
         assert_status(resp, 200)
         ctx.set("test_bm_name", self.bm_name)
+
+        # Validate response structure
+        body = resp.json()
+        bm_defs = body.get("businessMetadataDefs", [])
+        assert len(bm_defs) > 0, "Expected businessMetadataDefs in response"
+
         # BM types need time to propagate through type cache on staging
         time.sleep(5)
 
@@ -142,6 +168,28 @@ class TypeDefSuite:
         }
         resp = client.put("/types/typedefs", json_data=payload)
         assert_status(resp, 200)
+
+        # Read-after-write: GET enum and verify VAL_D is in elementDefs
+        resp2 = client.get(f"/types/enumdef/name/{self.enum_name}")
+        assert_status(resp2, 200)
+        body = resp2.json()
+        element_values = [e.get("value") for e in body.get("elementDefs", [])]
+        assert "VAL_D" in element_values, f"Expected VAL_D in elementDefs, got {element_values}"
+
+    @test("get_all_find_created_enum", tags=["typedef"], order=21, depends_on=["create_enum_def"])
+    def test_get_all_find_created_enum(self, client, ctx):
+        # GET-all typedefs and find our created enum in enumDefs by name
+        resp = client.get("/types/typedefs")
+        assert_status(resp, 200)
+        body = resp.json()
+        enum_defs = body.get("enumDefs", [])
+        found = None
+        for ed in enum_defs:
+            if ed.get("name") == self.enum_name:
+                found = ed
+                break
+        assert found is not None, f"Created enum '{self.enum_name}' not found in GET /types/typedefs"
+        assert "elementDefs" in found, "Found enum should have elementDefs"
 
     # ---- DELETE types (cleanup) ----
 

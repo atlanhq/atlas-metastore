@@ -69,12 +69,25 @@ class AdminSuite:
         resp = client.get("/tasks", admin=True)
         assert_status(resp, 200)
 
-    @test("get_debug_metrics", tags=["admin"], order=16)
+    @test("get_tasks_by_id", tags=["admin"], order=16)
+    def test_get_tasks_by_id(self, client, ctx):
+        # GET-all -> pick first task GUID -> GET by ID
+        resp = client.get("/tasks", admin=True)
+        assert_status(resp, 200)
+        body = resp.json()
+        tasks = body if isinstance(body, list) else body.get("tasks", [])
+        if tasks and isinstance(tasks[0], dict):
+            task_guid = tasks[0].get("taskGuid") or tasks[0].get("guid")
+            if task_guid:
+                resp2 = client.get(f"/tasks/{task_guid}", admin=True)
+                assert_status_in(resp2, [200, 404])
+
+    @test("get_debug_metrics", tags=["admin"], order=17)
     def test_get_debug_metrics(self, client, ctx):
         resp = client.get("/debug/metrics", admin=True)
         assert_status(resp, 200)
 
-    @test("push_metrics_statsd", tags=["admin"], order=17)
+    @test("push_metrics_statsd", tags=["admin"], order=18)
     def test_push_metrics_statsd(self, client, ctx):
         resp = client.get("/pushMetricsToStatsd", admin=True)
         # May fail if StatsD not configured, which is fine

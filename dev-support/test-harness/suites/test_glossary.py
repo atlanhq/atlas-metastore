@@ -7,6 +7,7 @@ from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_equals, assert_field_not_empty,
 )
+from core.audit_helpers import assert_audit_event_exists
 from core.data_factory import unique_name
 
 
@@ -35,24 +36,47 @@ class GlossarySuite:
         })
         assert_status(resp, 200)
         assert_field_present(resp, "guid")
+        assert_field_equals(resp, "name", self.glossary_name)
+        assert_field_present(resp, "qualifiedName")
+
         guid = resp.json()["guid"]
         ctx.register_entity("glossary", guid, "AtlasGlossary")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/{guid}"))
 
-    @test("get_glossary", tags=["glossary"], order=3, depends_on=["create_glossary"])
+    @test("list_glossaries_find_created", tags=["glossary", "validation"], order=3, depends_on=["create_glossary"])
+    def test_list_glossaries_find_created(self, client, ctx):
+        # GET-all -> find our glossary by name -> GET by that GUID -> verify details
+        resp = client.get("/glossary", params={"limit": 100, "offset": 0, "sort": "ASC"})
+        assert_status(resp, 200)
+        body = resp.json()
+        glossaries = body if isinstance(body, list) else []
+        found = None
+        for g in glossaries:
+            if g.get("name") == self.glossary_name:
+                found = g
+                break
+        assert found is not None, f"Created glossary '{self.glossary_name}' not found in list"
+
+        # GET by that GUID and verify details
+        found_guid = found.get("guid")
+        resp2 = client.get(f"/glossary/{found_guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "name", self.glossary_name)
+
+    @test("get_glossary", tags=["glossary"], order=4, depends_on=["create_glossary"])
     def test_get_glossary(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
         resp = client.get(f"/glossary/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "name", self.glossary_name)
 
-    @test("get_glossary_detailed", tags=["glossary"], order=4, depends_on=["create_glossary"])
+    @test("get_glossary_detailed", tags=["glossary"], order=5, depends_on=["create_glossary"])
     def test_get_glossary_detailed(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
         resp = client.get(f"/glossary/{guid}/detailed")
         assert_status(resp, 200)
 
-    @test("update_glossary", tags=["glossary", "crud"], order=5, depends_on=["create_glossary"])
+    @test("update_glossary", tags=["glossary", "crud"], order=6, depends_on=["create_glossary"])
     def test_update_glossary(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
         resp = client.put(f"/glossary/{guid}", json_data={
@@ -61,6 +85,20 @@ class GlossarySuite:
             "shortDescription": "Updated description",
         })
         assert_status(resp, 200)
+
+        # Read-after-write: GET and verify shortDescription
+        resp2 = client.get(f"/glossary/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "shortDescription", "Updated description")
+
+    @test("glossary_create_audit", tags=["glossary", "audit"], order=7, depends_on=["create_glossary"])
+    def test_glossary_create_audit(self, client, ctx):
+        guid = ctx.get_entity_guid("glossary")
+        if not guid:
+            return
+        event = assert_audit_event_exists(client, guid, "ENTITY_CREATE")
+        if event is None:
+            return  # Audit endpoint not available, graceful skip
 
     # ---- Term CRUD ----
 
@@ -74,6 +112,9 @@ class GlossarySuite:
         })
         assert_status(resp, 200)
         assert_field_present(resp, "guid")
+        assert_field_equals(resp, "name", self.term_name)
+        assert_field_present(resp, "anchor")
+
         guid = resp.json()["guid"]
         ctx.register_entity("term1", guid, "AtlasGlossaryTerm")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/term/{guid}"))
@@ -114,6 +155,11 @@ class GlossarySuite:
         })
         assert_status(resp, 200)
 
+        # Read-after-write: GET and verify shortDescription
+        resp2 = client.get(f"/glossary/term/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "shortDescription", "Updated term description")
+
     # ---- Category CRUD ----
 
     @test("create_category", tags=["glossary", "crud"], order=20, depends_on=["create_glossary"])
@@ -126,6 +172,9 @@ class GlossarySuite:
         })
         assert_status(resp, 200)
         assert_field_present(resp, "guid")
+        assert_field_not_empty(resp, "name")
+        assert_field_present(resp, "qualifiedName")
+
         guid = resp.json()["guid"]
         ctx.register_entity("category1", guid, "AtlasGlossaryCategory")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/category/{guid}"))

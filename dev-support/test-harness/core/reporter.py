@@ -75,7 +75,8 @@ class Reporter:
             icon = f"{_YELLOW}SKIP{_RESET}"
 
         latency_str = f" ({result.latency_ms:.0f}ms)" if result.latency_ms > 0 else ""
-        print(f"  [{icon}] {result.suite}::{result.test_name}{latency_str}", flush=True)
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        print(f"  [{ts}] [{icon}] {result.suite}::{result.test_name}{latency_str}", flush=True)
 
         if result.error_message and (status in ("FAIL", "ERROR") or self.verbose):
             for line in result.error_message.split("\n")[:5]:

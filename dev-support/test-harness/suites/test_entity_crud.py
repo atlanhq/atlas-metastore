@@ -5,8 +5,11 @@ import time
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
-    assert_field_equals, assert_field_not_empty,
+    assert_field_equals, assert_field_not_empty, assert_field_in,
+    assert_mutation_response,
 )
+from core.audit_helpers import assert_audit_event_exists
+from core.search_helpers import assert_entity_in_search
 from core.data_factory import build_dataset_entity, build_process_entity, unique_qn, unique_name
 
 
@@ -31,15 +34,37 @@ class EntityCrudSuite:
         assert_status(resp, 200)
         assert_field_not_empty(resp, "mutatedEntities")
 
-        # Extract GUID
+        # Deep validation: verify mutation response structure
         body = resp.json()
         creates = body.get("mutatedEntities", {}).get("CREATE", [])
         updates = body.get("mutatedEntities", {}).get("UPDATE", [])
         entities = creates or updates
         assert len(entities) > 0, "Expected at least one entity in mutatedEntities"
+
+        # Validate guidAssignments if present
+        if "guidAssignments" in body:
+            assert isinstance(body["guidAssignments"], dict), "guidAssignments should be a dict"
+
         guid = entities[0]["guid"]
         ctx.register_entity("ds1", guid, "DataSet")
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+
+    @test("create_entity_audit", tags=["crud", "audit"], order=5, depends_on=["create_entity"])
+    def test_create_entity_audit(self, client, ctx):
+        guid = ctx.get_entity_guid("ds1")
+        if not guid:
+            raise Exception("No ds1 entity registered")
+        event = assert_audit_event_exists(client, guid, "ENTITY_CREATE")
+        if event is None:
+            return  # Audit endpoint not available, graceful skip
+        entity_id = event.get("entityId") or event.get("entityGuid")
+        assert entity_id == guid, f"Audit event entityId mismatch: expected {guid}, got {entity_id}"
+
+    @test("create_entity_in_search", tags=["crud", "search"], order=6, depends_on=["create_entity"])
+    def test_create_entity_in_search(self, client, ctx):
+        result = assert_entity_in_search(client, self.ds1_qn)
+        if result is None:
+            return  # Search endpoint not available
 
     @test("create_entity_bulk", tags=["crud"], order=2)
     def test_create_entity_bulk(self, client, ctx):
@@ -90,6 +115,8 @@ class EntityCrudSuite:
         assert_field_equals(resp, "entity.guid", guid)
         assert_field_equals(resp, "entity.typeName", "DataSet")
         assert_field_equals(resp, "entity.attributes.qualifiedName", self.ds1_qn)
+        assert_field_in(resp, "entity.status", ["ACTIVE", "DELETED"])
+        assert_field_not_empty(resp, "entity.attributes.name")
 
     @test("get_entity_header", tags=["crud"], order=11, depends_on=["create_entity"])
     def test_get_entity_header(self, client, ctx):
@@ -141,7 +168,6 @@ class EntityCrudSuite:
     @test("update_entity_by_guid", tags=["crud"], order=20, depends_on=["create_entity"])
     def test_update_entity_by_guid(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
-        # Use createOrUpdate (POST) instead of PUT by GUID which can be stricter
         resp = client.post("/entity", json_data={
             "entity": {
                 "typeName": "DataSet",
@@ -155,7 +181,13 @@ class EntityCrudSuite:
         })
         assert_status(resp, 200)
 
-        # Verify
+        # Validate mutation response
+        body = resp.json()
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        if updates:
+            assert updates[0].get("guid"), "Updated entity should have guid"
+
+        # Read-after-write verification
         resp2 = client.get(f"/entity/guid/{guid}")
         assert_status(resp2, 200)
         assert_field_equals(resp2, "entity.attributes.description", "Updated by test harness")
@@ -190,6 +222,20 @@ class EntityCrudSuite:
         })
         assert_status(resp, 200)
 
+        # Read-after-write: GET entity and verify description
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.attributes.description", "Partial update test")
+
+    @test("update_entity_audit", tags=["crud", "audit"], order=25, depends_on=["update_entity_by_guid"])
+    def test_update_entity_audit(self, client, ctx):
+        guid = ctx.get_entity_guid("ds1")
+        if not guid:
+            raise Exception("No ds1 entity registered")
+        event = assert_audit_event_exists(client, guid, "ENTITY_UPDATE")
+        if event is None:
+            return  # Audit endpoint not available, graceful skip
+
     # ---- DELETE ----
 
     @test("delete_entity_by_guid", tags=["crud"], order=80)
@@ -208,6 +254,12 @@ class EntityCrudSuite:
         # Delete it
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status(resp, 200)
+
+        # Validate DELETE mutation response has the correct guid
+        del_body = resp.json()
+        deletes = del_body.get("mutatedEntities", {}).get("DELETE", [])
+        if deletes:
+            assert deletes[0].get("guid") == guid, f"Expected deleted guid={guid}"
 
         # Verify deleted (soft delete returns entity with DELETED status)
         resp = client.get(f"/entity/guid/{guid}")

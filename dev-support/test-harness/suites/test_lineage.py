@@ -3,7 +3,7 @@
 import time
 
 from core.decorators import suite, test
-from core.assertions import assert_status, assert_status_in, assert_field_present
+from core.assertions import assert_status, assert_status_in, assert_field_present, assert_field_equals
 
 
 @suite("lineage", depends_on_suites=["entity_crud"],
@@ -27,6 +27,12 @@ class LineageSuite:
         assert_status_in(resp, [200, 404])
         if resp.status_code == 200:
             assert_field_present(resp, "baseEntityGuid")
+            assert_field_equals(resp, "baseEntityGuid", guid)
+            # Verify structural fields exist
+            body = resp.json()
+            assert "guidEntityMap" in body or "relations" in body, (
+                "Expected 'guidEntityMap' or 'relations' in lineage response"
+            )
 
     @test("get_lineage_input", tags=["lineage"], order=2)
     def test_get_lineage_input(self, client, ctx):
@@ -38,6 +44,13 @@ class LineageSuite:
             "depth": 3,
         })
         assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            assert_field_present(resp, "baseEntityGuid")
+            assert_field_equals(resp, "baseEntityGuid", guid)
+            body = resp.json()
+            assert "guidEntityMap" in body or "relations" in body, (
+                "Expected 'guidEntityMap' or 'relations' in lineage response"
+            )
 
     @test("get_lineage_output", tags=["lineage"], order=3)
     def test_get_lineage_output(self, client, ctx):
@@ -49,6 +62,13 @@ class LineageSuite:
             "depth": 3,
         })
         assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            assert_field_present(resp, "baseEntityGuid")
+            assert_field_equals(resp, "baseEntityGuid", guid)
+            body = resp.json()
+            assert "guidEntityMap" in body or "relations" in body, (
+                "Expected 'guidEntityMap' or 'relations' in lineage response"
+            )
 
     @test("post_lineage_on_demand", tags=["lineage"], order=4)
     def test_post_lineage_on_demand(self, client, ctx):

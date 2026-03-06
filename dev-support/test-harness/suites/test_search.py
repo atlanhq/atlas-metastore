@@ -5,6 +5,7 @@ import time
 from core.decorators import suite, test
 from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
+    assert_field_not_empty, assert_field_in,
 )
 
 
@@ -53,6 +54,16 @@ class SearchSuite:
         })
         assert_status(resp, 200)
         assert_field_present(resp, "approximateCount")
+
+        # When results exist, validate first entity structure
+        body = resp.json()
+        if body.get("approximateCount", 0) > 0:
+            entities = body.get("entities", [])
+            if entities:
+                first = entities[0]
+                assert "guid" in first, "Entity should have 'guid' field"
+                assert "typeName" in first, "Entity should have 'typeName' field"
+                assert "status" in first, "Entity should have 'status' field"
 
     @test("index_search_with_sort", tags=["search"], order=4)
     def test_index_search_with_sort(self, client, ctx):
@@ -125,3 +136,50 @@ class SearchSuite:
         assert_status(resp, 200)
         count = resp.json().get("approximateCount", -1)
         assert count == 0, f"Expected 0 results, got {count}"
+
+    @test("search_finds_created_entity", tags=["search"], order=10)
+    def test_search_finds_created_entity(self, client, ctx):
+        guid = ctx.get_entity_guid("ds1")
+        if not guid:
+            return
+        # Search by GUID
+        resp = client.post("/search/indexsearch", json_data={
+            "dsl": {
+                "from": 0,
+                "size": 5,
+                "query": {
+                    "term": {"__guid": guid}
+                }
+            }
+        })
+        assert_status(resp, 200)
+        body = resp.json()
+        count = body.get("approximateCount", 0)
+        assert count > 0, f"Expected created entity with guid={guid} in search, got count={count}"
+        entities = body.get("entities", [])
+        if entities:
+            found_guids = [e.get("guid") for e in entities]
+            assert guid in found_guids, f"Expected {guid} in search results, got {found_guids}"
+
+    @test("search_result_structure", tags=["search"], order=11)
+    def test_search_result_structure(self, client, ctx):
+        guid = ctx.get_entity_guid("ds1")
+        if not guid:
+            return
+        resp = client.post("/search/indexsearch", json_data={
+            "dsl": {
+                "from": 0,
+                "size": 1,
+                "query": {
+                    "term": {"__guid": guid}
+                }
+            }
+        })
+        assert_status(resp, 200)
+        body = resp.json()
+        entities = body.get("entities", [])
+        if entities:
+            entity = entities[0]
+            assert "guid" in entity, "Search result entity should have 'guid'"
+            assert "typeName" in entity, "Search result entity should have 'typeName'"
+            assert entity.get("status") == "ACTIVE", f"Expected status=ACTIVE, got {entity.get('status')}"

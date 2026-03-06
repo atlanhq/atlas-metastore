@@ -2,6 +2,7 @@
 
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in
+from core.audit_helpers import assert_audit_event_exists
 from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
@@ -44,3 +45,16 @@ class EntityLabelsSuite:
             json_data=["test-label-1"],
         )
         assert_status_in(resp, [200, 204])
+
+        # Read-after-write: GET entity and verify "test-label-1" is gone
+        resp2 = client.get(f"/entity/guid/{self.entity_guid}")
+        assert_status(resp2, 200)
+        entity = resp2.json().get("entity", {})
+        labels = entity.get("labels", [])
+        assert "test-label-1" not in labels, f"Expected 'test-label-1' removed, got {labels}"
+
+    @test("add_labels_audit", tags=["labels", "audit"], order=4, depends_on=["add_labels"])
+    def test_add_labels_audit(self, client, ctx):
+        event = assert_audit_event_exists(client, self.entity_guid, "LABEL_ADD")
+        if event is None:
+            return  # Audit endpoint not available, graceful skip

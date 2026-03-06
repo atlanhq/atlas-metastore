@@ -147,3 +147,97 @@ def assert_list_min_length(resp, dot_path, min_len):
             expected=f">= {min_len}", actual=len(val),
             response=resp if hasattr(resp, "status_code") else None,
         )
+
+
+def assert_field_type(resp, dot_path, expected_type):
+    """Assert that a nested field exists and is an instance of the expected type."""
+    body = resp.body if hasattr(resp, "body") else resp
+    val, found = _resolve_path(body, dot_path)
+    if not found:
+        raise AssertionError(
+            f"Field '{dot_path}' not found",
+            expected=f"type {expected_type.__name__}", actual="<missing>",
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+    if not isinstance(val, expected_type):
+        raise AssertionError(
+            f"Field '{dot_path}' has type {type(val).__name__}, expected {expected_type.__name__}",
+            expected=expected_type.__name__, actual=type(val).__name__,
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+
+
+def assert_field_in(resp, dot_path, allowed_values):
+    """Assert that a nested field's value is in a set of allowed values."""
+    body = resp.body if hasattr(resp, "body") else resp
+    val, found = _resolve_path(body, dot_path)
+    if not found:
+        raise AssertionError(
+            f"Field '{dot_path}' not found",
+            expected=f"one of {allowed_values}", actual="<missing>",
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+    if val not in allowed_values:
+        raise AssertionError(
+            f"Field '{dot_path}' value {val!r} not in allowed values",
+            expected=allowed_values, actual=val,
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+
+
+def assert_list_contains_field(resp, dot_path, field_name, expected_value):
+    """Assert that a list at dot_path has at least one item where item[field_name] == expected_value."""
+    body = resp.body if hasattr(resp, "body") else resp
+    val, found = _resolve_path(body, dot_path)
+    if not found:
+        raise AssertionError(
+            f"Field '{dot_path}' not found",
+            expected=f"list with {field_name}={expected_value!r}", actual="<missing>",
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+    if not isinstance(val, list):
+        raise AssertionError(
+            f"Field '{dot_path}' is not a list",
+            expected=f"list with {field_name}={expected_value!r}", actual=type(val).__name__,
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+    found_item = any(
+        isinstance(item, dict) and item.get(field_name) == expected_value
+        for item in val
+    )
+    if not found_item:
+        raise AssertionError(
+            f"No item in '{dot_path}' has {field_name}={expected_value!r}",
+            expected=expected_value, actual=[item.get(field_name) for item in val if isinstance(item, dict)],
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+
+
+def assert_mutation_response(resp, expected_action, type_name=None):
+    """Validate mutatedEntities.{action} is non-empty, every entity has guid.
+
+    Returns the entity list from the mutation response.
+    """
+    body = resp.body if hasattr(resp, "body") else resp
+    mutated = body.get("mutatedEntities", {}) if isinstance(body, dict) else {}
+    entities = mutated.get(expected_action, [])
+    if not entities:
+        raise AssertionError(
+            f"Expected non-empty mutatedEntities.{expected_action}",
+            expected=f"non-empty {expected_action}", actual="empty or missing",
+            response=resp if hasattr(resp, "status_code") else None,
+        )
+    for i, entity in enumerate(entities):
+        if not isinstance(entity, dict) or "guid" not in entity:
+            raise AssertionError(
+                f"Entity [{i}] in mutatedEntities.{expected_action} missing 'guid'",
+                expected="guid present", actual=str(entity)[:100],
+                response=resp if hasattr(resp, "status_code") else None,
+            )
+        if type_name and entity.get("typeName") != type_name:
+            raise AssertionError(
+                f"Entity [{i}] typeName mismatch",
+                expected=type_name, actual=entity.get("typeName"),
+                response=resp if hasattr(resp, "status_code") else None,
+            )
+    return entities

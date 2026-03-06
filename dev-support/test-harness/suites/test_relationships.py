@@ -61,6 +61,12 @@ class RelationshipsSuite:
                 ctx.register_entity("rel_process", proc_guid, "Process")
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{proc_guid}"))
 
+                # Validate mutation response structure
+                assert entities[0].get("guid"), "Created entity should have guid"
+                assert entities[0].get("typeName") == "Process", (
+                    f"Expected typeName=Process, got {entities[0].get('typeName')}"
+                )
+
     @test("get_relationship_by_guid", tags=["relationship"], order=2)
     def test_get_relationship_by_guid(self, client, ctx):
         # Get entity and look for relationship GUIDs
@@ -87,6 +93,14 @@ class RelationshipsSuite:
             resp2 = client.get(f"/relationship/guid/{rel_guid}")
             assert_status(resp2, 200)
             ctx.set("test_rel_guid", rel_guid)
+
+            # Validate relationship structure
+            body = resp2.json()
+            rel = body.get("relationship", body)  # may be wrapped or direct
+            if isinstance(rel, dict):
+                assert "guid" in rel or "typeName" in rel or "end1" in rel, (
+                    "Relationship should have guid, typeName, or end1/end2"
+                )
 
     @test("delete_relationship", tags=["relationship", "crud"], order=10)
     def test_delete_relationship(self, client, ctx):
