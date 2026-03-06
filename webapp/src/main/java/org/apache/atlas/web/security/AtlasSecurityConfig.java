@@ -18,7 +18,15 @@
 package org.apache.atlas.web.security;
 
 import org.apache.atlas.AtlasConfiguration;
-import org.apache.atlas.web.filters.*;
+import org.apache.atlas.web.filters.ActiveServerFilter;
+import org.apache.atlas.web.filters.AtlasAuthenticationEntryPoint;
+import org.apache.atlas.web.filters.AtlasAuthenticationFilter;
+import org.apache.atlas.web.filters.AtlasCSRFPreventionFilter;
+import org.apache.atlas.web.filters.AtlasDelegatingAuthenticationEntryPoint;
+import org.apache.atlas.web.filters.AtlasKnoxSSOAuthenticationFilter;
+import org.apache.atlas.web.filters.AtlasXSSPreventionFilter;
+import org.apache.atlas.web.filters.HeadersUtil;
+import org.apache.atlas.web.filters.StaleTransactionCleanupFilter;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.lang.StringUtils;
 import org.keycloak.adapters.AdapterDeploymentContext;
@@ -44,16 +52,17 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
-import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
-import org.springframework.security.config.annotation.method.configuration.EnableGlobalMethodSecurity;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.builders.WebSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+import org.springframework.security.config.annotation.web.configuration.WebSecurityCustomizer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.DelegatingAuthenticationEntryPoint;
 import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.authentication.session.NullAuthenticatedSessionStrategy;
@@ -61,13 +70,13 @@ import org.springframework.security.web.authentication.session.RegisterSessionAu
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
 import org.springframework.security.web.servletapi.SecurityContextHolderAwareRequestFilter;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestHeaderRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.security.web.header.writers.StaticHeadersWriter;
 
-import javax.inject.Inject;
+import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -79,10 +88,15 @@ import static org.apache.atlas.AtlasConstants.ATLAS_MIGRATION_MODE_FILENAME;
 import static org.apache.atlas.web.filters.HeadersUtil.SERVER_KEY;
 
 @EnableWebSecurity
-@EnableGlobalMethodSecurity(prePostEnabled = true)
+@EnableMethodSecurity(prePostEnabled = true)
 @KeycloakConfiguration
-public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
+public class AtlasSecurityConfig {
     private static final Logger LOG = LoggerFactory.getLogger(AtlasSecurityConfig.class);
+
+    public static final RequestMatcher KEYCLOAK_REQUEST_MATCHER = new OrRequestMatcher(
+            PathPatternRequestMatcher.withDefaults().matcher("/login.jsp"),
+            new RequestHeaderRequestMatcher("Authorization"),
+            new QueryParamPresenceRequestMatcher("access_token"));
 
     private final AtlasAuthenticationProvider authenticationProvider;
     private final AtlasAuthenticationSuccessHandler successHandler;
@@ -91,24 +105,19 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
     private final AtlasAuthenticationFilter atlasAuthenticationFilter;
     private final AtlasCSRFPreventionFilter csrfPreventionFilter;
     private final AtlasAuthenticationEntryPoint atlasAuthenticationEntryPoint;
-    private final AtlasXSSPreventionFilter      atlasXSSPreventionFilter;
-
-    // Our own Atlas filters need to be registered as well
+    @SuppressWarnings("unused")
+    private final AtlasXSSPreventionFilter atlasXSSPreventionFilter;
     private final Configuration configuration;
     private final StaleTransactionCleanupFilter staleTransactionCleanupFilter;
     private final ActiveServerFilter activeServerFilter;
-    private final boolean isAlbEnabled = Boolean.valueOf(System.getenv("ALB_ENABLED")).booleanValue();
-
-
-    public static final RequestMatcher KEYCLOAK_REQUEST_MATCHER = new OrRequestMatcher(new RequestMatcher[]{new AntPathRequestMatcher("/login.jsp"), new RequestHeaderRequestMatcher("Authorization"), new QueryParamPresenceRequestMatcher("access_token")});
+    private final boolean keycloakEnabled;
+    private final boolean isKeycloakStatelessMode;
 
     @Value("${keycloak.configurationFile:WEB-INF/keycloak.json}")
     private Resource keycloakConfigFileResource;
+
     @Autowired(required = false)
     private KeycloakConfigResolver keycloakConfigResolver;
-
-    private final boolean keycloakEnabled;
-    private final boolean isKeycloakStatelessMode;
 
     @Inject
     public AtlasSecurityConfig(AtlasKnoxSSOAuthenticationFilter ssoAuthenticationFilter,
@@ -141,146 +150,138 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         this.isKeycloakStatelessMode = keycloakEnabled && keycloakStatelessEnabled;
     }
 
-    public AuthenticationEntryPoint getAuthenticationEntryPoint() throws Exception {
-        AuthenticationEntryPoint authenticationEntryPoint;
+    @Bean
+    public WebSecurityCustomizer webSecurityCustomizer() {
+        return web -> {
+            List<String> matchers = new ArrayList<>(Arrays.asList(
+                    "/css/**", "/n/css/**",
+                    "/img/**", "/n/img/**",
+                    "/libs/**", "/n/libs/**",
+                    "/js/**", "/n/js/**",
+                    "/ieerror.html",
+                    "/migration-status.html",
+                    "/api/atlas/admin/status",
+                    "/api/atlas/admin/metrics",
+                    "/api/atlas/admin/metrics/prometheus",
+                    "/api/atlas/admin/health",
+                    "/api/atlas/admin/types/refresh",
+                    "/api/atlas/admin/config/refresh",
+                    "/api/atlas/admin/isactive",
+                    "/api/atlas/admin/killtheleader",
+                    "/api/atlas/admin/pushMetricsToStatsd",
+                    "/api/atlas/v2/auth/download/policies/*",
+                    "/api/atlas/v2/auth/download/roles/*",
+                    "/api/atlas/v2/auth/download/users/*"));
 
-        if (keycloakEnabled) {
-            KeycloakAuthenticationEntryPoint keycloakAuthenticationEntryPoint = new KeycloakAuthenticationEntryPoint(adapterDeploymentContext());
-            keycloakAuthenticationEntryPoint.setRealm("atlas.com");
-            keycloakAuthenticationEntryPoint.setLoginUri("/login.jsp");
-            authenticationEntryPoint = keycloakAuthenticationEntryPoint;
-        } else {
-            LinkedHashMap<RequestMatcher, AuthenticationEntryPoint> entryPointMap = new LinkedHashMap<>();
-            entryPointMap.put(new RequestHeaderRequestMatcher(HeadersUtil.USER_AGENT_KEY, HeadersUtil.USER_AGENT_VALUE), atlasAuthenticationEntryPoint);
-            AtlasDelegatingAuthenticationEntryPoint basicAuthenticationEntryPoint = new AtlasDelegatingAuthenticationEntryPoint(entryPointMap);
-            authenticationEntryPoint = basicAuthenticationEntryPoint;
-        }
-        return authenticationEntryPoint;
+            if (!keycloakEnabled) {
+                matchers.add("/login.jsp");
+            }
+
+            web.ignoring().requestMatchers(matchers.toArray(new String[0]));
+        };
     }
 
-    public DelegatingAuthenticationEntryPoint getDelegatingAuthenticationEntryPoint() throws Exception {
-        LinkedHashMap<RequestMatcher, AuthenticationEntryPoint> entryPointMap = new LinkedHashMap<>();
-        entryPointMap.put(new RequestHeaderRequestMatcher(HeadersUtil.USER_AGENT_KEY, HeadersUtil.USER_AGENT_VALUE), atlasAuthenticationEntryPoint);
-        DelegatingAuthenticationEntryPoint entryPoint = new DelegatingAuthenticationEntryPoint(entryPointMap);
-        entryPoint.setDefaultEntryPoint(getAuthenticationEntryPoint());
-        return entryPoint;
-    }
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity httpSecurity,
+                                                   AuthenticationManager authenticationManager) throws Exception {
+        SessionCreationPolicy sessionCreationPolicy =
+                isKeycloakStatelessMode ? SessionCreationPolicy.STATELESS : SessionCreationPolicy.IF_REQUIRED;
 
-    @Inject
-    protected void configure(AuthenticationManagerBuilder authenticationManagerBuilder) {
-        authenticationManagerBuilder.authenticationProvider(authenticationProvider);
-    }
-
-    @Override
-    public void configure(WebSecurity web) throws Exception {
-        List<String> matchers = new ArrayList<>(
-          Arrays.asList("/css/**","/n/css/**",
-            "/img/**",
-            "/n/img/**",
-            "/libs/**",
-            "/n/libs/**",
-            "/js/**",
-            "/n/js/**",
-            "/ieerror.html",
-            "/migration-status.html",
-            "/api/atlas/admin/status",
-            "/api/atlas/admin/metrics",
-            "/api/atlas/admin/metrics/prometheus",
-            "/api/atlas/admin/health",
-            "/api/atlas/admin/types/refresh",
-            "/api/atlas/admin/config/refresh",
-            "/api/atlas/admin/isactive",
-            "/api/atlas/admin/killtheleader",
-            "/api/atlas/admin/pushMetricsToStatsd",
-            "/api/atlas/v2/auth/download/policies/*",
-            "/api/atlas/v2/auth/download/roles/*",
-            "/api/atlas/v2/auth/download/users/*"
-            ));
-
-        if (!keycloakEnabled) {
-            matchers.add("/login.jsp");
-        }
-
-        web.ignoring()
-                .antMatchers(matchers.toArray(new String[matchers.size()]));
-    }
-
-    protected void configure(HttpSecurity httpSecurity) throws Exception {
-        SessionCreationPolicy sessionCreationPolicy = isKeycloakStatelessMode ? SessionCreationPolicy.STATELESS : SessionCreationPolicy.IF_REQUIRED;
-
-        //@formatter:off
-        httpSecurity
-                .authorizeRequests().anyRequest().authenticated()
-                .and()
-                    .headers()
-                .addHeaderWriter(new StaticHeadersWriter(HeadersUtil.CONTENT_SEC_POLICY_KEY, HeadersUtil.headerMap.get(HeadersUtil.CONTENT_SEC_POLICY_KEY)))
-                .addHeaderWriter(new StaticHeadersWriter(SERVER_KEY, HeadersUtil.headerMap.get(SERVER_KEY)))
-                        .and()
-                    .servletApi()
-                .and()
-                    .csrf().disable()
-                    .sessionManagement()
-                    .enableSessionUrlRewriting(false)
-                    .sessionCreationPolicy(sessionCreationPolicy);
+        httpSecurity.authenticationProvider(authenticationProvider);
+        httpSecurity.authorizeHttpRequests(auth -> auth.anyRequest().authenticated());
+        httpSecurity.headers(headers -> headers
+                .addHeaderWriter(new StaticHeadersWriter(
+                        HeadersUtil.CONTENT_SEC_POLICY_KEY,
+                        HeadersUtil.headerMap.get(HeadersUtil.CONTENT_SEC_POLICY_KEY)))
+                .addHeaderWriter(new StaticHeadersWriter(
+                        SERVER_KEY,
+                        HeadersUtil.headerMap.get(SERVER_KEY))));
+        httpSecurity.servletApi(Customizer.withDefaults());
+        httpSecurity.csrf(csrf -> csrf.disable());
+        httpSecurity.sessionManagement(session -> {
+            session.enableSessionUrlRewriting(false);
+            session.sessionCreationPolicy(sessionCreationPolicy);
+            if (!isKeycloakStatelessMode) {
+                session.sessionFixation(fixation -> fixation.newSession());
+            }
+        });
+        AuthenticationEntryPoint delegatingEntryPoint = getDelegatingAuthenticationEntryPoint();
+        httpSecurity.httpBasic(httpBasic ->
+                httpBasic.authenticationEntryPoint(delegatingEntryPoint));
 
         if (!isKeycloakStatelessMode) {
-            httpSecurity
-                    .sessionManagement()
-                    .sessionFixation()
-                    .newSession();
-        }
-
-        httpSecurity
-                .httpBasic()
-                .authenticationEntryPoint(getDelegatingAuthenticationEntryPoint());
-
-        if (!isKeycloakStatelessMode) {
-            httpSecurity
-                    .formLogin()
+            httpSecurity.formLogin(form -> form
                     .loginPage("/login.jsp")
                     .loginProcessingUrl("/j_spring_security_check")
                     .successHandler(successHandler)
                     .failureHandler(failureHandler)
                     .usernameParameter("j_username")
-                    .passwordParameter("j_password");
+                    .passwordParameter("j_password"));
         }
 
-        httpSecurity
-                .logout()
+        httpSecurity.logout(logout -> logout
                 .logoutSuccessUrl("/login.jsp")
                 .deleteCookies("ATLASSESSIONID")
-                .logoutUrl("/logout.html");
+                .logoutUrl("/logout.html"));
 
-        //@formatter:on
-
-        boolean configMigrationEnabled = !StringUtils.isEmpty(configuration.getString(ATLAS_MIGRATION_MODE_FILENAME));
+        boolean configMigrationEnabled =
+                !StringUtils.isEmpty(configuration.getString(ATLAS_MIGRATION_MODE_FILENAME));
         if (configMigrationEnabled) {
             LOG.info("Atlas is in Migration Mode, enabling ActiveServerFilter");
         } else {
             LOG.info("Atlas is in HA or HS Mode, enabling ActiveServerFilter");
         }
 
-        // TODO: Enable XSS Filter after solving encoding problems
         LOG.warn("XSS filter is disabled from Atlas");
-        //Enable activeServerFilter regardless of HA or HS
-        httpSecurity.addFilterAfter(activeServerFilter, BasicAuthenticationFilter.class);
 
-        httpSecurity
-                .addFilterAfter(staleTransactionCleanupFilter, BasicAuthenticationFilter.class)
-                .addFilterBefore(ssoAuthenticationFilter, BasicAuthenticationFilter.class)
-                .addFilterAfter(atlasAuthenticationFilter, SecurityContextHolderAwareRequestFilter.class)
-                .addFilterAfter(csrfPreventionFilter, AtlasAuthenticationFilter.class);
+        httpSecurity.addFilterAfter(activeServerFilter, BasicAuthenticationFilter.class);
+        httpSecurity.addFilterAfter(staleTransactionCleanupFilter, BasicAuthenticationFilter.class);
+        httpSecurity.addFilterBefore(ssoAuthenticationFilter, BasicAuthenticationFilter.class);
+        httpSecurity.addFilterAfter(csrfPreventionFilter, BasicAuthenticationFilter.class);
 
         if (keycloakEnabled) {
-            httpSecurity
-              .logout().addLogoutHandler(keycloakLogoutHandler()).and()
-              .addFilterBefore(keycloakAuthenticationProcessingFilter(), BasicAuthenticationFilter.class)
-              .addFilterBefore(keycloakPreAuthActionsFilter(), LogoutFilter.class)
-              .addFilterAfter(keycloakSecurityContextRequestFilter(), SecurityContextHolderAwareRequestFilter.class)
-              .addFilterAfter(keycloakAuthenticatedActionsRequestFilter(), KeycloakSecurityContextRequestFilter.class);
+            KeycloakLogoutHandler keycloakLogoutHandler = keycloakLogoutHandler();
+            httpSecurity.logout(logout -> logout.addLogoutHandler(keycloakLogoutHandler));
+            httpSecurity.addFilterBefore(
+                    keycloakAuthenticationProcessingFilter(authenticationManager),
+                    BasicAuthenticationFilter.class);
+            httpSecurity.addFilterBefore(keycloakPreAuthActionsFilter(), LogoutFilter.class);
+            httpSecurity.addFilterAfter(
+                    keycloakSecurityContextRequestFilter(),
+                    SecurityContextHolderAwareRequestFilter.class);
+            httpSecurity.addFilterAfter(
+                    keycloakAuthenticatedActionsRequestFilter(),
+                    KeycloakSecurityContextRequestFilter.class);
         }
+
+        return httpSecurity.build();
     }
 
+    public AuthenticationEntryPoint getAuthenticationEntryPoint() throws Exception {
+        if (keycloakEnabled) {
+            KeycloakAuthenticationEntryPoint keycloakAuthenticationEntryPoint =
+                    new KeycloakAuthenticationEntryPoint(adapterDeploymentContext());
+            keycloakAuthenticationEntryPoint.setRealm("atlas.com");
+            keycloakAuthenticationEntryPoint.setLoginUri("/login.jsp");
+            return keycloakAuthenticationEntryPoint;
+        }
+
+        LinkedHashMap<RequestMatcher, AuthenticationEntryPoint> entryPointMap = new LinkedHashMap<>();
+        entryPointMap.put(
+                new RequestHeaderRequestMatcher(HeadersUtil.USER_AGENT_KEY, HeadersUtil.USER_AGENT_VALUE),
+                atlasAuthenticationEntryPoint);
+        return new AtlasDelegatingAuthenticationEntryPoint(entryPointMap);
+    }
+
+    public DelegatingAuthenticationEntryPoint getDelegatingAuthenticationEntryPoint() throws Exception {
+        LinkedHashMap<RequestMatcher, AuthenticationEntryPoint> entryPointMap = new LinkedHashMap<>();
+        entryPointMap.put(
+                new RequestHeaderRequestMatcher(HeadersUtil.USER_AGENT_KEY, HeadersUtil.USER_AGENT_VALUE),
+                atlasAuthenticationEntryPoint);
+        DelegatingAuthenticationEntryPoint entryPoint = new DelegatingAuthenticationEntryPoint(entryPointMap);
+        entryPoint.setDefaultEntryPoint(getAuthenticationEntryPoint());
+        return entryPoint;
+    }
 
     @Bean
     protected SessionAuthenticationStrategy sessionAuthenticationStrategy() {
@@ -302,6 +303,8 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
         if (fileName != null && !fileName.isEmpty()) {
             keycloakConfigFileResource = new FileSystemResource(fileName);
             factoryBean = new AdapterDeploymentContextFactoryBean(keycloakConfigFileResource);
+        } else if (keycloakConfigResolver != null) {
+            factoryBean = new AdapterDeploymentContextFactoryBean(keycloakConfigResolver);
         } else {
             Configuration conf = configuration.subset("atlas.authentication.method.keycloak");
             AdapterConfig cfg = new AdapterConfig();
@@ -309,16 +312,11 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
             cfg.setAuthServerUrl(conf.getString("auth-server-url", "https://localhost/auth"));
             cfg.setResource(conf.getString("resource", "none"));
 
-            Map<String,Object> credentials = new HashMap<>();
+            Map<String, Object> credentials = new HashMap<>();
             credentials.put("secret", conf.getString("credentials-secret", "nosecret"));
             cfg.setCredentials(credentials);
             KeycloakDeployment dep = KeycloakDeploymentBuilder.build(cfg);
-            factoryBean = new AdapterDeploymentContextFactoryBean(new KeycloakConfigResolver() {
-                @Override
-                public KeycloakDeployment resolve(HttpFacade.Request request) {
-                    return dep;
-                }
-            });
+            factoryBean = new AdapterDeploymentContextFactoryBean((KeycloakConfigResolver) request -> dep);
         }
 
         factoryBean.afterPropertiesSet();
@@ -350,8 +348,10 @@ public class AtlasSecurityConfig extends WebSecurityConfigurerAdapter {
     }
 
     @Bean
-    protected KeycloakAuthenticationProcessingFilter keycloakAuthenticationProcessingFilter() throws Exception {
-        KeycloakAuthenticationProcessingFilter filter = new KeycloakAuthenticationProcessingFilter(authenticationManagerBean(), KEYCLOAK_REQUEST_MATCHER);
+    protected KeycloakAuthenticationProcessingFilter keycloakAuthenticationProcessingFilter(
+            AuthenticationManager authenticationManager) throws Exception {
+        KeycloakAuthenticationProcessingFilter filter =
+                new KeycloakAuthenticationProcessingFilter(authenticationManager, KEYCLOAK_REQUEST_MATCHER);
         filter.setSessionAuthenticationStrategy(sessionAuthenticationStrategy());
         return filter;
     }

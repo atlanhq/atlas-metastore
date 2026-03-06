@@ -36,7 +36,7 @@ import org.springframework.security.ldap.authentication.ad.ActiveDirectoryLdapAu
 import org.springframework.security.ldap.search.FilterBasedLdapUserSearch;
 import org.springframework.stereotype.Component;
 
-import javax.annotation.PostConstruct;
+import jakarta.annotation.PostConstruct;
 import java.util.List;
 import java.util.Properties;
 

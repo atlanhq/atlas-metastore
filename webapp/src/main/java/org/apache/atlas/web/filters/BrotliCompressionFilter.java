@@ -4,9 +4,9 @@ import com.aayushatharva.brotli4j.Brotli4jLoader;
 import com.aayushatharva.brotli4j.encoder.Encoder;
 import com.aayushatharva.brotli4j.encoder.Encoder.Parameters;
 
-import javax.servlet.*;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.*;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 
 public class BrotliCompressionFilter implements Filter {

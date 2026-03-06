@@ -22,7 +22,7 @@ import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import java.util.Enumeration;
 
 public class RestUtil {
@@ -35,6 +35,24 @@ public class RestUtil {
     private static final String X_FORWARDED_HOST = "x-forwarded-host";
     private static final String X_FORWARDED_CONTEXT = "x-forwarded-context";
     public static final String DELIMITTER = "://";
+
+    public static String constructForwardableURL(javax.servlet.http.HttpServletRequest httpRequest) {
+        String requestURL = httpRequest.getRequestURL().toString();
+        String xForwardedProto = httpRequest.getHeader(X_FORWARDED_PROTO);
+        String xForwardedHost = httpRequest.getHeader(X_FORWARDED_HOST);
+
+        if (StringUtils.trimToNull(xForwardedProto) != null) {
+            if (StringUtils.trimToNull(xForwardedHost) != null) {
+                return xForwardedProto + DELIMITTER + xForwardedHost + httpRequest.getRequestURI();
+            }
+
+            if (requestURL.startsWith("http:")) {
+                return requestURL.replaceFirst("http", xForwardedProto);
+            }
+        }
+
+        return "";
+    }
 
     public static String constructForwardableURL(HttpServletRequest httpRequest) {
         String xForwardedProto = "";
@@ -87,6 +105,19 @@ public class RestUtil {
         return xForwardedURL;
     }
 
+    public static String constructRedirectURL(javax.servlet.http.HttpServletRequest request, String redirectUrl, String xForwardedURL, String originalUrlQueryParam) {
+        String delimiter = redirectUrl.contains("?") ? "&" : "?";
+        String loginURL = redirectUrl + delimiter + originalUrlQueryParam + "=";
+
+        if (StringUtils.trimToNull(xForwardedURL) != null) {
+            loginURL += xForwardedURL;
+        } else {
+            loginURL += request.getRequestURL().append(getOriginalQueryString(request));
+        }
+
+        return loginURL;
+    }
+
     public static String constructRedirectURL(HttpServletRequest request, String redirectUrl, String xForwardedURL, String originalUrlQueryParam) {
         String delimiter = "?";
         if (redirectUrl.contains("?")) {
@@ -99,6 +130,11 @@ public class RestUtil {
             loginURL += request.getRequestURL().append(getOriginalQueryString(request));
         }
         return loginURL;
+    }
+
+    private static String getOriginalQueryString(javax.servlet.http.HttpServletRequest request) {
+        String originalQueryString = request.getQueryString();
+        return (originalQueryString == null) ? "" : "?" + originalQueryString;
     }
 
     private static String getOriginalQueryString(HttpServletRequest request) {

@@ -105,7 +105,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
     private   static final String         PREFIX                = "atlas.authentication.method";
     private   static final String[]       DEFAULT_PROXY_USERS   = new String[] { "knox" };
     private   static final String         CONF_PROXYUSER_PREFIX = "atlas.proxyuser";
-    protected static final ServletContext nullContext           = new NullServletContext();
+    protected static final ServletContext nullContext           = null;
     private   static final String         ORIGINAL_URL_QUERY_PARAM = "originalUrl";
 
     private Signer               signer;
@@ -357,24 +357,26 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
         try {
             Authentication              existingAuth    = SecurityContextHolder.getContext().getAuthentication();
             HttpServletResponse         httpResponse    = (HttpServletResponse) response;
-            AtlasResponseRequestWrapper responseWrapper = new AtlasResponseRequestWrapper(httpResponse);
             String action = httpRequest.getParameter("action");
             String doAsUser = request.getParameter("doAs");
 
-            HeadersUtil.setHeaderMapAttributes(responseWrapper, HeadersUtil.X_FRAME_OPTIONS_KEY);
-            HeadersUtil.setHeaderMapAttributes(responseWrapper, HeadersUtil.X_CONTENT_TYPE_OPTIONS_KEY);
-            HeadersUtil.setHeaderMapAttributes(responseWrapper, HeadersUtil.X_XSS_PROTECTION_KEY);
-            HeadersUtil.setHeaderMapAttributes(responseWrapper, HeadersUtil.STRICT_TRANSPORT_SEC_KEY);
+            httpResponse.setHeader(HeadersUtil.X_FRAME_OPTIONS_KEY, HeadersUtil.headerMap.get(HeadersUtil.X_FRAME_OPTIONS_KEY));
+            httpResponse.setHeader(HeadersUtil.X_CONTENT_TYPE_OPTIONS_KEY, HeadersUtil.headerMap.get(HeadersUtil.X_CONTENT_TYPE_OPTIONS_KEY));
+            httpResponse.setHeader(HeadersUtil.X_XSS_PROTECTION_KEY, HeadersUtil.headerMap.get(HeadersUtil.X_XSS_PROTECTION_KEY));
+            httpResponse.setHeader(HeadersUtil.STRICT_TRANSPORT_SEC_KEY, HeadersUtil.headerMap.get(HeadersUtil.STRICT_TRANSPORT_SEC_KEY));
 
             if (headerProperties != null) {
                 for (String headerKey : headerProperties.stringPropertyNames()) {
-                    responseWrapper.setHeader(headerKey, headerProperties.getProperty(headerKey));
+                    httpResponse.setHeader(headerKey, headerProperties.getProperty(headerKey));
                 }
             }
 
             if (logoutHandler != null && supportTrustedProxy && StringUtils.isNotEmpty(doAsUser) && StringUtils.equals(action, RestUtil.TIMEOUT_ACTION)) {
                 if (existingAuth != null) {
-                    logoutHandler.logout(httpRequest, httpResponse, existingAuth);
+                    SecurityContextHolder.clearContext();
+                    if (httpRequest.getSession(false) != null) {
+                        httpRequest.getSession(false).invalidate();
+                    }
                 }
                 redirectTimeoutReqeust(httpRequest, httpResponse);
                 return;
@@ -770,9 +772,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
                 final List<GrantedAuthority>   grantedAuths        = AtlasAuthenticationProvider.getAuthoritiesFromUGI(userName);
                 final UserDetails              principal           = new User(userName, "", grantedAuths);
                 final Authentication           finalAuthentication = new UsernamePasswordAuthenticationToken(principal, "", grantedAuths);
-                final WebAuthenticationDetails webDetails          = new WebAuthenticationDetails(httpRequest);
-
-                ((AbstractAuthenticationToken) finalAuthentication).setDetails(webDetails);
+                ((AbstractAuthenticationToken) finalAuthentication).setDetails(httpRequest.getRemoteAddr());
 
                 SecurityContextHolder.getContext().setAuthentication(finalAuthentication);
                 if (sessionTimeout != SESSION_TIMEOUT_DISABLED_VALUE) {
@@ -797,7 +797,7 @@ public class AtlasAuthenticationFilter extends AuthenticationFilter {
 
                     NDC.push(requestUser + ":" + httpRequest.getMethod() + httpRequest.getRequestURI());
 
-                    LOG.info("Request from authenticated user: {}, URL={}", requestUser, Servlets.getRequestURI(httpRequest));
+                    LOG.info("Request from authenticated user: {}, URL={}", requestUser, httpRequest.getRequestURI());
 
                     filterChain.doFilter(servletRequest, servletResponse);
                 } finally {
