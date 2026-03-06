@@ -48,7 +48,7 @@ jobs:
       non_helm: ${{ steps.filter.outputs.non_helm }}
       helm: ${{ steps.filter.outputs.helm }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
         with:
           fetch-depth: 0  # Fetch all history for accurate comparisons
 
@@ -99,7 +99,7 @@ jobs:
     
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
       
       - name: Install Helm
         uses: azure/setup-helm@v3
@@ -234,7 +234,7 @@ jobs:
             echo "✅ Sufficient disk space available (${AVAILABLE_GB}GB)"
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
       # Set up Docker
       - name: Set up Docker
@@ -244,9 +244,8 @@ jobs:
           install: true
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v1
         with:
-          distribution: 'temurin'
           java-version: 17
 
       - name: Print JDK version
@@ -259,7 +258,7 @@ jobs:
          docker info
 
       - name: Cache Maven packages
-        uses: actions/cache@v4
+        uses: actions/cache@v3
         id: maven-cache
         with:
           path: ~/.m2/repository
@@ -402,7 +401,7 @@ jobs:
           output: 'trivy-image-results.sarif'
 
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v2.1.33
         with:
           sarif_file: 'trivy-image-results.sarif'
 
@@ -435,7 +434,7 @@ jobs:
     
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
       
       - name: Get branch name
         run: echo "BRANCH_NAME=${GITHUB_REF#refs/heads/}" >> $GITHUB_ENV
@@ -741,7 +740,7 @@ jobs:
       
       - name: Checkout code
         if: steps.can_publish.outputs.should_publish == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
       
       - name: Get branch name
         if: steps.can_publish.outputs.should_publish == 'true'
@@ -887,6 +886,46 @@ jobs:
           echo "📦 Chart: ${{ matrix.chart }}"
           echo "📌 Version: ${{ steps.version.outputs.chart }}"
           echo "🏷️  Registry: oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }}"
+      
+      - name: Create GitHub Release
+        if: steps.can_publish.outputs.should_publish == 'true'
+        uses: ncipollo/release-action@v1
+        with:
+          tag: helm-${{ matrix.chart }}-v${{ steps.version.outputs.chart }}
+          name: "${{ matrix.chart }} Helm Chart v${{ steps.version.outputs.chart }}"
+          body: |
+            ## 📦 ${{ matrix.chart }} Helm Chart Release
+            
+            **Chart**: `${{ matrix.chart }}`  
+            **Chart Version**: `${{ steps.version.outputs.chart }}`  
+            **Base Version**: `${{ matrix.base_version }}`  
+            **Branch**: `${{ steps.branch.outputs.name }}`  
+            **Commit**: `${{ steps.commit.outputs.id }}`
+            
+            ### 📥 Installation
+            
+            **Via OCI Registry (Recommended):**
+            ```bash
+            helm install ${{ matrix.chart }} oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }} \
+              --version ${{ steps.version.outputs.chart }}
+            ```
+            
+            **With custom values:**
+            ```bash
+            helm install ${{ matrix.chart }} oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }} \
+              --version ${{ steps.version.outputs.chart }} \
+              -f custom-values.yaml
+            ```
+            
+            ### 🔗 Links
+            
+            - **Registry**: `oci://ghcr.io/atlanhq/helm-charts/${{ matrix.chart }}`
+            - **Repository**: [atlanhq/atlas-metastore](https://github.com/atlanhq/atlas-metastore)
+            - **Path**: `${{ matrix.path }}`
+          artifacts: "./helm-packages/${{ matrix.chart }}-*.tgz"
+          token: ${{ secrets.ORG_PAT_GITHUB }}
+          allowUpdates: true
+          makeLatest: false
       
       - name: Chart publish summary
         if: steps.can_publish.outputs.should_publish == 'true'

@@ -28,10 +28,9 @@ import org.apache.atlas.type.AtlasEntityType;
 import org.apache.atlas.type.AtlasStructType;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import org.testng.Assert;
+import org.testng.annotations.BeforeTest;
+import org.testng.annotations.Test;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -44,7 +43,6 @@ import java.util.Set;
 import static org.mockito.Mockito.when;
 
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class AtlasSolrQueryBuilderTest {
 
     @Mock
@@ -89,7 +87,7 @@ public class AtlasSolrQueryBuilderTest {
     private Map<String, String> indexFieldNamesMap = new HashMap<>();
 
 
-    @BeforeAll
+    @BeforeTest
     public void setup() {
         AtlasTypesDef typesDef = new AtlasTypesDef();
         MockitoAnnotations.initMocks(this);
@@ -143,7 +141,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) OR ( +comment_index:*t10*  ) )");
+        Assert.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) OR ( +comment_index:*t10*  ) )");
     }
 
     @Test
@@ -153,7 +151,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) )");
+        Assert.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) )");
     }
 
     @Test
@@ -163,7 +161,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) AND ( +comment_index:*t10*  ) )");
+        Assert.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) AND ( +comment_index:*t10*  ) )");
     }
 
     @Test
@@ -173,7 +171,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) )");
+        Assert.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +name_index:t10  ) )");
     }
 
     @Test
@@ -183,7 +181,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( +name_index:t10  )");
+        Assert.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( +name_index:t10  )");
     }
 
     @Test
@@ -193,7 +191,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +comment_index:*United\\ States*  ) AND ( +descrption__index:*nothing*  ) AND ( +name_index:*t100*  ) )");
+        Assert.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +comment_index:*United\\ States*  ) AND ( +descrption__index:*nothing*  ) AND ( +name_index:*t100*  ) )");
     }
 
     @Test
@@ -203,7 +201,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:{ 100 TO * ]  ) )");
+        Assert.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:{ 100 TO * ]  ) )");
     }
 
     @Test
@@ -213,7 +211,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:[ 100 TO * ]  ) AND ( +started__index:[ 100 TO * ]  ) )");
+        Assert.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:[ 100 TO * ]  ) AND ( +started__index:[ 100 TO * ]  ) )");
     }
 
     @Test
@@ -223,7 +221,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:[ * TO 100}  ) )");
+        Assert.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:[ * TO 100}  ) )");
     }
 
     @Test
@@ -233,7 +231,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:[ * TO 100 ]  ) AND ( +started__index:[ * TO 100 ]  ) )");
+        Assert.assertEquals(underTest.build(), "+t10  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +created__index:[ * TO 100 ]  ) AND ( +started__index:[ * TO 100 ]  ) )");
     }
 
     @Test
@@ -243,7 +241,7 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParameters(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), " -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +qualifiedName__index:testdb.t1*  ) )");
+        Assert.assertEquals(underTest.build(), " -__state_index:DELETED AND  +__typeName__index:(hive_table )  AND  ( ( +qualifiedName__index:testdb.t1*  ) )");
     }
 
     @Test
@@ -253,18 +251,18 @@ public class AtlasSolrQueryBuilderTest {
 
         processSearchParametersForMultipleTypeNames(fileName, underTest);
 
-        Assertions.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table hive_db ) ");
+        Assert.assertEquals(underTest.build(), "+t  AND  -__state_index:DELETED AND  +__typeName__index:(hive_table hive_db ) ");
     }
 
 
 
     private void validateOrder(List<String> topTerms, int ... indices) {
-        Assertions.assertEquals(topTerms.size(), indices.length);
+        Assert.assertEquals(topTerms.size(), indices.length);
         int i = 0;
         for(String term: topTerms) {
-            Assertions.assertEquals(Integer.toString(indices[i++]), term);
+            Assert.assertEquals(Integer.toString(indices[i++]), term);
         }
-        Assertions.assertEquals(topTerms.size(), indices.length);
+        Assert.assertEquals(topTerms.size(), indices.length);
     }
 
     private Map<String, AtlasJanusGraphIndexClient.TermFreq>  generateTerms(int ... termFreqs) {

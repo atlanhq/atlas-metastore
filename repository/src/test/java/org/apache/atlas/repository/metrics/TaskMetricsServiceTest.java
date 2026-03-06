@@ -29,14 +29,13 @@ class TaskMetricsServiceTest {
         metricsService.recordTaskStart(taskType, version, tenant);
         
         // Then
-        assertEquals(1.0, meterRegistry.get("atlas_classification_tasks_total")
+        assertEquals(1.0, meterRegistry.get("atlas.classification.tasks.total")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)
                 .counter().count(), 0.01);
                 
-        assertEquals(1, meterRegistry.get("atlas_classification_tasks_in_progress")
-                .tag("component", "classification")
+        assertEquals(1, meterRegistry.get("atlas.classification.tasks.in_progress")
                 .gauge().value(), 0.01);
     }
     
@@ -52,21 +51,21 @@ class TaskMetricsServiceTest {
         metricsService.recordTaskEnd(taskType, version, tenant, 1000, assetsAffected, true);
         
         // Then
-        assertEquals(100.0, meterRegistry.get("atlas_classification_assets_affected_total")
+        assertEquals(100.0, meterRegistry.get("atlas.classification.assets.affected.total")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)
                 .tag("status", "success")
                 .counter().count(), 0.01);
                 
-        assertEquals(1.0, meterRegistry.get("atlas_classification_tasks_status")
+        assertEquals(1.0, meterRegistry.get("atlas.classification.tasks.status")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)
                 .tag("status", "success")
                 .counter().count(), 0.01);
                 
-        assertTrue(meterRegistry.get("atlas_classification_task_duration_seconds")
+        assertTrue(meterRegistry.get("atlas.classification.task.duration")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)
@@ -86,7 +85,7 @@ class TaskMetricsServiceTest {
         metricsService.recordTaskError(taskType, version, tenant, errorType);
         
         // Then
-        assertEquals(1.0, meterRegistry.get("atlas_classification_tasks_errors_total")
+        assertEquals(1.0, meterRegistry.get("atlas.classification.tasks.errors.total")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)
@@ -100,8 +99,7 @@ class TaskMetricsServiceTest {
         metricsService.updateQueueSize(5);
         
         // Then
-        assertEquals(5, meterRegistry.get("atlas_classification_tasks_queue_size")
-                .tag("component", "classification")
+        assertEquals(5, meterRegistry.get("atlas.classification.tasks.queue.size")
                 .gauge().value(), 0.01);
     }
     
@@ -117,14 +115,14 @@ class TaskMetricsServiceTest {
         metricsService.recordTaskEnd(taskType, version, tenant, 1000, assetsAffected, false);
         
         // Then
-        assertEquals(1.0, meterRegistry.get("atlas_classification_tasks_status")
+        assertEquals(1.0, meterRegistry.get("atlas.classification.tasks.status")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)
                 .tag("status", "failure")
                 .counter().count(), 0.01);
                 
-        assertTrue(meterRegistry.get("atlas_classification_task_duration_seconds")
+        assertTrue(meterRegistry.get("atlas.classification.task.duration")
                 .tag("type", taskType)
                 .tag("version", version)
                 .tag("tenant", tenant)

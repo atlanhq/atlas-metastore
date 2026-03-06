@@ -176,19 +176,11 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
 
             while (true) {
                 if (shouldRun.get()) {
-                    boolean lockAcquired = false;
                     try {
-                        // Check if Redis is available before attempting lock
-                        if (!redisService.isAvailable()) {
-                            LOG.debug("Index Health Monitor: Redis unavailable, sleeping...");
-                            Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
-                            continue;
-                        }
                         if(!redisService.acquireDistributedLock(ATLAS_INDEX_RECOVERY_LOCK)){
                             Thread.sleep(AtlasConstants.TASK_WAIT_TIME_MS);
                             continue;
                         }
-                        lockAcquired = true;
                         boolean indexHealthy = isIndexHealthy();
                         if (this.txRecoveryObject == null && indexHealthy) {
                             startMonitoring();
@@ -201,9 +193,7 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
                         LOG.error("Error: Index recovery monitoring!", e);
                     }
                     finally {
-                        if (lockAcquired) {
-                            redisService.releaseDistributedLock(ATLAS_INDEX_RECOVERY_LOCK);
-                        }
+                        redisService.releaseDistributedLock(ATLAS_INDEX_RECOVERY_LOCK);
                     }
                 }
             }
@@ -220,14 +210,7 @@ public class IndexRecoveryService implements Service, ActiveStateChangeHandler {
                 }
 
                 shouldRun.set(false);
-                // Only attempt to release lock if Redis is available
-                try {
-                    if (this.redisService.isAvailable()) {
-                        this.redisService.releaseDistributedLock(ATLAS_INDEX_RECOVERY_LOCK);
-                    }
-                } catch (Exception e) {
-                    LOG.warn("Index Health Monitor: Failed to release lock during shutdown", e);
-                }
+                this.redisService.releaseDistributedLock(ATLAS_INDEX_RECOVERY_LOCK);
             } finally {
                 LOG.info("Index Health Monitor: Shutdown: Done!");
             }

@@ -14,9 +14,6 @@ import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.commons.configuration.Configuration;
 import org.apache.commons.configuration.PropertiesConfiguration;
 import org.junit.jupiter.api.*;
-import org.testcontainers.containers.CassandraContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -35,17 +32,13 @@ import static org.junit.jupiter.api.Assertions.*;
  * data is correctly written to and read from the Cassandra tables.
  *
  * Prerequisites:
+ * - A Cassandra instance running and accessible on localhost:9042.
  * - The keyspace 'tags_v2' should be accessible (the DAO will create it if not present).
  */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
-@Testcontainers
 public class TagDAOCassandraImplTest {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final int CASSANDRA_NATIVE_PORT = 9042;
-
-    @Container
-    private static final CassandraContainer<?> cassandra = new CassandraContainer<>("cassandra:4.1.6");
 
     private TagDAOCassandraImpl tagDAO;
     private CqlSession testSession;
@@ -56,9 +49,7 @@ public class TagDAOCassandraImplTest {
         // Create an in-memory configuration to prevent the DAO from trying to load a file.
         // This resolves the "Failed to load application properties" error during tests.
         Configuration testConfig = new PropertiesConfiguration();
-        testConfig.setProperty(CassandraTagConfig.CASSANDRA_HOSTNAME_PROPERTY, cassandra.getHost());
-        testConfig.setProperty(CassandraTagConfig.CASSANDRA_PORT_PROPERTY, cassandra.getMappedPort(CASSANDRA_NATIVE_PORT));
-        testConfig.setProperty(CassandraTagConfig.CASSANDRA_REPLICATION_FACTOR_PROPERTY, "1");
+        testConfig.setProperty(CassandraTagConfig.CASSANDRA_HOSTNAME_PROPERTY, "localhost");
 
         // Inject the mock configuration into the ApplicationProperties class.
         ApplicationProperties.set(testConfig);
@@ -68,7 +59,7 @@ public class TagDAOCassandraImplTest {
 
         // Create a separate CqlSession for test utility functions like data setup and cleanup.
         testSession = CqlSession.builder()
-                .addContactPoint(new InetSocketAddress(cassandra.getHost(), cassandra.getMappedPort(CASSANDRA_NATIVE_PORT)))
+                .addContactPoint(new InetSocketAddress("localhost", CASSANDRA_PORT))
                 .withLocalDatacenter(DATACENTER) // Use the same datacenter as the DAO
                 .build();
     }
@@ -91,9 +82,6 @@ public class TagDAOCassandraImplTest {
         }
         if (testSession != null && !testSession.isClosed()) {
             testSession.close();
-        }
-        if (cassandra != null && cassandra.isRunning()) {
-            cassandra.stop();
         }
 
         ApplicationProperties.forceReload();
@@ -400,142 +388,6 @@ public class TagDAOCassandraImplTest {
     }
 
 
-
-    // =================== Batch Classification Tests ===================
-
-    @Test
-    void testGetAllClassificationsForVertices_MultipleVertices() throws AtlasBaseException {
-        // Setup: Insert tags for 3 different assets
-        String asset1 = "2001", asset2 = "2002", asset3 = "2003";
-        AtlasClassification tag1 = createClassification("TAG_A", asset1);
-        AtlasClassification tag2 = createClassification("TAG_B", asset2);
-        AtlasClassification tag3 = createClassification("TAG_C", asset3);
-        tagDAO.putDirectTag(asset1, "TAG_A", tag1, createAssetMetadata("a1", "q/a1"));
-        tagDAO.putDirectTag(asset2, "TAG_B", tag2, createAssetMetadata("a2", "q/a2"));
-        tagDAO.putDirectTag(asset3, "TAG_C", tag3, createAssetMetadata("a3", "q/a3"));
-
-        // Action: Batch fetch
-        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList(asset1, asset2, asset3));
-
-        // Assert: All 3 assets have their tags
-        assertEquals(3, result.size());
-        assertEquals(1, result.get(asset1).size());
-        assertEquals("TAG_A", result.get(asset1).get(0).getTypeName());
-        assertEquals(1, result.get(asset2).size());
-        assertEquals("TAG_B", result.get(asset2).get(0).getTypeName());
-        assertEquals(1, result.get(asset3).size());
-        assertEquals("TAG_C", result.get(asset3).get(0).getTypeName());
-    }
-
-    @Test
-    void testGetAllClassificationsForVertices_EmptyInput() throws AtlasBaseException {
-        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Collections.emptyList());
-        assertTrue(result.isEmpty());
-    }
-
-    @Test
-    void testGetAllClassificationsForVertices_VertexWithNoTags() throws AtlasBaseException {
-        // Asset 3001 has no tags inserted
-        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList("3001"));
-        assertTrue(result.containsKey("3001"));
-        assertTrue(result.get("3001").isEmpty());
-    }
-
-    @Test
-    void testGetAllClassificationsForVertices_FiltersDeletedTags() throws AtlasBaseException {
-        String assetId = "4001";
-        AtlasClassification tag = createClassification("DELETED_TAG", assetId);
-        tagDAO.putDirectTag(assetId, "DELETED_TAG", tag, createAssetMetadata("a4", "q/a4"));
-        tagDAO.deleteDirectTag(assetId, tag);
-
-        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList(assetId));
-        assertTrue(result.containsKey(assetId));
-        assertTrue(result.get(assetId).isEmpty(), "Deleted tags should be filtered out");
-    }
-
-    @Test
-    void testGetAllClassificationsForVertices_MultipleTagsPerVertex() throws AtlasBaseException {
-        String assetId = "5001";
-        tagDAO.putDirectTag(assetId, "TAG_X", createClassification("TAG_X", assetId), createAssetMetadata("a5", "q/a5"));
-        tagDAO.putDirectTag(assetId, "TAG_Y", createClassification("TAG_Y", assetId), createAssetMetadata("a5", "q/a5"));
-
-        Map<String, List<AtlasClassification>> result = tagDAO.getAllClassificationsForVertices(Arrays.asList(assetId));
-        assertEquals(2, result.get(assetId).size());
-    }
-
-    // =================== Lightweight Names-Only Query Tests ===================
-
-    @Test
-    void testGetClassificationNamesForVertex_AllNames() throws AtlasBaseException {
-        String assetId = "9001";
-        String sourceAssetId = "9002";
-
-        // Add a direct tag
-        tagDAO.putDirectTag(assetId, "DIRECT_TAG", createClassification("DIRECT_TAG", assetId),
-                createAssetMetadata("a9001", "q/a9001"));
-
-        // Add a propagated tag
-        tagDAO.putPropagatedTags(sourceAssetId, "PROPAGATED_TAG", Collections.singleton(assetId),
-                Collections.singletonMap(assetId, createAssetMetadata("a9001", "q/a9001")),
-                createClassification("PROPAGATED_TAG", sourceAssetId));
-
-        // Get all names (null = both direct and propagated)
-        List<String> allNames = tagDAO.getClassificationNamesForVertex(assetId, null);
-        assertEquals(2, allNames.size());
-        assertTrue(allNames.contains("DIRECT_TAG"));
-        assertTrue(allNames.contains("PROPAGATED_TAG"));
-    }
-
-    @Test
-    void testGetClassificationNamesForVertex_DirectOnly() throws AtlasBaseException {
-        String assetId = "9003";
-        String sourceAssetId = "9004";
-
-        tagDAO.putDirectTag(assetId, "DIRECT_ONLY", createClassification("DIRECT_ONLY", assetId),
-                createAssetMetadata("a9003", "q/a9003"));
-        tagDAO.putPropagatedTags(sourceAssetId, "PROPAGATED_ONLY", Collections.singleton(assetId),
-                Collections.singletonMap(assetId, createAssetMetadata("a9003", "q/a9003")),
-                createClassification("PROPAGATED_ONLY", sourceAssetId));
-
-        // Get direct only (propagated = false)
-        List<String> directNames = tagDAO.getClassificationNamesForVertex(assetId, false);
-        assertEquals(1, directNames.size());
-        assertEquals("DIRECT_ONLY", directNames.get(0));
-    }
-
-    @Test
-    void testGetClassificationNamesForVertex_PropagatedOnly() throws AtlasBaseException {
-        String assetId = "9005";
-        String sourceAssetId = "9006";
-
-        tagDAO.putDirectTag(assetId, "DIRECT_TAG2", createClassification("DIRECT_TAG2", assetId),
-                createAssetMetadata("a9005", "q/a9005"));
-        tagDAO.putPropagatedTags(sourceAssetId, "PROPAGATED_TAG2", Collections.singleton(assetId),
-                Collections.singletonMap(assetId, createAssetMetadata("a9005", "q/a9005")),
-                createClassification("PROPAGATED_TAG2", sourceAssetId));
-
-        // Get propagated only (propagated = true)
-        List<String> propagatedNames = tagDAO.getClassificationNamesForVertex(assetId, true);
-        assertEquals(1, propagatedNames.size());
-        assertEquals("PROPAGATED_TAG2", propagatedNames.get(0));
-    }
-
-    @Test
-    void testGetClassificationNamesForVertex_FiltersDeleted() throws AtlasBaseException {
-        String assetId = "9007";
-        AtlasClassification tag = createClassification("DELETED_NAME_TAG", assetId);
-        tagDAO.putDirectTag(assetId, "DELETED_NAME_TAG", tag, createAssetMetadata("a9007", "q/a9007"));
-        tagDAO.deleteDirectTag(assetId, tag);
-
-        List<String> names = tagDAO.getClassificationNamesForVertex(assetId, null);
-        assertTrue(names.isEmpty(), "Deleted tags should be filtered from names-only query");
-    }
-
-    @Test
-    void testGetClassificationNamesForVertex_EmptyVertex() throws AtlasBaseException {
-        List<String> names = tagDAO.getClassificationNamesForVertex("99999", null);
-        assertTrue(names.isEmpty());
-    }
 
     // =================== Helper Methods ===================
 

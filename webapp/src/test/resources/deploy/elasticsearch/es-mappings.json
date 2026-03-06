@@ -1,8 +1,5 @@
 {
   "properties": {
-    "lexicographicalSortOrder": {
-      "type": "keyword"
-    },
     "relationshipList": {
       "type": "nested",
       "properties": {

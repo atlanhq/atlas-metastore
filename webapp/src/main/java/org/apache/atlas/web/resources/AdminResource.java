@@ -41,7 +41,7 @@ import org.apache.atlas.model.tasks.AtlasTask;
 import org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchDatabase;
 import org.apache.atlas.repository.patches.AtlasPatchManager;
 import org.apache.atlas.repository.store.graph.AtlasEntityStore;
-import org.apache.atlas.service.config.DynamicConfigStore;
+import org.apache.atlas.service.FeatureFlagStore;
 import org.apache.atlas.service.metrics.MetricsRegistry;
 import org.apache.atlas.services.MetricsService;
 import org.apache.atlas.tasks.TaskManagement;
@@ -685,7 +685,7 @@ public class AdminResource {
     @Produces(MediaType.APPLICATION_JSON)
     public void setFeatureFlag(@QueryParam("key") String key, @QueryParam("value") String value) throws AtlasBaseException {
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_FEATURE_FLAG_CUD), "featureFlag");
-        DynamicConfigStore.setConfig(key, value, "admin-api");
+        FeatureFlagStore.setFlag(key, value);
     }
 
     @DELETE
@@ -693,7 +693,7 @@ public class AdminResource {
     @Produces(MediaType.APPLICATION_JSON)
     public void deleteFeatureFlag(@PathParam("flag") String key) throws AtlasBaseException {
         AtlasAuthorizationUtils.verifyAccess(new AtlasAdminAccessRequest(AtlasPrivilege.ADMIN_FEATURE_FLAG_CUD), "featureFlag");
-        DynamicConfigStore.deleteConfig(key);
+        FeatureFlagStore.deleteFlag(key);
     }
     private String getEditableEntityTypes(Configuration config) {
         String ret = DEFAULT_EDITABLE_ENTITY_TYPES;

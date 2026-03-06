@@ -26,13 +26,13 @@ import org.apache.atlas.type.AtlasType;
 import org.apache.atlas.v1.model.instance.Referenceable;
 import org.apache.atlas.v1.model.instance.Struct;
 import org.apache.atlas.v1.model.notification.HookNotificationV1;
-import org.junit.jupiter.api.Test;
+import org.testng.annotations.Test;
 
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Collections;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.testng.Assert.*;
 
 /**
  * AtlasNotificationMessage tests.

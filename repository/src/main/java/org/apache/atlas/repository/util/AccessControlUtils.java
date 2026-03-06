@@ -424,7 +424,7 @@ public final class AccessControlUtils {
 
     private static boolean hasMatchingVertex(AtlasGraph graph, List<String> newTags,
                                                IndexSearchParams indexSearchParams) throws AtlasBaseException {
-        String vertexIndexName = VERTEX_INDEX_NAME;
+        String vertexIndexName = getESIndex();
         AtlasIndexQuery indexQuery = graph.elasticsearchQuery(vertexIndexName);
 
         DirectIndexQueryResult indexQueryResult = indexQuery.vertices(indexSearchParams);

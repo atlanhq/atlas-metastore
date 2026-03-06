@@ -29,17 +29,16 @@ import org.apache.atlas.model.typedef.AtlasBusinessMetadataDef;
 import org.apache.atlas.model.typedef.AtlasStructDef;
 import org.apache.atlas.model.typedef.AtlasEntityDef;
 import org.apache.commons.configuration.Configuration;
+import org.mockito.Matchers;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
+import org.testng.Assert;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
 import javax.ws.rs.core.MediaType;
 import javax.ws.rs.core.Response;
 import java.util.Collections;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Matchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -55,7 +54,7 @@ public class AtlasClientV2Test {
     private Configuration configuration;
 
 
-    @BeforeEach
+    @BeforeMethod
     public void setup() {
         MockitoAnnotations.initMocks(this);
     }
@@ -93,13 +92,13 @@ public class AtlasClientV2Test {
         when(response.getStatus()).thenReturn(Response.Status.NO_CONTENT.getStatusCode());
 
 
-        when(builder.method(anyString(), eq(ClientResponse.class), any())).thenReturn(response);
+        when(builder.method(anyString(), Matchers.<Class>any(), anyString())).thenReturn(response);
 
         try {
             atlasClient.updateClassifications("abb672b1-e4bd-402d-a98f-73cd8f775e2a", Collections.singletonList(atlasClassification));
 
         } catch (AtlasServiceException e) {
-            Assertions.fail("Failed with Exception");
+            Assert.fail("Failed with Exception");
         }
 
     }
@@ -120,13 +119,13 @@ public class AtlasClientV2Test {
         when(response.getStatus()).thenReturn(Response.Status.OK.getStatusCode());
 
 
-        when(builder.method(anyString(), eq(ClientResponse.class), any())).thenReturn(response);
+        when(builder.method(anyString(), Matchers.<Class>any(), anyString())).thenReturn(response);
 
         try {
             atlasClient.updateClassifications("abb672b1-e4bd-402d-a98f-73cd8f775e2a", Collections.singletonList(atlasClassification));
-            Assertions.fail("Failed with Exception");
+            Assert.fail("Failed with Exception");
         } catch (AtlasServiceException e) {
-            Assertions.assertTrue(e.getMessage().contains(" failed with status 200 "));
+            Assert.assertTrue(e.getMessage().contains(" failed with status 200 "));
         }
 
     }
@@ -135,16 +134,17 @@ public class AtlasClientV2Test {
     public void restRequestCheck() {
         AtlasClientV2 atlasClient = new AtlasClientV2(service, configuration);
         String pathForRelationshipTypeDef           = atlasClient.getPathForType(AtlasRelationshipDef.class);
-        Assertions.assertEquals("relationshipdef", pathForRelationshipTypeDef);
+        Assert.assertEquals("relationshipdef", pathForRelationshipTypeDef);
         String pathForStructTypeDef                 = atlasClient.getPathForType(AtlasStructDef.class);
-        Assertions.assertEquals("structdef", pathForStructTypeDef);
+        Assert.assertEquals("structdef", pathForStructTypeDef);
         String pathForBusinessMetadataTypeDef       = atlasClient.getPathForType(AtlasBusinessMetadataDef.class);
-        Assertions.assertEquals("businessmetadatadef", pathForBusinessMetadataTypeDef);
+        Assert.assertEquals("businessmetadatadef", pathForBusinessMetadataTypeDef);
         String pathForEnumTypeDef                   = atlasClient.getPathForType(AtlasEnumDef.class);
-        Assertions.assertEquals("enumdef", pathForEnumTypeDef);
+        Assert.assertEquals("enumdef", pathForEnumTypeDef);
         String pathForClassificationTypeDef         = atlasClient.getPathForType(AtlasClassificationDef.class);
-        Assertions.assertEquals("classificationdef", pathForClassificationTypeDef);
+        Assert.assertEquals("classificationdef", pathForClassificationTypeDef);
         String pathForEntityTypeDef                 = atlasClient.getPathForType(AtlasEntityDef.class);
-        Assertions.assertEquals("entitydef", pathForEntityTypeDef);
+        Assert.assertEquals("entitydef", pathForEntityTypeDef);
     }
 }
+

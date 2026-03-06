@@ -32,14 +32,14 @@ import java.util.List;
 import java.util.Map;
 
 import static org.mockito.Mockito.mock;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.testng.Assert.*;
 
 /**
  * AbstractNotification tests.
  */
 public class AbstractNotificationTest {
 
-    @org.junit.jupiter.api.Test
+    @org.testng.annotations.Test
     public void testSend() throws Exception {
         MessageSource    source        = new MessageSource();
         Configuration    configuration = mock(Configuration.class);
@@ -63,7 +63,7 @@ public class AbstractNotificationTest {
         }
     }
 
-    @org.junit.jupiter.api.Test
+    @org.testng.annotations.Test
     public void testSend2() throws Exception {
         MessageSource    source        = new MessageSource();
         Configuration    configuration = mock(Configuration.class);

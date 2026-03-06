@@ -224,6 +224,7 @@ public class AtlasTypeDefStoreInitializer implements ActiveStateChangeHandler {
 
                         if (!typesToCreate.isEmpty() || !typesToUpdate.isEmpty()) {
                             typeDefStore.createUpdateTypesDef(typesToCreate, typesToUpdate);
+
                             LOG.info("Created/Updated types defined in file {}", typeDefFile.getAbsolutePath());
                         } else {
                             LOG.info("No new type in file {}", typeDefFile.getAbsolutePath());

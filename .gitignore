@@ -88,4 +88,3 @@ distro/solr/*.tgz
 **.class
 */bin.vscode/
 **/bin
-*.local.md
