@@ -7,6 +7,7 @@ from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_not_empty, assert_field_in,
 )
+from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
 @suite("search", depends_on_suites=["entity_crud"],
@@ -183,3 +184,77 @@ class SearchSuite:
             assert "guid" in entity, "Search result entity should have 'guid'"
             assert "typeName" in entity, "Search result entity should have 'typeName'"
             assert entity.get("status") == "ACTIVE", f"Expected status=ACTIVE, got {entity.get('status')}"
+
+    @test("search_exclude_deleted_entities", tags=["search"], order=12)
+    def test_search_exclude_deleted_entities(self, client, ctx):
+        # Create + delete entity, then search excluding deleted
+        qn = unique_qn("search-del-test")
+        entity = build_dataset_entity(qn=qn, name=unique_name("search-del"))
+        resp = client.post("/entity", json_data={"entity": entity})
+        assert_status(resp, 200)
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        guid = entities[0]["guid"]
+
+        # Delete it
+        client.delete(f"/entity/guid/{guid}")
+
+        time.sleep(5)
+
+        # Search with excludeDeletedEntities
+        resp2 = client.post("/search/basic", json_data={
+            "typeName": "DataSet",
+            "excludeDeletedEntities": True,
+            "limit": 100,
+            "offset": 0,
+        })
+        assert_status(resp2, 200)
+        body2 = resp2.json()
+        result_entities = body2.get("entities", [])
+        found_guids = [e.get("guid") for e in result_entities]
+        assert guid not in found_guids, (
+            f"Deleted entity {guid} should not appear with excludeDeletedEntities=True"
+        )
+
+    @test("basic_search_by_type_with_pagination", tags=["search"], order=13)
+    def test_basic_search_by_type_with_pagination(self, client, ctx):
+        resp = client.post("/search/basic", json_data={
+            "typeName": "DataSet",
+            "limit": 1,
+            "offset": 0,
+        })
+        assert_status(resp, 200)
+        body = resp.json()
+        result_entities = body.get("entities", [])
+        assert len(result_entities) <= 1, (
+            f"Expected at most 1 result with limit=1, got {len(result_entities)}"
+        )
+
+    @test("basic_search_with_attribute_filter", tags=["search"], order=14)
+    def test_basic_search_with_attribute_filter(self, client, ctx):
+        from core.data_factory import PREFIX
+        resp = client.post("/search/basic", json_data={
+            "typeName": "DataSet",
+            "limit": 10,
+            "offset": 0,
+            "entityFilters": {
+                "condition": "AND",
+                "criterion": [{
+                    "attributeName": "qualifiedName",
+                    "operator": "STARTS_WITH",
+                    "attributeValue": PREFIX,
+                }],
+            },
+        })
+        assert_status(resp, 200)
+
+    @test("search_by_glossary_term_type", tags=["search"], order=15)
+    def test_search_by_glossary_term_type(self, client, ctx):
+        resp = client.post("/search/basic", json_data={
+            "typeName": "AtlasGlossaryTerm",
+            "limit": 5,
+            "offset": 0,
+        })
+        assert_status(resp, 200)

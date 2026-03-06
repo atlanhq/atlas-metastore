@@ -5,7 +5,7 @@ from core.assertions import (
     assert_status, assert_status_in, assert_field_present,
     assert_field_equals,
 )
-from core.data_factory import build_dataset_entity, unique_qn, unique_name
+from core.data_factory import build_dataset_entity, build_relationship_def, unique_qn, unique_name, unique_type_name
 
 
 @suite("relationships", depends_on_suites=["entity_crud"],
@@ -101,6 +101,101 @@ class RelationshipsSuite:
                 assert "guid" in rel or "typeName" in rel or "end1" in rel, (
                     "Relationship should have guid, typeName, or end1/end2"
                 )
+
+    @test("create_direct_relationship", tags=["relationship", "crud"], order=4)
+    def test_create_direct_relationship(self, client, ctx):
+        if not self.src_guid or not self.tgt_guid:
+            return
+        # Create a custom relationship def first
+        rel_def_name = unique_type_name("TestRelDef")
+        payload = {"relationshipDefs": [build_relationship_def(name=rel_def_name)]}
+        resp = client.post("/types/typedefs", json_data=payload)
+        assert_status_in(resp, [200, 409])
+        if resp.status_code == 200:
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{rel_def_name}")
+            )
+            ctx.set("direct_rel_def_name", rel_def_name)
+
+            import time
+            time.sleep(5)
+
+            # Create relationship instance
+            rel_payload = {
+                "typeName": rel_def_name,
+                "end1": {"guid": self.src_guid, "typeName": "DataSet"},
+                "end2": {"guid": self.tgt_guid, "typeName": "DataSet"},
+                "propagateTags": "NONE",
+            }
+            resp2 = client.post("/relationship", json_data=rel_payload)
+            assert_status_in(resp2, [200, 201, 404])
+            if resp2.status_code in [200, 201]:
+                body = resp2.json()
+                rel_guid = body.get("guid")
+                if rel_guid:
+                    ctx.set("direct_rel_guid", rel_guid)
+                    ctx.register_cleanup(
+                        lambda: client.delete(f"/relationship/guid/{rel_guid}")
+                    )
+
+    @test("get_relationship_extended_info", tags=["relationship"], order=5, depends_on=["create_direct_relationship"])
+    def test_get_relationship_extended_info(self, client, ctx):
+        rel_guid = ctx.get("direct_rel_guid") or ctx.get("test_rel_guid")
+        if not rel_guid:
+            return
+        resp = client.get(f"/relationship/guid/{rel_guid}", params={"extendedInfo": "true"})
+        assert_status(resp, 200)
+
+    @test("update_relationship_propagate_tags", tags=["relationship", "crud"], order=6, depends_on=["create_direct_relationship"])
+    def test_update_relationship_propagate_tags(self, client, ctx):
+        rel_guid = ctx.get("direct_rel_guid")
+        rel_def_name = ctx.get("direct_rel_def_name")
+        if not rel_guid or not rel_def_name:
+            return
+        payload = {
+            "guid": rel_guid,
+            "typeName": rel_def_name,
+            "end1": {"guid": self.src_guid, "typeName": "DataSet"},
+            "end2": {"guid": self.tgt_guid, "typeName": "DataSet"},
+            "propagateTags": "ONE_TO_TWO",
+        }
+        resp = client.put("/relationship", json_data=payload)
+        assert_status_in(resp, [200, 204, 400])
+
+    @test("delete_direct_relationship", tags=["relationship", "crud"], order=7, depends_on=["create_direct_relationship"])
+    def test_delete_direct_relationship(self, client, ctx):
+        rel_guid = ctx.get("direct_rel_guid")
+        if not rel_guid:
+            return
+        resp = client.delete(f"/relationship/guid/{rel_guid}")
+        assert_status_in(resp, [200, 204])
+
+    @test("bulk_relationship_create", tags=["relationship", "crud"], order=8)
+    def test_bulk_relationship_create(self, client, ctx):
+        if not self.src_guid or not self.tgt_guid:
+            return
+        rel_def_name = ctx.get("direct_rel_def_name")
+        if not rel_def_name:
+            return
+        # Bulk create relationships
+        rels = [{
+            "typeName": rel_def_name,
+            "end1": {"guid": self.src_guid, "typeName": "DataSet"},
+            "end2": {"guid": self.tgt_guid, "typeName": "DataSet"},
+            "propagateTags": "NONE",
+        }]
+        resp = client.post("/relationship/bulk", json_data=rels)
+        # Bulk endpoint may not exist on all versions
+        assert_status_in(resp, [200, 201, 400, 404, 405])
+        if resp.status_code in [200, 201]:
+            body = resp.json()
+            if isinstance(body, list):
+                for rel in body:
+                    rel_guid = rel.get("guid")
+                    if rel_guid:
+                        ctx.register_cleanup(
+                            lambda g=rel_guid: client.delete(f"/relationship/guid/{g}")
+                        )
 
     @test("delete_relationship", tags=["relationship", "crud"], order=10)
     def test_delete_relationship(self, client, ctx):

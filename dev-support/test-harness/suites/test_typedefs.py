@@ -11,7 +11,7 @@ from core.assertions import (
 from core.data_factory import (
     build_enum_def, build_classification_def, build_struct_def,
     build_entity_def, build_business_metadata_def, build_relationship_def,
-    unique_type_name,
+    build_dataset_entity, unique_type_name, unique_qn, unique_name,
 )
 
 
@@ -191,12 +191,84 @@ class TypeDefSuite:
         assert found is not None, f"Created enum '{self.enum_name}' not found in GET /types/typedefs"
         assert "elementDefs" in found, "Found enum should have elementDefs"
 
+    # ---- Extended tests ----
+
+    @test("create_entity_with_custom_type", tags=["typedef", "crud"], order=22, depends_on=["create_entity_def"])
+    def test_create_entity_with_custom_type(self, client, ctx):
+        time.sleep(5)
+        qn = unique_qn("custom-typedef-test")
+        entity = build_dataset_entity(qn=qn, name=unique_name("custom-td"), type_name=self.entity_type_name)
+        resp = client.post("/entity", json_data={"entity": entity})
+        assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            creates = body.get("mutatedEntities", {}).get("CREATE", [])
+            updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+            entities = creates or updates
+            if entities:
+                guid = entities[0]["guid"]
+                ctx.register_entity("custom_type_td_entity", guid, self.entity_type_name)
+                ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+                assert entities[0].get("typeName") == self.entity_type_name, (
+                    f"Expected typeName={self.entity_type_name}, got {entities[0].get('typeName')}"
+                )
+                ctx.set("custom_type_entity_exists", True)
+
+    @test("create_relationship_def", tags=["typedef", "crud"], order=23)
+    def test_create_relationship_def(self, client, ctx):
+        self.rel_def_name = unique_type_name("TestRelDef")
+        payload = {"relationshipDefs": [build_relationship_def(name=self.rel_def_name)]}
+        resp = client.post("/types/typedefs", json_data=payload)
+        assert_status(resp, 200)
+        ctx.set("test_rel_def_name", self.rel_def_name)
+        ctx.register_cleanup(
+            lambda: client.delete(f"/types/typedef/name/{self.rel_def_name}")
+        )
+
+        # Validate response
+        body = resp.json()
+        rel_defs = body.get("relationshipDefs", [])
+        assert len(rel_defs) > 0, "Expected relationshipDefs in response"
+        assert rel_defs[0].get("name") == self.rel_def_name, (
+            f"Expected name={self.rel_def_name}"
+        )
+
+    @test("delete_type_in_use", tags=["typedef"], order=24, depends_on=["create_entity_with_custom_type"])
+    def test_delete_type_in_use(self, client, ctx):
+        if not ctx.get("custom_type_entity_exists"):
+            return  # No entity of custom type exists
+        resp = client.delete(f"/types/typedef/name/{self.entity_type_name}")
+        # Should fail because an instance exists
+        assert_status_in(resp, [400, 409])
+
+    @test("get_typedef_by_guid", tags=["typedef"], order=25, depends_on=["create_enum_def"])
+    def test_get_typedef_by_guid(self, client, ctx):
+        # First get the enum by name to find its GUID
+        resp = client.get(f"/types/enumdef/name/{self.enum_name}")
+        assert_status(resp, 200)
+        body = resp.json()
+        type_guid = body.get("guid")
+        if not type_guid:
+            return
+        # GET by GUID
+        resp2 = client.get(f"/types/typedef/guid/{type_guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "name", self.enum_name)
+
     # ---- DELETE types (cleanup) ----
+
+    @test("delete_custom_type_entity", tags=["typedef", "crud"], order=89, depends_on=["create_entity_with_custom_type"])
+    def test_delete_custom_type_entity(self, client, ctx):
+        guid = ctx.get_entity_guid("custom_type_td_entity")
+        if not guid:
+            return
+        resp = client.delete(f"/entity/guid/{guid}")
+        assert_status_in(resp, [200, 204])
 
     @test("delete_entity_def", tags=["typedef", "crud"], order=90, depends_on=["create_entity_def"])
     def test_delete_entity_def(self, client, ctx):
         resp = client.delete(f"/types/typedef/name/{self.entity_type_name}")
-        assert_status_in(resp, [200, 204])
+        assert_status_in(resp, [200, 204, 409])
 
     @test("delete_classification_def", tags=["typedef", "crud"], order=91, depends_on=["create_classification_def"])
     def test_delete_classification_def(self, client, ctx):

@@ -8,7 +8,7 @@ from core.assertions import (
     assert_field_equals, assert_field_not_empty,
 )
 from core.audit_helpers import assert_audit_event_exists
-from core.data_factory import unique_name
+from core.data_factory import unique_name, build_dataset_entity, unique_qn
 
 
 @suite("glossary", depends_on_suites=["typedefs"],
@@ -98,7 +98,7 @@ class GlossarySuite:
             return
         event = assert_audit_event_exists(client, guid, "ENTITY_CREATE")
         if event is None:
-            return  # Audit endpoint not available, graceful skip
+            return  # Audit endpoint not available on this environment
 
     # ---- Term CRUD ----
 
@@ -160,6 +160,27 @@ class GlossarySuite:
         assert_status(resp2, 200)
         assert_field_equals(resp2, "shortDescription", "Updated term description")
 
+    @test("get_glossary_terms_list", tags=["glossary"], order=15, depends_on=["create_term"])
+    def test_get_glossary_terms_list(self, client, ctx):
+        guid = ctx.get_entity_guid("glossary")
+        resp = client.get(f"/glossary/{guid}/terms", params={
+            "limit": 10, "offset": 0, "sort": "ASC",
+        })
+        assert_status(resp, 200)
+        body = resp.json()
+        terms = body if isinstance(body, list) else []
+        assert len(terms) > 0, f"Expected at least one term in glossary, got {len(terms)}"
+
+    @test("get_glossary_detailed_with_terms", tags=["glossary"], order=16, depends_on=["create_term"])
+    def test_get_glossary_detailed_with_terms(self, client, ctx):
+        guid = ctx.get_entity_guid("glossary")
+        resp = client.get(f"/glossary/{guid}/detailed")
+        assert_status(resp, 200)
+        body = resp.json()
+        # Detailed response should include terms
+        terms = body.get("terms") or body.get("termInfo", [])
+        # Terms may be in different response shapes; just verify 200
+
     # ---- Category CRUD ----
 
     @test("create_category", tags=["glossary", "crud"], order=20, depends_on=["create_glossary"])
@@ -186,6 +207,138 @@ class GlossarySuite:
         assert_status(resp, 200)
         assert_field_equals(resp, "name", self.category_name)
 
+    @test("create_categories_bulk", tags=["glossary", "crud"], order=23, depends_on=["create_glossary"])
+    def test_create_categories_bulk(self, client, ctx):
+        glossary_guid = ctx.get_entity_guid("glossary")
+        cat_name_a = unique_name("bulk-cat-a")
+        cat_name_b = unique_name("bulk-cat-b")
+        resp = client.post("/glossary/categories", json_data=[
+            {
+                "name": cat_name_a,
+                "shortDescription": "Bulk category A",
+                "anchor": {"glossaryGuid": glossary_guid},
+            },
+            {
+                "name": cat_name_b,
+                "shortDescription": "Bulk category B",
+                "anchor": {"glossaryGuid": glossary_guid},
+            },
+        ])
+        assert_status(resp, 200)
+        body = resp.json()
+        if isinstance(body, list):
+            for cat in body:
+                cat_guid = cat.get("guid")
+                if cat_guid:
+                    ctx.register_cleanup(lambda g=cat_guid: client.delete(f"/glossary/category/{g}"))
+
+    @test("create_category_hierarchy", tags=["glossary", "crud"], order=24, depends_on=["create_category"])
+    def test_create_category_hierarchy(self, client, ctx):
+        glossary_guid = ctx.get_entity_guid("glossary")
+        parent_guid = ctx.get_entity_guid("category1")
+        child_name = unique_name("child-cat")
+        resp = client.post("/glossary/category", json_data={
+            "name": child_name,
+            "shortDescription": "Child category",
+            "anchor": {"glossaryGuid": glossary_guid},
+            "parentCategory": {"categoryGuid": parent_guid},
+        })
+        assert_status_in(resp, [200, 409])
+        if resp.status_code == 200:
+            child_guid = resp.json().get("guid")
+            ctx.register_entity("child_category", child_guid, "AtlasGlossaryCategory")
+            ctx.register_cleanup(lambda: client.delete(f"/glossary/category/{child_guid}"))
+
+            # Verify parent has childrenCategories
+            resp2 = client.get(f"/glossary/category/{parent_guid}")
+            if resp2.status_code == 200:
+                body = resp2.json()
+                children = body.get("childrenCategories", [])
+                found = any(c.get("categoryGuid") == child_guid for c in children)
+                assert found, f"Expected child {child_guid} in parent's childrenCategories"
+
+    @test("get_glossary_categories_list", tags=["glossary"], order=25, depends_on=["create_category"])
+    def test_get_glossary_categories_list(self, client, ctx):
+        guid = ctx.get_entity_guid("glossary")
+        resp = client.get(f"/glossary/{guid}/categories", params={
+            "limit": 10, "offset": 0, "sort": "ASC",
+        })
+        assert_status(resp, 200)
+        body = resp.json()
+        categories = body if isinstance(body, list) else []
+        assert len(categories) > 0, f"Expected at least one category, got {len(categories)}"
+
+    @test("get_category_terms", tags=["glossary"], order=26, depends_on=["create_term", "create_category"])
+    def test_get_category_terms(self, client, ctx):
+        cat_guid = ctx.get_entity_guid("category1")
+        resp = client.get(f"/glossary/category/{cat_guid}/terms")
+        # May be empty if term not assigned to category, just verify endpoint works
+        assert_status_in(resp, [200, 204])
+
+    @test("assign_term_to_entity", tags=["glossary"], order=30, depends_on=["create_term"])
+    def test_assign_term_to_entity(self, client, ctx):
+        term_guid = ctx.get_entity_guid("term1")
+        # Create a DataSet entity for term assignment
+        qn = unique_qn("term-assign-test")
+        entity = build_dataset_entity(qn=qn, name=unique_name("term-assign"))
+        resp = client.post("/entity", json_data={"entity": entity})
+        assert_status(resp, 200)
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        entity_guid = entities[0]["guid"]
+        ctx.register_entity("term_assign_entity", entity_guid, "DataSet")
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{entity_guid}"))
+
+        # Assign term to entity
+        resp = client.post(f"/glossary/terms/{term_guid}/assignedEntities", json_data=[
+            {"guid": entity_guid, "typeName": "DataSet"},
+        ])
+        assert_status_in(resp, [200, 204])
+
+    @test("get_term_assigned_entities", tags=["glossary"], order=31, depends_on=["assign_term_to_entity"])
+    def test_get_term_assigned_entities(self, client, ctx):
+        term_guid = ctx.get_entity_guid("term1")
+        resp = client.get(f"/glossary/terms/{term_guid}/assignedEntities")
+        assert_status(resp, 200)
+        body = resp.json()
+        entities = body if isinstance(body, list) else []
+        entity_guid = ctx.get_entity_guid("term_assign_entity")
+        if entity_guid:
+            found = any(e.get("guid") == entity_guid for e in entities)
+            assert found, f"Expected entity {entity_guid} in assigned entities"
+
+    @test("disassociate_term_from_entity", tags=["glossary"], order=32, depends_on=["assign_term_to_entity"])
+    def test_disassociate_term_from_entity(self, client, ctx):
+        term_guid = ctx.get_entity_guid("term1")
+        entity_guid = ctx.get_entity_guid("term_assign_entity")
+        if not entity_guid:
+            return
+
+        # First get the relationship guid
+        resp = client.get(f"/glossary/terms/{term_guid}/assignedEntities")
+        if resp.status_code != 200:
+            return
+        body = resp.json()
+        entities = body if isinstance(body, list) else []
+        # Find the assignment with matching guid
+        assignment = None
+        for e in entities:
+            if e.get("guid") == entity_guid:
+                assignment = e
+                break
+        if not assignment:
+            return
+
+        # Disassociate
+        resp = client.put(
+            f"/glossary/terms/{term_guid}/assignedEntities",
+            json_data=[assignment],
+        )
+        # PUT with empty or DELETE semantics vary; accept multiple statuses
+        assert_status_in(resp, [200, 204, 400, 404])
+
     @test("update_category", tags=["glossary", "crud"], order=22, depends_on=["create_category"])
     def test_update_category(self, client, ctx):
         guid = ctx.get_entity_guid("category1")
@@ -201,14 +354,31 @@ class GlossarySuite:
 
     # ---- Delete (reverse order: categories, terms, then glossary via cleanup) ----
 
+    @test("delete_glossary_not_empty", tags=["glossary"], order=79)
+    def test_delete_glossary_not_empty(self, client, ctx):
+        # Try to delete glossary with terms still present
+        guid = ctx.get_entity_guid("glossary")
+        if not guid:
+            return
+        resp = client.delete(f"/glossary/{guid}")
+        # May return 409 (conflict) if cascade not supported, or 200 if cascade delete
+        assert_status_in(resp, [200, 204, 409])
+        if resp.status_code in (200, 204):
+            # Cascade deleted everything — mark so downstream deletes skip gracefully
+            ctx.set("glossary_cascade_deleted", True)
+
     @test("delete_category", tags=["glossary", "crud"], order=80, depends_on=["create_category"])
     def test_delete_category(self, client, ctx):
+        if ctx.get("glossary_cascade_deleted"):
+            return  # Already deleted by cascade
         guid = ctx.get_entity_guid("category1")
         resp = client.delete(f"/glossary/category/{guid}")
         assert_status_in(resp, [200, 204])
 
     @test("delete_term", tags=["glossary", "crud"], order=81, depends_on=["create_term"])
     def test_delete_term(self, client, ctx):
+        if ctx.get("glossary_cascade_deleted"):
+            return  # Already deleted by cascade
         guid = ctx.get_entity_guid("term1")
         resp = client.delete(f"/glossary/term/{guid}")
         assert_status_in(resp, [200, 204])

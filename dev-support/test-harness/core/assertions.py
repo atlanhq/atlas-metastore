@@ -213,6 +213,34 @@ def assert_list_contains_field(resp, dot_path, field_name, expected_value):
         )
 
 
+def assert_list_length(body, expected_len, msg=None):
+    """Assert a list has exactly expected_len items."""
+    if not isinstance(body, list):
+        raise AssertionError(
+            msg or f"Expected a list, got {type(body).__name__}",
+            expected=f"list of length {expected_len}", actual=type(body).__name__,
+        )
+    if len(body) != expected_len:
+        raise AssertionError(
+            msg or f"Expected list of length {expected_len}, got {len(body)}",
+            expected=expected_len, actual=len(body),
+        )
+
+
+def assert_list_not_empty(body, msg=None):
+    """Assert a list is non-empty."""
+    if not isinstance(body, list):
+        raise AssertionError(
+            msg or f"Expected a list, got {type(body).__name__}",
+            expected="non-empty list", actual=type(body).__name__,
+        )
+    if len(body) == 0:
+        raise AssertionError(
+            msg or "Expected non-empty list, got empty list",
+            expected="non-empty list", actual="[]",
+        )
+
+
 def assert_mutation_response(resp, expected_action, type_name=None):
     """Validate mutatedEntities.{action} is non-empty, every entity has guid.
 
