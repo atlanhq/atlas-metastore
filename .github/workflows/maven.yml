@@ -296,7 +296,7 @@ jobs:
       - name: Checkout Experiments Repo
         uses: actions/checkout@v4
         with:
-          repository: atlanhq/mdlh-experiments
+          repository: atlanhq/mdlh-experiements
           ref: slimcontext
           path: experiments
           token: ${{ secrets.METASTORE_EXPTS_TOKEN }}
