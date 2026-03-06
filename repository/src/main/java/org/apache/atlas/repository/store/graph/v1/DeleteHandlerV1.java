@@ -1040,7 +1040,7 @@ public abstract class DeleteHandlerV1 {
         String typeName           = AtlasGraphUtilsV2.getTypeName(edge.getOutVertex());
 
         if (typeName == null) {
-            LOG.warn("getAttributeForEdge: skipping orphaned edge with null typeName on OUT vertex; edgeLabel={}", edge.getLabel());
+            LOG.warn("getAttributeForEdge: skipping orphaned edge with null typeName on OUT vertex; edgeId={}, edgeLabel={}", edge.getId(), edge.getLabel());
             return null;
         }
 
@@ -1285,7 +1285,7 @@ public abstract class DeleteHandlerV1 {
                         if (attribute != null) {
                             deleteEdgeBetweenVertices(outVertex, inVertex, attribute);
                         } else {
-                            LOG.warn("Skipping deleteEdgeBetweenVertices for orphaned edge with null attribute; edgeLabel={}", edge.getLabel());
+                            LOG.warn("Skipping deleteEdgeBetweenVertices for orphaned edge with null attribute; edgeId={}, edgeLabel={}", edge.getId(), edge.getLabel());
                         }
                     }
                 }
