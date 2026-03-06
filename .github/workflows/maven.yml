@@ -27,6 +27,8 @@ on:
       - lite_master
       - alcon-v2-418
       - slimleangraph
+      - leangraph
+      - slimcontext
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
