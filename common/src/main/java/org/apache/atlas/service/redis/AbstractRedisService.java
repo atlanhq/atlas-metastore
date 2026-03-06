@@ -368,7 +368,7 @@ public abstract class AbstractRedisService implements RedisService {
                 .addSentinelAddress(formatUrls(atlasConfig.getStringArray(ATLAS_REDIS_SENTINEL_URLS)))
                 .setUsername(atlasConfig.getString(ATLAS_REDIS_USERNAME))
                 .setPassword(atlasConfig.getString(ATLAS_REDIS_PASSWORD))
-                .setTimeout(50) //Setting UP timeout to 50ms
+                .setTimeout(1000) //Setting timeout to 1 second
                 .setRetryAttempts(3) //Retry 3 times
                 // 2-node availability settings - allow operation with partial Redis cluster
                 .setConnectTimeout(1000) // 1 second connection timeout
