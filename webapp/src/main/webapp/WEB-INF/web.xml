@@ -81,8 +81,9 @@
 
     <filter-mapping>
         <filter-name>MetricsFilter</filter-name>
-        <url-pattern>/*</url-pattern>
+        <url-pattern>/api/atlas/*</url-pattern>
     </filter-mapping>
+
 
     <filter>
         <filter-name>AuditFilter</filter-name>
