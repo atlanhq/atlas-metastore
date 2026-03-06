@@ -503,7 +503,7 @@ public class ESBasedAuditRepository extends AbstractStorageBasedAuditRepository 
 
                             // Handle both single GUID and list of GUIDs
                             if (attrValue instanceof List) {
-                                guids = q(List<String>) attrValue;
+                                guids = (List<String>) attrValue;
                             } else if (attrValue instanceof String) {
                                 guids.add((String) attrValue);
                             }
