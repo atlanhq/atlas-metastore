@@ -40,8 +40,13 @@ public enum ConfigKey {
     // Delete batch operations flag
     DELETE_BATCH_ENABLED("atlas.delete.batch.enabled", "false"),
 
+<<<<<<< HEAD
     // Async execution flag for parallel API operations (getByGuids, lineage BOTH)
     ENABLE_ASYNC_EXECUTION("enable_async_execution", "false");
+=======
+    // Async ingestion flag - when enabled, write operations also publish to Kafka for shadow consumer
+    ENABLE_ASYNC_INGESTION("ENABLE_ASYNC_INGESTION", "false");
+>>>>>>> 887c4cd95ab85e723b696147206cf8a044b9bea7
 
     private final String key;
     private final String defaultValue;

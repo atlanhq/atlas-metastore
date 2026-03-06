@@ -452,6 +452,7 @@ public class DynamicConfigStore implements ApplicationContextAware {
     }
 
     /**
+<<<<<<< HEAD
      * Check if async execution is enabled for parallel API operations
      * (e.g., getByGuids fan-out, lineage BOTH direction split).
      * Falls back to FeatureFlagStore (Redis) if DynamicConfigStore is not activated.
@@ -464,6 +465,19 @@ public class DynamicConfigStore implements ApplicationContextAware {
         }
         // Fall back to FeatureFlagStore (Redis)
         return FeatureFlagStore.evaluate(ConfigKey.ENABLE_ASYNC_EXECUTION.getKey(), "true");
+=======
+     * Check if async ingestion is enabled.
+     * When enabled, write operations also publish to Kafka for a shadow consumer.
+     * Only enabled when DynamicConfigStore is activated and the flag is set to true.
+     *
+     * @return true if async ingestion is enabled, false otherwise
+     */
+    public static boolean isAsyncIngestionEnabled() {
+        if (isActivated()) {
+            return getConfigAsBoolean(ConfigKey.ENABLE_ASYNC_INGESTION.getKey());
+        }
+        return false; // disabled by default when config store is not activated
+>>>>>>> 887c4cd95ab85e723b696147206cf8a044b9bea7
     }
 
     // ================== Internal Methods ==================

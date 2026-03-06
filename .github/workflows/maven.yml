@@ -24,14 +24,23 @@ on:
       - beta
       - master
       - staging
+<<<<<<< HEAD
       - lite_master
       - alcon-v2-418
       - ring-*
       - ms-574-make-apis-async
 
+=======
+      - ring-*
+      - ms-635
+      - lg-async-producer
+      - ms-428-delete-by-conn
+      - ms-664-fix-audit-search
+>>>>>>> 887c4cd95ab85e723b696147206cf8a044b9bea7
     paths-ignore:
       - '.claude/**'
       - '.cursor/**'
+      - '.github/**'
       - 'docs/**'
       - 'local-dev/**'
       - 'README.txt'
