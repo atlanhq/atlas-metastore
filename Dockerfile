@@ -56,7 +56,7 @@ RUN mkdir /opt/apache-atlas/libext
 RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
 
 RUN cd /opt/apache-atlas/bin \
-    && ./atlas_start.py -setup || true \
+    && ./atlas_start.py -setup || true \ 
     && java -jar /opt/context/context-engine.jar --server.port=22000 
 
 VOLUME ["/opt/apache-atlas/conf", "/opt/apache-atlas/logs"]

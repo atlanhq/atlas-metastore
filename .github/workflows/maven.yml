@@ -269,7 +269,7 @@ jobs:
           echo "===================================="
           echo "Building Context Engine"
           echo "===================================="
-          cd mdlh-experiments/atlas-context
+          cd experiments/atlas-context
           mvn clean package -DskipTests
           cd ../../
 
