@@ -77,7 +77,11 @@ public class CassandraSessionProvider {
         configuredPort = port;
         configuredDc = dc;
 
-        LOG.info("Initializing Cassandra session: host={}, port={}, keyspace={}, dc={}", hostname, port, keyspace, dc);
+        int    rf       = configuration.getInt(CONFIG_PREFIX + "replication.factor", 1);
+        String strategy = configuration.getString(CONFIG_PREFIX + "replication.strategy", "SimpleStrategy");
+
+        LOG.info("Initializing Cassandra session: host={}, port={}, keyspace={}, dc={}, rf={}, strategy={}",
+                hostname, port, keyspace, dc, rf, strategy);
 
         CqlSessionBuilder builder = CqlSession.builder()
                 .addContactPoint(new InetSocketAddress(hostname, port))
@@ -86,9 +90,15 @@ public class CassandraSessionProvider {
         CqlSession initSession = builder.build();
 
         // Create keyspace if it doesn't exist
+        String replicationConfig;
+        if ("NetworkTopologyStrategy".equalsIgnoreCase(strategy)) {
+            replicationConfig = "{'class': 'NetworkTopologyStrategy', '" + dc + "': " + rf + "}";
+        } else {
+            replicationConfig = "{'class': 'SimpleStrategy', 'replication_factor': " + rf + "}";
+        }
         initSession.execute(
             "CREATE KEYSPACE IF NOT EXISTS " + keyspace +
-            " WITH replication = {'class': 'SimpleStrategy', 'replication_factor': 1}"
+            " WITH replication = " + replicationConfig
         );
         initSession.close();
 
@@ -99,7 +109,13 @@ public class CassandraSessionProvider {
                 .withKeyspace(keyspace)
                 .build();
 
-        createTables(keyspaceSession);
+        try {
+            createTables(keyspaceSession);
+        } catch (Exception e) {
+            LOG.error("Failed to create Cassandra tables, closing session: {}", e.getMessage(), e);
+            keyspaceSession.close();
+            throw e;
+        }
 
         LOG.info("Cassandra session initialized successfully for keyspace: {}", keyspace);
 

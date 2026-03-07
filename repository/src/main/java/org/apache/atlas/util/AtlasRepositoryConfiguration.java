@@ -158,7 +158,7 @@ public class AtlasRepositoryConfiguration {
 
             if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_CASSANDRA)) {
                 ret = ApplicationProperties.getClass(CASSANDRA_GRAPH_DATABASE_IMPLEMENTATION_CLASS, GraphDatabase.class);
-            } else if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHBD_BACKEND_JANUS)) {
+            } else if (StringUtils.equals(graphDatabaseImpl, ApplicationProperties.GRAPHDB_BACKEND_JANUS)) {
                 ret = ApplicationProperties.getClass(JANUS_GRAPH_DATABASE_IMPLEMENTATION_CLASS, GraphDatabase.class);
             } else {
                 ret = ApplicationProperties.getClass(graphDatabaseImpl, GraphDatabase.class);
