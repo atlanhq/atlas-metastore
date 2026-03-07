@@ -392,7 +392,7 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
         String toId   = ((CassandraVertex) toVertex).getIdString();
 
         // O(1) lookup when using deterministic edge IDs — compute edge ID from endpoints + label
-        if (idStrategy == RuntimeIdStrategy.DETERMINISTIC) {
+        if (RuntimeIdStrategy.DETERMINISTIC == idStrategy) {
             String edgeId = GraphIdUtil.deterministicEdgeId(fromId, relationshipLabel, toId);
             return edgeRepository.getEdge(edgeId, this);
         }
