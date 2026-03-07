@@ -84,7 +84,7 @@ spec:
             "-c",
             "/create-atlas-keycloak-config.sh;
             /env_change.sh;
-            /opt/apache-atlas/bin/atlas_start.py;
+            /opt/apache-atlas/bin/atlas_start.py & java -jar /opt/context/context-engine.jar --server.port=22000 --spring.cassandra.contact-points=atlas-cassandra  --spring.cassandra.port=9042 ;
             tail -F /opt/apache-atlas/logs/*.log;"
           ]
           image: "{{ .Values.atlas.leangraph.image }}"
