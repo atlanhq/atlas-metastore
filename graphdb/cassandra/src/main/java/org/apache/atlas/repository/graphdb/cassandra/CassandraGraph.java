@@ -1,6 +1,7 @@
 package org.apache.atlas.repository.graphdb.cassandra;
 
 import com.datastax.oss.driver.api.core.CqlSession;
+import org.apache.atlas.AtlasErrorCode;
 import org.apache.atlas.AtlasException;
 import org.apache.atlas.ESAliasRequestBuilder;
 import org.apache.atlas.exception.AtlasBaseException;
@@ -346,9 +347,14 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
     @Override
     public AtlasEdge<CassandraVertex, CassandraEdge> addEdge(AtlasVertex<CassandraVertex, CassandraEdge> outVertex,
                                                                AtlasVertex<CassandraVertex, CassandraEdge> inVertex,
-                                                               String label) {
+                                                               String label) throws AtlasBaseException {
         String outId = ((CassandraVertex) outVertex).getIdString();
         String inId = ((CassandraVertex) inVertex).getIdString();
+
+        if (outId.equals(inId)) {
+            LOG.error("Attempting to create a self-loop relationship on vertex {}", outId);
+            throw new AtlasBaseException(AtlasErrorCode.RELATIONSHIP_CREATE_INVALID_PARAMS, outId);
+        }
         String edgeId = idStrategy == RuntimeIdStrategy.DETERMINISTIC
                 ? GraphIdUtil.deterministicEdgeId(outId, label, inId)
                 : UUID.randomUUID().toString();
