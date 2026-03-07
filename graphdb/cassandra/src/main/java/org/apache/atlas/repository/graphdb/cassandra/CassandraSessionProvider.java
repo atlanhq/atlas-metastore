@@ -99,7 +99,13 @@ public class CassandraSessionProvider {
                 .withKeyspace(keyspace)
                 .build();
 
-        createTables(keyspaceSession);
+        try {
+            createTables(keyspaceSession);
+        } catch (Exception e) {
+            LOG.error("Failed to create Cassandra tables, closing session: {}", e.getMessage(), e);
+            keyspaceSession.close();
+            throw e;
+        }
 
         LOG.info("Cassandra session initialized successfully for keyspace: {}", keyspace);
 
