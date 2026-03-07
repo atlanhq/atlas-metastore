@@ -144,7 +144,7 @@
                     <artifactId>metrics-core</artifactId>
                 </exclusion>
             </exclusions>
-            <version>3.11.18</version>
+            <version>5.0.6</version>
         </dependency>
 
 
@@ -204,9 +204,9 @@
             </exclusions>
         </dependency>
         <dependency>
-            <groupId>com.datastax.cassandra</groupId>
-            <artifactId>cassandra-driver-core</artifactId>
-            <version>3.2.0</version>
+            <groupId>com.datastax.oss</groupId>
+            <artifactId>java-driver-core</artifactId>
+            <version>4.17.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>ch.qos.logback</groupId>
@@ -229,18 +229,6 @@
             <version>3.2.6</version>
         </dependency>
 
-        <dependency>
-            <groupId>org.cassandraunit</groupId>
-            <artifactId>cassandra-unit</artifactId>
-            <version>2.0.2.2</version>
-            <scope>test</scope>
-            <exclusions>
-                <exclusion>
-                    <groupId>ch.qos.logback</groupId>
-                    <artifactId>*</artifactId>
-                </exclusion>
-            </exclusions>
-        </dependency>
         <dependency>
             <groupId>com.carrotsearch</groupId>
             <artifactId>hppc</artifactId>
@@ -324,7 +312,7 @@
         <dependency>
             <groupId>com.fasterxml.jackson.dataformat</groupId>
             <artifactId>jackson-dataformat-yaml</artifactId>
-            <version>2.12.7</version>
+            <version>2.19.2</version>
         </dependency>
         <dependency>
             <groupId>org.apache.atlas</groupId>
