@@ -63,11 +63,14 @@ atlas:
     replicaCount: 2
     image: ghcr.io/atlanhq/atlas-metastore-leangraphsts:ac2b433abcd
     service:
-      portName: leangraph
       type: ClusterIP
-      path: /api/atlas/v2/
-      port: 80
-      targetPort: 21000
+      ports:
+        - name: atlas
+          port: 80
+          targetPort: 21000
+        - name: context-engine
+          port: 81
+          targetPort: 22000
     podAntiAffinity: true
     affinity:
       podAntiAffinity:
@@ -243,6 +246,7 @@ atlas:
       konghq.com/plugins: keycloak-jwt, xss
     labels: {}
     path: /
+    contextPath: /api/context/
     # pathType is only for k8s >= 1.1=
     pathType: ImplementationSpecific
     hosts: []

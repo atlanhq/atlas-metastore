@@ -36,10 +36,12 @@ spec:
       protocol: TCP
       name: http
     {{- else }}
-    - port: {{ .Values.atlas.service.port }}
-      targetPort: {{ .Values.atlas.service.targetPort }}
-      protocol: TCP
-      name: {{ .Values.atlas.service.portName }}
+      {{- range .Values.atlas.service.ports }}
+        - name: {{ .name }}
+          port: {{ .port }}
+          targetPort: {{ .targetPort }}
+          protocol: {{ .protocol | default "TCP" }}
+      {{- end }}
     {{- end }}
   selector:
     app: {{ template "name" . }}

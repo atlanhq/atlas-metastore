@@ -49,7 +49,7 @@ COPY atlas-hub/atlas_start.py.patch atlas-hub/atlas_config.py.patch /opt/apache-
 COPY atlas-hub/pre-conf/atlas-logback.xml /opt/apache-atlas/conf/
 COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
-# Copy Context Engine
+# Copy Context Engine - for now in the same container listening on port 22000
 COPY experiments/atlas-context/target/context-engine-0.0.1.jar /opt/context/context-engine.jar
 
 COPY start-services.sh /opt/start-services.sh

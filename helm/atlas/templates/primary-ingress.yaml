@@ -55,6 +55,20 @@ spec:
               serviceName: atlas-ui-service
               servicePort: {{ $servicePort }}
               {{- end }}
+          - path: /api/context/
+            {{- if $ingressSupportsPathType }}
+            pathType: {{ $ingressPathType }}
+            {{- end }}
+            backend:
+              {{- if $ingressApiIsStable }}
+              service:
+                name: atlas-service-atlas
+                port:
+                  name: context-engine
+              {{- else }}
+              serviceName: atlas-service-atlas
+              servicePort: context-engine
+              {{- end }}
   {{- end }}
   {{- else }}
     - http:
