@@ -49,7 +49,7 @@ COPY atlas-hub/atlas_start.py.patch atlas-hub/atlas_config.py.patch /opt/apache-
 COPY atlas-hub/pre-conf/atlas-logback.xml /opt/apache-atlas/conf/
 COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
-# Copy Context Engine - for now in the same container listening on port 22000 
+# Copy Context Engine - for now in the same atlas container listening on port 22000
 COPY experiments/atlas-context/target/context-engine-0.0.1.jar /opt/context/context-engine.jar
 
 COPY start-services.sh /opt/start-services.sh
@@ -57,7 +57,7 @@ RUN chmod +x /opt/start-services.sh
 
 RUN mkdir /opt/apache-atlas/libext
 RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
-
+# Expose Atlas REST API port along with context engine port
 ENTRYPOINT ["/opt/start-services.sh"]
 
 VOLUME ["/opt/apache-atlas/conf", "/opt/apache-atlas/logs"]
