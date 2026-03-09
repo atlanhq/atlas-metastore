@@ -45,10 +45,14 @@ public class DebugMetricsWrapper {
 
 	@PostConstruct
 	public void init() {
-		MetricsSystem metricsSystem = DefaultMetricsSystem.initialize(DEBUG_METRICS_CONTEXT);
-		registerOrIgnoreDuplicate(metricsSystem, DEBUG_METRICS_SOURCE, () -> metricsSystem.register(debugMetricsSource));
-		registerOrIgnoreDuplicate(metricsSystem, DEBUG_METRICS_REST_SINK, () -> metricsSystem.register(DEBUG_METRICS_REST_SINK, "", debugMetricsRESTSink));
-    }
+		try {
+			MetricsSystem metricsSystem = DefaultMetricsSystem.initialize(DEBUG_METRICS_CONTEXT);
+			registerOrIgnoreDuplicate(metricsSystem, DEBUG_METRICS_SOURCE, () -> metricsSystem.register(debugMetricsSource));
+			registerOrIgnoreDuplicate(metricsSystem, DEBUG_METRICS_REST_SINK, () -> metricsSystem.register(DEBUG_METRICS_REST_SINK, "", debugMetricsRESTSink));
+		} catch (Throwable t) {
+			LOG.error("Failed to initialize debug metrics; metrics will be unavailable. Cause: {} - {}", t.getClass().getSimpleName(), t.getMessage());
+		}
+	}
 
 	private void registerOrIgnoreDuplicate(MetricsSystem metricsSystem, String name, Runnable registration) {
 		try {
