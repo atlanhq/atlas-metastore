@@ -136,7 +136,7 @@
     </profiles>
 
     <build>
-        <outputDirectory>target/classes</outputDirectory>
+        <outputDirectory>target</outputDirectory>
         <resources>
             <resource>
                 <directory>src/bin</directory>
