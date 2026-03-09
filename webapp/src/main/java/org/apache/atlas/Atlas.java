@@ -345,14 +345,15 @@ public final class Atlas {
 
         // Create the primary template for the configured index prefix (e.g., janusgraph_vertex_index)
         String vertexIndex = INDEX_PREFIX + VERTEX_INDEX;
-        createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson);
 
         // Also create a template for atlas_graph_* pattern so the Cassandra graph backend
         // gets the same analyzers, normalizers, and dynamic templates when its index is created.
         // This ensures smooth migration — new tenants on Cassandra graph get correct mappings.
-        if (!INDEX_PREFIX.equals("atlas_graph_")) {
+        if (INDEX_PREFIX.equalsIgnoreCase("atlas_graph_")) {
             createESTemplateIfNotExists(esClient, "atlas-graph-template",
                     Arrays.asList("atlas_graph_*"), settingsJson, mappingsJson);
+        } else {
+            createESTemplateIfNotExists(esClient, "atlan-template", Arrays.asList(vertexIndex), settingsJson, mappingsJson);
         }
     }
 
