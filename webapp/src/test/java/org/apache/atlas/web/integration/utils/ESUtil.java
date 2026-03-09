@@ -2,6 +2,7 @@ package org.apache.atlas.web.integration.utils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.atlas.web.integration.AtlasDockerIntegrationTest;
 import org.apache.http.HttpHost;
 import org.elasticsearch.action.admin.indices.alias.get.GetAliasesRequest;
 import org.elasticsearch.action.search.SearchRequest;
@@ -31,6 +32,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.atlas.web.integration.AtlasDockerIntegrationTest.ES_URL;
 import static org.apache.atlas.web.integration.utils.TestUtil.sleep;
 import static org.apache.atlas.web.integration.utils.TestUtil.verifyESDocumentNotPresent;
 
@@ -40,30 +42,21 @@ public class ESUtil {
     public static RestHighLevelClient highLevelClient;
     public static String              JG_VERTEX_INDEX = "janusgraph_vertex_index";
     public static String              index_access_logs = "ranger-audit";
-    private static String             esAddress = "localhost:9200";
 
     private static RequestOptions requestOptions = RequestOptions.DEFAULT;
     private static int            bufferLimit    = 2000 * 1024 * 1024;
 
     static {
+        setupClients();
+
         RequestOptions.Builder builder = requestOptions.toBuilder();
         builder.setHttpAsyncResponseConsumerFactory(new HttpAsyncResponseConsumerFactory.HeapBufferedResponseConsumerFactory(bufferLimit));
         requestOptions = builder.build();
     }
 
-    public static synchronized void configureAddress(String address) {
-        if (address == null || address.trim().isEmpty()) {
-            throw new IllegalArgumentException("address must not be blank");
-        }
-
-        esAddress = address.replaceFirst("^https?://", "").trim();
-
-        if (highLevelClient != null) {
-            close();
-            highLevelClient = null;
-        }
-
-        LOG.info("Configured ESUtil address: {}", esAddress);
+    private static void setupClients(){
+        highLevelClient = getClient();
+        LOG.info("Client setup is successful!");
     }
 
     public static SearchResponse searchWithName(String entityName) {
@@ -182,7 +175,8 @@ public class ESUtil {
             synchronized (ESUtil.class) {
                 if (highLevelClient == null) {
                     try {
-                        String[] hostAndPort = esAddress.split(":");
+                        String[] hostAndPort = ES_URL.split(":");
+                        System.out.println(hostAndPort);
                         List<HttpHost> httpHosts = new ArrayList<>(1);
                         httpHosts.add(new HttpHost(hostAndPort[0], Integer.parseInt(hostAndPort[1])));
 
@@ -204,10 +198,8 @@ public class ESUtil {
 
     public static void close() {
         try {
-            if (highLevelClient != null) {
-                highLevelClient.close();
-                LOG.info("Closed highLevelClient");
-            }
+            highLevelClient.close();
+            LOG.info("Closed highLevelClient");
         } catch (IOException io) {
             LOG.info("Failed to close ES client/s");
         }

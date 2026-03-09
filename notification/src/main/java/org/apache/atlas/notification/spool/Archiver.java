@@ -19,7 +19,6 @@ package org.apache.atlas.notification.spool;
 
 import org.apache.atlas.notification.spool.models.IndexRecord;
 import org.apache.atlas.type.AtlasType;
-import org.apache.commons.io.FileExistsException;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
@@ -64,13 +63,7 @@ public class Archiver {
 
             FileUtils.moveFile(spoolFile, archiveFile);
         } catch (FileNotFoundException excp) {
-            // Expected in retry/idempotent flows when the source has already been moved or deleted.
-            LOG.warn("{}: skipping archive move because source file was not found. spoolFile={}, archiveFile={}",
-                    source, spoolFile, archiveFile);
-        } catch (FileExistsException excp) {
-            // Expected in retry/idempotent flows when an archive file for the same spool file already exists.
-            LOG.warn("{}: skipping archive move because archive file already exists. spoolFile={}, archiveFile={}",
-                    source, spoolFile, archiveFile);
+            LOG.warn("{}: failed while moving spoolFile={} to archiveFile={}", source, spoolFile, archiveFile, excp);
         } catch (IOException excp) {
             LOG.error("{}: failed while moving spoolFile={} to archiveFile={}", source, spoolFile, archiveFile, excp);
         }

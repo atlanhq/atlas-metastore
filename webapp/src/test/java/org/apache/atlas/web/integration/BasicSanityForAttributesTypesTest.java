@@ -8,8 +8,10 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.junit.jupiter.TestcontainersExtension;
 
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,11 +27,12 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
+@ExtendWith(TestcontainersExtension.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
-public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcessBaseIT {
-    private static final Logger LOG = LoggerFactory.getLogger(BasicSanityForAttributesTypesIntegrationTest.class);
+public class BasicSanityForAttributesTypesTest extends AtlasDockerIntegrationTest {
+    private static final Logger LOG = LoggerFactory.getLogger(BasicSanityForAttributesTypesTest.class);
 
-    private static long SLEEP = 1000;
+    private static long SLEEP = 2000;
 
     public static String TYPE_PROJECT = "TableauProject";
     public static String TYPE_WORKOBOOK = "TableauWorkbook";
@@ -762,7 +765,7 @@ public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcess
 
         assertEquals(1, ownerUsers.size());
         assertEquals("value_1", ownerUsers.get(0));
-        LOG.info("Skipping ES-level assertion for {}, validating Atlas entity value only", ATTR_OWNER_USERS);
+        verifyESAttributes(tableGuid, mapOf(ATTR_OWNER_USERS, listOf("value_1")));
 
 
         // 2. Add two more values in list
@@ -783,6 +786,7 @@ public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcess
         assertEquals("value_0", ownerUsers.get(0));
         assertEquals("value_1", ownerUsers.get(1));
         assertEquals("value_2", ownerUsers.get(2));
+        verifyESAttributes(tableGuid, mapOf(ATTR_OWNER_USERS, ownerUsers));
 
         // 3. Remove one value from list
         ownerUsers = new ArrayList<>(2);
@@ -800,6 +804,7 @@ public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcess
         assertEquals(2, ownerUsers.size());
         assertEquals("value_0", ownerUsers.get(0));
         assertEquals("value_2", ownerUsers.get(1));
+        verifyESAttributes(tableGuid, mapOf(ATTR_OWNER_USERS, ownerUsers));
 
         // 4. Add one + Remove one value
         ownerUsers = new ArrayList<>(2);
@@ -817,6 +822,7 @@ public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcess
         assertEquals(2, ownerUsers.size());
         assertEquals("value_1", ownerUsers.get(0));
         assertEquals("value_2", ownerUsers.get(1));
+        verifyESAttributes(tableGuid, mapOf(ATTR_OWNER_USERS, ownerUsers));
 
         // 5. Remove all values from list
         table.setAttribute(ATTR_OWNER_USERS, null);
@@ -846,6 +852,7 @@ public class BasicSanityForAttributesTypesIntegrationTest extends AtlasInProcess
         assertTrue(ownerUsers.contains("value_0"));
         assertTrue(ownerUsers.contains("value_2"));
         assertTrue(ownerUsers.contains("value_1"));
+        verifyESAttributes(tableGuid, mapOf(ATTR_OWNER_USERS, ownerUsers));
 
         LOG.info(">> arrayOfStrings");
     }

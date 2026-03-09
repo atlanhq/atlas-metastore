@@ -18,7 +18,6 @@
 
 package org.apache.atlas.repository.graphdb.janus;
 
-import org.apache.atlas.ApplicationProperties;
 import org.apache.atlas.graph.GraphSandboxUtil;
 import org.apache.atlas.repository.Constants;
 import org.apache.atlas.repository.graphdb.AtlasCardinality;
@@ -27,9 +26,9 @@ import org.apache.atlas.repository.graphdb.AtlasGraphManagement;
 import org.apache.atlas.repository.graphdb.AtlasPropertyKey;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
 import org.apache.atlas.runner.LocalSolrRunner;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeAll;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.AfterMethod;
+import org.testng.annotations.BeforeClass;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -45,16 +44,11 @@ public abstract class AbstractGraphDatabaseTest {
     protected static final String TYPESYSTEM = "TYPESYSTEM";
 
     private static final String BACKING_INDEX_NAME = "backing";
-    private static String originalAtlasConf;
 
     private AtlasGraph<?, ?> graph = null;
 
-    @BeforeAll
+    @BeforeClass
     public static void createIndices() throws Exception {
-        originalAtlasConf = System.getProperty("atlas.conf");
-        System.setProperty("atlas.conf", "src/test/resources");
-        ApplicationProperties.forceReload();
-
         GraphSandboxUtil.create();
 
         if (useLocalSolr()) {
@@ -80,14 +74,14 @@ public abstract class AbstractGraphDatabaseTest {
         mgmt.commit();
     }
 
-    @AfterEach
+    @AfterMethod
     public void commitGraph() {
         //force any pending actions to be committed so we can be sure they don't cause errors.
         pushChangesAndFlushCache();
         getGraph().commit();
     }
 
-    @AfterAll
+    @AfterClass
     public static void cleanUp() throws Exception {
         AtlasJanusGraph graph = new AtlasJanusGraph();
         graph.clear();
@@ -95,13 +89,6 @@ public abstract class AbstractGraphDatabaseTest {
         if (useLocalSolr()) {
             LocalSolrRunner.stop();
         }
-
-        if (originalAtlasConf != null) {
-            System.setProperty("atlas.conf", originalAtlasConf);
-        } else {
-            System.clearProperty("atlas.conf");
-        }
-        ApplicationProperties.forceReload();
     }
 
     protected <V, E> void pushChangesAndFlushCache() {
@@ -155,7 +142,7 @@ public abstract class AbstractGraphDatabaseTest {
         return vertex;
     }
 
-    @AfterEach
+    @AfterMethod
     public void removeVertices() {
         for(AtlasVertex vertex : newVertices) {
             if (vertex.exists()) {
