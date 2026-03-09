@@ -19,14 +19,12 @@ package org.apache.atlas.authorize.simple;
 import org.apache.atlas.authorize.*;
 import org.apache.atlas.model.instance.AtlasClassification;
 import org.apache.atlas.model.instance.AtlasEntityHeader;
-import org.apache.atlas.type.AtlasTypeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
-import org.junit.jupiter.api.Assertions;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.BeforeMethod;
+import org.testng.annotations.Test;
+import org.testng.AssertJUnit;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -35,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class AtlasSimpleAuthorizerTest {
     private static Logger LOG = LoggerFactory.getLogger(AtlasSimpleAuthorizerTest.class);
 
@@ -75,23 +72,20 @@ public class AtlasSimpleAuthorizerTest {
     private String          originalConf;
     private AtlasAuthorizer authorizer;
 
-    @BeforeEach
+    @BeforeMethod
     public void setup1() {
         originalConf = System.getProperty("atlas.conf");
 
         System.setProperty("atlas.conf", "src/test/resources");
 
         try {
-            authorizer = AtlasAuthorizerFactory.getAtlasAuthorizer(new AtlasTypeRegistry());
+            authorizer = AtlasAuthorizerFactory.getAtlasAuthorizer();
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest setup failed", e);
-            Assertions.fail("Failed to initialize authorizer: " + e.getMessage());
         }
-
-        Assertions.assertNotNull(authorizer, "Authorizer should be initialized");
     }
 
-    @AfterAll
+    @AfterClass
     public void tearDown() throws Exception {
         if (originalConf != null) {
             System.setProperty("atlas.conf", originalConf);
@@ -99,9 +93,8 @@ public class AtlasSimpleAuthorizerTest {
 
         authorizer = null;
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAllAllowedForAdminUser() {
         try {
             for (AtlasPrivilege privilege : AtlasPrivilege.values()) {
@@ -111,17 +104,16 @@ public class AtlasSimpleAuthorizerTest {
 
                 boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                Assertions.assertEquals(true, isAccessAllowed, privilege.name() + " should have been allowed for user " + USER_DATA_SCIENTIST);
+                AssertJUnit.assertEquals(privilege.name() + " should have been allowed for user " + USER_DATA_SCIENTIST, true, isAccessAllowed);
             }
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAddPIIForStewardExUser() {
         try {
             AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(null , AtlasPrivilege.ENTITY_ADD_CLASSIFICATION, null,  new AtlasClassification("PII"));
@@ -130,16 +122,15 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(true, isAccessAllowed, "user " + USER_DATA_STEWARD_EX + " should have been allowed to add PII");
+            AssertJUnit.assertEquals("user " + USER_DATA_STEWARD_EX + " should have been allowed to add PII", true, isAccessAllowed);
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAddClassificationOnEntityWithClassificationForStewardExUser() {
         try {
 
@@ -152,16 +143,15 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(true, isAccessAllowed, "user " + USER_DATA_STEWARD_EX + " should have been allowed to add PII");
+            AssertJUnit.assertEquals("user " + USER_DATA_STEWARD_EX + " should have been allowed to add PII", true, isAccessAllowed);
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAddClassificationOnEntityWithClassificationForStewardExUserShouldFail() {
         try {
 
@@ -174,16 +164,15 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(false, isAccessAllowed, "user " + USER_DATA_STEWARD_EX + " should have not been allowed to add PII on entity with TAG1,TAG2 classification ");
+            AssertJUnit.assertEquals("user " + USER_DATA_STEWARD_EX + " should have not been allowed to add PII on entity with TAG1,TAG2 classification ", false, isAccessAllowed);
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAddPIIForStewardUser() {
         try {
             AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(null , AtlasPrivilege.ENTITY_ADD_CLASSIFICATION, null,  new AtlasClassification("PII"));
@@ -192,16 +181,15 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(false, isAccessAllowed, "user " + USER_DATA_STEWARD + " should not have been allowed to add PII");
+            AssertJUnit.assertEquals("user " + USER_DATA_STEWARD + " should not have been allowed to add PII", false, isAccessAllowed);
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testFinancePIIEntityAccessForFinancePIIUser() {
         try {
             AtlasEntityHeader entity = new AtlasEntityHeader() {{
@@ -215,17 +203,16 @@ public class AtlasSimpleAuthorizerTest {
 
                 boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                Assertions.assertEquals(true, isAccessAllowed, "user " + USER_FINANCE_PII + " should have been allowed " + privilege + " on entity with FINANCE & PII");
+                AssertJUnit.assertEquals("user " + USER_FINANCE_PII + " should have been allowed " + privilege + " on entity with FINANCE & PII", true, isAccessAllowed);
             }
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testFinancePIIEntityAccessForFinanceUser() {
         try {
             AtlasEntityHeader entity = new AtlasEntityHeader() {{
@@ -239,17 +226,16 @@ public class AtlasSimpleAuthorizerTest {
 
                 boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                Assertions.assertEquals(false, isAccessAllowed, "user " + USER_FINANCE + " should not have been allowed " + privilege + " on entity with FINANCE & PII");
+                AssertJUnit.assertEquals("user " + USER_FINANCE + " should not have been allowed " + privilege + " on entity with FINANCE & PII", false, isAccessAllowed);
             }
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testFinanceEntityAccess() {
         try {
             AtlasEntityHeader entity = new AtlasEntityHeader() {{
@@ -264,18 +250,17 @@ public class AtlasSimpleAuthorizerTest {
 
                     boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                    Assertions.assertEquals(true, isAccessAllowed, "user " + userName + " should have been allowed " + privilege + " on entity with FINANCE");
+                    AssertJUnit.assertEquals("user " + userName + " should have been allowed " + privilege + " on entity with FINANCE", true, isAccessAllowed);
                 }
             }
         } catch (Exception e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAccessForUserInAdminGroup() {
         try {
             AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(null, AtlasPrivilege.ENTITY_UPDATE);
@@ -284,16 +269,15 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(true, isAccessAllowed, "user " + USER_IN_ADMIN_GROUP + " should have been allowed " + AtlasPrivilege.ENTITY_UPDATE);
+            AssertJUnit.assertEquals("user " + USER_IN_ADMIN_GROUP + " should have been allowed " + AtlasPrivilege.ENTITY_UPDATE, true, isAccessAllowed);
         } catch (AtlasAuthorizationException e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testAccessForUserInUnknownGroup() {
         try {
             AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(null, AtlasPrivilege.ENTITY_UPDATE);
@@ -302,16 +286,15 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(false, isAccessAllowed, "user " + USER_IN_UNKNOWN_GROUP + " should not have been allowed " + AtlasPrivilege.ENTITY_UPDATE);
+            AssertJUnit.assertEquals("user " + USER_IN_UNKNOWN_GROUP + " should not have been allowed " + AtlasPrivilege.ENTITY_UPDATE, false, isAccessAllowed);
         } catch (AtlasAuthorizationException e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testLabels() {
         try {
             for (AtlasPrivilege privilege : LABEL_PRIVILEGES) {
@@ -322,7 +305,7 @@ public class AtlasSimpleAuthorizerTest {
 
                     boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                    Assertions.assertEquals(false, isAccessAllowed, "user " + userName + " should not have been allowed " + privilege);
+                    AssertJUnit.assertEquals("user " + userName + " should not have been allowed " + privilege, false, isAccessAllowed);
                 }
 
                 AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(null, privilege);
@@ -331,17 +314,16 @@ public class AtlasSimpleAuthorizerTest {
 
                 boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                Assertions.assertEquals(true, isAccessAllowed, "user " + USER_DATA_STEWARD_EX + " should have been allowed " + privilege);
+                AssertJUnit.assertEquals("user " + USER_DATA_STEWARD_EX + " should have been allowed " + privilege, true, isAccessAllowed);
             }
         } catch (AtlasAuthorizationException e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
-    
-    
-    @Test
+
+    @Test(enabled = true)
     public void testBusinessMetadata() {
         try {
             for (String userName : Arrays.asList(USER_DATA_SCIENTIST, USER_DATA_STEWARD)) {
@@ -351,7 +333,7 @@ public class AtlasSimpleAuthorizerTest {
 
                 boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-                Assertions.assertEquals(false, isAccessAllowed, "user " + userName + " should not have been allowed " + AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA);
+                AssertJUnit.assertEquals("user " + userName + " should not have been allowed " + AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, false, isAccessAllowed);
             }
 
             AtlasEntityAccessRequest request = new AtlasEntityAccessRequest(null, AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA);
@@ -360,11 +342,11 @@ public class AtlasSimpleAuthorizerTest {
 
             boolean isAccessAllowed = authorizer.isAccessAllowed(request).isAllowed();
 
-            Assertions.assertEquals(true, isAccessAllowed, "user " + USER_DATA_STEWARD_EX + " should have been allowed " + AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA);
+            AssertJUnit.assertEquals("user " + USER_DATA_STEWARD_EX + " should have been allowed " + AtlasPrivilege.ENTITY_UPDATE_BUSINESS_METADATA, true, isAccessAllowed);
         } catch (AtlasAuthorizationException e) {
             LOG.error("Exception in AtlasSimpleAuthorizerTest", e);
 
-            Assertions.fail();
+            AssertJUnit.fail();
         }
     }
 

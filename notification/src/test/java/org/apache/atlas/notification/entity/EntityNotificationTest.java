@@ -24,7 +24,7 @@ import org.apache.atlas.type.AtlasClassificationType;
 import org.apache.atlas.type.AtlasTypeRegistry;
 import org.apache.atlas.v1.model.notification.EntityNotificationV1;
 import org.apache.atlas.v1.model.notification.EntityNotificationV1.OperationType;
-import org.junit.jupiter.api.Test;
+import org.testng.annotations.Test;
 
 import java.util.Collections;
 import java.util.HashMap;
@@ -35,8 +35,8 @@ import java.util.Set;
 
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertTrue;
 
 /**
  * EntityNotificationV1 tests.

@@ -20,8 +20,8 @@ package org.apache.atlas.repository.graphdb.janus;
 
 
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.testng.AssertJUnit.assertEquals;
+import static org.testng.AssertJUnit.assertTrue;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -33,7 +33,7 @@ import org.apache.atlas.repository.graphdb.AtlasGraph;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery;
 import org.apache.atlas.repository.graphdb.AtlasGraphQuery.ComparisionOperator;
 import org.apache.atlas.repository.graphdb.AtlasVertex;
-import org.junit.jupiter.api.Test;
+import org.testng.annotations.Test;
 
 import com.google.common.base.Predicate;
 import com.google.common.collect.Collections2;
@@ -43,6 +43,7 @@ import com.google.common.collect.Collections2;
 /**
  * Tests for AtlasJanusGraphQuery.
  */
+@Test
 public class GraphQueryTest extends AbstractGraphDatabaseTest {
 
 
@@ -428,7 +429,7 @@ public class GraphQueryTest extends AbstractGraphDatabaseTest {
                 });
         String errorMessage = "Expected/found result sizes differ.  Expected: "
                 + Arrays.asList(expectedResults).toString() +", found: " + result;
-        assertEquals(expectedResults.length, result.size(), errorMessage);
+        assertEquals(errorMessage, expectedResults.length, result.size());
 
         for(AtlasVertex<V, E> v : expectedResults) {
             assertTrue(result.contains(v));
@@ -445,7 +446,7 @@ public class GraphQueryTest extends AbstractGraphDatabaseTest {
 
     private void pause() {
         try {
-            Thread.sleep(500);
+            Thread.sleep(5000);
         } catch(InterruptedException e) {
            //ignore
         }

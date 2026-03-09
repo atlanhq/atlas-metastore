@@ -17,8 +17,8 @@
  */
 package org.apache.atlas.repository.graphdb.janus;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
+import org.testng.Assert;
+import org.testng.annotations.Test;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -107,7 +107,7 @@ public class AtlasJanusGraphIndexClientTest {
         fields.add("two");
         fields.add("three");
         String generatedString = AtlasJanusGraphIndexClient.generateSuggestionsString(fields);
-        Assertions.assertEquals(generatedString, "'one', 'two', 'three'");
+        Assert.assertEquals(generatedString, "'one', 'two', 'three'");
     }
 
     @Test
@@ -117,16 +117,16 @@ public class AtlasJanusGraphIndexClientTest {
         fields.put("two", 1);
         fields.put("three", 15);
         String generatedString = AtlasJanusGraphIndexClient.generateSearchWeightString(fields);
-        Assertions.assertEquals(generatedString, " one^10 two^1 three^15");
+        Assert.assertEquals(generatedString, " one^10 two^1 three^15");
     }
 
     private void assertOrder(List<String> topTerms, int ... indices) {
-        Assertions.assertEquals(topTerms.size(), indices.length);
+        Assert.assertEquals(topTerms.size(), indices.length);
         int i = 0;
         for(String term: topTerms) {
-            Assertions.assertEquals(Integer.toString(indices[i++]), term);
+            Assert.assertEquals(Integer.toString(indices[i++]), term);
         }
-        Assertions.assertEquals(topTerms.size(), indices.length);
+        Assert.assertEquals(topTerms.size(), indices.length);
     }
 
     private Map<String, AtlasJanusGraphIndexClient.TermFreq>  generateTerms(int ... termFreqs) {

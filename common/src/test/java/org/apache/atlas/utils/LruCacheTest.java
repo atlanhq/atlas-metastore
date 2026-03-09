@@ -17,20 +17,21 @@
  */
 package org.apache.atlas.utils;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.testng.Assert.assertEquals;
+import static org.testng.Assert.assertFalse;
+import static org.testng.Assert.assertNull;
+import static org.testng.Assert.assertTrue;
 
 import java.util.HashMap;
 import java.util.Map;
 
 import org.apache.commons.lang.RandomStringUtils;
-import org.junit.jupiter.api.Test;
+import org.testng.annotations.Test;
 
 /**
  * Tests the LruCache.
  */
+@Test
 public class LruCacheTest {
 
     /**

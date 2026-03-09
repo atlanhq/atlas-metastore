@@ -1,26 +1,19 @@
 package org.apache.atlas.web.integration.client;
 
 import org.apache.commons.lang3.StringUtils;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.Properties;
 
 public class ConfigReader {
-    private static final Logger LOG = LoggerFactory.getLogger(ConfigReader.class);
     private static Properties properties = new Properties();
 
     static {
         try (InputStream fis = ConfigReader.class.getClassLoader().getResourceAsStream("atlas-application.properties");) {
-            if (fis != null) {
-                properties.load(fis);
-            } else {
-                LOG.debug("atlas-application.properties not found on test classpath; using defaults");
-            }
+            properties.load(fis);
         } catch (IOException e) {
-            LOG.warn("Failed to load atlas-application.properties for test client config; using defaults", e);
+            e.printStackTrace();
         }
     }
 

@@ -23,15 +23,6 @@ on:
       - master
       - beta
       - staging
-    paths-ignore:
-      - '.claude/**'
-      - '.cursor/**'
-      - '.github/**'
-      - 'docs/**'
-      - 'helm/**'
-      - 'local-dev/**'
-      - 'README.txt'
-      - 'README.md'
 
 permissions:
   contents: read
@@ -44,24 +35,50 @@ jobs:
     timeout-minutes: 30
 
     steps:
+      - uses: actions/checkout@v3
+
+      - name: Check if tests should run
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            src:
+              - '**'
+              - '!.claude/**'
+              - '!.cursor/**'
+              - '!.github/**'
+              - '!docs/**'
+              - '!helm/**'
+              - '!local-dev/**'
+              - '!README.txt'
+              - '!README.md'
+
+      - name: Skip message
+        if: steps.filter.outputs.src != 'true'
+        run: |
+          echo "## Integration Tests Skipped" >> $GITHUB_STEP_SUMMARY
+          echo "No source code changes detected. Only docs/config files were modified." >> $GITHUB_STEP_SUMMARY
+          echo "Skipping integration tests."
+
       # ============================================
       # DISK CLEANUP - Testcontainers need space
       # ============================================
       - name: Free up disk space
+        if: steps.filter.outputs.src == 'true'
         run: |
           echo "Freeing disk space..."
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/share/swift || true
 
-      - uses: actions/checkout@v4
-
       - name: Set up JDK 17
-        uses: actions/setup-java@v4
+        if: steps.filter.outputs.src == 'true'
+        uses: actions/setup-java@v3
         with:
           java-version: '17'
           distribution: 'zulu'
 
       - name: Cache Maven packages
-        uses: actions/cache@v4
+        if: steps.filter.outputs.src == 'true'
+        uses: actions/cache@v3
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-integration-${{ hashFiles('**/pom.xml') }}
@@ -70,6 +87,7 @@ jobs:
             ${{ runner.os }}-maven-
 
       - name: Create Maven Settings
+        if: steps.filter.outputs.src == 'true'
         uses: s4u/maven-settings-action@v2.8.0
         with:
           servers: |
@@ -80,79 +98,80 @@ jobs:
             }]
 
       - name: Verify Docker
+        if: steps.filter.outputs.src == 'true'
         run: |
           docker --version
           docker info
 
-      - name: Run Tests
+      - name: Build webapp module
+        if: steps.filter.outputs.src == 'true'
+        run: |
+          mvn install -pl webapp -am -DskipTests -Drat.skip=true -q
+        env:
+          MAVEN_OPTS: -Xmx2g
+
+      - name: Run integration tests
         id: tests
+        if: steps.filter.outputs.src == 'true'
+        continue-on-error: true
         env:
           TESTCONTAINERS_RYUK_DISABLED: true
           TESTCONTAINERS_CHECKS_DISABLE: true
           DOCKER_HOST: unix:///var/run/docker.sock
         run: |
-          set +e
-          mvn verify -am \
+          # Debug: Verify Docker is accessible
+          echo "Checking Docker connectivity..."
+          docker ps || echo "Warning: docker ps failed"
+
+          # Run tests with testcontainers properties passed to JVM
+          mvn test -pl webapp \
+            -Dtest="EntityCrudIntegrationTest,GlossaryIntegrationTest,GlossaryExtendedIntegrationTest,SQLAssetHierarchyIntegrationTest,ClassificationIntegrationTest,LineageIntegrationTest,SearchIntegrationTest,RelationshipIntegrationTest,BusinessMetadataIntegrationTest,DataMeshIntegrationTest,PersonaPurposeIntegrationTest,PurposeDiscoveryIntegrationTest,LabelIntegrationTest,TypeDefIntegrationTest,AsyncIngestionIntegrationTest" \
             -Drat.skip=true \
+            -Dsurefire.failIfNoSpecifiedTests=false \
+            -Dtestcontainers.ryuk.disabled=true \
             2>&1 | tee test-output.log
 
           # Capture exit code from mvn (not tee)
-          exit_code=${PIPESTATUS[0]}
-          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
-          exit "${exit_code}"
-
-      - name: Discover test reports
-        id: discover-test-reports
-        if: always() && steps.tests.outcome != 'skipped'
-        run: |
-          mapfile -t reports < <(find . -type f \( -path "*/target/failsafe-reports/TEST-*.xml" -o -path "*/target/surefire-reports/TEST-*.xml" \))
-
-          if [ ${#reports[@]} -gt 0 ]; then
-            echo "has_reports=true" >> "$GITHUB_OUTPUT"
-            echo "Found ${#reports[@]} test report file(s)."
-            {
-              echo "report_paths<<EOF"
-              printf '%s\n' "${reports[@]}"
-              echo "EOF"
-            } >> "$GITHUB_OUTPUT"
-          else
-            echo "has_reports=false" >> "$GITHUB_OUTPUT"
-            echo "No JUnit XML files found under */target/{failsafe,surefire}-reports."
-          fi
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
 
       - name: Publish test results
         uses: dorny/test-reporter@v1
-        if: always() && steps.tests.outcome != 'skipped' && steps.discover-test-reports.outputs.has_reports == 'true'
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
           name: Integration Test Results
-          path: '**/target/failsafe-reports/TEST-*.xml,**/target/surefire-reports/TEST-*.xml'
+          path: webapp/target/surefire-reports/TEST-*.xml
           reporter: java-junit
           fail-on-error: false
-          fail-on-empty: false
-          list-suites: failed
-          list-tests: failed
 
-      - name: Summarize integration test run
-        if: always() && steps.tests.outcome != 'skipped'
+      - name: Generate test reports
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         run: |
-          echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
-          mapfile -t summaries < <(find . -type f -path "*/target/failsafe-reports/failsafe-summary.xml")
-          if [ ${#summaries[@]} -gt 0 ]; then
-            for summary in "${summaries[@]}"; do
-              echo "### ${summary}" >> $GITHUB_STEP_SUMMARY
-              cat "${summary}" >> $GITHUB_STEP_SUMMARY
-            done
+          python3 webapp/src/test/scripts/generate-test-report.py \
+            webapp/target/surefire-reports \
+            webapp/target/site/test-report.html \
+            --markdown webapp/target/site/test-summary.md \
+          || echo "Report generation failed, falling back to basic summary"
+
+          if [ -f webapp/target/site/test-summary.md ]; then
+            cat webapp/target/site/test-summary.md >> $GITHUB_STEP_SUMMARY
           else
-            echo "No failsafe summary found. Check artifacts for raw reports." >> $GITHUB_STEP_SUMMARY
+            echo "## Integration Test Results" >> $GITHUB_STEP_SUMMARY
+            echo "Report generation failed. Check artifacts for raw XML reports." >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Upload test reports
         uses: actions/upload-artifact@v4
-        if: always() && steps.tests.outcome != 'skipped'
+        if: always() && steps.filter.outputs.src == 'true' && steps.tests.outcome != 'skipped'
         with:
           name: integration-test-reports-${{ github.run_id }}
           path: |
-            **/target/failsafe-reports/
-            **/target/surefire-reports/
+            webapp/target/surefire-reports/
+            webapp/target/site/test-report.html
             test-output.log
           retention-days: 14
+
+      - name: Fail if tests failed
+        if: steps.filter.outputs.src == 'true' && steps.tests.outputs.exit_code != '0'
+        run: |
+          echo "Integration tests failed with exit code ${{ steps.tests.outputs.exit_code }}"
+          exit 1

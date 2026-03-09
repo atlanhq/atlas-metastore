@@ -21,10 +21,9 @@ import org.apache.atlas.notification.spool.models.IndexRecord;
 import org.apache.atlas.notification.spool.models.IndexRecords;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.TestInstance;
+import org.testng.Assert;
+import org.testng.annotations.AfterClass;
+import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
@@ -32,7 +31,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class IndexManagementTest extends BaseTest {
     @Test
     public void fileNameGeneration() {
@@ -40,8 +38,8 @@ public class IndexManagementTest extends BaseTest {
         SpoolConfiguration cfg = getSpoolConfiguration(spoolDir, handlerName);
 
         IndexRecord record = new IndexRecord(StringUtils.EMPTY);
-        Assertions.assertEquals(SpoolUtils.getIndexFileName(cfg.getSourceName(), cfg.getMessageHandlerName()), "index-test-src-someHandler.json");
-        Assertions.assertTrue(SpoolUtils.getSpoolFileName(cfg.getSourceName(), cfg.getMessageHandlerName(), record.getId()).startsWith("spool-test-src-someHandler-"));
+        Assert.assertEquals(SpoolUtils.getIndexFileName(cfg.getSourceName(), cfg.getMessageHandlerName()), "index-test-src-someHandler.json");
+        Assert.assertTrue(SpoolUtils.getSpoolFileName(cfg.getSourceName(), cfg.getMessageHandlerName(), record.getId()).startsWith("spool-test-src-someHandler-"));
     }
 
     @Test
@@ -51,10 +49,10 @@ public class IndexManagementTest extends BaseTest {
 
         IndexManagement.IndexFileManager indexFileManager = new IndexManagement.IndexFileManager(SOURCE_TEST, cfg.getIndexFile(), cfg.getIndexDoneFile(), null, 2);
 
-        Assertions.assertEquals(indexFileManager.getRecords().size(), expectedRecords);
+        Assert.assertEquals(indexFileManager.getRecords().size(), expectedRecords);
 
-        Assertions.assertEquals(indexFileManager.getRecords().get(0).getId(), "1");
-        Assertions.assertEquals(indexFileManager.getRecords().get(1).getId(), "2");
+        Assert.assertEquals(indexFileManager.getRecords().get(0).getId(), "1");
+        Assert.assertEquals(indexFileManager.getRecords().get(1).getId(), "2");
     }
 
     @Test
@@ -65,7 +63,7 @@ public class IndexManagementTest extends BaseTest {
         IndexManagement.IndexFileManager indexFileManager = new IndexManagement.IndexFileManager(SOURCE_TEST, newIndexFile, newIndexDoneFile, null, 2);
 
         int expectedCount = 2;
-        Assertions.assertEquals(indexFileManager.getRecords().size(), expectedCount);
+        Assert.assertEquals(indexFileManager.getRecords().size(), expectedCount);
 
         IndexRecord r3 = indexFileManager.add("3.log");
         IndexRecord r4 = indexFileManager.add("4.log");
@@ -78,19 +76,19 @@ public class IndexManagementTest extends BaseTest {
         indexFileManager.updateIndex(r5);
 
         IndexRecords records = indexFileManager.loadRecords(newIndexFile);
-        Assertions.assertTrue(records.getRecords().containsKey(r3.getId()));
-        Assertions.assertTrue(records.getRecords().containsKey(r4.getId()));
-        Assertions.assertTrue(records.getRecords().containsKey(r5.getId()));
+        Assert.assertTrue(records.getRecords().containsKey(r3.getId()));
+        Assert.assertTrue(records.getRecords().containsKey(r4.getId()));
+        Assert.assertTrue(records.getRecords().containsKey(r5.getId()));
 
-        Assertions.assertEquals(records.getRecords().get(r3.getId()).getStatus(), r3.getStatus());
-        Assertions.assertEquals(records.getRecords().get(r4.getId()).getFailedAttempt(), r4.getFailedAttempt());
-        Assertions.assertEquals(records.getRecords().get(r5.getId()).getLine(), r5.getLine());
+        Assert.assertEquals(records.getRecords().get(r3.getId()).getStatus(), r3.getStatus());
+        Assert.assertEquals(records.getRecords().get(r4.getId()).getFailedAttempt(), r4.getFailedAttempt());
+        Assert.assertEquals(records.getRecords().get(r5.getId()).getLine(), r5.getLine());
 
         indexFileManager.remove(r3);
         indexFileManager.remove(r4);
         indexFileManager.remove(r5);
 
-        Assertions.assertEquals(indexFileManager.getRecords().size(), expectedCount);
+        Assert.assertEquals(indexFileManager.getRecords().size(), expectedCount);
     }
 
     @Test
@@ -116,13 +114,13 @@ public class IndexManagementTest extends BaseTest {
     private void verifyRecords(IndexManagement.IndexFileManager indexFileManager) {
         List<IndexRecord> records = indexFileManager.getRecords();
 
-        Assertions.assertEquals(records.size(), 5);
-        Assertions.assertTrue(records.get(3).getPath().endsWith("3.log"));
-        Assertions.assertEquals(records.get(3).getStatus(), IndexRecord.STATUS_WRITE_IN_PROGRESS);
-        Assertions.assertEquals(records.get(2).getFailedAttempt(), 0);
-        Assertions.assertEquals(records.get(1).getDoneCompleted(), 0);
-        Assertions.assertEquals(records.get(0).getLine(), 0);
-        Assertions.assertFalse(records.get(0).getLastSuccess() != 0);
+        Assert.assertEquals(records.size(), 5);
+        Assert.assertTrue(records.get(3).getPath().endsWith("3.log"));
+        Assert.assertEquals(records.get(3).getStatus(), IndexRecord.STATUS_WRITE_IN_PROGRESS);
+        Assert.assertEquals(records.get(2).getFailedAttempt(), 0);
+        Assert.assertEquals(records.get(1).getDoneCompleted(), 0);
+        Assert.assertEquals(records.get(0).getLine(), 0);
+        Assert.assertFalse(records.get(0).getLastSuccess() != 0);
     }
 
     private void verifyAdding(IndexManagement.IndexFileManager indexFileManager) throws IOException {
@@ -145,7 +143,7 @@ public class IndexManagementTest extends BaseTest {
         indexFileManager.remove(indexFileManager.getRecords().get(5));
 
         boolean isPending = indexFileManager.getRecords().size() > 0;
-        Assertions.assertTrue(isPending);
+        Assert.assertTrue(isPending);
     }
 
     private void verifySaveAndLoad(IndexManagement.IndexFileManager indexFileManager) throws IOException {
@@ -154,7 +152,7 @@ public class IndexManagementTest extends BaseTest {
         indexFileManager.getRecords().get(1).setDoneCompleted(333l);
         indexFileManager.getRecords().get(0).setCurrentLine(999);
 
-        Assertions.assertEquals(indexFileManager.getRecords().size(), 6);
+        Assert.assertEquals(indexFileManager.getRecords().size(), 6);
     }
 
     private void checkArchiveDir(File archiveDir) {
@@ -167,8 +165,8 @@ public class IndexManagementTest extends BaseTest {
         }
 
         File[] files = archiveDir.listFiles();
-        Assertions.assertNotNull(files);
-        Assertions.assertEquals(files.length, 1);
+        Assert.assertNotNull(files);
+        Assert.assertEquals(files.length, 1);
     }
 
     private void addFile(IndexManagement.IndexFileManager indexFileManager, String dir, String fileName) throws IOException {
@@ -180,11 +178,11 @@ public class IndexManagementTest extends BaseTest {
     private void checkDoneFile(File newIndexDoneFile, File archiveDir, int maxArchiveFiles, String expectedFilePath) throws IOException {
         IndexManagement.IndexFileManager indexFileManager = new IndexManagement.IndexFileManager(SOURCE_TEST, newIndexDoneFile, newIndexDoneFile, null, maxArchiveFiles);
 
-        Assertions.assertEquals(indexFileManager.getRecords().size(), 2);
-        Assertions.assertTrue(indexFileManager.getRecords().get(1).getPath().endsWith(expectedFilePath));
+        Assert.assertEquals(indexFileManager.getRecords().size(), 2);
+        Assert.assertTrue(indexFileManager.getRecords().get(1).getPath().endsWith(expectedFilePath));
     }
 
-    @AfterAll
+    @AfterClass
     public void tearDown() {
         FileUtils.deleteQuietly(new File(spoolDirTest));
     }

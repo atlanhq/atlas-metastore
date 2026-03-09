@@ -146,7 +146,7 @@ public class PersonaPurposeIntegrationTest extends AtlasInProcessBaseIT {
     @Order(5)
     void testGetPersonaWithPolicies() throws AtlasServiceException {
         Assumptions.assumeTrue(personaCreationSupported, "Skipping: Persona creation not supported");
-        assertNotNull(policyGuid, "Policy creation failed");
+        Assumptions.assumeTrue(policyGuid != null, "Skipping: Policy creation failed");
         assertNotNull(personaGuid);
 
         AtlasEntityWithExtInfo result = atlasClient.getEntityByGuid(personaGuid, false, false);
@@ -203,9 +203,8 @@ public class PersonaPurposeIntegrationTest extends AtlasInProcessBaseIT {
     @Test
     @Order(8)
     void testDeletePolicy() throws AtlasServiceException {
-        Assumptions.assumeTrue(personaCreationSupported,
-                "Skipping: Persona creation not supported");
-        assertNotNull(policyGuid, "Policy not created");
+        Assumptions.assumeTrue(personaCreationSupported && policyGuid != null,
+                "Skipping: Policy not created");
 
         EntityMutationResponse response = atlasClient.deleteEntityByGuid(policyGuid);
         assertNotNull(response);

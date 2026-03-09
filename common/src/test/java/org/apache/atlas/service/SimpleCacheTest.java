@@ -17,7 +17,7 @@
  */
 package org.apache.atlas.service;
 
-import org.junit.jupiter.api.Test;
+import org.testng.annotations.Test;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -25,13 +25,12 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.testng.Assert.*;
 
 /**
  * Unit tests for SimpleCache with TTL and jitter support.
  */
+@Test
 public class SimpleCacheTest {
 
     @Test
