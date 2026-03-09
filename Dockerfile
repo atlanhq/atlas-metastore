@@ -57,7 +57,7 @@ RUN chmod +x /opt/start-services.sh
 
 RUN mkdir /opt/apache-atlas/libext
 RUN curl https://repo1.maven.org/maven2/org/jolokia/jolokia-jvm/1.6.2/jolokia-jvm-1.6.2-agent.jar -o /opt/apache-atlas/libext/jolokia-jvm-agent.jar
-# Expose Atlas REST API port along with context engine REST API port
+# Expose Atlas REST API port along with context engine REST API port 
 ENTRYPOINT ["/opt/start-services.sh"]
 
 VOLUME ["/opt/apache-atlas/conf", "/opt/apache-atlas/logs"]
