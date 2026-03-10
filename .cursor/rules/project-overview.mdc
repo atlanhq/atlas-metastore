@@ -1,0 +1,74 @@
+---
+description: Project description and structure of the project
+globs: 
+alwaysApply: false
+---
+## Project Overview
+Apache Atlas Metastore is a metadata management and data governance platform designed to provide centralized metadata repository capabilities across diverse data assets.
+
+### Core Architecture
+
+The project follows a modular Maven-based architecture with multiple components:
+
+**Key Modules:**
+- `intg` - Integration layer
+- `common` - Common utilities
+- `server-api` - Server API definitions
+- `notification` - Notification system
+- `client` - Client libraries
+- `repository` - Core repository layer
+- `authorization` - Authorization framework
+- `webapp` - Web application and REST APIs
+- `distro` - Distribution packaging
+- `graphdb` - Graph operations
+
+### REST API Layer
+
+The project provides comprehensive REST APIs for metadata operations:
+
+**Discovery and Search APIs:**
+The `DiscoveryREST` class provides search capabilities using DSL queries and full-text search.
+
+**Metadata Management APIs:**
+The `EntityREST` class provides entity CRUD capabilities for entities and tags.
+
+**Type Management APIs:**
+The `TypesRest` class provided types CRUD capabilities.
+
+**Administrative APIs:**
+Administrative endpoints like version information are available through `AdminResource`.
+
+**Lineage APIs:**
+Specialized lineage management through `LineageRest`.
+
+### Key Features
+
+1. **Metadata Management**: Centralized storage and management of metadata entities
+2. **Data Lineage**: Tracking data flow and relationships between entities
+3. **Search & Discovery**: DSL and full-text search capabilities
+4. **Governance**: Classification and policy enforcement
+5. **Notification System**: Event-driven architecture for metadata changes
+6. **Audit & Security**: Request tracking and authorization
+
+### Service Dependencies
+1. LineageREST → AtlasLineageService → Graph traversal
+2. EntityREST → AtlasEntityStore → Graph storage + notifications
+3. TypesREST → AtlasTypeDefStore → Type registry + distributed locking
+4. DiscoveryREST → EntityDiscoveryService → Elasticsearch + graph queries
+
+### Technology Stack
+The project is built using:
+- **Java/Maven** for core development
+- **Spring Framework** for dependency injection
+- **JanusGraph** for graph database storage
+- **Apache Kafka** for notifications
+- **Elasticsearch** for search indexing
+
+### Distributed Task Management
+
+The platform includes distributed task processing capabilities:
+This enables asynchronous processing of metadata operations across distributed environments.
+
+**Notes**
+
+This is an enterprise-grade metadata management platform with extensive REST API coverage, making it suitable for large-scale data governance implementations. The modular architecture allows for flexible deployment and customization based on organizational needs.
