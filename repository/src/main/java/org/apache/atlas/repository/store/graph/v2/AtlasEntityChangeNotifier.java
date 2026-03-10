@@ -265,7 +265,13 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
         if (isV2EntityNotificationEnabled) {
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
-                listener.onClassificationsUpdated(entity, updatedClassifications);
+                try {
+                    listener.onClassificationsUpdated(entity, updatedClassifications);
+                } catch (Exception e) {
+                    LOG.error("Classification update notification failed for listener {}: entity(guid={}, typeName={}, qualifiedName={}), classifications={}: {}",
+                            listener.getClass().getSimpleName(), entity.getGuid(), entity.getTypeName(), entity.getAttribute("qualifiedName"),
+                            updatedClassifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.toList()), e.getMessage(), e);
+                }
             }
         } else {
             if (instanceConverter != null) {
@@ -292,7 +298,13 @@ public class AtlasEntityChangeNotifier implements IAtlasEntityChangeNotifier {
 
         if (isV2EntityNotificationEnabled) {
             for (EntityChangeListenerV2 listener : entityChangeListenersV2) {
-                listener.onClassificationPropagationUpdated(entity, updatedClassifications, forceInline);
+                try {
+                    listener.onClassificationPropagationUpdated(entity, updatedClassifications, forceInline);
+                } catch (Exception e) {
+                    LOG.error("Classification propagation update notification failed for listener {}: entity(guid={}, typeName={}, qualifiedName={}), classifications={}, forceInline={}: {}",
+                            listener.getClass().getSimpleName(), entity.getGuid(), entity.getTypeName(), entity.getAttribute("qualifiedName"),
+                            updatedClassifications.stream().map(AtlasClassification::getTypeName).collect(Collectors.toList()), forceInline, e.getMessage(), e);
+                }
             }
         } else {
             if (instanceConverter != null) {
