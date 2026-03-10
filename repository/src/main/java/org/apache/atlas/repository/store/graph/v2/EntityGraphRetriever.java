@@ -2451,6 +2451,14 @@ public class EntityGraphRetriever {
                     while (iterator.hasNext()) {
                         AtlasEdge classificationEdge = iterator.next();
                         AtlasVertex classificationVertex = classificationEdge != null ? classificationEdge.getInVertex() : null;
+
+                        if (classificationVertex == null) {
+                            LOG.warn("Skipping classification edge with missing in-vertex: edgeId={}, entityGuid={}",
+                                     classificationEdge != null ? classificationEdge.getId() : "null",
+                                     GraphHelper.getGuid(entityVertex));
+                            continue;
+                        }
+
                         AtlasClassification classification = toAtlasClassification(classificationVertex);
 
                         if (classification != null) {
