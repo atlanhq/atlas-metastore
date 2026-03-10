@@ -71,6 +71,7 @@ import static org.apache.atlas.repository.graphdb.janus.AtlasElasticsearchQuery.
 public class EntityDiscoveryService implements AtlasDiscoveryService {
     private static final Logger LOG = LoggerFactory.getLogger(EntityDiscoveryService.class);
     private static final Logger PERF_LOG = AtlasPerfTracer.getPerfLogger("discovery.EntityDiscoveryService");
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final String DEFAULT_SORT_ATTRIBUTE_NAME = "name";
 
     private final AtlasGraph                      graph;
@@ -754,7 +755,6 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             String purpose = ((IndexSearchParams) searchParams).getPurpose();
 
             AtlasPerfMetrics.MetricRecorder addPreFiltersToSearchQueryMetric = RequestContext.get().startMetricRecord("addPreFiltersToSearchQuery");
-            ObjectMapper mapper = new ObjectMapper();
             List<Map<String, Object>> mustClauseList = new ArrayList<>();
 
             List<String> actions = new ArrayList<>();
@@ -764,7 +764,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
             mustClauseList.add(allPreFiltersBoolClause);
 
             String dslString = searchParams.getQuery();
-            JsonNode node = mapper.readTree(dslString);
+            JsonNode node = OBJECT_MAPPER.readTree(dslString);
             JsonNode userQueryNode = node.get("query");
             if (userQueryNode != null) {
 
@@ -774,7 +774,7 @@ public class EntityDiscoveryService implements AtlasDiscoveryService {
                 mustClauseList.add(getMap("wrapper", getMap("query", userQueryBase64)));
             }
 
-            JsonNode updateQueryNode = mapper.valueToTree(getMap("bool", getMap("must", mustClauseList)));
+            JsonNode updateQueryNode = OBJECT_MAPPER.valueToTree(getMap("bool", getMap("must", mustClauseList)));
 
             ((ObjectNode) node).set("query", updateQueryNode);
             searchParams.setQuery(node.toString());

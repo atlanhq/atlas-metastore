@@ -35,13 +35,20 @@ public class BrotliCompressionFilter implements Filter {
 
                 // Compress the response content with Brotli
                 byte[] uncompressedData = responseWrapper.getOutputStreamData();
-                Parameters params = new Parameters().setQuality(6); // Set Brotli quality level
-                byte[] compressedOutput = Encoder.compress(uncompressedData, params);
 
-                // Write Brotli-compressed data to the actual response
-                httpResponse.setHeader("Content-Encoding", "br");
-                httpResponse.setContentLength(compressedOutput.length);
-                httpResponse.getOutputStream().write(compressedOutput);
+                int maxCompressibleBytes = 50 * 1024 * 1024; // 50MB
+                if (uncompressedData.length > maxCompressibleBytes) {
+                    // Skip compression for very large responses to avoid 3x memory amplification
+                    httpResponse.getOutputStream().write(uncompressedData);
+                } else {
+                    Parameters params = new Parameters().setQuality(6); // Set Brotli quality level
+                    byte[] compressedOutput = Encoder.compress(uncompressedData, params);
+
+                    // Write Brotli-compressed data to the actual response
+                    httpResponse.setHeader("Content-Encoding", "br");
+                    httpResponse.setContentLength(compressedOutput.length);
+                    httpResponse.getOutputStream().write(compressedOutput);
+                }
             } else {
                 // Proceed without compression
                 chain.doFilter(request, response);

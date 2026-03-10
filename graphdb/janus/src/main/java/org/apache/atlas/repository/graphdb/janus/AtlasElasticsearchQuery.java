@@ -195,11 +195,11 @@ public class AtlasElasticsearchQuery implements AtlasIndexQuery<AtlasJanusVertex
             String responseString = performDirectIndexQuery(query, true);
 
             Map<String, LinkedHashMap> responseMap = AtlasType.fromJson(responseString, Map.class);
-            Map<String, LinkedHashMap> hits_0 = AtlasType.fromJson(AtlasType.toJson(responseMap.get("hits")), Map.class);
+            LinkedHashMap hits_0 = responseMap.get("hits");
 
-            ret.put("total", hits_0.get("total").get("value"));
+            ret.put("total", ((LinkedHashMap) hits_0.get("total")).get("value"));
 
-            List<LinkedHashMap> hits_1 = AtlasType.fromJson(AtlasType.toJson(hits_0.get("hits")), List.class);
+            List<LinkedHashMap> hits_1 = (List<LinkedHashMap>) hits_0.get("hits");
             ret.put("data", hits_1);
 
             Map<String, Object> aggregationsMap = (Map<String, Object>) responseMap.get("aggregations");
