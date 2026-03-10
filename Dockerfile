@@ -51,7 +51,7 @@ COPY atlas-hub/pre-conf/atlas-auth/ /opt/apache-atlas/conf/
 
 # Copy Context Engine:- for now deployed in the same atlas container listening on port 22000
 COPY experiments/atlas-context/target/context-engine-0.0.1.jar /opt/context/context-engine.jar
-
+# set bootstrap:     enabled: true in application.yaml for bootstrap of context 
 COPY start-services.sh /opt/start-services.sh
 RUN chmod +x /opt/start-services.sh
 
