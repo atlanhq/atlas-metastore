@@ -579,7 +579,16 @@ public class CassandraGraph implements AtlasGraph<CassandraVertex, CassandraEdge
      * AtlasElasticsearchDatabase is initialized).
      */
     static void ensureESIndexExists(String indexName) {
-        if (indexName == null || VERIFIED_ES_INDEXES.contains(indexName)) {
+        if (indexName == null) {
+            return;
+        }
+        // Normalize: callers may pass unprefixed names like "search_logs" but the actual
+        // ES index is prefixed (e.g. "atlas_graph_search_logs"). Must match what
+        // CassandraIndexQuery.normalizeIndexName() will resolve to.
+        if (!indexName.startsWith(Constants.INDEX_PREFIX)) {
+            indexName = Constants.INDEX_PREFIX + indexName;
+        }
+        if (VERIFIED_ES_INDEXES.contains(indexName)) {
             return;
         }
         try {
