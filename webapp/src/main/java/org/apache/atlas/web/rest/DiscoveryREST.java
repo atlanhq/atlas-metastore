@@ -353,12 +353,7 @@ public class DiscoveryREST {
         if (elapsed > AtlasConfiguration.SEARCH_SLOW_QUERY_THRESHOLD_MS.getLong()) {
             PERF_LOG.info("slow esSearch: {} ms, query={}", elapsed, parameters.getQuery());
         }
-        java.util.Map<String, Object> result = new java.util.LinkedHashMap<>();
-        result.put("hits", esResponse.get("hits"));
-        if (esResponse.containsKey("aggregations")) {
-            result.put("aggregations", esResponse.get("aggregations"));
-        }
-        return result;
+        return esResponse;
     }
 
     /**
