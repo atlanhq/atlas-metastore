@@ -145,6 +145,12 @@ class RelationshipsSuite:
             return
         resp = client.get(f"/relationship/guid/{rel_guid}", params={"extendedInfo": "true"})
         assert_status(resp, 200)
+        body = resp.json()
+        rel = body.get("relationship", body)
+        if isinstance(rel, dict):
+            assert "guid" in rel or "typeName" in rel or "end1" in rel, (
+                "Extended relationship response should have guid, typeName, or end1/end2"
+            )
 
     @test("update_relationship_propagate_tags", tags=["relationship", "crud"], order=6, depends_on=["create_direct_relationship"])
     def test_update_relationship_propagate_tags(self, client, ctx):
@@ -161,6 +167,16 @@ class RelationshipsSuite:
         }
         resp = client.put("/relationship", json_data=payload)
         assert_status_in(resp, [200, 204, 400])
+        if resp.status_code in [200, 204]:
+            # Read-after-write: verify propagateTags updated
+            resp2 = client.get(f"/relationship/guid/{rel_guid}")
+            if resp2.status_code == 200:
+                body = resp2.json()
+                rel = body.get("relationship", body)
+                if isinstance(rel, dict) and "propagateTags" in rel:
+                    assert rel["propagateTags"] == "ONE_TO_TWO", (
+                        f"Expected propagateTags=ONE_TO_TWO, got {rel['propagateTags']}"
+                    )
 
     @test("delete_direct_relationship", tags=["relationship", "crud"], order=7, depends_on=["create_direct_relationship"])
     def test_delete_direct_relationship(self, client, ctx):
@@ -169,6 +185,19 @@ class RelationshipsSuite:
             return
         resp = client.delete(f"/relationship/guid/{rel_guid}")
         assert_status_in(resp, [200, 204])
+
+        # Verify deleted: GET should return 404 or status=DELETED
+        resp2 = client.get(f"/relationship/guid/{rel_guid}")
+        assert resp2.status_code in [404, 200], (
+            f"Expected 404 or 200 after delete, got {resp2.status_code}"
+        )
+        if resp2.status_code == 200:
+            body = resp2.json()
+            rel = body.get("relationship", body)
+            if isinstance(rel, dict):
+                assert rel.get("status") == "DELETED", (
+                    f"Expected status=DELETED, got {rel.get('status')}"
+                )
 
     @test("bulk_relationship_create", tags=["relationship", "crud"], order=8)
     def test_bulk_relationship_create(self, client, ctx):

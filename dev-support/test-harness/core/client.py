@@ -27,12 +27,13 @@ class ApiResponse:
 class AtlasClient:
     """HTTP client wrapping requests with auth, latency tracking, and 401 retry."""
 
-    def __init__(self, api_base, admin_base, auth_provider, timeout=30):
+    def __init__(self, api_base, admin_base, auth_provider, timeout=30, request_logger=None):
         self.api_base = api_base.rstrip("/")
         self.admin_base = admin_base.rstrip("/")
         self.auth = auth_provider
         self.timeout = timeout
         self.latency_log: List[Dict] = []
+        self.request_logger = request_logger
 
     def get(self, path, params=None, admin=False) -> ApiResponse:
         return self._do("GET", path, params=params, admin=admin)
@@ -77,6 +78,8 @@ class AtlasClient:
                 "method": method, "path": path,
                 "status": 408, "latency_ms": latency_ms,
             })
+            if self.request_logger:
+                self.request_logger.log(method, path, params, json_data, 408, api_resp.body, latency_ms)
             return api_resp
 
         # 401 retry
@@ -114,5 +117,8 @@ class AtlasClient:
             "status": resp.status_code,
             "latency_ms": latency_ms,
         })
+
+        if self.request_logger:
+            self.request_logger.log(method, path, params, json_data, resp.status_code, body, latency_ms)
 
         return api_resp

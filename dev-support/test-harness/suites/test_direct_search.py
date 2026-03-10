@@ -19,6 +19,9 @@ class DirectSearchSuite:
             }
         })
         assert_status_in(resp, [200, 400, 403])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict) and body, "Expected non-empty dict from direct search"
 
     @test("direct_search_pit_create", tags=["search", "direct_search"], order=2)
     def test_direct_search_pit_create(self, client, ctx):

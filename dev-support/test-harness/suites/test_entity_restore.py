@@ -41,7 +41,11 @@ class EntityRestoreSuite:
         )
         # 200 or 204 on success; 404 if endpoint not available
         assert_status_in(resp, [200, 204, 404])
-        if resp.status_code == 404:
+        if resp.status_code == 200:
+            body = resp.json()
+            if isinstance(body, dict):
+                assert body, "Expected non-empty restore response"
+        elif resp.status_code == 404:
             ctx.set("restore_unavailable", True)
 
     @test("verify_restored_entity", tags=["restore", "crud"], order=3, depends_on=["restore_entity"])

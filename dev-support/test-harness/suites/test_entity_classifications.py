@@ -128,6 +128,16 @@ class EntityClassificationsSuite:
         )
         assert_status_in(resp, [200, 204])
 
+        # Read-after-write: verify classification still attached with correct typeName
+        resp2 = client.get(
+            f"/entity/guid/{self.entity_guid}/classification/{self.tag_name}"
+        )
+        if resp2.status_code == 200:
+            body = resp2.json()
+            assert body.get("typeName") == self.tag_name, (
+                f"Expected typeName={self.tag_name}, got {body.get('typeName')}"
+            )
+
     @test("update_classification_propagation_flags", tags=["classification", "propagation"], order=4.5, depends_on=["add_classification"])
     def test_update_classification_propagation_flags(self, client, ctx):
         if ctx.get("classification_add_failed"):
@@ -297,6 +307,14 @@ class EntityClassificationsSuite:
         assert_status_in(resp, [200, 204, 404])
 
         if resp.status_code != 404:
+            # Read-after-write: verify classification attached
+            resp2 = client.get(f"/entity/guid/{guid}")
+            if resp2.status_code == 200:
+                entity_body = resp2.json().get("entity", {})
+                classifications = entity_body.get("classifications", [])
+                found = any(c.get("typeName") == self.tag_name for c in classifications)
+                assert found, f"Classification {self.tag_name} not found after add by unique attr"
+
             # Clean up: delete classification
             resp = client.delete(
                 f"/entity/uniqueAttribute/type/DataSet/classification/{self.tag_name}",
@@ -312,4 +330,8 @@ class EntityClassificationsSuite:
             json_data=payload,
         )
         assert_status_in(resp, [404, 400])
+        body = resp.json()
+        assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+            f"Expected error details in response, got keys: {list(body.keys()) if isinstance(body, dict) else type(body).__name__}"
+        )
 

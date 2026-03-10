@@ -42,6 +42,8 @@ class ConfigSuite:
             # Try simpler payload
             resp = client.put(f"/configs/{self.test_key}", json_data="test_value_123")
         assert_status_in(resp, [200, 201, 204, 400])
+        if resp.status_code in [200, 201, 204]:
+            ctx.set("config_set_success", True)
 
     @test("get_config", tags=["config"], order=3, depends_on=["set_config"])
     def test_get_config(self, client, ctx):
@@ -50,9 +52,17 @@ class ConfigSuite:
         resp = client.get(f"/configs/{key}")
         # Staging validates keys against an allowlist; custom keys return 400
         assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            assert resp.body is not None, "Expected non-empty config response"
 
     @test("delete_config", tags=["config", "crud"], order=10, depends_on=["set_config"])
     def test_delete_config(self, client, ctx):
         resp = client.delete(f"/configs/{self.test_key}")
         # Staging validates keys against an allowlist; custom keys return 400
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code in [200, 204] and ctx.get("config_set_success"):
+            # Read-after-write: verify deleted
+            resp2 = client.get(f"/configs/{self.test_key}")
+            assert resp2.status_code in [400, 404], (
+                f"Expected 400/404 after config delete, got {resp2.status_code}"
+            )

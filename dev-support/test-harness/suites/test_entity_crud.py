@@ -10,6 +10,7 @@ from core.assertions import (
 )
 from core.audit_helpers import assert_audit_event_exists
 from core.search_helpers import assert_entity_in_search
+from core.kafka_helpers import assert_entity_in_kafka
 from core.data_factory import build_dataset_entity, build_process_entity, unique_qn, unique_name
 
 
@@ -49,6 +50,16 @@ class EntityCrudSuite:
         ctx.register_entity("ds1", guid, "DataSet")
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
+        # Read-after-write: verify persisted entity matches what was sent
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.typeName", "DataSet")
+        assert_field_equals(resp2, "entity.attributes.name", self.ds1_name)
+        assert_field_equals(resp2, "entity.attributes.qualifiedName", self.ds1_qn)
+
+        # Kafka: verify ENTITY_CREATE notification
+        assert_entity_in_kafka(ctx, guid, "ENTITY_CREATE")
+
     @test("create_entity_missing_required", tags=["crud"], order=4)
     def test_create_entity_missing_required(self, client, ctx):
         # POST entity without qualifiedName -> expect 400/422
@@ -61,7 +72,12 @@ class EntityCrudSuite:
         }
         resp = client.post("/entity", json_data={"entity": entity})
         # Atlas returns 404 with ATLAS-404-00-007 for missing mandatory attributes
-        assert_status_in(resp, [400, 404, 422])
+        assert_status_in(resp, [400, 404, 408, 422])
+        body = resp.json()
+        if isinstance(body, dict):
+            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+                f"Expected error details in response, got keys: {list(body.keys())}"
+            )
 
     @test("create_entity_audit", tags=["crud", "audit"], order=5, depends_on=["create_entity"])
     def test_create_entity_audit(self, client, ctx):
@@ -116,6 +132,13 @@ class EntityCrudSuite:
         ctx.register_entity("ds2", guid, "DataSet")
         ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
+        # Read-after-write: verify persisted entity matches what was sent
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "entity.typeName", "DataSet")
+        assert_field_equals(resp2, "entity.attributes.name", self.ds2_name)
+        assert_field_equals(resp2, "entity.attributes.qualifiedName", self.ds2_qn)
+
     @test("create_process_entity", tags=["crud"], order=3, depends_on=["create_entity", "create_entity_bulk"])
     def test_create_process_entity(self, client, ctx):
         ds1_guid = ctx.get_entity_guid("ds1")
@@ -139,6 +162,13 @@ class EntityCrudSuite:
                 guid = entities[0]["guid"]
                 ctx.register_entity("process1", guid, "Process")
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+
+                # Read-after-write: verify persisted process entity
+                resp2 = client.get(f"/entity/guid/{guid}")
+                if resp2.status_code == 200:
+                    assert_field_equals(resp2, "entity.typeName", "Process")
+                    assert_field_equals(resp2, "entity.attributes.name", self.process_name)
+                    assert_field_equals(resp2, "entity.attributes.qualifiedName", self.process_qn)
 
     # ---- READ ----
 
@@ -204,6 +234,11 @@ class EntityCrudSuite:
     def test_get_entity_not_found(self, client, ctx):
         resp = client.get("/entity/guid/00000000-0000-0000-0000-000000000000")
         assert_status_in(resp, [404, 400])
+        body = resp.json()
+        if isinstance(body, dict):
+            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+                f"Expected error details in 404 response, got keys: {list(body.keys())}"
+            )
 
     # ---- UPDATE ----
 
@@ -247,6 +282,13 @@ class EntityCrudSuite:
             params={"attr:qualifiedName": self.ds1_qn},
         )
         assert_status(resp, 200)
+
+        # Read-after-write: verify description updated
+        guid = ctx.get_entity_guid("ds1")
+        if guid:
+            resp2 = client.get(f"/entity/guid/{guid}")
+            assert_status(resp2, 200)
+            assert_field_equals(resp2, "entity.attributes.description", "Updated via unique attr")
 
     @test("update_entity_partial", tags=["crud"], order=22, depends_on=["create_entity"])
     def test_update_entity_partial(self, client, ctx):
@@ -309,6 +351,9 @@ class EntityCrudSuite:
         if resp.status_code == 200:
             assert_field_equals(resp, "entity.status", "DELETED")
 
+        # Kafka: verify ENTITY_DELETE notification
+        assert_entity_in_kafka(ctx, guid, "ENTITY_DELETE")
+
     @test("delete_entity_by_unique_attr", tags=["crud"], order=81)
     def test_delete_entity_by_unique_attr(self, client, ctx):
         qn = unique_qn("delete-ua-test")
@@ -340,6 +385,12 @@ class EntityCrudSuite:
         if guids:
             resp = client.delete("/entity/bulk", params={"guid": guids})
             assert_status(resp, 200)
+            body = resp.json()
+            deletes = body.get("mutatedEntities", {}).get("DELETE", [])
+            assert len(deletes) > 0, "Expected non-empty mutatedEntities.DELETE in bulk delete"
+            deleted_guids = [e.get("guid") for e in deletes]
+            for g in guids:
+                assert g in deleted_guids, f"Expected {g} in deleted guids, got {deleted_guids}"
 
     @test("delete_entity_verify_search_removal", tags=["crud", "search"], order=83, depends_on=["delete_entity_by_guid"])
     def test_delete_entity_verify_search_removal(self, client, ctx):

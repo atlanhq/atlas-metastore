@@ -47,18 +47,37 @@ def main():
     # Build auth
     auth = build_auth_provider(config)
 
+    # Trace logger (optional)
+    request_logger = None
+    if config.trace_log:
+        from core.request_logger import RequestLogger
+        trace_path = config.trace_log
+        if trace_path == "auto":
+            trace_path = RequestLogger.generate_filename()
+        request_logger = RequestLogger(trace_path)
+        print(f"  Trace log:   {os.path.abspath(trace_path)}")
+
     # Build client
     client = AtlasClient(
         api_base=config.api_base,
         admin_base=config.admin_base,
         auth_provider=auth,
         timeout=config.timeout,
+        request_logger=request_logger,
     )
 
     # Shared context
     ctx = TestContext()
     ctx.set("config", config)
     ctx.set("es_sync_wait", config.es_sync_wait)
+    if request_logger:
+        ctx.set("request_logger", request_logger)
+
+    # Kafka verifier (optional)
+    if config.kafka_bootstrap_servers:
+        from core.kafka_helpers import KafkaVerifier
+        kafka = KafkaVerifier(config.kafka_bootstrap_servers)
+        ctx.set("kafka_verifier", kafka)
 
     # Reporter
     reporter = Reporter(verbose=config.verbose, output_file=config.output_file)
@@ -111,6 +130,15 @@ def main():
                 print("  Cleanup complete")
         else:
             print("\nSkipping cleanup (--skip-cleanup)")
+
+        # Close Kafka verifier
+        kafka_verifier = ctx.get("kafka_verifier")
+        if kafka_verifier:
+            kafka_verifier.close()
+
+        # Close trace logger
+        if request_logger:
+            request_logger.close()
 
         # Report
         reporter.print_summary()

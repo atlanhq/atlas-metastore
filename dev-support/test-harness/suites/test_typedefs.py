@@ -31,6 +31,11 @@ class TypeDefSuite:
     def test_get_all_typedefs(self, client, ctx):
         resp = client.get("/types/typedefs")
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
+        for key in ("enumDefs", "entityDefs", "classificationDefs"):
+            assert key in body, f"Expected '{key}' in typedefs response"
+            assert isinstance(body[key], list), f"Expected '{key}' to be a list"
 
     @test("get_typedef_headers", tags=["smoke", "typedef"], order=2)
     def test_get_typedef_headers(self, client, ctx):

@@ -20,11 +20,15 @@ class AdminSuite:
     def test_get_version(self, client, ctx):
         resp = client.get("/version", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert body, "Expected non-empty version response"
 
     @test("get_health", tags=["smoke", "admin"], order=3)
     def test_get_health(self, client, ctx):
         resp = client.get("/health", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict) and body, "Expected non-empty dict health response"
 
     @test("is_active", tags=["smoke", "admin"], order=4)
     def test_is_active(self, client, ctx):
@@ -37,37 +41,56 @@ class AdminSuite:
         resp = client.get("/session", admin=True)
         # Staging may return 500 if session endpoint is not supported
         assert_status_in(resp, [200, 500])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict) and body, "Expected non-empty dict session response"
 
     @test("get_metrics", tags=["admin"], order=10)
     def test_get_metrics(self, client, ctx):
         resp = client.get("/metrics", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert body, "Expected non-empty metrics response"
 
     @test("get_metrics_prometheus", tags=["admin"], order=11)
     def test_get_metrics_prometheus(self, client, ctx):
         resp = client.get("/metrics/prometheus", admin=True)
         assert_status_in(resp, [200, 204, 404])
+        if resp.status_code == 200:
+            assert resp.body, "Expected non-empty Prometheus metrics response"
 
     @test("get_stack", tags=["admin"], order=12)
     def test_get_stack(self, client, ctx):
         resp = client.get("/stack", admin=True)
         # Staging may restrict stack trace endpoint
         assert_status_in(resp, [200, 500])
+        if resp.status_code == 200:
+            assert resp.body, "Expected non-empty stack response"
 
     @test("get_active_searches", tags=["admin"], order=13)
     def test_get_active_searches(self, client, ctx):
         resp = client.get("/activeSearches", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, (list, dict)), (
+            f"Expected list or dict response, got {type(body).__name__}"
+        )
 
     @test("get_patches", tags=["admin"], order=14)
     def test_get_patches(self, client, ctx):
         resp = client.get("/patches", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, list), f"Expected list response for patches, got {type(body).__name__}"
 
     @test("get_admin_tasks", tags=["admin"], order=15)
     def test_get_admin_tasks(self, client, ctx):
         resp = client.get("/tasks", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, (list, dict)), (
+            f"Expected list or dict response for tasks, got {type(body).__name__}"
+        )
 
     @test("get_tasks_by_id", tags=["admin"], order=16)
     def test_get_tasks_by_id(self, client, ctx):
@@ -87,6 +110,8 @@ class AdminSuite:
     def test_get_debug_metrics(self, client, ctx):
         resp = client.get("/debug/metrics", admin=True)
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict) and body, "Expected non-empty dict debug metrics response"
 
     @test("push_metrics_statsd", tags=["admin"], order=18)
     def test_push_metrics_statsd(self, client, ctx):
@@ -99,6 +124,9 @@ class AdminSuite:
         payload = {"fixIssues": False}
         resp = client.post("/checkstate", json_data=payload, admin=True)
         assert_status_in(resp, [200, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict) and body, "Expected non-empty dict checkstate response"
 
     @test("set_and_delete_feature_flag", tags=["admin"], order=21)
     def test_set_and_delete_feature_flag(self, client, ctx):

@@ -39,9 +39,11 @@ class DataMeshSuite:
             ctx.register_entity("domain1", guid, "DataDomain")
             ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
-            # Read back the auto-generated QN
+            # Read back the auto-generated QN and verify field values
             resp2 = client.get(f"/entity/guid/{guid}")
             if resp2.status_code == 200:
+                assert_field_equals(resp2, "entity.typeName", "DataDomain")
+                assert_field_equals(resp2, "entity.attributes.name", self.domain_name)
                 qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
                 ctx.set("domain1_qn", qn)
 
@@ -73,6 +75,9 @@ class DataMeshSuite:
             updates = body.get("mutatedEntities", {}).get("UPDATE", [])
             entities = creates or updates
             if entities:
+                assert entities[0].get("typeName") == "DataDomain", (
+                    f"Expected typeName=DataDomain, got {entities[0].get('typeName')}"
+                )
                 guid = entities[0]["guid"]
                 ctx.register_entity("sub_domain1", guid, "DataDomain")
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
@@ -114,9 +119,18 @@ class DataMeshSuite:
             updates = body.get("mutatedEntities", {}).get("UPDATE", [])
             entities = creates or updates
             if entities:
+                assert entities[0].get("typeName") == "DataProduct", (
+                    f"Expected typeName=DataProduct, got {entities[0].get('typeName')}"
+                )
                 guid = entities[0]["guid"]
                 ctx.register_entity("product1", guid, "DataProduct")
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
+
+                # Read-after-write: verify persisted data product
+                resp2 = client.get(f"/entity/guid/{guid}")
+                if resp2.status_code == 200:
+                    assert_field_equals(resp2, "entity.typeName", "DataProduct")
+                    assert_field_equals(resp2, "entity.attributes.name", self.product_name)
 
     @test("get_product_with_domain", tags=["data_mesh"], order=6, depends_on=["create_data_product"])
     def test_get_product_with_domain(self, client, ctx):

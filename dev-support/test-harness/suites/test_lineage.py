@@ -83,6 +83,12 @@ class LineageSuite:
             "depth": 3,
         })
         assert_status_in(resp, [200, 400])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert "baseEntityGuid" in body, "Expected 'baseEntityGuid' in on-demand lineage response"
+            assert "guidEntityMap" in body or "relations" in body, (
+                "Expected 'guidEntityMap' or 'relations' in on-demand lineage response"
+            )
 
     @test("post_lineage_list", tags=["lineage"], order=5)
     def test_post_lineage_list(self, client, ctx):
@@ -96,6 +102,11 @@ class LineageSuite:
             "direction": "BOTH",
         })
         assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, (dict, list)), (
+                f"Expected dict or list response from lineage list, got {type(body).__name__}"
+            )
 
     @test("lineage_isolated_entity", tags=["lineage"], order=6)
     def test_lineage_isolated_entity(self, client, ctx):

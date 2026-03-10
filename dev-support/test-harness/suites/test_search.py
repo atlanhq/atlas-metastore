@@ -26,6 +26,8 @@ class SearchSuite:
             "limit": 10,
         })
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("basic_search_post", tags=["search"], order=2)
     def test_basic_search_post(self, client, ctx):
@@ -36,6 +38,8 @@ class SearchSuite:
             "excludeDeletedEntities": True,
         })
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("index_search", tags=["smoke", "search"], order=3)
     def test_index_search(self, client, ctx):
@@ -77,6 +81,11 @@ class SearchSuite:
             }
         })
         assert_status(resp, 200)
+        assert_field_present(resp, "approximateCount")
+        body = resp.json()
+        assert isinstance(body.get("approximateCount"), int), (
+            f"Expected approximateCount to be int, got {type(body.get('approximateCount')).__name__}"
+        )
 
     @test("index_search_aggregation", tags=["search"], order=5)
     def test_index_search_aggregation(self, client, ctx):
@@ -93,6 +102,8 @@ class SearchSuite:
             }
         })
         assert_status(resp, 200)
+        body = resp.json()
+        assert "aggregations" in body, "Expected 'aggregations' field in aggregation search response"
 
     @test("es_search", tags=["search"], order=6)
     def test_es_search(self, client, ctx):
@@ -105,6 +116,9 @@ class SearchSuite:
         })
         # Raw ES response — may return 200 or could be unavailable/forbidden
         assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict) and body, "Expected non-empty dict response from ES search"
 
     @test("dsl_search", tags=["search"], order=7)
     def test_dsl_search(self, client, ctx):
@@ -113,6 +127,9 @@ class SearchSuite:
         })
         # DSL may or may not be enabled; staging may return 500
         assert_status_in(resp, [200, 400, 404, 500])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert body, "Expected non-empty response from DSL search"
 
     @test("basic_search_by_classification", tags=["search", "slow"], order=8)
     def test_basic_search_by_classification(self, client, ctx):
@@ -122,6 +139,9 @@ class SearchSuite:
         })
         # Wildcard classification search can be slow or unsupported
         assert_status_in(resp, [200, 400, 408, 500])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("index_search_empty_result", tags=["search"], order=9)
     def test_index_search_empty_result(self, client, ctx):
@@ -249,6 +269,8 @@ class SearchSuite:
             },
         })
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("search_by_glossary_term_type", tags=["search"], order=15)
     def test_search_by_glossary_term_type(self, client, ctx):
@@ -258,3 +280,5 @@ class SearchSuite:
             "offset": 0,
         })
         assert_status(resp, 200)
+        body = resp.json()
+        assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"

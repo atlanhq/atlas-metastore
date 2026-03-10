@@ -24,6 +24,8 @@ class HarnessConfig:
     es_sync_wait: int = 5
     verbose: bool = False
     output_file: Optional[str] = None
+    trace_log: Optional[str] = None
+    kafka_bootstrap_servers: Optional[str] = None
 
 
 def parse_args() -> HarnessConfig:
@@ -81,6 +83,10 @@ Examples:
                         help="Verbose output")
     parser.add_argument("-o", "--output", default=None, dest="output_file",
                         help="Write JSON report to this file")
+    parser.add_argument("--trace-log", nargs="?", const="auto", default=None,
+                        help="Log full request/response JSON to a JSONL file (default: auto-generated timestamped name)")
+    parser.add_argument("--kafka-bootstrap-servers", default=None,
+                        help="Kafka bootstrap servers for notification verification (e.g. 'localhost:9092')")
 
     args = parser.parse_args()
 
@@ -96,6 +102,8 @@ Examples:
     cfg.creds_file = args.creds_file
     cfg.user = args.user
     cfg.password = args.password
+    cfg.trace_log = args.trace_log
+    cfg.kafka_bootstrap_servers = args.kafka_bootstrap_servers
 
     if args.tenant:
         cfg.env = "staging"

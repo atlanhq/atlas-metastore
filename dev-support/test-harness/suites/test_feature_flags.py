@@ -39,6 +39,8 @@ class FeatureFlagSuite:
             # Try simpler payload
             resp = client.put(f"/featureflags/{self.test_key}", json_data="true")
         assert_status_in(resp, [200, 201, 204, 400])
+        if resp.status_code in [200, 201, 204]:
+            ctx.set("ff_set_success", True)
 
     @test("get_feature_flag", tags=["feature_flags"], order=3, depends_on=["set_feature_flag"])
     def test_get_feature_flag(self, client, ctx):
@@ -47,9 +49,17 @@ class FeatureFlagSuite:
         resp = client.get(f"/featureflags/{key}")
         # Staging validates keys against an allowlist; custom keys return 400
         assert_status_in(resp, [200, 400, 404])
+        if resp.status_code == 200:
+            assert resp.body is not None, "Expected non-empty feature flag response"
 
     @test("delete_feature_flag", tags=["feature_flags", "crud"], order=10, depends_on=["set_feature_flag"])
     def test_delete_feature_flag(self, client, ctx):
         resp = client.delete(f"/featureflags/{self.test_key}")
         # Staging validates keys against an allowlist; custom keys return 400
         assert_status_in(resp, [200, 204, 400, 404])
+        if resp.status_code in [200, 204] and ctx.get("ff_set_success"):
+            # Read-after-write: verify deleted
+            resp2 = client.get(f"/featureflags/{self.test_key}")
+            assert resp2.status_code in [400, 404], (
+                f"Expected 400/404 after delete, got {resp2.status_code}"
+            )

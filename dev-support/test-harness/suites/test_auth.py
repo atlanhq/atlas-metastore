@@ -13,6 +13,8 @@ class AuthSuite:
             "pluginId": "test-harness",
         })
         assert_status_in(resp, [200, 404, 403])
+        if resp.status_code == 200:
+            assert resp.body, "Expected non-empty roles response"
 
     @test("download_users", tags=["auth"], order=2)
     def test_download_users(self, client, ctx):
@@ -20,6 +22,8 @@ class AuthSuite:
             "pluginId": "test-harness",
         })
         assert_status_in(resp, [200, 404, 403])
+        if resp.status_code == 200:
+            assert resp.body, "Expected non-empty users response"
 
     @test("download_policies", tags=["auth"], order=3)
     def test_download_policies(self, client, ctx):
@@ -27,3 +31,5 @@ class AuthSuite:
             "pluginId": "test-harness",
         })
         assert_status_in(resp, [200, 404, 403])
+        if resp.status_code == 200:
+            assert resp.body, "Expected non-empty policies response"

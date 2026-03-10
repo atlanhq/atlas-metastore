@@ -17,6 +17,9 @@ class BulkPurgeSuite:
         })
         # 500 with NotFoundException on staging when endpoint routing differs
         assert_status_in(resp, [200, 404, 500])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("purge_invalid_prefix", tags=["bulk_purge"], order=2)
     def test_purge_invalid_prefix(self, client, ctx):
@@ -25,14 +28,24 @@ class BulkPurgeSuite:
             "prefix": "short",
         })
         assert_status_in(resp, [400, 422, 500])
+        body = resp.json()
+        if isinstance(body, dict):
+            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+                f"Expected error details in response, got keys: {list(body.keys())}"
+            )
 
     @test("system_status", tags=["bulk_purge"], order=3)
     def test_system_status(self, client, ctx):
         resp = client.get("/bulk-purge/system-status")
         # 500 with NotFoundException on staging when endpoint routing differs
         assert_status_in(resp, [200, 404, 500])
+        if resp.status_code == 200:
+            body = resp.json()
+            assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
 
     @test("cancel_nonexistent", tags=["bulk_purge"], order=4)
     def test_cancel_nonexistent(self, client, ctx):
         resp = client.delete("/bulk-purge/00000000-0000-0000-0000-000000000000")
         assert_status_in(resp, [200, 404, 500])
+        if resp.status_code == 200:
+            assert resp.body is not None, "Expected non-empty cancel response"

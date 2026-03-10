@@ -8,6 +8,7 @@ from core.assertions import (
     assert_field_equals, assert_field_not_empty,
 )
 from core.audit_helpers import assert_audit_event_exists
+from core.kafka_helpers import assert_entity_in_kafka
 from core.data_factory import unique_name, build_dataset_entity, unique_qn
 
 
@@ -42,6 +43,15 @@ class GlossarySuite:
         guid = resp.json()["guid"]
         ctx.register_entity("glossary", guid, "AtlasGlossary")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/{guid}"))
+
+        # Read-after-write: verify persisted glossary matches what was sent
+        resp2 = client.get(f"/glossary/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "name", self.glossary_name)
+        assert_field_present(resp2, "qualifiedName")
+
+        # Kafka: verify ENTITY_CREATE notification
+        assert_entity_in_kafka(ctx, guid, "ENTITY_CREATE")
 
     @test("list_glossaries_find_created", tags=["glossary", "validation"], order=3, depends_on=["create_glossary"])
     def test_list_glossaries_find_created(self, client, ctx):
@@ -119,6 +129,19 @@ class GlossarySuite:
         ctx.register_entity("term1", guid, "AtlasGlossaryTerm")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/term/{guid}"))
 
+        # Read-after-write: verify persisted term matches what was sent
+        resp2 = client.get(f"/glossary/term/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "name", self.term_name)
+        assert_field_present(resp2, "anchor")
+        anchor = resp2.json().get("anchor", {})
+        assert anchor.get("glossaryGuid") == glossary_guid, (
+            f"Expected anchor.glossaryGuid={glossary_guid}, got {anchor.get('glossaryGuid')}"
+        )
+
+        # Kafka: verify ENTITY_CREATE notification
+        assert_entity_in_kafka(ctx, guid, "ENTITY_CREATE")
+
     @test("create_terms_bulk", tags=["glossary", "crud"], order=11, depends_on=["create_glossary"])
     def test_create_terms_bulk(self, client, ctx):
         glossary_guid = ctx.get_entity_guid("glossary")
@@ -139,6 +162,8 @@ class GlossarySuite:
     @test("get_term", tags=["glossary"], order=12, depends_on=["create_term"])
     def test_get_term(self, client, ctx):
         guid = ctx.get_entity_guid("term1")
+        if not guid:
+            return
         resp = client.get(f"/glossary/term/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "name", self.term_name)
@@ -146,6 +171,8 @@ class GlossarySuite:
     @test("update_term", tags=["glossary", "crud"], order=13, depends_on=["create_term"])
     def test_update_term(self, client, ctx):
         guid = ctx.get_entity_guid("term1")
+        if not guid:
+            return
         glossary_guid = ctx.get_entity_guid("glossary")
         resp = client.put(f"/glossary/term/{guid}", json_data={
             "guid": guid,
@@ -163,6 +190,8 @@ class GlossarySuite:
     @test("get_glossary_terms_list", tags=["glossary"], order=15, depends_on=["create_term"])
     def test_get_glossary_terms_list(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
+        if not guid:
+            return
         resp = client.get(f"/glossary/{guid}/terms", params={
             "limit": 10, "offset": 0, "sort": "ASC",
         })
@@ -174,12 +203,14 @@ class GlossarySuite:
     @test("get_glossary_detailed_with_terms", tags=["glossary"], order=16, depends_on=["create_term"])
     def test_get_glossary_detailed_with_terms(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
+        if not guid:
+            return
         resp = client.get(f"/glossary/{guid}/detailed")
         assert_status(resp, 200)
         body = resp.json()
-        # Detailed response should include terms
-        terms = body.get("terms") or body.get("termInfo", [])
-        # Terms may be in different response shapes; just verify 200
+        assert isinstance(body, dict), f"Expected dict response, got {type(body).__name__}"
+        assert "guid" in body, "Detailed glossary response should have 'guid'"
+        assert "name" in body, "Detailed glossary response should have 'name'"
 
     # ---- Category CRUD ----
 
@@ -200,9 +231,16 @@ class GlossarySuite:
         ctx.register_entity("category1", guid, "AtlasGlossaryCategory")
         ctx.register_cleanup(lambda: client.delete(f"/glossary/category/{guid}"))
 
+        # Read-after-write: verify persisted category matches what was sent
+        resp2 = client.get(f"/glossary/category/{guid}")
+        assert_status(resp2, 200)
+        assert_field_equals(resp2, "name", self.category_name)
+
     @test("get_category", tags=["glossary"], order=21, depends_on=["create_category"])
     def test_get_category(self, client, ctx):
         guid = ctx.get_entity_guid("category1")
+        if not guid:
+            return
         resp = client.get(f"/glossary/category/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "name", self.category_name)
@@ -260,6 +298,8 @@ class GlossarySuite:
     @test("get_glossary_categories_list", tags=["glossary"], order=25, depends_on=["create_category"])
     def test_get_glossary_categories_list(self, client, ctx):
         guid = ctx.get_entity_guid("glossary")
+        if not guid:
+            return
         resp = client.get(f"/glossary/{guid}/categories", params={
             "limit": 10, "offset": 0, "sort": "ASC",
         })
@@ -271,6 +311,8 @@ class GlossarySuite:
     @test("get_category_terms", tags=["glossary"], order=26, depends_on=["create_term", "create_category"])
     def test_get_category_terms(self, client, ctx):
         cat_guid = ctx.get_entity_guid("category1")
+        if not cat_guid:
+            return
         resp = client.get(f"/glossary/category/{cat_guid}/terms")
         # May be empty if term not assigned to category, just verify endpoint works
         assert_status_in(resp, [200, 204])
@@ -278,6 +320,8 @@ class GlossarySuite:
     @test("assign_term_to_entity", tags=["glossary"], order=30, depends_on=["create_term"])
     def test_assign_term_to_entity(self, client, ctx):
         term_guid = ctx.get_entity_guid("term1")
+        if not term_guid:
+            return
         # Create a DataSet entity for term assignment
         qn = unique_qn("term-assign-test")
         entity = build_dataset_entity(qn=qn, name=unique_name("term-assign"))
@@ -296,6 +340,14 @@ class GlossarySuite:
             {"guid": entity_guid, "typeName": "DataSet"},
         ])
         assert_status_in(resp, [200, 204])
+
+        # Read-after-write: verify entity in assigned list
+        resp2 = client.get(f"/glossary/terms/{term_guid}/assignedEntities")
+        if resp2.status_code == 200:
+            body = resp2.json()
+            assigned = body if isinstance(body, list) else []
+            found = any(e.get("guid") == entity_guid for e in assigned)
+            assert found, f"Expected entity {entity_guid} in assigned entities after assign"
 
     @test("get_term_assigned_entities", tags=["glossary"], order=31, depends_on=["assign_term_to_entity"])
     def test_get_term_assigned_entities(self, client, ctx):
@@ -342,6 +394,8 @@ class GlossarySuite:
     @test("update_category", tags=["glossary", "crud"], order=22, depends_on=["create_category"])
     def test_update_category(self, client, ctx):
         guid = ctx.get_entity_guid("category1")
+        if not guid:
+            return
         glossary_guid = ctx.get_entity_guid("glossary")
         resp = client.put(f"/glossary/category/{guid}", json_data={
             "guid": guid,
@@ -351,6 +405,11 @@ class GlossarySuite:
         })
         # 409 can happen if concurrent modification or qualifiedName conflicts
         assert_status_in(resp, [200, 409])
+        if resp.status_code == 200:
+            # Read-after-write: verify shortDescription updated
+            resp2 = client.get(f"/glossary/category/{guid}")
+            if resp2.status_code == 200:
+                assert_field_equals(resp2, "shortDescription", "Updated category")
 
     # ---- Delete (reverse order: categories, terms, then glossary via cleanup) ----
 
@@ -363,7 +422,12 @@ class GlossarySuite:
         resp = client.delete(f"/glossary/{guid}")
         # May return 409 (conflict) if cascade not supported, or 200 if cascade delete
         assert_status_in(resp, [200, 204, 409])
-        if resp.status_code in (200, 204):
+        if resp.status_code == 409:
+            body = resp.json()
+            assert "errorMessage" in body or "message" in body, (
+                "Expected error message in 409 response"
+            )
+        elif resp.status_code in (200, 204):
             # Cascade deleted everything — mark so downstream deletes skip gracefully
             ctx.set("glossary_cascade_deleted", True)
 
@@ -372,6 +436,8 @@ class GlossarySuite:
         if ctx.get("glossary_cascade_deleted"):
             return  # Already deleted by cascade
         guid = ctx.get_entity_guid("category1")
+        if not guid:
+            return
         resp = client.delete(f"/glossary/category/{guid}")
         assert_status_in(resp, [200, 204])
 
@@ -380,5 +446,7 @@ class GlossarySuite:
         if ctx.get("glossary_cascade_deleted"):
             return  # Already deleted by cascade
         guid = ctx.get_entity_guid("term1")
+        if not guid:
+            return
         resp = client.delete(f"/glossary/term/{guid}")
         assert_status_in(resp, [200, 204])

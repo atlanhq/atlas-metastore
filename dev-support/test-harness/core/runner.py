@@ -155,14 +155,15 @@ def run(client, ctx, reporter, config):
                 continue
 
         # Run tests
-        failed_tests = set()
+        blocked_tests = set()  # Tests that failed, errored, or were skipped
         for test_meta in runnable_tests:
             test_name = test_meta["name"]
             test_fn = test_meta["fn"]
 
             # Check depends_on
             deps = test_meta.get("depends_on", [])
-            if any(d in failed_tests for d in deps):
+            if any(d in blocked_tests for d in deps):
+                blocked_tests.add(test_name)
                 reporter.record(TestResult(
                     suite=suite_name,
                     test_name=test_name,
@@ -170,6 +171,10 @@ def run(client, ctx, reporter, config):
                     error_message=f"Dependency failed: {deps}",
                 ))
                 continue
+
+            request_logger = ctx.get("request_logger")
+            if request_logger:
+                request_logger.set_context(suite_name, test_name)
 
             start = time.perf_counter()
             try:
@@ -186,7 +191,7 @@ def run(client, ctx, reporter, config):
                 ))
             except AssertionError as e:
                 latency = (time.perf_counter() - start) * 1000
-                failed_tests.add(test_name)
+                blocked_tests.add(test_name)
                 reporter.record(TestResult(
                     suite=suite_name,
                     test_name=test_name,
@@ -197,7 +202,7 @@ def run(client, ctx, reporter, config):
                 ))
             except Exception as e:
                 latency = (time.perf_counter() - start) * 1000
-                failed_tests.add(test_name)
+                blocked_tests.add(test_name)
                 tb = traceback.format_exc()
                 reporter.record(TestResult(
                     suite=suite_name,

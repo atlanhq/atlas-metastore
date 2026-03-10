@@ -41,9 +41,11 @@ class PersonaPurposeSuite:
             ctx.register_entity("persona1", guid, "Persona")
             ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
 
-            # Read back the auto-generated QN
+            # Read back the auto-generated QN and verify field values
             resp2 = client.get(f"/entity/guid/{guid}")
             if resp2.status_code == 200:
+                assert_field_equals(resp2, "entity.typeName", "Persona")
+                assert_field_equals(resp2, "entity.attributes.name", self.persona_name)
                 qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
                 ctx.set("persona1_qn", qn)
 
@@ -109,6 +111,8 @@ class PersonaPurposeSuite:
 
             resp2 = client.get(f"/entity/guid/{guid}")
             if resp2.status_code == 200:
+                assert_field_equals(resp2, "entity.typeName", "Purpose")
+                assert_field_equals(resp2, "entity.attributes.name", self.purpose_name)
                 qn = resp2.json().get("entity", {}).get("attributes", {}).get("qualifiedName")
                 ctx.set("purpose1_qn", qn)
 
@@ -166,6 +170,9 @@ class PersonaPurposeSuite:
             updates = body.get("mutatedEntities", {}).get("UPDATE", [])
             entities = creates or updates
             if entities:
+                assert entities[0].get("typeName") == "AuthPolicy", (
+                    f"Expected typeName=AuthPolicy, got {entities[0].get('typeName')}"
+                )
                 guid = entities[0]["guid"]
                 ctx.register_entity("auth_policy1", guid, "AuthPolicy")
                 ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{guid}"))
@@ -202,6 +209,14 @@ class PersonaPurposeSuite:
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 204])
 
+        # Verify deleted: GET should return 404 or status=DELETED
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert resp2.status_code in [200, 404], (
+            f"Expected 200 or 404 after delete, got {resp2.status_code}"
+        )
+        if resp2.status_code == 200:
+            assert_field_equals(resp2, "entity.status", "DELETED")
+
     @test("delete_persona", tags=["persona_purpose", "crud"], order=80, depends_on=["create_persona"])
     def test_delete_persona(self, client, ctx):
         if ctx.get("persona_unavailable"):
@@ -228,7 +243,20 @@ class PersonaPurposeSuite:
         resp = client.delete(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 204])
 
+        # Verify deleted
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert resp2.status_code in [200, 404], (
+            f"Expected 200 or 404 after delete, got {resp2.status_code}"
+        )
+        if resp2.status_code == 200:
+            assert_field_equals(resp2, "entity.status", "DELETED")
+
     @test("persona_purpose_not_found", tags=["persona_purpose"], order=90)
     def test_persona_purpose_not_found(self, client, ctx):
         resp = client.get("/entity/guid/00000000-0000-0000-0000-000000000000")
         assert_status_in(resp, [404, 400])
+        body = resp.json()
+        if isinstance(body, dict):
+            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+                f"Expected error details in response, got keys: {list(body.keys())}"
+            )
