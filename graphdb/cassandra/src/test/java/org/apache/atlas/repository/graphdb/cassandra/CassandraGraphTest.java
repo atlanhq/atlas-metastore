@@ -174,7 +174,7 @@ public class CassandraGraphTest {
     // ======================== addEdge ========================
 
     @Test
-    public void testAddEdge() {
+    public void testAddEdge() throws AtlasBaseException {
         AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
         AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
 
@@ -184,7 +184,7 @@ public class CassandraGraphTest {
     }
 
     @Test
-    public void testAddEdgeHasCorrectVertices() {
+    public void testAddEdgeHasCorrectVertices() throws AtlasBaseException {
         AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
         AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
 
@@ -223,7 +223,7 @@ public class CassandraGraphTest {
     // ======================== removeEdge ========================
 
     @Test
-    public void testRemoveEdge() {
+    public void testRemoveEdge() throws AtlasBaseException {
         AtlasVertex<CassandraVertex, CassandraEdge> v1 = graph.addVertex();
         AtlasVertex<CassandraVertex, CassandraEdge> v2 = graph.addVertex();
         AtlasEdge<CassandraVertex, CassandraEdge> edge = graph.addEdge(v1, v2, "knows");
