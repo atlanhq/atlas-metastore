@@ -6,8 +6,8 @@ from core.assertions import (
     assert_field_equals, assert_field_not_empty,
 )
 from core.data_factory import (
-    build_domain_entity, build_data_product_entity,
-    unique_name,
+    build_domain_entity, build_data_product_entity, build_dataset_entity,
+    unique_name, unique_qn,
 )
 
 
@@ -142,6 +142,110 @@ class DataMeshSuite:
         resp = client.get(f"/entity/guid/{guid}")
         assert_status(resp, 200)
         assert_field_equals(resp, "entity.typeName", "DataProduct")
+
+    @test("add_assets_to_product", tags=["data_mesh"], order=6.5, depends_on=["create_data_product"])
+    def test_add_assets_to_product(self, client, ctx):
+        """PR-02 (add): Add asset GUIDs to a DataProduct via dapiAssetGuids."""
+        if ctx.get("data_mesh_unavailable"):
+            return
+        product_guid = ctx.get_entity_guid("product1")
+        if not product_guid:
+            return
+
+        # Create a throwaway DataSet to assign as an asset
+        qn = unique_qn("product-asset")
+        entity = build_dataset_entity(qn=qn, name=unique_name("prod-asset"))
+        resp = client.post("/entity", json_data={"entity": entity})
+        assert_status(resp, 200)
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        if not entities:
+            return
+        asset_guid = entities[0]["guid"]
+        ctx.set("product_asset_guid", asset_guid)
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{asset_guid}"))
+
+        # Read product to get its current QN
+        resp_prod = client.get(f"/entity/guid/{product_guid}")
+        if resp_prod.status_code != 200:
+            return
+        prod_entity = resp_prod.json().get("entity", {})
+        prod_qn = prod_entity.get("attributes", {}).get("qualifiedName")
+        if not prod_qn:
+            return
+
+        # Update product to set dapiAssetGuids
+        resp = client.post("/entity", json_data={
+            "entity": {
+                "typeName": "DataProduct",
+                "guid": product_guid,
+                "attributes": {
+                    "qualifiedName": prod_qn,
+                    "name": self.product_name,
+                    "dapiAssetGuids": [asset_guid],
+                },
+            }
+        })
+        # 400 can happen if preprocessor rejects asset assignment
+        assert_status_in(resp, [200, 400])
+        if resp.status_code != 200:
+            ctx.set("product_asset_add_failed", True)
+            return
+
+        # Read back and verify
+        resp2 = client.get(f"/entity/guid/{product_guid}")
+        assert_status(resp2, 200)
+        attrs = resp2.json().get("entity", {}).get("attributes", {})
+        asset_guids = attrs.get("dapiAssetGuids", [])
+        assert asset_guid in asset_guids, (
+            f"Expected {asset_guid} in dapiAssetGuids, got {asset_guids}"
+        )
+
+    @test("remove_assets_from_product", tags=["data_mesh"], order=6.7,
+          depends_on=["add_assets_to_product"])
+    def test_remove_assets_from_product(self, client, ctx):
+        """PR-02 (remove): Clear dapiAssetGuids from DataProduct."""
+        if ctx.get("data_mesh_unavailable"):
+            return
+        if ctx.get("product_asset_add_failed"):
+            return
+        product_guid = ctx.get_entity_guid("product1")
+        if not product_guid:
+            return
+
+        # Read product QN
+        resp_prod = client.get(f"/entity/guid/{product_guid}")
+        if resp_prod.status_code != 200:
+            return
+        prod_entity = resp_prod.json().get("entity", {})
+        prod_qn = prod_entity.get("attributes", {}).get("qualifiedName")
+        if not prod_qn:
+            return
+
+        # Update product to clear dapiAssetGuids
+        resp = client.post("/entity", json_data={
+            "entity": {
+                "typeName": "DataProduct",
+                "guid": product_guid,
+                "attributes": {
+                    "qualifiedName": prod_qn,
+                    "name": self.product_name,
+                    "dapiAssetGuids": [],
+                },
+            }
+        })
+        assert_status_in(resp, [200, 400])
+        if resp.status_code != 200:
+            return
+
+        # Read back and verify cleared
+        resp2 = client.get(f"/entity/guid/{product_guid}")
+        assert_status(resp2, 200)
+        attrs = resp2.json().get("entity", {}).get("attributes", {})
+        asset_guids = attrs.get("dapiAssetGuids", [])
+        assert not asset_guids, f"Expected empty dapiAssetGuids, got {asset_guids}"
 
     @test("update_domain", tags=["data_mesh", "crud"], order=7, depends_on=["create_domain"])
     def test_update_domain(self, client, ctx):

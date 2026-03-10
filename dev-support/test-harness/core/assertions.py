@@ -1,6 +1,11 @@
 """Assertion helpers for API response validation."""
 
 
+class SkipTestError(Exception):
+    """Raised to skip a test with an explicit reason."""
+    pass
+
+
 class AssertionError(Exception):
     """Test assertion failure with context."""
 

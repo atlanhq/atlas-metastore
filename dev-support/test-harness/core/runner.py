@@ -7,7 +7,7 @@ import sys
 import time
 import traceback
 
-from core.assertions import AssertionError
+from core.assertions import AssertionError, SkipTestError
 from core.decorators import get_suite_registry, register_suite_tests
 from core.reporter import TestResult
 
@@ -188,6 +188,15 @@ def run(client, ctx, reporter, config):
                     test_name=test_name,
                     status="PASS",
                     latency_ms=latency,
+                ))
+            except SkipTestError as e:
+                latency = (time.perf_counter() - start) * 1000
+                reporter.record(TestResult(
+                    suite=suite_name,
+                    test_name=test_name,
+                    status="SKIP",
+                    latency_ms=latency,
+                    error_message=str(e),
                 ))
             except AssertionError as e:
                 latency = (time.perf_counter() - start) * 1000

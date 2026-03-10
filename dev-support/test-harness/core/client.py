@@ -35,21 +35,22 @@ class AtlasClient:
         self.latency_log: List[Dict] = []
         self.request_logger = request_logger
 
-    def get(self, path, params=None, admin=False) -> ApiResponse:
-        return self._do("GET", path, params=params, admin=admin)
+    def get(self, path, params=None, admin=False, timeout=None) -> ApiResponse:
+        return self._do("GET", path, params=params, admin=admin, timeout=timeout)
 
-    def post(self, path, json_data=None, params=None, admin=False) -> ApiResponse:
-        return self._do("POST", path, json_data=json_data, params=params, admin=admin)
+    def post(self, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
+        return self._do("POST", path, json_data=json_data, params=params, admin=admin, timeout=timeout)
 
-    def put(self, path, json_data=None, params=None, admin=False) -> ApiResponse:
-        return self._do("PUT", path, json_data=json_data, params=params, admin=admin)
+    def put(self, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
+        return self._do("PUT", path, json_data=json_data, params=params, admin=admin, timeout=timeout)
 
-    def delete(self, path, json_data=None, params=None, admin=False) -> ApiResponse:
-        return self._do("DELETE", path, json_data=json_data, params=params, admin=admin)
+    def delete(self, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
+        return self._do("DELETE", path, json_data=json_data, params=params, admin=admin, timeout=timeout)
 
-    def _do(self, method, path, json_data=None, params=None, admin=False) -> ApiResponse:
+    def _do(self, method, path, json_data=None, params=None, admin=False, timeout=None) -> ApiResponse:
         base = self.admin_base if admin else self.api_base
         url = f"{base}{path}"
+        effective_timeout = timeout if timeout is not None else self.timeout
 
         headers = self.auth.get_headers()
         auth_obj = self.auth.get_requests_auth()
@@ -62,7 +63,7 @@ class AtlasClient:
                 auth=auth_obj,
                 json=json_data,
                 params=params,
-                timeout=self.timeout,
+                timeout=effective_timeout,
             )
         except requests.exceptions.Timeout:
             latency_ms = (time.perf_counter() - start) * 1000
@@ -91,7 +92,7 @@ class AtlasClient:
                 auth=auth_obj,
                 json=json_data,
                 params=params,
-                timeout=self.timeout,
+                timeout=effective_timeout,
             )
 
         latency_ms = (time.perf_counter() - start) * 1000

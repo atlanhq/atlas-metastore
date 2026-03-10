@@ -26,6 +26,7 @@ class HarnessConfig:
     output_file: Optional[str] = None
     trace_log: Optional[str] = None
     kafka_bootstrap_servers: Optional[str] = None
+    no_kafka: bool = False
 
 
 def parse_args() -> HarnessConfig:
@@ -87,6 +88,8 @@ Examples:
                         help="Log full request/response JSON to a JSONL file (default: auto-generated timestamped name)")
     parser.add_argument("--kafka-bootstrap-servers", default=None,
                         help="Kafka bootstrap servers for notification verification (e.g. 'localhost:9092')")
+    parser.add_argument("--no-kafka", action="store_true",
+                        help="Disable Kafka notification verification entirely")
 
     args = parser.parse_args()
 
@@ -104,6 +107,7 @@ Examples:
     cfg.password = args.password
     cfg.trace_log = args.trace_log
     cfg.kafka_bootstrap_servers = args.kafka_bootstrap_servers
+    cfg.no_kafka = args.no_kafka
 
     if args.tenant:
         cfg.env = "staging"

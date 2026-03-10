@@ -74,7 +74,9 @@ def main():
         ctx.set("request_logger", request_logger)
 
     # Kafka verifier (optional)
-    if config.kafka_bootstrap_servers:
+    if config.no_kafka:
+        print("  Kafka:       disabled (--no-kafka)")
+    elif config.kafka_bootstrap_servers:
         from core.kafka_helpers import KafkaVerifier
         kafka = KafkaVerifier(config.kafka_bootstrap_servers)
         ctx.set("kafka_verifier", kafka)
@@ -117,6 +119,9 @@ def main():
         import traceback
         traceback.print_exc()
     finally:
+        # Print results first
+        reporter.print_summary()
+
         # Cleanup
         if not config.skip_cleanup:
             print("\nRunning cleanup...")
@@ -140,8 +145,7 @@ def main():
         if request_logger:
             request_logger.close()
 
-        # Report
-        reporter.print_summary()
+        # Write JSON report
         reporter.write_json_report(client.latency_log)
 
     sys.exit(0 if reporter.all_passed else 1)

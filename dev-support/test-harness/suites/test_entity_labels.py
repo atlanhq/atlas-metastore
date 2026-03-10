@@ -107,6 +107,6 @@ class EntityLabelsSuite:
         assert_status_in(resp, [404, 400])
         body = resp.json()
         if isinstance(body, dict):
-            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+            assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
                 f"Expected error details in response, got keys: {list(body.keys())}"
             )

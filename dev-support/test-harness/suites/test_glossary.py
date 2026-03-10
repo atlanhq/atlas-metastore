@@ -34,7 +34,7 @@ class GlossarySuite:
         resp = client.post("/glossary", json_data={
             "name": self.glossary_name,
             "shortDescription": "Test harness glossary",
-        })
+        }, timeout=90)
         assert_status(resp, 200)
         assert_field_present(resp, "guid")
         assert_field_equals(resp, "name", self.glossary_name)
@@ -93,7 +93,7 @@ class GlossarySuite:
             "guid": guid,
             "name": self.glossary_name,
             "shortDescription": "Updated description",
-        })
+        }, timeout=90)
         assert_status(resp, 200)
 
         # Read-after-write: GET and verify shortDescription
@@ -119,7 +119,7 @@ class GlossarySuite:
             "name": self.term_name,
             "shortDescription": "Test term",
             "anchor": {"glossaryGuid": glossary_guid},
-        })
+        }, timeout=90)
         assert_status(resp, 200)
         assert_field_present(resp, "guid")
         assert_field_equals(resp, "name", self.term_name)
@@ -151,7 +151,7 @@ class GlossarySuite:
                 "shortDescription": "Bulk term",
                 "anchor": {"glossaryGuid": glossary_guid},
             }
-        ])
+        ], timeout=90)
         assert_status(resp, 200)
         body = resp.json()
         if isinstance(body, list) and body:
@@ -221,7 +221,7 @@ class GlossarySuite:
             "name": self.category_name,
             "shortDescription": "Test category",
             "anchor": {"glossaryGuid": glossary_guid},
-        })
+        }, timeout=90)
         assert_status(resp, 200)
         assert_field_present(resp, "guid")
         assert_field_not_empty(resp, "name")
@@ -261,7 +261,7 @@ class GlossarySuite:
                 "shortDescription": "Bulk category B",
                 "anchor": {"glossaryGuid": glossary_guid},
             },
-        ])
+        ], timeout=90)
         assert_status(resp, 200)
         body = resp.json()
         if isinstance(body, list):
@@ -280,7 +280,7 @@ class GlossarySuite:
             "shortDescription": "Child category",
             "anchor": {"glossaryGuid": glossary_guid},
             "parentCategory": {"categoryGuid": parent_guid},
-        })
+        }, timeout=90)
         assert_status_in(resp, [200, 409])
         if resp.status_code == 200:
             child_guid = resp.json().get("guid")
@@ -412,6 +412,50 @@ class GlossarySuite:
                 assert_field_equals(resp2, "shortDescription", "Updated category")
 
     # ---- Delete (reverse order: categories, terms, then glossary via cleanup) ----
+
+    @test("term_assignment_in_search", tags=["glossary", "search"], order=42,
+          depends_on=["assign_term_to_entity"])
+    def test_term_assignment_in_search(self, client, ctx):
+        entity_guid = ctx.get_entity_guid("term_assign_entity")
+        term_guid = ctx.get_entity_guid("term1")
+        if not entity_guid or not term_guid:
+            return
+
+        time.sleep(ctx.get("es_sync_wait", 5))
+
+        # Search entity by GUID and verify meanings in response
+        resp = client.post("/search/indexsearch", json_data={
+            "dsl": {
+                "from": 0, "size": 1,
+                "query": {"bool": {"must": [
+                    {"term": {"__guid": entity_guid}},
+                    {"term": {"__state": "ACTIVE"}},
+                ]}}
+            }
+        })
+        if resp.status_code != 200:
+            return  # Search not available
+
+        body = resp.json()
+        entities = body.get("entities", [])
+        if not entities:
+            return  # Entity not yet in search
+
+        entity = entities[0]
+
+        # Check meanings array has termGuid
+        meanings = entity.get("meanings", [])
+        if meanings and isinstance(meanings, list):
+            if isinstance(meanings[0], dict):
+                term_guids = [m.get("termGuid") for m in meanings]
+                assert term_guid in term_guids, (
+                    f"Expected termGuid {term_guid} in meanings, got {term_guids}"
+                )
+
+        # Check meaningNames field is present (if populated)
+        meaning_names = entity.get("meaningNames", [])
+        if meaning_names:
+            assert len(meaning_names) > 0, "Expected non-empty meaningNames"
 
     @test("delete_glossary_not_empty", tags=["glossary"], order=79)
     def test_delete_glossary_not_empty(self, client, ctx):

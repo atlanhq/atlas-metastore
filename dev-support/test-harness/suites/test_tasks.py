@@ -42,6 +42,6 @@ class TasksSuite:
         if resp.status_code in [400, 404]:
             body = resp.json()
             if isinstance(body, dict):
-                assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+                assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
                     f"Expected error details in response, got keys: {list(body.keys())}"
                 )

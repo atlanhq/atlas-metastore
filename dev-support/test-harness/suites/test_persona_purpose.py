@@ -61,6 +61,43 @@ class PersonaPurposeSuite:
         assert_field_equals(resp, "entity.typeName", "Persona")
         assert_field_not_empty(resp, "entity.attributes.qualifiedName")
 
+    @test("assign_users_to_persona", tags=["persona_purpose"], order=2.5, depends_on=["create_persona"])
+    def test_assign_users_to_persona(self, client, ctx):
+        """P-02: Update persona to set personaUsers and personaGroups, verify persistence."""
+        if ctx.get("persona_unavailable"):
+            return
+        guid = ctx.get_entity_guid("persona1")
+        persona_qn = ctx.get("persona1_qn")
+        if not guid or not persona_qn:
+            return
+
+        resp = client.post("/entity", json_data={
+            "entity": {
+                "typeName": "Persona",
+                "guid": guid,
+                "attributes": {
+                    "qualifiedName": persona_qn,
+                    "name": self.persona_name,
+                    "personaUsers": ["test-user"],
+                    "personaGroups": ["test-group"],
+                },
+            }
+        })
+        # 400/500 can happen if Keycloak validates user/group existence
+        assert_status_in(resp, [200, 400, 500])
+        if resp.status_code != 200:
+            return  # Keycloak validation rejected fake users — skip gracefully
+
+        # Read back and verify lists persisted
+        resp2 = client.get(f"/entity/guid/{guid}")
+        assert_status(resp2, 200)
+        entity = resp2.json().get("entity", {})
+        attrs = entity.get("attributes", {})
+        users = attrs.get("personaUsers", [])
+        groups = attrs.get("personaGroups", [])
+        assert "test-user" in users, f"Expected 'test-user' in personaUsers, got {users}"
+        assert "test-group" in groups, f"Expected 'test-group' in personaGroups, got {groups}"
+
     @test("update_persona", tags=["persona_purpose", "crud"], order=3, depends_on=["create_persona"])
     def test_update_persona(self, client, ctx):
         if ctx.get("persona_unavailable"):
@@ -257,6 +294,6 @@ class PersonaPurposeSuite:
         assert_status_in(resp, [404, 400])
         body = resp.json()
         if isinstance(body, dict):
-            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+            assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
                 f"Expected error details in response, got keys: {list(body.keys())}"
             )

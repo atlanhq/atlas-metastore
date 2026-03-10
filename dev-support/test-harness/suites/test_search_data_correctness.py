@@ -1,0 +1,549 @@
+"""Search data correctness tests.
+
+Verifies that data written to Atlas is correctly reflected in ES search
+results — both after initial creation and after mutations (attribute
+updates, label changes, classification changes).
+
+Existing suites verify field *presence* and *filtering*.  This suite
+verifies that the returned **values** match what was written.
+"""
+
+import time
+
+from core.decorators import suite, test
+from core.assertions import assert_status, assert_status_in
+from core.data_factory import (
+    build_dataset_entity, build_classification_def, build_business_metadata_def,
+    unique_name, unique_qn, unique_type_name, PREFIX,
+)
+
+
+# ES field names for qualifiedName differ between local and staging
+QN_FIELDS = ("qualifiedName.keyword", "qualifiedName", "__qualifiedName")
+
+
+def _index_search(client, dsl):
+    """Issue an indexsearch query and return (available, body)."""
+    resp = client.post("/search/indexsearch", json_data={"dsl": dsl})
+    if resp.status_code in (404, 400, 405):
+        return False, {}
+    if resp.status_code != 200:
+        return False, {}
+    return True, resp.json()
+
+
+def _search_by_guid(client, guid):
+    """Search for a single entity by GUID."""
+    return _index_search(client, {
+        "from": 0, "size": 1,
+        "query": {"bool": {"must": [
+            {"term": {"__guid": guid}},
+            {"term": {"__state": "ACTIVE"}},
+        ]}}
+    })
+
+
+def _search_by_qn(client, qn):
+    """Search by qualifiedName, trying multiple ES field names."""
+    available, body = False, {}
+    for field in QN_FIELDS:
+        available, body = _index_search(client, {
+            "from": 0, "size": 1,
+            "query": {"bool": {"must": [
+                {"term": {field: qn}},
+                {"term": {"__state": "ACTIVE"}},
+            ]}}
+        })
+        if available and body.get("approximateCount", 0) > 0:
+            return True, body
+    return available, body
+
+
+def _get_entity(client, guid):
+    """Search by GUID and return (available, entity_dict_or_None)."""
+    available, body = _search_by_guid(client, guid)
+    if not available:
+        return False, None
+    entities = body.get("entities", [])
+    if not entities:
+        return True, None
+    return True, entities[0]
+
+
+def _attr(entity, name):
+    """Get an attribute value, checking both nested and flat paths."""
+    val = entity.get("attributes", {}).get(name)
+    if val is None:
+        val = entity.get(name)
+    return val
+
+
+@suite("search_data_correctness", depends_on_suites=["entity_crud"],
+       description="Search data round-trip correctness — write then verify via search")
+class SearchDataCorrectnessSuite:
+
+    def setup(self, client, ctx):
+        es_wait = ctx.get("es_sync_wait", 5)
+
+        # --- Classification typedef ---
+        self.tag_name = unique_type_name("DCorTag")
+        tag_resp = client.post("/types/typedefs", json_data={
+            "classificationDefs": [build_classification_def(name=self.tag_name)]
+        })
+        self.tag_ok = tag_resp.status_code in (200, 409)
+        if self.tag_ok:
+            time.sleep(10)  # type cache propagation
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.tag_name}")
+            )
+
+        # --- BM typedef ---
+        self.bm_name = unique_type_name("DCorBM")
+        bm_resp = client.post("/types/typedefs", json_data={
+            "businessMetadataDefs": [build_business_metadata_def(name=self.bm_name)]
+        })
+        self.bm_ok = bm_resp.status_code in (200, 409)
+        if self.bm_ok:
+            time.sleep(10)
+            ctx.register_cleanup(
+                lambda: client.delete(f"/types/typedef/name/{self.bm_name}")
+            )
+
+        # --- Entity A: rich entity with all attributes ---
+        self.created_name = unique_name("dcor-a")
+        self.created_qn = unique_qn("dcor-a")
+        self.created_desc = "dcor-description-alpha"
+        self.created_cert = "VERIFIED"
+        self.created_labels = ["dcor-label-1", "dcor-label-2"]
+
+        entity_a = build_dataset_entity(
+            qn=self.created_qn, name=self.created_name,
+            extra_attrs={
+                "description": self.created_desc,
+                "certificateStatus": self.created_cert,
+            },
+        )
+        entity_a["labels"] = self.created_labels
+
+        resp = client.post("/entity", json_data={"entity": entity_a})
+        assert_status(resp, 200)
+        body = resp.json()
+        creates = body.get("mutatedEntities", {}).get("CREATE", [])
+        updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+        entities = creates or updates
+        self.guid_a = entities[0]["guid"]
+        ctx.register_cleanup(lambda: client.delete(f"/entity/guid/{self.guid_a}"))
+
+        # Add classification to Entity A
+        self.tag_added = False
+        if self.tag_ok:
+            tag_resp = client.post(
+                f"/entity/guid/{self.guid_a}/classifications",
+                json_data=[{"typeName": self.tag_name}],
+            )
+            self.tag_added = tag_resp.status_code in (200, 204)
+
+        # Set BM on Entity A
+        self.bm_value = "dcor-bm-val"
+        self.bm_set = False
+        if self.bm_ok:
+            bm_resp = client.post(
+                f"/entity/guid/{self.guid_a}/businessmetadata",
+                json_data={self.bm_name: {"bmField1": self.bm_value}},
+            )
+            self.bm_set = bm_resp.status_code in (200, 204)
+
+        # --- Glossary + Term assigned to Entity A ---
+        self.glossary_ok = False
+        self.term_guid = None
+        self.term_name = None
+        self.term_qn = None
+
+        glossary_resp = client.post("/glossary", json_data={
+            "name": unique_name("dcor-gloss"),
+            "shortDescription": "Data correctness glossary",
+        })
+        if glossary_resp.status_code == 200:
+            glossary_guid = glossary_resp.json().get("guid")
+            ctx.register_cleanup(lambda: client.delete(f"/glossary/{glossary_guid}"))
+
+            self.term_name = unique_name("dcor-term")
+            term_resp = client.post("/glossary/term", json_data={
+                "name": self.term_name,
+                "shortDescription": "Data correctness term",
+                "anchor": {"glossaryGuid": glossary_guid},
+            })
+            if term_resp.status_code == 200:
+                term_body = term_resp.json()
+                self.term_guid = term_body.get("guid")
+                self.term_qn = term_body.get("qualifiedName")
+                ctx.register_cleanup(
+                    lambda: client.delete(f"/glossary/term/{self.term_guid}")
+                )
+
+                assign_resp = client.post(
+                    f"/glossary/terms/{self.term_guid}/assignedEntities",
+                    json_data=[{"guid": self.guid_a, "typeName": "DataSet"}],
+                )
+                if assign_resp.status_code in (200, 204):
+                    self.glossary_ok = True
+
+        # Single ES sync wait after all setup
+        time.sleep(max(es_wait, 5))
+
+    # ================================================================
+    #  Phase 1 — Create-and-verify (no mutations, just read-back)
+    # ================================================================
+
+    @test("guid_lookup_returns_correct_core_attrs",
+          tags=["search", "data_correctness"], order=1)
+    def test_guid_lookup(self, client, ctx):
+        """Search by GUID — verify name, QN, typeName, status match created values."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available:
+            return
+        assert entity is not None, (
+            f"Entity {self.guid_a} not found in search"
+        )
+
+        assert entity.get("guid") == self.guid_a, (
+            f"GUID mismatch: expected {self.guid_a}, got {entity.get('guid')}"
+        )
+        assert entity.get("typeName") == "DataSet", (
+            f"typeName mismatch: expected DataSet, got {entity.get('typeName')}"
+        )
+
+        actual_name = _attr(entity, "name")
+        assert actual_name == self.created_name, (
+            f"name mismatch: expected {self.created_name!r}, got {actual_name!r}"
+        )
+
+        actual_qn = _attr(entity, "qualifiedName")
+        assert actual_qn == self.created_qn, (
+            f"qualifiedName mismatch: expected {self.created_qn!r}, got {actual_qn!r}"
+        )
+
+        status = entity.get("status") or entity.get("__state")
+        if status:
+            assert status == "ACTIVE", f"status mismatch: expected ACTIVE, got {status}"
+
+    @test("qn_lookup_returns_correct_entity",
+          tags=["search", "data_correctness"], order=2)
+    def test_qn_lookup(self, client, ctx):
+        """Search by qualifiedName — verify GUID and name match."""
+        available, body = _search_by_qn(client, self.created_qn)
+        if not available:
+            return
+        count = body.get("approximateCount", 0)
+        assert count > 0, (
+            f"Entity not found when searching by QN {self.created_qn}"
+        )
+        entity = body["entities"][0]
+        assert entity.get("guid") == self.guid_a, (
+            f"QN lookup returned wrong entity: expected guid={self.guid_a}, "
+            f"got {entity.get('guid')}"
+        )
+        actual_name = _attr(entity, "name")
+        assert actual_name == self.created_name, (
+            f"QN lookup name mismatch: expected {self.created_name!r}, got {actual_name!r}"
+        )
+
+    @test("description_matches_created_value",
+          tags=["search", "data_correctness"], order=3)
+    def test_description(self, client, ctx):
+        """Verify description value in search matches what was written."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual = _attr(entity, "description")
+        if actual is not None:  # field may not be in ES mapping on all envs
+            assert actual == self.created_desc, (
+                f"description mismatch: expected {self.created_desc!r}, got {actual!r}"
+            )
+
+    @test("certificate_matches_created_value",
+          tags=["search", "data_correctness"], order=4)
+    def test_certificate(self, client, ctx):
+        """Verify certificateStatus value in search matches what was written."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual = _attr(entity, "certificateStatus")
+        if actual is not None:
+            assert actual == self.created_cert, (
+                f"certificateStatus mismatch: expected {self.created_cert!r}, "
+                f"got {actual!r}"
+            )
+
+    @test("labels_match_created_values",
+          tags=["search", "data_correctness"], order=5)
+    def test_labels(self, client, ctx):
+        """Verify every created label appears in the search result."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual = entity.get("labels", [])
+        if not actual:
+            return  # labels not returned on this environment
+        for lbl in self.created_labels:
+            assert lbl in actual, (
+                f"Label {lbl!r} not in search labels: {actual}"
+            )
+
+    @test("classifications_match_created_values",
+          tags=["search", "data_correctness"], order=6)
+    def test_classifications(self, client, ctx):
+        """Verify classificationNames and classification objects are correct."""
+        if not self.tag_added:
+            return
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+
+        # classificationNames list
+        cn = entity.get("classificationNames", [])
+        assert self.tag_name in cn, (
+            f"{self.tag_name} not in classificationNames: {cn}"
+        )
+
+        # classification objects — verify typeName
+        classifications = entity.get("classifications", [])
+        if classifications:
+            type_names = [
+                c.get("typeName") for c in classifications
+                if isinstance(c, dict)
+            ]
+            assert self.tag_name in type_names, (
+                f"{self.tag_name} not in classification objects: {type_names}"
+            )
+
+    @test("bm_matches_created_value",
+          tags=["search", "data_correctness", "businessmeta"], order=7)
+    def test_bm(self, client, ctx):
+        """Verify business metadata value in search matches what was set."""
+        if not self.bm_set:
+            return
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        bm = entity.get("businessAttributes", {}).get(self.bm_name, {})
+        if bm:  # BM may not appear in all ES mappings
+            assert bm.get("bmField1") == self.bm_value, (
+                f"bmField1 mismatch: expected {self.bm_value!r}, got {bm}"
+            )
+
+    @test("meanings_match_created_value",
+          tags=["search", "data_correctness", "glossary"], order=8)
+    def test_meanings(self, client, ctx):
+        """Verify meanings contains the assigned term with correct termGuid."""
+        if not self.glossary_ok:
+            return
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+
+        # Primary: meanings objects with termGuid
+        meanings = entity.get("meanings", [])
+        if meanings and isinstance(meanings, list) and isinstance(meanings[0], dict):
+            term_guids = [m.get("termGuid") for m in meanings]
+            assert self.term_guid in term_guids, (
+                f"termGuid {self.term_guid} not in meanings: {term_guids}"
+            )
+            return
+
+        # Fallback: meaningNames list
+        meaning_names = entity.get("meaningNames", [])
+        if meaning_names:
+            found = any(self.term_name in str(n) for n in meaning_names)
+            assert found, (
+                f"Term name {self.term_name!r} not in meaningNames: {meaning_names}"
+            )
+
+    @test("fulltext_name_search_finds_entity",
+          tags=["search", "data_correctness"], order=9)
+    def test_fulltext_name(self, client, ctx):
+        """Basic search with query=name finds the entity."""
+        resp = client.post("/search/basic", json_data={
+            "typeName": "DataSet",
+            "excludeDeletedEntities": True,
+            "limit": 10,
+            "query": self.created_name,
+        })
+        if resp.status_code in (400, 404, 405):
+            return
+        if resp.status_code != 200:
+            return
+        body = resp.json()
+        entities = body.get("entities", [])
+        guids = [e.get("guid") for e in entities]
+        assert self.guid_a in guids, (
+            f"Entity {self.guid_a} not found via full-text search "
+            f"for name {self.created_name!r}: {guids}"
+        )
+
+    @test("combined_type_tag_qn_search_correct",
+          tags=["search", "data_correctness"], order=10)
+    def test_combined_search(self, client, ctx):
+        """Combined typeName + classification + QN-wildcard returns correct entity."""
+        if not self.tag_added:
+            return
+        found = False
+        for qn_field in QN_FIELDS:
+            available, body = _index_search(client, {
+                "from": 0, "size": 10,
+                "query": {"bool": {"must": [
+                    {"term": {"__typeName.keyword": "DataSet"}},
+                    {"match_phrase": {"__classificationNames": self.tag_name}},
+                    {"wildcard": {qn_field: f"{PREFIX}*"}},
+                    {"term": {"__state": "ACTIVE"}},
+                ]}}
+            })
+            if available and body.get("approximateCount", 0) > 0:
+                found = True
+                break
+        if not found:
+            return
+
+        guids = [e.get("guid") for e in body.get("entities", [])]
+        assert self.guid_a in guids, (
+            f"Entity {self.guid_a} not in combined search results: {guids}"
+        )
+        # Verify the matching entity has correct data
+        entity = next(e for e in body["entities"] if e.get("guid") == self.guid_a)
+        assert _attr(entity, "name") == self.created_name, (
+            f"Combined search name mismatch: expected {self.created_name!r}"
+        )
+
+    # ================================================================
+    #  Phase 2 — Mutate-and-verify
+    # ================================================================
+
+    @test("batch_update_entity_attributes",
+          tags=["search", "data_correctness", "mutation"], order=11)
+    def test_batch_update(self, client, ctx):
+        """Update name, description, and certificateStatus in one call.
+
+        Subsequent tests verify each updated field in search.
+        """
+        self.updated_name = unique_name("dcor-upd")
+        self.updated_desc = "dcor-updated-description"
+        self.updated_cert = "DRAFT"
+
+        resp = client.post("/entity", json_data={
+            "entity": {
+                "typeName": "DataSet",
+                "guid": self.guid_a,
+                "attributes": {
+                    "qualifiedName": self.created_qn,
+                    "name": self.updated_name,
+                    "description": self.updated_desc,
+                    "certificateStatus": self.updated_cert,
+                },
+            }
+        })
+        assert_status(resp, 200)
+        time.sleep(max(ctx.get("es_sync_wait", 5), 5))
+
+    @test("search_reflects_updated_name",
+          tags=["search", "data_correctness", "mutation"], order=12,
+          depends_on=["batch_update_entity_attributes"])
+    def test_updated_name(self, client, ctx):
+        """Verify search returns the new name after update."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual = _attr(entity, "name")
+        assert actual == self.updated_name, (
+            f"Updated name not reflected in search: "
+            f"expected {self.updated_name!r}, got {actual!r}"
+        )
+
+    @test("search_reflects_updated_description",
+          tags=["search", "data_correctness", "mutation"], order=13,
+          depends_on=["batch_update_entity_attributes"])
+    def test_updated_desc(self, client, ctx):
+        """Verify search returns the new description after update."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual = _attr(entity, "description")
+        if actual is not None:
+            assert actual == self.updated_desc, (
+                f"Updated description not reflected in search: "
+                f"expected {self.updated_desc!r}, got {actual!r}"
+            )
+
+    @test("search_reflects_updated_certificate",
+          tags=["search", "data_correctness", "mutation"], order=14,
+          depends_on=["batch_update_entity_attributes"])
+    def test_updated_cert(self, client, ctx):
+        """Verify search returns the new certificateStatus after update."""
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual = _attr(entity, "certificateStatus")
+        if actual is not None:
+            assert actual == self.updated_cert, (
+                f"Updated certificateStatus not reflected in search: "
+                f"expected {self.updated_cert!r}, got {actual!r}"
+            )
+
+    @test("search_reflects_label_addition",
+          tags=["search", "data_correctness", "mutation"], order=15)
+    def test_label_addition(self, client, ctx):
+        """Add a new label and verify it appears in search alongside originals."""
+        new_label = "dcor-new-label"
+        all_labels = self.created_labels + [new_label]
+        current_name = getattr(self, "updated_name", self.created_name)
+
+        resp = client.post("/entity", json_data={
+            "entity": {
+                "typeName": "DataSet",
+                "guid": self.guid_a,
+                "attributes": {
+                    "qualifiedName": self.created_qn,
+                    "name": current_name,
+                },
+                "labels": all_labels,
+            }
+        })
+        assert_status(resp, 200)
+        time.sleep(max(ctx.get("es_sync_wait", 5), 5))
+
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        actual_labels = entity.get("labels", [])
+        if not actual_labels:
+            return  # labels not in search on this env
+        assert new_label in actual_labels, (
+            f"New label {new_label!r} not in search labels: {actual_labels}"
+        )
+        # Original labels should still be present
+        for lbl in self.created_labels:
+            assert lbl in actual_labels, (
+                f"Original label {lbl!r} missing after addition: {actual_labels}"
+            )
+
+    @test("search_reflects_classification_removal",
+          tags=["search", "data_correctness", "mutation"], order=16)
+    def test_classification_removal(self, client, ctx):
+        """Remove classification and verify classificationNames no longer has it."""
+        if not self.tag_added:
+            return
+
+        resp = client.delete(
+            f"/entity/guid/{self.guid_a}/classification/{self.tag_name}"
+        )
+        if resp.status_code not in (200, 204):
+            return  # cannot remove, skip
+        time.sleep(max(ctx.get("es_sync_wait", 5), 5))
+
+        available, entity = _get_entity(client, self.guid_a)
+        if not available or entity is None:
+            return
+        cn = entity.get("classificationNames", [])
+        assert self.tag_name not in cn, (
+            f"Removed classification {self.tag_name} still in "
+            f"classificationNames: {cn}"
+        )

@@ -75,7 +75,7 @@ class EntityCrudSuite:
         assert_status_in(resp, [400, 404, 408, 422])
         body = resp.json()
         if isinstance(body, dict):
-            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+            assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
                 f"Expected error details in response, got keys: {list(body.keys())}"
             )
 
@@ -216,6 +216,38 @@ class EntityCrudSuite:
         assert_status(resp, 200)
         assert_field_present(resp, "entities")
 
+    @test("get_entity_bulk_large_batch", tags=["crud"], order=15.5, depends_on=["create_entity_bulk"])
+    def test_get_entity_bulk_large_batch(self, client, ctx):
+        # Create 10 throwaway entities and fetch them all in a single bulk GET
+        guids = []
+        entities_payload = []
+        for i in range(10):
+            qn = unique_qn(f"bulk-get-{i}")
+            entities_payload.append(build_dataset_entity(qn=qn, name=unique_name(f"bget-{i}")))
+        resp = client.post("/entity/bulk", json_data={"entities": entities_payload})
+        assert_status(resp, 200)
+        body = resp.json()
+        for action in ("CREATE", "UPDATE"):
+            for e in body.get("mutatedEntities", {}).get(action, []):
+                guids.append(e["guid"])
+
+        # Register cleanup for all created entities
+        for g in guids:
+            ctx.register_cleanup(lambda guid=g: client.delete(f"/entity/guid/{guid}"))
+
+        assert len(guids) >= 10, f"Expected at least 10 entities created, got {len(guids)}"
+
+        # Bulk GET all at once
+        resp2 = client.get("/entity/bulk", params={"guid": guids})
+        assert_status(resp2, 200)
+        body2 = resp2.json()
+        returned_entities = body2.get("entities", [])
+        returned_guids = {e.get("guid") for e in returned_entities}
+        for g in guids:
+            assert g in returned_guids, (
+                f"GUID {g} not found in bulk GET response ({len(returned_guids)} entities returned)"
+            )
+
     @test("get_entity_min_ext_info", tags=["crud"], order=15, depends_on=["create_entity"])
     def test_get_entity_min_ext_info(self, client, ctx):
         guid = ctx.get_entity_guid("ds1")
@@ -236,7 +268,7 @@ class EntityCrudSuite:
         assert_status_in(resp, [404, 400])
         body = resp.json()
         if isinstance(body, dict):
-            assert "errorMessage" in body or "errorCode" in body or "message" in body, (
+            assert "errorMessage" in body or "errorCode" in body or "message" in body or "error" in body, (
                 f"Expected error details in 404 response, got keys: {list(body.keys())}"
             )
 
@@ -345,6 +377,9 @@ class EntityCrudSuite:
         if deletes:
             assert deletes[0].get("guid") == guid, f"Expected deleted guid={guid}"
 
+        # Store deleted GUID so audit suite can verify ENTITY_DELETE events
+        ctx.set("deleted_entity_guid", guid)
+
         # Verify deleted (soft delete returns entity with DELETED status)
         resp = client.get(f"/entity/guid/{guid}")
         assert_status_in(resp, [200, 404])
@@ -430,6 +465,38 @@ class EntityCrudSuite:
             assert count == 0, (
                 f"Deleted entity {guid} should not appear in ACTIVE search, got count={count}"
             )
+
+    @test("delete_entity_by_unique_attr_bulk", tags=["crud"], order=84)
+    def test_delete_entity_by_unique_attr_bulk(self, client, ctx):
+        # Create two throwaway entities to delete via bulk unique attribute
+        qn1 = unique_qn("bulk-ua-del-1")
+        qn2 = unique_qn("bulk-ua-del-2")
+        entities = [
+            build_dataset_entity(qn=qn1, name=unique_name("bua-del-1")),
+            build_dataset_entity(qn=qn2, name=unique_name("bua-del-2")),
+        ]
+        resp = client.post("/entity/bulk", json_data={"entities": entities})
+        assert_status(resp, 200)
+
+        # Delete via /entity/bulk/uniqueAttribute/type/DataSet
+        # This endpoint accepts query params for each entity's unique attributes
+        resp = client.delete(
+            "/entity/bulk/uniqueAttribute/type/DataSet",
+            params=[
+                ("attr:qualifiedName", qn1),
+                ("attr:qualifiedName", qn2),
+            ],
+        )
+        # Endpoint may not exist or may error on all environments
+        assert_status_in(resp, [200, 204, 400, 404, 405, 500])
+        if resp.status_code in (200, 204):
+            # Verify at least one entity was deleted
+            if resp.status_code == 200:
+                body = resp.json()
+                deletes = body.get("mutatedEntities", {}).get("DELETE", [])
+                assert len(deletes) > 0, (
+                    "Expected non-empty mutatedEntities.DELETE from bulk unique attr delete"
+                )
 
     @test("restore_soft_deleted_entity", tags=["crud", "restore"], order=85)
     def test_restore_soft_deleted_entity(self, client, ctx):

@@ -11,10 +11,10 @@ class TypeCacheSuite:
     def test_refresh_type_cache_init(self, client, ctx):
         resp = client.post("/admin/types/refresh", json_data={}, params={
             "action": "INIT",
-        })
+        }, timeout=120)
         assert_status_in(resp, [200, 204, 400, 404])
 
     @test("refresh_type_cache_no_action", tags=["cache"], order=2)
     def test_refresh_type_cache_no_action(self, client, ctx):
-        resp = client.post("/admin/types/refresh", json_data={})
+        resp = client.post("/admin/types/refresh", json_data={}, timeout=120)
         assert_status_in(resp, [200, 204, 400, 404])

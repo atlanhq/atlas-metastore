@@ -4,7 +4,8 @@ import time
 
 from core.decorators import suite, test
 from core.assertions import assert_status, assert_status_in, assert_field_present
-from core.audit_helpers import search_audit_events, AUDIT_CONSISTENCY_WAIT_S
+from core.audit_helpers import search_audit_events, assert_audit_event_exists, AUDIT_CONSISTENCY_WAIT_S
+from core.data_factory import build_dataset_entity, unique_qn, unique_name
 
 
 @suite("entity_audit", depends_on_suites=["entity_crud"],
@@ -108,3 +109,42 @@ class EntityAuditSuite:
         required_fields = ["entityId", "action", "user"]
         for field_name in required_fields:
             assert field_name in event, f"Audit event missing required field '{field_name}'"
+
+    @test("audit_search_entity_delete", tags=["audit"], order=7)
+    def test_audit_search_entity_delete(self, client, ctx):
+        """AUD-03: Verify ENTITY_DELETE audit event after entity deletion."""
+        if ctx.get("audit_indexing_unavailable"):
+            return
+
+        # Prefer GUID from entity_crud's delete_entity_by_guid test
+        guid = ctx.get("deleted_entity_guid")
+
+        if not guid:
+            # Fallback: create and delete our own entity
+            qn = unique_qn("audit-del")
+            entity = build_dataset_entity(qn=qn, name=unique_name("audit-del"))
+            resp = client.post("/entity", json_data={"entity": entity})
+            assert_status(resp, 200)
+            body = resp.json()
+            creates = body.get("mutatedEntities", {}).get("CREATE", [])
+            updates = body.get("mutatedEntities", {}).get("UPDATE", [])
+            entities = creates or updates
+            if not entities:
+                return
+            guid = entities[0]["guid"]
+            resp = client.delete(f"/entity/guid/{guid}")
+            assert_status_in(resp, [200, 204])
+            # Wait for audit indexing
+            time.sleep(AUDIT_CONSISTENCY_WAIT_S)
+
+        events, total = search_audit_events(client, guid, action_filter="ENTITY_DELETE")
+        if events is None:
+            return  # Endpoint not available
+        if not events:
+            return  # Audit indexing may not be active
+        event = events[0]
+        entity_id = event.get("entityId") or event.get("entityGuid")
+        assert entity_id == guid, f"Expected entityId={guid}, got {entity_id}"
+        assert event.get("action") == "ENTITY_DELETE", (
+            f"Expected action=ENTITY_DELETE, got {event.get('action')}"
+        )

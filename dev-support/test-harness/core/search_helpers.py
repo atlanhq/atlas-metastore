@@ -15,30 +15,40 @@ _RESET = "\033[0m"
 def _search_by_qn(client, qn):
     """Issue a single index-search query by qualifiedName. Returns (available, count, entities).
 
+    Tries both qualifiedName.keyword and __qualifiedName field names to handle
+    differences between local dev and staging ES mappings.
+
     available=False means the search endpoint is not usable (404/400/405/non-200).
     """
-    resp = client.post("/search/indexsearch", json_data={
-        "dsl": {
-            "from": 0,
-            "size": 1,
-            "query": {
-                "bool": {
-                    "must": [
-                        {"term": {"__qualifiedName": qn}},
-                        {"term": {"__state": "ACTIVE"}},
-                    ]
+    for field_name in ("qualifiedName.keyword", "__qualifiedName"):
+        resp = client.post("/search/indexsearch", json_data={
+            "dsl": {
+                "from": 0,
+                "size": 1,
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {field_name: qn}},
+                            {"term": {"__state": "ACTIVE"}},
+                        ]
+                    }
                 }
             }
-        }
-    })
-    if resp.status_code in (404, 400, 405):
+        })
+        if resp.status_code in (404, 400, 405):
+            continue
+        if resp.status_code != 200:
+            continue
+        body = resp.json()
+        count = body.get("approximateCount", 0)
+        entities = body.get("entities", [])
+        if count > 0:
+            return True, count, entities
+        # If count is 0, try next field name before giving up
+    # Return last attempt's result (or not-found)
+    if resp.status_code in (404, 400, 405) or resp.status_code != 200:
         return False, 0, []
-    if resp.status_code != 200:
-        return False, 0, []
-    body = resp.json()
-    count = body.get("approximateCount", 0)
-    entities = body.get("entities", [])
-    return True, count, entities
+    return True, 0, []
 
 
 def assert_entity_in_search(client, qn, type_name="DataSet",
